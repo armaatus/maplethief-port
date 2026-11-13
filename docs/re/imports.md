@@ -85,13 +85,13 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 
 | Import | Kind | Class | Code sites | Data uses | Functions | Busiest callers |
 |---|---|---|---|---|---|---|
-| `___divsi3` | function | game | 236 | – | 87 | `CHero::RollDamage` (10), `FUN_00007558` (8), `FUN_0004ab00` (8) +84 more |
+| `___divsi3` | function | game | 236 | – | 87 | `CHero::RollDamage` (10), `FUN_00007558` (8), `Shop_PaintItemDetail` (8) +84 more |
 | `__Unwind_SjLj_Register` | function | both | 205 | – | 205 | `+[EAGLView_Instance allocWithZone:]` (1), `+[EAGLView_Instance Instance]` (1), `Clet_Start` (1) +202 more |
 | `__Unwind_SjLj_Resume` | function | both | 205 | – | 205 | `+[EAGLView_Instance allocWithZone:]` (1), `+[EAGLView_Instance Instance]` (1), `Clet_Start` (1) +202 more |
 | `__Unwind_SjLj_Unregister` | function | both | 205 | – | 205 | `+[EAGLView_Instance allocWithZone:]` (1), `+[EAGLView_Instance Instance]` (1), `Clet_Start` (1) +202 more |
 | `___modsi3` | function | game | 42 | – | 24 | `CStateGame::Paint` (7), `HUD_Paint` (4), `FUN_0000d6d0` (2) +21 more |
-| `___divdi3` | function | game | 6 | – | 5 | `FUN_0000b3e4` (2), `FUN_0000b320` (1), `FUN_00049480` (1) +2 more |
-| `___udivsi3` | function | game | 3 | – | 2 | `FUN_0001e96c` (2), `FUN_0000d6d0` (1) |
+| `___divdi3` | function | game | 6 | – | 5 | `FUN_0000b3e4` (2), `FUN_0000b320` (1), `PopupMenu_PaintItemInfoBox` (1) +2 more |
+| `___udivsi3` | function | game | 3 | – | 2 | `CMFrame::RenderPortrait` (2), `FUN_0000d6d0` (1) |
 | `___floatdisf` | function | game | 2 | – | 1 | `RunLoopTimer_Arm` (2) |
 | `___udivdi3` | function | game | 2 | – | 1 | `CStateGame::Paint` (2) |
 | `___umodsi3` | function | game | 1 | – | 1 | `Stringtable::intern` (1) |
@@ -105,18 +105,18 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `__Block_object_dispose` | function | both | 123 | – | 78 | `-[CBNativeInterstitialView prepareWithResponse:]` (4), `FUN_000d2a74` (4), `-[CBNativeMoreAppsView prepareWithResponse:]` (4) +75 more |
 | `_memcpy` | function | both | 105 | – | 28 | `CDataMgr::drawConfig` (23), `Lua::execute` (12), `CDataMgr::OnServerPacket` (10) +25 more |
 | `__Block_object_assign` | function | both | 90 | – | 63 | `FUN_000d2a38` (4), `GameCenterManager_callDelegateOnMainThread_block_copy` (3), `FUN_000c5870` (3) +60 more |
-| `_strlen` | function | both | 71 | – | 35 | `CStateGame::Paint` (10), `FUN_00049480` (8), `FUN_0004ab00` (8) +32 more |
-| `_strcpy` | function | game | 57 | – | 26 | `FUN_000491e0` (12), `CStateTitle::CStateTitle` (7), `FUN_00049480` (4) +23 more |
+| `_strlen` | function | both | 71 | – | 35 | `CStateGame::Paint` (10), `PopupMenu_PaintItemInfoBox` (8), `Shop_PaintItemDetail` (8) +32 more |
+| `_strcpy` | function | game | 57 | – | 26 | `CDataMgr::DeleteCoupon` (12), `CStateTitle::CStateTitle` (7), `PopupMenu_PaintItemInfoBox` (4) +23 more |
 | `_memset` | function | game | 53 | – | 33 | `CStateTitle::CStateTitle` (7), `CDataMgr::drawConfig` (3), `CStateGame::Paint` (3) +30 more |
 | `__NSConcreteStackBlock` | address | both | 49 | – | 37 | `-[CBNativeInterstitialView prepareWithResponse:]` (6), `-[CBImpression initWithResponse:type:]` (4), `-[CBNativeMoreAppsView prepareWithResponse:]` (4) +34 more |
-| `_puts` | function | game | 30 | – | 20 | `PopupMenu_QuestTabOnTouch` (4), `CMob::Die` (3), `FUN_0007b920` (3) +17 more |
-| `_printf` | function | game | 25 | – | 12 | `FUN_0007b920` (5), `MyGetOpenALAudioData` (5), `SoundPlayer_EndInterruption` (3) +9 more |
+| `_puts` | function | game | 30 | – | 20 | `PopupMenu_QuestTabOnTouch` (4), `CMob::Die` (3), `CQuestList::DebugDump` (3) +17 more |
+| `_printf` | function | game | 25 | – | 12 | `CQuestList::DebugDump` (5), `MyGetOpenALAudioData` (5), `SoundPlayer_EndInterruption` (3) +9 more |
 | `_free` | function | both | 13 | – | 11 | `FUN_0000a2c0` (2), `+[CBIdentity cbma]` (2), `FUN_00008694` (1) +8 more |
 | `_malloc` | function | both | 11 | – | 10 | `FUN_0000a1c8` (2), `FUN_00009008` (1), `FUN_0000a120` (1) +7 more |
-| `_strcmp` | function | game | 10 | – | 7 | `Text_Wrap` (3), `FUN_00021154` (2), `FUN_0000a670` (1) +4 more |
+| `_strcmp` | function | game | 10 | – | 7 | `Text_Wrap` (3), `CMSpriteImage::Matches` (2), `FUN_0000a670` (1) +4 more |
 | `_dispatch_async` | function | both | 9 | – | 7 | `-[CBImpression initWithResponse:type:]` (3), `-[GameCenterManager callDelegateOnMainThread:withArg:error:]` (1), `-[CBNativeInterstitialView prepareWithResponse:]` (1) +4 more |
 | `__dispatch_main_q` | address | both | 8 | – | 6 | `-[CBImpression initWithResponse:type:]` (3), `-[GameCenterManager callDelegateOnMainThread:withArg:error:]` (1), `-[CBAPIConnection sendRequest:]` (1) +3 more |
-| `_strcat` | function | game | 8 | – | 4 | `FUN_00049480` (3), `FUN_0004ab00` (3), `CStateGame::Paint` (1) +1 more |
+| `_strcat` | function | game | 8 | – | 4 | `PopupMenu_PaintItemInfoBox` (3), `Shop_PaintItemDetail` (3), `CStateGame::Paint` (1) +1 more |
 | `_exit` | function | both | 7 | – | 6 | `SoundPlayer_InitOpenAL` (2), `start` (1), `FUN_00008ff8` (1) +3 more |
 | `_pow` | function | game | 4 | – | 2 | `Map_PaintSub2` (2), `Map_PaintSub1` (2) |
 | `_sysctl` | function | both | 4 | – | 2 | `-[UIDevice(IdentifierAddition) macaddress]` (2), `+[CBIdentity cbma]` (2) |
@@ -244,7 +244,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_CFRelease` | function | both | 18 | – | 8 | `FUN_0000a2c0` (4), `CMSocket::Disconnect` (4), `FUN_00008f70` (3) +5 more |
 | `_OBJC_CLASS_$_NSMutableDictionary` | class | both | 17 | – | 13 | `-[CBAPIRequest appendBodyArgumentKey:value:]` (2), `-[CBAPIRequest appendQueryArgumentKey:value:]` (2), `-[CBAPIRequest appendHeaderKey:value:]` (2) +10 more |
 | `_OBJC_CLASS_$_NSArray` | class | both | 16 | 1 category | 12 | `+[CBAnimationManager transitionInWithAnimationType:layer:animationConfigurationBlock:]` (4), `+[CBAnimationManager transitionOutWithAnimationType:layer:animationConfigurationBlock:]` (2), `-[GameCenterManager FindPlayerByid:]` (1) +9 more |
-| `_OBJC_CLASS_$_NSData` | class | both | 14 | – | 10 | `FUN_0000d6d0` (3), `FUN_0001e96c` (3), `SaveIO_Write` (1) +7 more |
+| `_OBJC_CLASS_$_NSData` | class | both | 14 | – | 10 | `FUN_0000d6d0` (3), `CMFrame::RenderPortrait` (3), `SaveIO_Write` (1) +7 more |
 | `_OBJC_CLASS_$_NSMutableArray` | class | both | 14 | – | 12 | `-[EAGLView initWithCoder:]` (2), `-[CBJsonStreamParserAdapter init]` (2), `CStateMainMenu::LoadCharacterSlots` (1) +9 more |
 | `_OBJC_CLASS_$_NSUserDefaults` | class | Chartboost only | 14 | – | 13 | `-[Chartboost startSession]` (2), `-[Chartboost cacheInterstitial:]` (1), `-[Chartboost showInterstitial:]` (1) +10 more |
 | `_OBJC_CLASS_$_NSNull` | class | both | 13 | – | 8 | `-[ChooseCharacterView drawRect:]` (3), `+[CBIdentity combinedIdentifier]` (3), `CStateMainMenu::LoadCharacterSlots` (2) +5 more |
@@ -299,7 +299,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | Import | Kind | Class | Code sites | Data uses | Functions | Busiest callers |
 |---|---|---|---|---|---|---|
 | `_CGColorSpaceCreateDeviceRGB` | function | both | 6 | – | 5 | `-[TouchKeyPadView colorAtPixel:onImage:]` (2), `TextCache_DrawText` (1), `FUN_00009534` (1) +2 more |
-| `_CGImageGetWidth` | function | game | 5 | – | 4 | `FUN_00009534` (2), `FUN_0000d6d0` (1), `FUN_0001e96c` (1) +1 more |
+| `_CGImageGetWidth` | function | game | 5 | – | 4 | `FUN_00009534` (2), `FUN_0000d6d0` (1), `CMFrame::RenderPortrait` (1) +1 more |
 | `_CGColorSpaceRelease` | function | both | 4 | – | 4 | `TextCache_DrawText` (1), `-[TouchKeyPadView colorAtPixel:onImage:]` (1), `_CBNativeMoreAppsCellDrawGradient` (1) +1 more |
 | `_CGContextTranslateCTM` | function | both | 4 | – | 3 | `-[CBUnderfinedProgressBar drawRect:]` (2), `FUN_00009534` (1), `-[TouchKeyPadView colorAtPixel:onImage:]` (1) |
 | `_CGImageGetHeight` | function | game | 4 | – | 2 | `FUN_00009534` (3), `-[TouchKeyPadView colorAtPixel:onImage:]` (1) |
@@ -313,22 +313,22 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_CGContextSaveGState` | function | Chartboost only | 3 | – | 3 | `_CBNativeMoreAppsCellDrawGradient` (1), `-[CBNativeMoreAppsSexyImageView redrawImage]` (1), `-[CBNativeMoreAppsSexyButton drawRect:]` (1) |
 | `_CGGradientCreateWithColors` | function | Chartboost only | 3 | – | 3 | `-[CBDefaultBackgroundView drawRect:]` (1), `_CBNativeMoreAppsCellDrawGradient` (1), `-[CBNativeMoreAppsSexyButton drawRect:]` (1) |
 | `_CGGradientRelease` | function | Chartboost only | 3 | – | 3 | `-[CBDefaultBackgroundView drawRect:]` (1), `_CBNativeMoreAppsCellDrawGradient` (1), `-[CBNativeMoreAppsSexyButton drawRect:]` (1) |
-| `_CGImageGetBitsPerComponent` | function | game | 3 | – | 3 | `FUN_0000d6d0` (1), `FUN_0001e96c` (1), `-[TouchKeyPadView colorAtPixel:onImage:]` (1) |
-| `_CGImageGetBitsPerPixel` | function | game | 3 | – | 3 | `FUN_00009534` (1), `FUN_0000d6d0` (1), `FUN_0001e96c` (1) |
+| `_CGImageGetBitsPerComponent` | function | game | 3 | – | 3 | `FUN_0000d6d0` (1), `CMFrame::RenderPortrait` (1), `-[TouchKeyPadView colorAtPixel:onImage:]` (1) |
+| `_CGImageGetBitsPerPixel` | function | game | 3 | – | 3 | `FUN_00009534` (1), `FUN_0000d6d0` (1), `CMFrame::RenderPortrait` (1) |
 | `_CGImageGetBytesPerRow` | function | game | 3 | – | 3 | `FUN_00009534` (1), `FUN_0000d6d0` (1), `-[TouchKeyPadView colorAtPixel:onImage:]` (1) |
 | `_CGRectContainsPoint` | function | game | 3 | – | 3 | `-[MarketKeyPadView touchesBegan:withEvent:]` (1), `-[TouchKeyPadView colorAtPixel:onImage:]` (1), `-[TouchKeyPadView touchesBegan:withEvent:]` (1) |
 | `_CGRectInset` | function | Chartboost only | 3 | – | 3 | `-[CBNativeMoreAppsFeaturedCell layoutSubviews]` (1), `-[CBNativeMoreAppsSexyImageView redrawImage]` (1), `-[CBNativeMoreAppsSexyButton drawRect:]` (1) |
 | `_CGContextDrawImage` | function | game | 2 | – | 2 | `FUN_00009534` (1), `-[TouchKeyPadView colorAtPixel:onImage:]` (1) |
 | `_CGContextDrawLinearGradient` | function | Chartboost only | 2 | – | 2 | `_CBNativeMoreAppsCellDrawGradient` (1), `-[CBNativeMoreAppsSexyButton drawRect:]` (1) |
-| `_CGDataProviderCopyData` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `FUN_0001e96c` (1) |
-| `_CGDataProviderCreateWithCFData` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `FUN_0001e96c` (1) |
-| `_CGDataProviderRelease` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `FUN_0001e96c` (1) |
-| `_CGImageCreate` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `FUN_0001e96c` (1) |
-| `_CGImageGetBitmapInfo` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `FUN_0001e96c` (1) |
-| `_CGImageGetColorSpace` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `FUN_0001e96c` (1) |
-| `_CGImageGetDataProvider` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `FUN_0001e96c` (1) |
-| `_CGImageGetRenderingIntent` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `FUN_0001e96c` (1) |
-| `_CGImageRelease` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `FUN_0001e96c` (1) |
+| `_CGDataProviderCopyData` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `CMFrame::RenderPortrait` (1) |
+| `_CGDataProviderCreateWithCFData` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `CMFrame::RenderPortrait` (1) |
+| `_CGDataProviderRelease` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `CMFrame::RenderPortrait` (1) |
+| `_CGImageCreate` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `CMFrame::RenderPortrait` (1) |
+| `_CGImageGetBitmapInfo` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `CMFrame::RenderPortrait` (1) |
+| `_CGImageGetColorSpace` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `CMFrame::RenderPortrait` (1) |
+| `_CGImageGetDataProvider` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `CMFrame::RenderPortrait` (1) |
+| `_CGImageGetRenderingIntent` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `CMFrame::RenderPortrait` (1) |
+| `_CGImageRelease` | function | game | 2 | – | 2 | `FUN_0000d6d0` (1), `CMFrame::RenderPortrait` (1) |
 | `_CGRectZero` | address | Chartboost only | 2 | – | 2 | `-[CBNativeInterstitialView initWithFrame:]` (1), `-[CBNativeMoreAppsView initWithFrame:]` (1) |
 | `_CGAffineTransformIdentity` | address | Chartboost only | 1 | – | 1 | `-[CBDefaultViewController orientView:]` (1) |
 | `_CGContextDrawRadialGradient` | function | Chartboost only | 1 | – | 1 | `-[CBDefaultBackgroundView drawRect:]` (1) |
@@ -369,13 +369,13 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_glRotatex` | function | game | 2 | – | 1 | `FUN_00007558` (2) |
 | `_glTexCoordPointer` | function | game | 2 | – | 2 | `FUN_00007558` (1), `Sprite_DrawClipped` (1) |
 | `_glCheckFramebufferStatusOES` | function | game | 1 | – | 1 | `-[EAGLView createGLes]` (1) |
-| `_glDrawArrays` | function | game | 1 | – | 1 | `FUN_0000752c` (1) |
+| `_glDrawArrays` | function | game | 1 | – | 1 | `GL_DrawVertices` (1) |
 | `_glFramebufferRenderbufferOES` | function | game | 1 | – | 1 | `-[EAGLView createGLes]` (1) |
 | `_glGenFramebuffersOES` | function | game | 1 | – | 1 | `-[EAGLView createGLes]` (1) |
 | `_glGenRenderbuffersOES` | function | game | 1 | – | 1 | `-[EAGLView createGLes]` (1) |
 | `_glOrthox` | function | game | 1 | – | 1 | `-[EAGLView setupView]` (1) |
 | `_glScalef` | function | game | 1 | – | 1 | `Sprite_DrawClipped` (1) |
-| `_glVertexPointer` | function | game | 1 | – | 1 | `FUN_0000752c` (1) |
+| `_glVertexPointer` | function | game | 1 | – | 1 | `GL_DrawVertices` (1) |
 | `_glViewport` | function | game | 1 | – | 1 | `-[EAGLView setupView]` (1) |
 | `_kEAGLColorFormatRGBA8` | address | game | 1 | – | 1 | `-[EAGLView createGLes]` (1) |
 | `_kEAGLDrawablePropertyColorFormat` | address | game | 1 | – | 1 | `-[EAGLView createGLes]` (1) |
