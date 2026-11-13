@@ -14,6 +14,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <string>
@@ -119,7 +120,8 @@ struct NibWriter {
         data(s, "NS.bytes", std::vector<u8>(text, text + std::strlen(text)));
         return s;
     }
-    u32 array(std::initializer_list<u32> items) {
+    u32 array(std::initializer_list<u32> items) { return array(std::vector<u32>(items)); }
+    u32 array(const std::vector<u32> &items) {
         const u32 a = add("NSArray");
         for (const u32 i : items) {
             object(a, "UINibEncoderEmptyKey", i);
@@ -185,8 +187,9 @@ struct NibWriter {
 
 // A MainWindow.nib like the game's: a 320x480 white UIWindow holding a TestView (a
 // UIClassSwapper from UIView), a TestDelegate (from UICustomObject), the outlets File's
-// Owner.delegate and delegate.window, and the window visible.
-std::vector<u8> main_window_nib() {
+// Owner.delegate and delegate.window, and the window visible. `more` adds subviews of the
+// window after the TestView.
+std::vector<u8> main_window_nib(const std::function<std::vector<u32>(NibWriter &)> &more = {}) {
     NibWriter w;
     const u32 root = w.add("NSObject");
     const u32 owner = w.add("UIProxyObject");
@@ -217,7 +220,13 @@ std::vector<u8> main_window_nib() {
     w.floats(window, "UIBounds", {0, 0, 320, 480});
     w.floats(window, "UICenter", {160, 240});
     w.object(window, "UIBackgroundColor", white);
-    w.object(window, "UISubviews", w.array({view}));
+    std::vector<u32> subviews = {view};
+    if (more) {
+        for (const u32 s : more(w)) {
+            subviews.push_back(s);
+        }
+    }
+    w.object(window, "UISubviews", w.array(subviews));
     const u32 c1 = w.add("UIRuntimeOutletConnection");
     w.object(c1, "UILabel", w.string("delegate"));
     w.object(c1, "UISource", owner);
@@ -739,6 +748,63 @@ TEST_CASE("launch: a missing or broken main nib fails with the reason") {
         }
         CHECK_MESSAGE(why.find("MainWindow.nib: ") != std::string::npos, why);
         CHECK_MESSAGE(why.find("do not fit the file") != std::string::npos, why);
+    }
+}
+
+TEST_CASE("launch: a nib nested deeper than 64 objects or referring back to itself gives nil, "
+          "logged (#413)") {
+    // A chain of 70 UIViews, each the only subview of the one before: -initWithCoder: nests
+    // once a level, and the 64th level under the window is refused, so 63 are made.
+    {
+        Bundle bundle(main_window_nib([](NibWriter &w) {
+            u32 inner = w.add("UIView");
+            for (int i = 1; i < 70; i++) {
+                const u32 outer = w.add("UIView");
+                w.object(outer, "UISubviews", w.array({inner}));
+                inner = outer;
+            }
+            return std::vector<u32>{inner};
+        }));
+        Ui ui;
+        REQUIRE(mt_ui::launch(&ui.cpu, nullptr) == nullptr);
+        REQUIRE(g_rec.window_at_launch != 0);
+        const u32 subviews = ui.send(g_rec.window_at_launch, "subviews");
+        REQUIRE(ui.send(subviews, "count") == 2u);
+        u32 view = ui.send(subviews, "objectAtIndex:", {1});
+        int levels = 0;
+        while (view != 0) {
+            levels++;
+            const u32 below = ui.send(view, "subviews");
+            view = ui.send(below, "count") != 0 ? ui.send(below, "objectAtIndex:", {0}) : 0u;
+        }
+        CHECK(levels == 63);
+        CHECK(logged("refers back to itself or nests too deep: nil"));
+    }
+    // A view whose subviews array holds the view itself, and an array that holds itself.
+    {
+        Bundle bundle(main_window_nib([](NibWriter &w) {
+            const u32 view = w.add("UIView");
+            const u32 loop = w.add("NSArray");
+            w.object(loop, "UINibEncoderEmptyKey", view);
+            w.object(view, "UISubviews", loop);
+            const u32 other = w.add("UIView");
+            const u32 self_array = w.add("NSArray");
+            w.object(self_array, "UINibEncoderEmptyKey", self_array);
+            w.object(other, "UISubviews", self_array);
+            return std::vector<u32>{view, other};
+        }));
+        Ui ui;
+        REQUIRE(mt_ui::launch(&ui.cpu, nullptr) == nullptr);
+        REQUIRE(g_rec.window_at_launch != 0);
+        const u32 subviews = ui.send(g_rec.window_at_launch, "subviews");
+        REQUIRE(ui.send(subviews, "count") == 3u);
+        for (const u32 i : {1u, 2u}) {
+            CAPTURE(i);
+            const u32 view = ui.send(subviews, "objectAtIndex:", {i});
+            REQUIRE(view != 0u);
+            CHECK(ui.send(ui.send(view, "subviews"), "count") == 0u);
+        }
+        CHECK(logged("refers back to itself or nests too deep: nil"));
     }
 }
 

@@ -975,6 +975,98 @@ TEST_CASE("Foundation: the binary plist reader") {
     CHECK(error == "too many object references");
 }
 
+namespace {
+
+// A binary plist of hand-written objects (1-byte offsets and references), object `top` the root.
+std::string raw_bplist(const std::vector<std::string> &objects, std::uint8_t top = 0) {
+    std::string out = "bplist00";
+    std::vector<std::size_t> offsets;
+    for (const std::string &o : objects) {
+        offsets.push_back(out.size());
+        out += o;
+    }
+    const std::size_t table = out.size();
+    for (const std::size_t o : offsets) {
+        out.push_back(static_cast<char>(o));
+    }
+    std::string trailer(32, '\0');
+    trailer[6] = 1;
+    trailer[7] = 1;
+    trailer[15] = static_cast<char>(objects.size());
+    trailer[23] = static_cast<char>(top);
+    trailer[31] = static_cast<char>(table);
+    return out + trailer;
+}
+
+} // namespace
+
+TEST_CASE("Foundation: the binary plist reader's refusals, each by its message (#413)") {
+    mt_ns::PlistValue v;
+    std::string error;
+    const auto refused = [&v, &error](const std::string &file, const char *message) {
+        error.clear();
+        CHECK_FALSE(parse(file, &v, &error));
+        CHECK(error == message);
+    };
+    // Depth: 64 nested arrays around a number are read; 65 are not.
+    V nested = num(7);
+    for (int i = 0; i < 64; i++) {
+        nested = arr({nested});
+    }
+    REQUIRE(parse(bplist(nested), &v, &error));
+    refused(bplist(arr({nested})), "nested too deeply");
+    // A cycle through two arrays: 0 holds 1, 1 holds 0.
+    refused(raw_bplist({std::string("\xA1\x01", 2), std::string("\xA1\x00", 2)}),
+            "reference cycle");
+    // The shared-reference bound: count x 16 + 4,096 objects parsed. 13 levels of [x, x] parse
+    // 2^14 - 1 = 16,383 objects (over 14 x 16 + 4,096); 11 levels parse 4,095.
+    const auto doubling = [](int levels) {
+        std::vector<std::string> objects;
+        for (int level = 0; level < levels; level++) {
+            objects.push_back(std::string("\xA2", 1) + static_cast<char>(level + 1) +
+                              static_cast<char>(level + 1));
+        }
+        objects.emplace_back("\x08", 1);
+        return raw_bplist(objects);
+    };
+    REQUIRE(parse(doubling(11), &v, &error));
+    refused(doubling(13), "too many object references");
+    // The trailer and the root.
+    refused("bplist00", "not a binary plist");
+    refused("bplist01" + std::string(40, '\0'), "not a binary plist");
+    std::string top = raw_bplist({std::string("\x08", 1)});
+    top[top.size() - 9] = 1; // the root, object 1 of 1
+    refused(top, "bad trailer");
+    std::string cut = raw_bplist({std::string("\x08", 1), std::string("\x09", 1)});
+    cut[cut.size() - 17] = 9; // 9 objects, a table of 2
+    refused(cut, "bad trailer");
+    // Truncated or out-of-range objects, each with its own message.
+    refused(raw_bplist({std::string("\x5F\x10\xF0", 3) + "ab"}), "object runs past the end");
+    refused(raw_bplist({std::string("\x4F\x10\xF0", 3)}), "object runs past the end");
+    refused(raw_bplist({std::string("\x5F\x20\x01", 3)}), "bad length object");
+    refused(raw_bplist({std::string("\x6F\x10\xF0", 3)}), "UTF-16 string out of bounds");
+    refused(raw_bplist({std::string("\xAF\x10\xF0", 3)}), "collection out of bounds");
+    refused(raw_bplist({std::string("\xA1\x05", 2)}), "object reference out of range");
+    std::string offset = raw_bplist({std::string("\x08", 1)});
+    offset[offset.size() - 33] = static_cast<char>(offset.size() - 4); // into the trailer
+    refused(offset, "object offset out of bounds");
+    refused(raw_bplist({std::string("\x15", 1)}), "integer too wide");
+    refused(raw_bplist({std::string("\x24", 1)}), "bad real or date");
+    refused(raw_bplist({std::string("\x07", 1)}), "unknown simple object");
+    refused(raw_bplist({std::string("\xF0", 1)}), "unknown object type");
+    refused(raw_bplist({std::string("\x52\x41\xC3", 3)}), "non-ASCII byte in an ASCII string");
+    refused(raw_bplist({std::string("\xD1\x01\x01", 3), std::string("\x10\x01", 2)}),
+            "dictionary key is not a string");
+    // Every truncation of a good file is refused with one of the messages above, never "".
+    const std::string good = bplist(dict({{"k", arr({str("x"), num(-1), yes(true)})}}));
+    for (std::size_t n = 0; n < good.size(); n++) {
+        CAPTURE(n);
+        error.clear();
+        CHECK_FALSE(parse(good.substr(0, n), &v, &error));
+        CHECK_FALSE(error.empty());
+    }
+}
+
 // --- the save files
 // ----------------------------------------------------------------------------------
 
