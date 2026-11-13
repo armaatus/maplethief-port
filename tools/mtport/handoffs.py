@@ -14,9 +14,15 @@ recipes (a ``--preset`` only on a line that runs CMake or one of our build scrip
 the game takes ``--preset`` as well). Links are left to ``tests/test_doc_links.py``. It needs
 no network, so CI runs it.
 
-``--live`` also diffs the committed list against GitHub's open ``needs-human`` issues through
-``gh``: an open hand-off missing from the list is an error, a listed issue that is closed or no
-longer labelled is reported as a note.
+The README's second list, between ``<!-- gates:begin -->`` and ``<!-- gates:end -->``, marks
+each open hand-off for the v1.0 tag (ADR 0147)::
+
+    - #79: gate (full playthrough)
+    - #237: not a gate, agent work (the emulator choice is a judgement call)
+
+``--live`` also diffs both lists against GitHub's open ``needs-human`` issues through ``gh``: an
+open hand-off missing from the issue list, or without a gate mark, is an error; a listed issue
+that is closed or no longer labelled is reported as a note.
 
 CLI::
 
@@ -41,6 +47,9 @@ DEVICES = ("windows", "mac", "iphone", "linux", "switch", "playthrough")
 BEGIN = "<!-- handoffs:begin -->"
 END = "<!-- handoffs:end -->"
 LIST_LINE = re.compile(r"^- #(\d+): ([a-z]+(?:, [a-z]+)*)\b")
+GATES_BEGIN = "<!-- gates:begin -->"
+GATES_END = "<!-- gates:end -->"
+GATE_LINE = re.compile(r"^- #(\d+): (gate|preview|not a gate)(, agent work)? \(")
 SECTION = re.compile(r"^## (.*)$")
 ISSUE = re.compile(r"#(\d+)\b")
 FENCE = re.compile(r"^\s*(```|~~~)")
@@ -94,6 +103,26 @@ def committed_list(readme: str) -> dict[int, tuple[str, ...]]:
         if n in out:
             raise ValueError(f"#{n} is listed twice")
         out[n] = tuple(m.group(2).split(", "))
+    return out
+
+
+def gate_marks(readme: str) -> dict[int, str]:
+    """The README's v1.0 gate list (ADR 0147): issue number to ``gate``, ``preview`` or
+    ``not a gate``."""
+    if GATES_BEGIN not in readme or GATES_END not in readme:
+        raise ValueError(f"the README has no {GATES_BEGIN} ... {GATES_END} list")
+    block = readme.split(GATES_BEGIN, 1)[1].split(GATES_END, 1)[0]
+    out: dict[int, str] = {}
+    for line in block.splitlines():
+        if not line.strip():
+            continue
+        m = GATE_LINE.match(line)
+        if not m:
+            raise ValueError(f"not a gate line: {line!r}")
+        n = int(m.group(1))
+        if n in out:
+            raise ValueError(f"#{n} is marked twice")
+        out[n] = m.group(2)
     return out
 
 
@@ -166,8 +195,11 @@ def check(root: Path = ROOT) -> list[str]:
     readme = (root / HANDOFFS / "README.md").read_text(encoding="utf-8")
     try:
         listed = committed_list(readme)
+        marks = gate_marks(readme)
     except ValueError as e:
         return [f"README.md: {e}"]
+    for n in sorted(set(listed) - set(marks)):
+        errors.append(f"#{n}: listed, but has no v1.0 gate mark")
     covered: dict[int, set[str]] = {}
     for device in DEVICES:
         page = device_page(device, root)
@@ -226,12 +258,18 @@ def open_handoffs() -> set[int]:
     return {item["number"] for item in json.loads(out)}
 
 
-def live_diff(listed: set[int], open_now: set[int]) -> tuple[list[str], list[str]]:
-    """Errors (open hand-offs missing from the list) and notes (listed, but not open with the
-    label)."""
+def live_diff(
+    listed: set[int], open_now: set[int], marked: set[int] | None = None
+) -> tuple[list[str], list[str]]:
+    """Errors (open hand-offs missing from the list, or from the gate marks when ``marked`` is
+    given) and notes (listed, but not open with the label)."""
     errors = [
         f"#{n}: open needs-human issue missing from the README" for n in sorted(open_now - listed)
     ]
+    if marked is not None:
+        errors += [
+            f"#{n}: open needs-human issue has no v1.0 gate mark" for n in sorted(open_now - marked)
+        ]
     notes = [f"#{n}: listed, but not an open needs-human issue" for n in sorted(listed - open_now)]
     return errors, notes
 
@@ -248,7 +286,9 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, subprocess.SubprocessError) as e:
             print(f"handoffs: gh failed: {e}", file=sys.stderr)
             return 2
-        live_errors, notes = live_diff(set(committed_list(readme)), open_now)
+        live_errors, notes = live_diff(
+            set(committed_list(readme)), open_now, set(gate_marks(readme))
+        )
         errors += live_errors
         for note in notes:
             print(f"note: {note}")
