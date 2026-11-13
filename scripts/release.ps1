@@ -176,7 +176,8 @@ $python = Find-Python
 if (-not $python) { Fail 'need Python 3.10+ (the py launcher, python3 or python on PATH, or $env:PYTHON)' }
 
 if ($Command -eq 'itch') {
-    # The Windows channel only; the Mac pushes macOS and Linux (scripts/release itch, ADR 0146).
+    # The Windows channel only; the Mac pushes macOS, Linux and the Switch (scripts/release itch,
+    # ADR 0146).
     $itchArgs = @('itch', $Tag, '--platforms', 'windows')
     if ($DryRun) { $itchArgs += '--dry-run' }
     if ($From) { $itchArgs += @('--from', $From) }

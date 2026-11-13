@@ -25,8 +25,8 @@
 #                .sha256 is on the draft,
 #                downloads them, verifies them, merges SHA256SUMS (`shasum -a 256 -c` must
 #                pass), runs the guard again, uploads SHA256SUMS and publishes the release
-#   itch TAG     after publish (ADR 0146): downloads the published release's macOS and Linux
-#                player builds, checks them against SHA256SUMS and the guard's player mode,
+#   itch TAG     after publish (ADR 0146): downloads the published release's macOS, Linux and
+#                Nintendo Switch player builds, checks them against SHA256SUMS and the guard's player mode,
 #                and pushes each to its itch.io channel with the pinned butler
 #                (python3 -m mtport.release itch; the key from BUTLER_API_KEY); Windows pushes
 #                its own with scripts\release.ps1 itch TAG
@@ -57,7 +57,7 @@ Usage: scripts/release start|build|publish|itch TAG [--dry-run] [--replace] [--p
                    upload them to the draft
   publish TAG      check every platform's kit and player build is on the draft, write
                    SHA256SUMS, publish
-  itch TAG         push the published release's player builds (macOS, Linux) to itch.io
+  itch TAG         push the published release's player builds (macOS, Linux, Switch) to itch.io
                    with butler, after checking them against SHA256SUMS and the guard; needs
                    BUTLER_API_KEY; pre-releases are not pushed (ADR 0146)
   TAG              vX.Y.Z or vX.Y.Z-rc.N (a pre-release), an annotated tag
@@ -74,7 +74,7 @@ Usage: scripts/release start|build|publish|itch TAG [--dry-run] [--replace] [--p
   --out DIR        itch: download directory (default build/release/TAG/itch)
 
   itch --dry-run checks the files and prints the butler commands (no butler or key needed);
-  itch --platforms is of mac,linux,windows (default mac,linux).
+  itch --platforms is of mac,linux,windows,switch (default mac,linux,switch).
 EOF
     exit "${1:-2}"
 }
@@ -493,7 +493,7 @@ cmd_publish() {
 # itch: the published release's player builds to itch.io (ADR 0146). mtport.itch downloads and
 # checks them and runs butler; BUTLER_API_KEY reaches butler through the environment only.
 cmd_itch() {
-    local args=(itch "$tag" --platforms "${platforms:-mac,linux}")
+    local args=(itch "$tag" --platforms "${platforms:-mac,linux,switch}")
     [ "$dry_run" -eq 1 ] && args+=(--dry-run)
     mtrelease "${args[@]}" ${itch_args[@]+"${itch_args[@]}"} || die "itch failed on $tag"
 }

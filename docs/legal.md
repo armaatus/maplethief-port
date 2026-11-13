@@ -26,7 +26,7 @@ Release downloads contain the program, never the game's art, sound or data. The 
 
 ## itch.io
 
-The same player builds are also on itch.io, at [armaatus.itch.io/maplethief](https://armaatus.itch.io/maplethief): the files of the published GitHub Release, checked against its `SHA256SUMS` and the release guard again before they are uploaded, never a build made only for itch.io and never a release candidate ([ADR 0146](adr/0146-distribution-on-itch-io.md)). The page's text is our own; its cover and banner are our own art, and its screenshots of the game are taken from a local build and never stored in this repository.
+The same player builds, the Nintendo Switch zip included, are also on itch.io, at [armaatus.itch.io/maplethief](https://armaatus.itch.io/maplethief): the files of the published GitHub Release, checked against its `SHA256SUMS` and the release guard again before they are uploaded, never a build made only for itch.io and never a release candidate ([ADR 0146](adr/0146-distribution-on-itch-io.md)). The page's text is our own; its cover and banner are our own art, and its screenshots of the game are taken from a local build and never stored in this repository.
 
 The download is free. The page offers an optional donation ("$0 or donate") and a Buy Me a Coffee link. A donation is a tip for the work on the port. It buys nothing: not the game, which belongs to Nexon, and not any right to it. If Nexon objects, donations are switched off first, then the screenshots and the downloads are withdrawn, on itch.io and on GitHub; the source code stays.
 
