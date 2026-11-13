@@ -29,6 +29,7 @@
 #include "ipa_import.h"
 #include "save_zip.h"
 #include "settings.h"
+#include "zip_fixtures.h"
 
 namespace {
 
@@ -472,6 +473,76 @@ TEST_CASE("ipa import: an interrupted import leaves no game/, and its folder goe
     CHECK(read_file(data / "game" / "b.bin") == Bytes(300, 3));
     CHECK(read_file(data / "game" / "new.txt") == bytes_of("n"));
     CHECK(read_file(data / "game" / "MapleThief") == executable(0, 3));
+}
+
+TEST_CASE("ipa import: the file's, an entry's, the entry count's and Info.plist's caps (#413)") {
+    const fe::IpaExpected real = fe::ipa_expected();
+    const fs::path data = fresh_dir("caps");
+
+    // kMaxIpaBytes (256 MiB), a sparse file: at the cap it is read (and is no zip); one byte
+    // more is refused by its size, before it is read.
+    const fs::path big = data / "big.ipa";
+    write_file(big, {});
+    fs::resize_file(big, fe::kMaxIpaBytes);
+    fe::IpaResult r = fe::check_ipa(big.string(), real);
+    CHECK(r.problem == IpaProblem::kNotZip);
+    fs::resize_file(big, fe::kMaxIpaBytes + 1);
+    r = fe::check_ipa(big.string(), real);
+    CHECK(r.problem == IpaProblem::kUnreadable);
+    CHECK(r.why.find("is too large (268435457 bytes)") != std::string::npos);
+    fs::remove(big);
+
+    // kMaxIpaEntryBytes (64 MiB): an entry at the cap inflates; one declared a byte larger (with
+    // ten bytes of data) is refused before it is inflated, and the import writes nothing.
+    const Bytes at_cap = zip_fixtures::zip_of_zeros({"Payload/MapleThief.app/big.bin"},
+                                                    static_cast<std::uint32_t>(fe::kMaxIpaEntryBytes));
+    std::vector<fe::ZipItem> items;
+    std::string why;
+    REQUIRE_MESSAGE(fe::zip_list(at_cap, &items, &why), why);
+    Bytes inflated;
+    REQUIRE_MESSAGE(fe::zip_extract(at_cap, items.at(0), fe::kMaxIpaEntryBytes, &inflated, &why),
+                    why);
+    CHECK(inflated.size() == fe::kMaxIpaEntryBytes);
+    inflated = {};
+    Ipa over = make_ipa("1.5", 0, {{"Payload/MapleThief.app/big.bin", Bytes(10, 1)}});
+    put_le(over.zip, central_entries(over.zip).back() + 24,
+           static_cast<std::uint32_t>(fe::kMaxIpaEntryBytes + 1));
+    over = rehash(over);
+    r = import_bytes(over, data);
+    CHECK(r.problem == IpaProblem::kModified);
+    CHECK(r.why.find("big.bin has 67108865 bytes, more than 67108864") != std::string::npos);
+    CHECK(names_in(data).empty());
+
+    // 4,096 entries are listed (the file is then only "changed"); 4,097 are refused from the
+    // central directory.
+    std::vector<fe::ZipEntry> extra;
+    for (std::size_t i = central_entries(make_ipa().zip).size(); i < fe::kMaxZipEntries; i++) {
+        extra.push_back({"Payload/MapleThief.app/f" + std::to_string(i), {}});
+    }
+    CHECK(fe::check_ipa_bytes(make_ipa("1.5", 0, extra).zip, real).problem ==
+          IpaProblem::kModified);
+    extra.push_back({"Payload/MapleThief.app/one-more", {}});
+    r = fe::check_ipa_bytes(make_ipa("1.5", 0, extra).zip, real);
+    CHECK(r.problem == IpaProblem::kNotZip);
+    CHECK(r.why.find("4097 entries, more than 4096") != std::string::npos);
+
+    // Info.plist is read for the diagnosis up to 1 MiB: an XML plist of exactly 1 MiB gives its
+    // version, one byte more is not read and gives none.
+    const auto with_plist = [&](std::size_t size) {
+        std::string xml = "<?xml version=\"1.0\"?>\n<plist version=\"1.0\"><dict>"
+                          "<key>CFBundleVersion</key><string>1.4</string></dict></plist>\n";
+        xml.resize(size, '\n');
+        return fe::zip_store(std::vector<fe::ZipEntry>{
+            {"Payload/MapleThief.app/Info.plist", bytes_of(xml)},
+            {"Payload/MapleThief.app/MapleThief", executable()}});
+    };
+    r = fe::check_ipa_bytes(with_plist(1u << 20), real);
+    CHECK(r.problem == IpaProblem::kOtherVersion);
+    CHECK(r.version == "1.4");
+    r = fe::check_ipa_bytes(with_plist((1u << 20) + 1), real);
+    CHECK(r.problem == IpaProblem::kOtherVersion);
+    CHECK(r.version.empty());
+    CHECK(r.why.find("gives no version") != std::string::npos);
 }
 
 TEST_CASE("bundle: --bundle, MAPLETHIEF_BUNDLE_DIR, the build's default, next to the "
