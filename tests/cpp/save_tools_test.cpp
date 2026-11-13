@@ -701,8 +701,8 @@ TEST_CASE("save tools: a zip's names are filtered before anything is inflated, a
     // An entry that is no save is never inflated: its damaged data does not refuse the zip.
     Bytes junk = fe::zip_store(std::vector<fe::ZipEntry>{
         {"config", kConfig}, {"notes/junk.bin", Bytes{'J', 'U', 'N', 'K', 'J', 'U', 'N', 'K'}}});
-    const auto at =
-        std::search(junk.begin(), junk.end(), std::begin("JUNKJUNK"), std::begin("JUNKJUNK") + 8);
+    const Bytes marker = {'J', 'U', 'N', 'K', 'J', 'U', 'N', 'K'};
+    const auto at = std::search(junk.begin(), junk.end(), marker.begin(), marker.end());
     REQUIRE(at != junk.end());
     *at ^= 1; // its CRC fails
     write_bytes(root / "junk.zip", junk);
