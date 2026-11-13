@@ -3,7 +3,7 @@
 - **Status:** Accepted (delegated by Joris, 2026-11-13)
 - **Date:** 2026-11-13
 - **Issue:** [#322](https://github.com/armaatus/maplethief-port/issues/322) (epic [#287](https://github.com/armaatus/maplethief-port/issues/287)); [#323](https://github.com/armaatus/maplethief-port/issues/323) adds its targets the same way
-- **Builds on:** [ADR 0154](0154-threat-model-for-player-supplied-files.md) (the parsers to cover), [ADR 0157](0157-asan-and-ubsan-preset-and-ci-job.md) (ASan, UBSan, the `asan` CI job), [ADR 0006](0006-continuous-integration.md) (CI and `scripts/ci-scope`), [ADR 0100](0100-no-game-files-in-git.md) (no game file in git)
+- **Builds on:** [ADR 0154](0154-threat-model-for-player-supplied-files.md) (the parsers to cover), [ADR 0157](0157-asan-and-ubsan-preset-and-ci-job.md) (ASan, UBSan, the `asan` CI job), [ADR 0006](0006-continuous-integration.md) (CI and `scripts/ci-scope`), [ADR 0100](0100-public-repository-and-player-releases.md) (no game file in git)
 
 ## Context
 
