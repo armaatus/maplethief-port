@@ -219,6 +219,7 @@ void serve(mt_cpu *cpu, u32 s, const std::uint8_t *p, u32 n) {
         if (ours) {
             const std::size_t idn = std::strlen(id);
             out[3] = static_cast<std::uint8_t>(idn);
+            // NOLINTNEXTLINE(bugprone-not-null-terminated-result): a length-prefixed string
             std::memcpy(out + 4, id, idn);
             size += static_cast<u32>(idn);
             g_server.confirmed++;

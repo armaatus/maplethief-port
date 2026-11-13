@@ -3015,6 +3015,8 @@ void start_menu(Game &g, const GameOptions &options) {
     const auto switch_inputs = [] {
         DataSwitchInputs in;
         in.user_dir = [] { return user_data_dir(false); };
+        // Returned by value, and its lambda captures nothing: no stack address escapes.
+        // NOLINTNEXTLINE(clang-analyzer-core.StackAddressEscape)
         return in;
     };
     g.menu.set_action_question("data_location", [switch_inputs] {

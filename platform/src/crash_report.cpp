@@ -134,10 +134,12 @@ File open_report() {
         }
 #else
         std::size_t n = std::strlen(g_dir);
+        // NOLINTNEXTLINE(bugprone-not-null-terminated-result): ".txt" below ends the path
         std::memcpy(g_path, g_dir, n);
         g_path[n++] = '/';
         std::memcpy(g_path + n, stamp, 15);
         n += 15;
+        // NOLINTNEXTLINE(bugprone-not-null-terminated-result): the 5 bytes include ".txt"'s NUL
         std::memcpy(g_path + n, ".txt", 5);
         const int fd = ::open(g_path, O_WRONLY | O_CREAT | O_EXCL | O_TRUNC, 0644);
         if (fd >= 0) {

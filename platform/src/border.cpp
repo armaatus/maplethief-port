@@ -15,7 +15,10 @@
 #define STBI_NO_LINEAR
 #define STBI_MAX_DIMENSIONS 8192
 #define STB_IMAGE_STATIC
+// clang-tidy sees the declarations only: the third-party bodies are not ours to check.
+#if !defined(__clang_analyzer__)
 #define STB_IMAGE_IMPLEMENTATION
+#endif
 #include <stb_image.h>
 
 namespace maplethief::frontend {
