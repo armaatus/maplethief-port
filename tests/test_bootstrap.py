@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 import zipfile
 from pathlib import Path
 
@@ -272,6 +273,69 @@ class BootstrapModuleTest(unittest.TestCase):
         self.check_rejected(
             (("Payload/MapleThief.app/Info.plist/x", b"y", 0),), "both a file and a directory"
         )
+
+    def declared_sizes(self) -> list[int]:
+        with zipfile.ZipFile(io.BytesIO(self.repo.ipa)) as z:
+            return [i.file_size for i in z.infolist()]
+
+    def check_extract_cap(self, cap: str, value: int, pattern: str):
+        """Extraction with ``bs.<cap>`` set to ``value`` is refused and writes nothing."""
+        with mock.patch.object(bs, cap, value):
+            with self.assertRaisesRegex(bs.BootstrapError, pattern):
+                self.run_bootstrap(until=bs.EXTRACT)
+        self.assertFalse((self.root / bs.IPA_DIR).exists())
+        self.assertNoTempLeft()
+
+    def test_extraction_caps_match_the_player_import(self):
+        # ipa_import.h's kMaxIpaEntryBytes and save_zip.h's kMaxZipEntries; ADR 0154 (g).
+        self.assertEqual(bs.MAX_ENTRY_BYTES, 64 << 20)
+        self.assertEqual(bs.MAX_TOTAL_BYTES, 1 << 30)
+        self.assertEqual(bs.MAX_ENTRIES, 4096)
+
+    def test_an_entry_over_the_entry_cap_is_refused_before_extracting(self):
+        largest = max(self.declared_sizes())
+        self.check_extract_cap("MAX_ENTRY_BYTES", largest - 1, "padding.bin.* too large")
+        with mock.patch.object(bs, "MAX_ENTRY_BYTES", largest):
+            self.run_bootstrap(until=bs.EXTRACT)
+        self.assertTrue((self.root / bs.BINARY).is_file())
+
+    def test_entries_over_the_total_cap_are_refused_before_extracting(self):
+        total = sum(self.declared_sizes())
+        self.check_extract_cap("MAX_TOTAL_BYTES", total - 1, "more than .* bytes in total")
+        with mock.patch.object(bs, "MAX_TOTAL_BYTES", total):
+            self.run_bootstrap(until=bs.EXTRACT)
+        self.assertTrue((self.root / bs.BINARY).is_file())
+
+    def test_more_entries_than_the_cap_are_refused_before_extracting(self):
+        count = len(self.declared_sizes())
+        self.check_extract_cap("MAX_ENTRIES", count - 1, f"{count} entries, more than {count - 1}")
+        with mock.patch.object(bs, "MAX_ENTRIES", count):
+            self.run_bootstrap(until=bs.EXTRACT)
+        self.assertTrue((self.root / bs.BINARY).is_file())
+
+    def test_an_entry_longer_than_it_declares_is_cut_off_while_extracting(self):
+        # A zip can lie about its sizes: with the declared-size check out of the way, the copy
+        # itself still stops at the caps, and the half-written tree goes.
+        largest = max(self.declared_sizes())
+        with mock.patch.object(bs, "_check_declared_sizes", lambda *_args: None):
+            self.check_extract_cap("MAX_ENTRY_BYTES", largest - 1, "padding.bin.* too large")
+            self.check_extract_cap(
+                "MAX_TOTAL_BYTES", sum(self.declared_sizes()) - 1, "bytes in total"
+            )
+
+    def test_a_4096_entry_ipa_extracts_and_4097_is_refused(self):
+        files = 4096 - len(DEFAULT_ENTRIES) - 1  # with padding.bin
+        many = tuple((f"Payload/MapleThief.app/f{i}", b"", 0) for i in range(files))
+        self.repo.set_ipa(synthetic_ipa((*DEFAULT_ENTRIES, *many)))
+        self.run_bootstrap(until=bs.EXTRACT)
+        self.assertTrue((self.root / bs.APP_DIR / f"f{files - 1}").is_file())
+        extra = (("Payload/MapleThief.app/one-more", b"", 0),)
+        self.repo.set_ipa(synthetic_ipa((*DEFAULT_ENTRIES, *many, *extra)))
+        with self.assertRaisesRegex(bs.BootstrapError, "4097 entries, more than 4096"):
+            self.run_bootstrap(until=bs.EXTRACT)
+        # The refusal is before work/ipa/ is touched: the earlier tree is still there.
+        self.assertTrue((self.root / bs.APP_DIR / f"f{files - 1}").is_file())
+        self.assertNoTempLeft()
 
     def test_lfs_pointer(self):
         (self.root / bs.IPA).write_bytes(LFS_POINTER)

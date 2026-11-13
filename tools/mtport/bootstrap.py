@@ -82,6 +82,8 @@ BINARY_ENTRY = f"Payload/{APP_NAME}/MapleThief"  # the main binary's name inside
 PLIST_ENTRY = f"Payload/{APP_NAME}/Info.plist"
 IPA_VERSION = "1.5"
 MAX_ENTRY_BYTES = 64 << 20  # the most we read of one entry; ipa_import.h's kMaxIpaEntryBytes
+MAX_TOTAL_BYTES = 1 << 30  # the most extract_ipa writes in all (ADR 0154 (g))
+MAX_ENTRIES = 4096  # the most entries an IPA may have; save_zip.h's kMaxZipEntries
 SLICES_DIR = "work/slices"
 SLICE_SUMS = f"{SLICES_DIR}/SHA256SUMS"
 BOOTSTRAP_JSON = "work/bootstrap.json"
@@ -342,6 +344,7 @@ def safe_members(
     seen: dict[str, str] = {}  # case-folded path -> entry name
     files: set[str] = set()
     parents: set[str] = set()
+    _check_declared_sizes(archive.infolist(), label)
     for info in archive.infolist():
         # The name as stored: .filename has '\' turned into '/' on Windows only.
         parts = entry_parts(info.orig_filename, label)
@@ -370,6 +373,41 @@ def safe_members(
     return members
 
 
+def _check_declared_sizes(infos: list[zipfile.ZipInfo], label: str) -> None:
+    """Refuse an archive whose entry count or declared sizes pass the caps, before any is read.
+
+    The sizes are the zip's own claims; extract_ipa counts the bytes again as it copies."""
+    if len(infos) > MAX_ENTRIES:
+        raise BootstrapError(f"{label}: {len(infos)} entries, more than {MAX_ENTRIES}")
+    total = 0
+    for info in infos:
+        if info.file_size > MAX_ENTRY_BYTES:
+            raise BootstrapError(
+                f"{label}: entry {info.orig_filename!r} is too large "
+                f"({info.file_size} bytes, at most {MAX_ENTRY_BYTES})"
+            )
+        total += info.file_size
+    if total > MAX_TOTAL_BYTES:
+        raise BootstrapError(
+            f"{label}: its entries hold {total} bytes, more than {MAX_TOTAL_BYTES} bytes in total"
+        )
+
+
+def _copy_capped(src, dst, name: str, total: int) -> int:
+    """Copy ``src`` to ``dst``, stopping past the per-entry or the total cap; return the new
+    total. A zip's declared sizes can lie, so the bytes themselves are counted."""
+    size = 0
+    while chunk := src.read(min(1 << 20, MAX_ENTRY_BYTES + 1 - size)):
+        size += len(chunk)
+        total += len(chunk)
+        if size > MAX_ENTRY_BYTES:
+            raise BootstrapError(f"{IPA}: entry {name!r} is too large (more than {MAX_ENTRY_BYTES})")
+        if total > MAX_TOTAL_BYTES:
+            raise BootstrapError(f"{IPA}: its entries hold more than {MAX_TOTAL_BYTES} bytes in total")
+        dst.write(chunk)
+    return total
+
+
 def _zip_mtime(info: zipfile.ZipInfo) -> float | None:
     """The entry's timestamp as a POSIX time. Zip times are local time, as unzip reads them."""
     try:
@@ -396,6 +434,7 @@ def extract_ipa(repo: Path, sums: dict[str, str], log=print) -> None:
         _remove_tree(tmp)
         tmp.mkdir()
         root = os.path.realpath(tmp)
+        total = 0  # bytes written so far, against MAX_TOTAL_BYTES
         with zipfile.ZipFile(repo / IPA) as archive:
             for info, parts in safe_members(archive):
                 target = tmp.joinpath(*parts)
@@ -408,7 +447,7 @@ def extract_ipa(repo: Path, sums: dict[str, str], log=print) -> None:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 # "x": never write through anything that is already there.
                 with archive.open(info) as src, open(target, "xb") as dst:
-                    shutil.copyfileobj(src, dst, 1 << 20)
+                    total = _copy_capped(src, dst, info.orig_filename, total)
                 if (mtime := _zip_mtime(info)) is not None:
                     os.utime(target, (mtime, mtime))
         binary = tmp / Path(BINARY).relative_to(IPA_DIR)
