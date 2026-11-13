@@ -17,14 +17,16 @@ Nothing from this run goes into git: no NRO, no log with your own paths, no scre
 - An existing save with a character that can walk onto a field map, as a zip exported from the desktop build (Saves → Export saves…), for the import row G4. You can also play a new character up to a field map.
 - About 2 hours. The 30-minute play (P1) and the performance session (F1, about 15 minutes) are the long rows.
 
-**Builds** (on the Mac, from the epic branch `epic-233-switch`, or `dev` once the epic is merged):
+**Builds** (on the Mac, from `dev`):
 
 ```sh
 scripts/bootstrap && python3 -m recomp all          # work/ipa and work/gen, if not there yet
 MAPLETHIEF_VERSION=0.9.245-rc.1 scripts/build-switch --preset switch-player --gen work/gen
 #   -> build/switch-player/MapleThief-0.9.245-rc.1-switch.zip   (the player zip; rows I1 to G5)
-scripts/build-switch HEAD --preset switch-release   # -> build/switch-release/MapleThief.nro (row F1)
+mkdir -p build/switch-release && cp build/switch-player/MapleThief.nro build/switch-release/MapleThief.nro   # the game, for scripts/switch-perf (row F1)
 ```
+
+`scripts/build-switch --preset switch-release` without `--gen` builds the hello NRO (#235), not the game, and with `--gen` its kit guard fails the run by design (#243). So F1 sends the player build's NRO: `scripts/switch-perf` reads `build/switch-release/MapleThief.nro`, hence the copy. Don't use `scripts/switch-perf --build`, which rebuilds the hello NRO there.
 
 If a release with a Switch zip has been drafted or published by then, download `MapleThief-<version>-switch.zip` from it instead and use that. Rows I1 and I2 then check the release's own file.
 
@@ -343,8 +345,8 @@ These checks stay on their own issues, with the steps in the issue's hand-off co
 | Issue | What | Command |
 |---|---|---|
 | [#236](https://github.com/armaatus/maplethief-port/issues/236) | the runtime's test NRO in applet mode and title takeover, and the forced guest fault | `scripts/switch-test --ip <IP>`, `scripts/switch-test --ip <IP> --crash-test` |
-| [#242](https://github.com/armaatus/maplethief-port/issues/242) | the GPU picture against the software one, every filter, the GPU time per frame | `scripts/switch-run "$NRO" -- --gfx-prototype --gfx-backend gpu --smoke-frames 120`, and the rest of its comment |
-| [#235](https://github.com/armaatus/maplethief-port/issues/235) | the Homebrew Menu entry and an nxlink run | covered by I3 and F1 |
+| [#242](https://github.com/armaatus/maplethief-port/issues/242) | the GPU picture against the software one, every filter, the GPU time per frame | `NRO=build/switch-player/MapleThief.nro`, then `scripts/switch-run "$NRO" -- --gfx-prototype --gfx-backend gpu --smoke-frames 120`, and the rest of its comment |
+| [#235](https://github.com/armaatus/maplethief-port/issues/235) | the hello NRO's Homebrew Menu entry and an nxlink run | not covered by I3 and F1, which run the game: see [the Switch hand-offs](handoffs/switch.md#235-the-hello-nro-on-the-console) |
 
 ## How to report
 
