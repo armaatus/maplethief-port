@@ -9,8 +9,10 @@ bundle's executable, each planted in it, fail the guard's player mode.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -710,3 +712,396 @@ def test_module_runs_as_script(tmp_path):
     )
     assert out.returncode == 0, out.stderr
     assert "guard: OK" in out.stdout
+
+
+# --- itch.io pushes (mtport.itch, ADR 0146, #208) --------------------------------------------
+#
+# A synthetic published release: the three desktop player builds and SHA256SUMS, served by a
+# fake `gh` (a function, or a shell script for scripts/release), and pushed with a fake
+# `butler` that logs its arguments and whether it saw the key.
+
+ITCH_VERSION = "1.0.0"
+ITCH_TAG = f"v{ITCH_VERSION}"
+ITCH_CHANNELS = ("macos-universal", "linux-x86_64", "windows-x64")
+MACHO64 = b"\xcf\xfa\xed\xfe" + b"\0" * 60 + b"f_000027E0\0f_0002A3C1\0"
+ELF64 = b"\x7fELF\x02\x01\x01\0" + b"\0" * 56 + b"f_000027E0\0f_0002A3C1\0"
+FAKE_BUTLER = """\
+import json, os, sys
+with open(os.environ["FAKE_BUTLER_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps({"argv": sys.argv[1:], "key": os.environ.get("BUTLER_API_KEY")}) + "\\n")
+"""
+
+
+def itch_release(root: Path, extra: dict[str, bytes] | None = None) -> Path:
+    """The player builds of ITCH_VERSION and their SHA256SUMS in root; ``extra`` is planted in
+    the Windows build."""
+    root.mkdir(parents=True, exist_ok=True)
+    licences = {k: v for k, v in PLAYER.items() if k != "MapleThief.exe"}
+    builds = {
+        "macos-universal": {"MapleThief.app/Contents/MacOS/MapleThief": MACHO64, **licences},
+        "linux-x86_64": {"bin/MapleThief": ELF64, "MapleThief.sh": b"#!/bin/sh\n", **licences},
+        "windows-x64": {**PLAYER, **(extra or {})},
+    }
+    sums = []
+    for channel, files in builds.items():
+        top = f"MapleThief-{ITCH_VERSION}-{channel}"
+        if channel.startswith("linux"):
+            path = make_tgz(root / f"{top}.tar.gz", files, top)
+        else:
+            path = make_zip(root / f"{top}.zip", files, top)
+        sums.append(rel.write_sha256(path))
+    (root / "SHA256SUMS").write_bytes(rel.merge_sums(sums).encode())
+    for s in sums:
+        s.unlink()
+    return root
+
+
+@pytest.fixture
+def itch_env(monkeypatch):
+    """No reference directories or dispatch table of this checkout in the guard."""
+    monkeypatch.setattr(rel, "DEFAULT_REFERENCES", ())
+    monkeypatch.setattr(rel, "GEN_DISPATCH", "no/such/dispatch.c")
+
+
+def itch_args(tmp_path: Path, *extra: str):
+    from mtport import itch  # noqa: F401  (registers the subcommand)
+
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="cmd")
+    itch.add_parser(sub)
+    return parser.parse_args(["itch", ITCH_TAG, "--out", str(tmp_path / "out"), *extra])
+
+
+def fake_gh(release: Path, draft=False, prerelease=False, drop=()):
+    """A `gh` that serves release's files as the published release ITCH_TAG."""
+    calls = []
+
+    def run(argv):
+        calls.append(argv)
+        assert argv[:3] == ["gh", "release", "view"] or argv[:3] == ["gh", "release", "download"]
+        assert argv[3] == ITCH_TAG
+        if argv[2] == "view":
+            names = [p.name for p in release.iterdir() if p.name not in drop]
+            return json.dumps(
+                {
+                    "isDraft": draft,
+                    "isPrerelease": prerelease,
+                    "assets": [{"name": n} for n in names],
+                }
+            )
+        dest = Path(argv[argv.index("--dir") + 1])
+        for i, a in enumerate(argv):
+            if a == "--pattern":
+                shutil.copyfile(release / argv[i + 1], dest / argv[i + 1])
+        return ""
+
+    return run, calls
+
+
+def itch_run(tmp_path, args, gh_run, env=None, butler=True):
+    from mtport import itch
+
+    script = tmp_path / "fake_butler.py"
+    script.write_text(FAKE_BUTLER, encoding="utf-8")
+    log = tmp_path / "butler.log"
+    env = {**(env or {}), "FAKE_BUTLER_LOG": str(log)}
+    status = itch.run(args, ("gh",), gh_run, env, [sys.executable, str(script)] if butler else None)
+    calls = (
+        [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        if log.exists()
+        else []
+    )
+    return status, calls
+
+
+def test_itch_dry_run_prints_one_push_per_channel(tmp_path, itch_env, capsys):
+    release = itch_release(tmp_path / "release")
+    gh_run, calls = fake_gh(release)
+    status, butler = itch_run(tmp_path, itch_args(tmp_path, "--dry-run"), gh_run, butler=False)
+    out = capsys.readouterr().out
+    assert status == 0, out
+    assert butler == []
+    pushes = [line for line in out.splitlines() if "dry-run, not run: butler push" in line]
+    assert len(pushes) == 3
+    for line, channel in zip(pushes, ITCH_CHANNELS, strict=True):
+        assert line.endswith(
+            f"MapleThief-{ITCH_VERSION}-{channel}."
+            f"{'tar.gz' if 'linux' in channel else 'zip'} armaatus/maplethief:{channel} "
+            f"--userversion {ITCH_VERSION}"
+        )
+    assert "dry-run, not run: butler status armaatus/maplethief" in out
+    assert [c[2] for c in calls] == ["view", "download"]
+    # Pushed bytes are the release's.
+    for name in rel.player_names(ITCH_VERSION)[:3]:
+        assert (tmp_path / "out" / name).read_bytes() == (release / name).read_bytes()
+
+
+def test_itch_platforms_and_from_dir(tmp_path, itch_env, capsys):
+    release = itch_release(tmp_path / "release")
+    args = itch_args(tmp_path, "--dry-run", "--platforms", "windows", "--from", str(release))
+    status, _ = itch_run(
+        tmp_path, args, lambda argv: pytest.fail(f"gh called: {argv}"), butler=False
+    )
+    out = capsys.readouterr().out
+    assert status == 0, out
+    assert out.count("butler push") == 1
+    assert "armaatus/maplethief:windows-x64 --userversion 1.0.0" in out
+
+
+@pytest.mark.parametrize(
+    "gh_options, message",
+    [
+        ({"drop": ("MapleThief-1.0.0-linux-x86_64.tar.gz",)}, "missing from the published"),
+        ({"drop": ("SHA256SUMS",)}, "missing from the published"),
+        ({"draft": True}, "is a draft"),
+        ({"prerelease": True}, "is a pre-release"),
+    ],
+)
+def test_itch_refuses_a_file_missing_from_the_published_release(
+    tmp_path, itch_env, capsys, gh_options, message
+):
+    release = itch_release(tmp_path / "release")
+    gh_run, _ = fake_gh(release, **gh_options)
+    status, butler = itch_run(tmp_path, itch_args(tmp_path), gh_run, {"BUTLER_API_KEY": "k"})
+    assert status == 1
+    assert message in capsys.readouterr().err
+    assert butler == []
+
+
+def test_itch_refuses_a_file_that_fails_sha256sums(tmp_path, itch_env, capsys):
+    release = itch_release(tmp_path / "release")
+    name = "MapleThief-1.0.0-macos-universal.zip"
+    (release / name).write_bytes((release / name).read_bytes() + b"tampered")
+    gh_run, _ = fake_gh(release)
+    status, butler = itch_run(tmp_path, itch_args(tmp_path), gh_run, {"BUTLER_API_KEY": "k"})
+    assert status == 1
+    assert f"{name} does not match SHA256SUMS" in capsys.readouterr().err
+    assert butler == []
+
+
+def test_itch_refuses_a_file_not_listed_in_sha256sums(tmp_path, itch_env, capsys):
+    release = itch_release(tmp_path / "release")
+    sums = (release / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+    kept = "".join(f"{s}\n" for s in sums if "windows" not in s)
+    (release / "SHA256SUMS").write_text(kept, encoding="utf-8")
+    gh_run, _ = fake_gh(release)
+    status, butler = itch_run(tmp_path, itch_args(tmp_path, "--dry-run"), gh_run)
+    assert status == 1
+    assert "windows-x64.zip is not listed in SHA256SUMS" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "planted",
+    [
+        {"data/title.png": b"\x89PNG\r\n\x1a\n"},
+        {"Payload/MapleThief.app/MapleThief": b"anything"},
+    ],
+)
+def test_itch_refuses_a_file_that_fails_the_guard(tmp_path, itch_env, capsys, planted):
+    release = itch_release(tmp_path / "release", planted)  # SHA256SUMS still matches
+    gh_run, _ = fake_gh(release)
+    status, butler = itch_run(tmp_path, itch_args(tmp_path), gh_run, {"BUTLER_API_KEY": "k"})
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "content guard rejected a player build" in captured.err
+    assert "guard: FAILED" in captured.err
+    assert butler == []
+
+
+def test_itch_push_runs_butler_with_the_key_from_the_environment(tmp_path, itch_env, capsys):
+    release = itch_release(tmp_path / "release")
+    gh_run, _ = fake_gh(release)
+    key = "test-key-not-real"
+    status, butler = itch_run(tmp_path, itch_args(tmp_path), gh_run, {"BUTLER_API_KEY": key})
+    out = capsys.readouterr().out
+    assert status == 0, out
+    assert [c["argv"][0] for c in butler] == ["push", "push", "push", "status"]
+    for call, channel in zip(butler[:3], ITCH_CHANNELS, strict=True):
+        path, target, flag, version = call["argv"][1:]
+        assert Path(path).parent == tmp_path / "out"
+        assert (target, flag, version) == (
+            f"armaatus/maplethief:{channel}",
+            "--userversion",
+            "1.0.0",
+        )
+    assert butler[3]["argv"] == ["status", "armaatus/maplethief"]
+    assert all(c["key"] == key for c in butler)  # from the environment...
+    assert not any(key in " ".join(c["argv"]) for c in butler)  # ...never on the command line
+    assert key not in out
+
+
+def test_itch_push_needs_the_key(tmp_path, itch_env, capsys):
+    release = itch_release(tmp_path / "release")
+    gh_run, _ = fake_gh(release)
+    status, butler = itch_run(tmp_path, itch_args(tmp_path), gh_run, {})
+    assert status == 1
+    assert "BUTLER_API_KEY is not set" in capsys.readouterr().err
+    assert butler == []
+
+
+def test_itch_refuses_a_pre_release_tag(tmp_path, itch_env, capsys):
+    from mtport import itch
+
+    args = itch_args(tmp_path, "--dry-run")
+    args.tag = "v1.0.0-rc.1"
+    assert itch.run(args, ("gh",), lambda argv: pytest.fail("gh called"), {}) == 1
+    assert "-rc.N is not pushed to itch.io" in capsys.readouterr().err
+
+
+def test_itch_channels_are_the_player_build_names():
+    from mtport import itch
+
+    assert tuple(itch.CHANNELS.values()) == ITCH_CHANNELS
+    assert [itch.file_name("1.0.0", c) for c in ITCH_CHANNELS] == rel.player_names("1.0.0")[:3]
+    with pytest.raises(itch.ItchError):
+        itch.channels(["switch"])
+
+
+def test_itch_butler_is_pinned_per_os():
+    from mtport import itch
+
+    assert set(itch.BUTLER.builds) == {
+        "darwin-arm64",
+        "darwin-x86_64",
+        "linux-x86_64",
+        "windows-x86_64",
+    }
+    for build in itch.BUTLER.builds.values():
+        assert len(build.sha256) == 64 and int(build.sha256, 16) >= 0
+        assert itch.BUTLER.url(build) == (
+            f"https://broth.itch.zone/butler/{build.channel}/{itch.BUTLER.version}/archive/default"
+        )
+    assert itch.host_key("Darwin", "arm64") == "darwin-arm64"
+    assert itch.host_key("Windows", "AMD64") == "windows-x86_64"
+    assert itch.host_key("Linux", "x86_64") == "linux-x86_64"
+
+
+class _FakeResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def _butler_zip(files: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def test_itch_pinned_butler_checks_the_download(tmp_path, monkeypatch):
+    from mtport import itch
+
+    data = _butler_zip({"butler": b"#!/bin/sh\n", "7z.so": b"lib"})
+    good = itch.ButlerBuild("linux-amd64", hashlib.sha256(data).hexdigest(), "butler")
+    monkeypatch.setattr(itch, "BUTLER", itch.Butler("15.32.0", {"linux-x86_64": good}))
+    urls = []
+
+    def urlopen(url, timeout):
+        urls.append(url)
+        return _FakeResponse(data)
+
+    monkeypatch.setattr(itch.urllib.request, "urlopen", urlopen)
+    exe = itch.pinned_butler(tmp_path, "linux-x86_64", log=lambda _: None)
+    assert exe == tmp_path / "butler-15.32.0-linux-x86_64" / "butler"
+    assert exe.read_bytes() == b"#!/bin/sh\n"
+    assert itch.pinned_butler(tmp_path, "linux-x86_64", log=lambda _: None) == exe
+    assert len(urls) == 1  # cached
+
+    bad = itch.ButlerBuild("linux-amd64", "0" * 64, "butler")
+    monkeypatch.setattr(itch, "BUTLER", itch.Butler("15.32.0", {"linux-x86_64": bad}))
+    with pytest.raises(itch.ItchError, match="SHA-256"):
+        itch.pinned_butler(tmp_path / "other", "linux-x86_64", log=lambda _: None)
+    assert not any((tmp_path / "other").glob("butler-*"))
+
+
+def test_itch_pinned_butler_rejects_unexpected_entries(tmp_path, monkeypatch):
+    from mtport import itch
+
+    data = _butler_zip({"../butler": b"x"})
+    build = itch.ButlerBuild("linux-amd64", hashlib.sha256(data).hexdigest(), "butler")
+    monkeypatch.setattr(itch, "BUTLER", itch.Butler("15.32.0", {"linux-x86_64": build}))
+    monkeypatch.setattr(itch.urllib.request, "urlopen", lambda url, timeout: _FakeResponse(data))
+    with pytest.raises(itch.ItchError, match="unexpected entry"):
+        itch.pinned_butler(tmp_path, "linux-x86_64", log=lambda _: None)
+
+
+FAKE_GH_SH = """\
+#!/bin/sh
+# A fake gh for scripts/release itch: the published release is $FAKE_RELEASE.
+set -eu
+case "$1 $2" in
+    "release view")
+        printf '{"isDraft":false,"isPrerelease":false,"assets":['
+        sep=""
+        for f in "$FAKE_RELEASE"/*; do
+            printf '%s{"name":"%s"}' "$sep" "$(basename "$f")"
+            sep=,
+        done
+        printf ']}\\n' ;;
+    "release download")
+        shift 3
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --dir) dir="$2"; shift 2 ;;
+                --pattern) cp "$FAKE_RELEASE/$2" "$dir/$2"; shift 2 ;;
+                *) shift ;;
+            esac
+        done ;;
+    *) echo "fake gh: unexpected $*" >&2; exit 1 ;;
+esac
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="scripts/release is a bash script")
+def test_scripts_release_itch_dry_run(tmp_path):
+    release = itch_release(tmp_path / "release")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(FAKE_GH_SH, encoding="utf-8")
+    gh.chmod(0o755)
+    # A sitecustomize that keeps the guard off this checkout's work/ (it may hold the IPA).
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "sitecustomize.py").write_text(
+        "from mtport import release\n"
+        "release.DEFAULT_REFERENCES = ()\n"
+        "release.GEN_DISPATCH = 'no/such/dispatch.c'\n",
+        encoding="utf-8",
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "PYTHON": sys.executable,
+        "PYTHONPATH": f"{site}{os.pathsep}{REPO / 'tools'}",
+        "FAKE_RELEASE": str(release),
+    }
+    env.pop("BUTLER_API_KEY", None)
+    out = subprocess.run(
+        [
+            "bash",
+            str(REPO / "scripts/release"),
+            "itch",
+            ITCH_TAG,
+            "--dry-run",
+            "--out",
+            str(tmp_path / "out"),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stdout + out.stderr
+    pushes = [line for line in out.stdout.splitlines() if "not run: butler push" in line]
+    # The Mac pushes macOS and Linux; Windows pushes its own (scripts/release.ps1 itch).
+    assert [p.split()[-3] for p in pushes] == [
+        "armaatus/maplethief:macos-universal",
+        "armaatus/maplethief:linux-x86_64",
+    ]
+    assert all(p.endswith("--userversion 1.0.0") for p in pushes)
+    assert "not run: butler status armaatus/maplethief" in out.stdout
+    assert "no reference directory" in out.stdout  # the sitecustomize took effect

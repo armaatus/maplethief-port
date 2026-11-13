@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     The Windows part of the release flow (docs/release-checklist.md). `start` and `publish`
-    run on the Mac (scripts/release); this script only has `build`:
+    run on the Mac (scripts/release); this script has `build` and `itch`. `build`:
 
       1. checks the tag (annotated vX.Y.Z or vX.Y.Z-rc.N), that it is pushed and that the
          draft release exists (both skipped with -DryRun), and that work/gen/ exists;
@@ -29,12 +29,18 @@
     (.github/workflows/release.yml); -PlayersOnly skips step 3 and the kit, and builds,
     checks and uploads the player build only.
 
+    `itch` (ADR 0146), after `scripts/release publish` on the Mac: downloads the published
+    release's Windows player build and SHA256SUMS, checks the file against SHA256SUMS and the
+    content guard's player mode, and pushes it to the itch.io channel windows-x64 with the
+    pinned butler (python -m mtport.release itch TAG --platforms windows). butler reads its key
+    from $env:BUTLER_API_KEY. With -DryRun the butler commands are printed instead.
+
     Run it from the x64 Visual Studio developer environment (docs/build/README.md), with gh logged in.
     Needs Python 3.10+ (the py launcher, python3 or python on PATH, or $env:PYTHON), uv, and
     work/gen/ in this checkout (scripts\bootstrap.ps1, then python -m recomp all).
 
 .PARAMETER Command
-    build (the only command on Windows).
+    build, or itch (push the published release's Windows player build to itch.io).
 
 .PARAMETER Tag
     The release tag, vX.Y.Z or vX.Y.Z-rc.N.
@@ -51,17 +57,24 @@
 .PARAMETER Keep
     Keep the clone build/release/<TAG>/src and its build tree.
 
+.PARAMETER From
+    itch: take the player build and SHA256SUMS from this directory, not the published release.
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\release.ps1 build v0.0.1-rc.1
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File scripts\release.ps1 itch v1.0.0 -DryRun
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true, Position = 0)][ValidateSet('build', 'start', 'publish')][string]$Command,
+    [Parameter(Mandatory = $true, Position = 0)][ValidateSet('build', 'itch', 'start', 'publish')][string]$Command,
     [Parameter(Mandatory = $true, Position = 1)][string]$Tag,
     [switch]$DryRun,
     [switch]$Replace,
     [switch]$PlayersOnly,
-    [switch]$Keep
+    [switch]$Keep,
+    [string]$From
 )
 
 Set-StrictMode -Version 3.0
@@ -156,11 +169,30 @@ function Invoke-Gh([string[]]$Arguments) {
     Invoke-Native 'gh' $Arguments | Out-Host
 }
 
-if ($Command -ne 'build') {
+if ($Command -notin @('build', 'itch')) {
     Fail "'$Command' runs on the Mac: scripts/release $Command $Tag"
 }
 $python = Find-Python
 if (-not $python) { Fail 'need Python 3.10+ (the py launcher, python3 or python on PATH, or $env:PYTHON)' }
+
+if ($Command -eq 'itch') {
+    # The Windows channel only; the Mac pushes macOS and Linux (scripts/release itch, ADR 0146).
+    $itchArgs = @('itch', $Tag, '--platforms', 'windows')
+    if ($DryRun) { $itchArgs += '--dry-run' }
+    if ($From) { $itchArgs += @('--from', $From) }
+    # Run directly, not through Invoke-MtRelease, so the checks print as they go.
+    $savedPath = $env:PYTHONPATH
+    $env:PYTHONPATH = Join-Path $Repo 'tools'
+    if ($savedPath) { $env:PYTHONPATH += [IO.Path]::PathSeparator + $savedPath }
+    try {
+        & $python[0] @(@($python | Select-Object -Skip 1) + @('-B', '-m', 'mtport.release') + $itchArgs)
+        $itchStatus = $LASTEXITCODE
+    } finally {
+        $env:PYTHONPATH = $savedPath
+    }
+    if ($itchStatus -ne 0) { Fail "itch failed on $Tag" }
+    exit 0
+}
 
 $parsed = @(Invoke-MtRelease @('tag', $Tag))
 $version = $parsed[0]
