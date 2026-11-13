@@ -49,3 +49,7 @@ Every test NRO's `main` (`tests/cpp/doctest_main.cpp`, `switch_test_host.cpp`) n
 - **The link.** GNU ld reads each archive once: a program whose own objects never call `mt_dispatch` (the real-asset test programs) left `dispatch.o` out of `libmaplethief_gen.a` and then found the runtime's calls to it unresolved. `maplethief_gen` now carries `LINKER:--undefined=mt_dispatch` in its interface on every non-Apple, non-MSVC linker (`cmake/GeneratedCode.cmake`), which pulls it in when the archive is read. ld64 and link.exe search archives again and are unchanged.
 
 The NRO with the game is derived from the player's IPA and stays on their own console (ADR 0100); CI still builds only the hello path.
+
+## Addendum: the guard's mode follows the generated code (#283, 2026-11-13)
+
+#243 gave `platform.switch_guard` the guard's player mode only in the player build (`MAPLETHIEF_PLAYER_BUILD`). That left the game build above, `switch-release` or `switch-debug` with `--gen` (and `just build switch` with the IPA in `original/`), in kit mode, which refuses recompiled code: the NRO was written and the run then failed, and `scripts/switch-perf --build`, which passed no `--gen`, measured the hello NRO. The guard now runs player mode whenever the build links `maplethief_gen`, with its `dispatch.c`, and kit mode otherwise, so the hello NRO and CI's kit are checked as before. `scripts/switch-perf --build` builds `switch-player` with `--gen work/gen` and refuses a hello NRO (#284, [ADR 0145](0145-switch-performance-session-and-defaults.md)'s addendum).

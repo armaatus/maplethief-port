@@ -7,10 +7,11 @@ The criterion: at default settings on a stock-clocked Switch, on a map, the game
 ## How to run it
 
 ```sh
-scripts/build-switch HEAD --preset switch-release   # needs work/gen (scripts/bootstrap)
 export MAPLETHIEF_SWITCH_IP=<the address the Homebrew Menu's NetLoader (Y) shows>
-scripts/switch-perf
+scripts/switch-perf --build   # needs work/gen (scripts/bootstrap, then python3 -m recomp all)
 ```
+
+`scripts/switch-perf` sends the game's NRO, `build/switch-player/MapleThief.nro` (the `switch-player` preset, with your own `work/gen`); `--build` makes it first with `scripts/build-switch HEAD --preset switch-player --gen work/gen`, and without `--build` it sends the one already there. Before sending, it checks the NRO with the release guard's player mode against `work/gen/dispatch.c` and refuses the hello NRO (no generated code), whose numbers say nothing about the game (#284). `--build-only` stops after the build and that check.
 
 The game starts with `--perf-session --fast-forward x2 --gfx-gpu-timing` and logs a `perf:` line every second. When it quits, `python3 -m mtport.perfsession judge` reads the log and prints the `perfsession:` lines and the verdict. To judge a kept log again, run `scripts/switch-perf --judge build/test-output/switch/MapleThief-perf-<time>.log`. A desktop run takes `--perf-session` as well, and is judged with `--displays desktop`.
 

@@ -17,14 +17,16 @@ Nothing from this run goes into git: no NRO, no log with your own paths, no scre
 - An existing save with a character that can walk onto a field map, as a zip exported from the desktop build (Saves → Export saves…), for the import row G4. You can also play a new character up to a field map.
 - About 2 hours. The 30-minute play (P1) and the performance session (F1, about 15 minutes) are the long rows.
 
-**Builds** (on the Mac, from the epic branch `epic-233-switch`, or `dev` once the epic is merged):
+**Builds** (on the Mac, from `dev`):
 
 ```sh
 scripts/bootstrap && python3 -m recomp all          # work/ipa and work/gen, if not there yet
 MAPLETHIEF_VERSION=0.9.245-rc.1 scripts/build-switch --preset switch-player --gen work/gen
 #   -> build/switch-player/MapleThief-0.9.245-rc.1-switch.zip   (the player zip; rows I1 to G5)
-scripts/build-switch HEAD --preset switch-release   # -> build/switch-release/MapleThief.nro (row F1)
+#      and build/switch-player/MapleThief.nro   (the game, which scripts/switch-perf sends in row F1)
 ```
+
+`scripts/build-switch --preset switch-release` without `--gen` builds the hello NRO (#235), not the game. `scripts/switch-perf` sends `build/switch-player/MapleThief.nro` and refuses a hello NRO (#284).
 
 If a release with a Switch zip has been drafted or published by then, download `MapleThief-<version>-switch.zip` from it instead and use that. Rows I1 and I2 then check the release's own file.
 
@@ -319,7 +321,7 @@ Signs off [#244](https://github.com/armaatus/maplethief-port/issues/244)'s hardw
      export MAPLETHIEF_SWITCH_IP=<the address the NetLoader shows>
      scripts/switch-perf
      ```
-     It sends `build/switch-release/MapleThief.nro` with `--perf-session --fast-forward x2 --gfx-gpu-timing`. Change no setting in the game.
+     It sends `build/switch-player/MapleThief.nro` (the game) with `--perf-session --fast-forward x2 --gfx-gpu-timing`. Change no setting in the game.
   3. **Handheld:** load the character and play on a map for at least 5½ minutes. Avoid HOME and sleep.
   4. **Fast-forward:** on a map, hold R3 (the right stick's click) for about 20 s.
   5. **Busiest scene:** the busiest map you know, fighting, for a minute.
@@ -343,8 +345,8 @@ These checks stay on their own issues, with the steps in the issue's hand-off co
 | Issue | What | Command |
 |---|---|---|
 | [#236](https://github.com/armaatus/maplethief-port/issues/236) | the runtime's test NRO in applet mode and title takeover, and the forced guest fault | `scripts/switch-test --ip <IP>`, `scripts/switch-test --ip <IP> --crash-test` |
-| [#242](https://github.com/armaatus/maplethief-port/issues/242) | the GPU picture against the software one, every filter, the GPU time per frame | `scripts/switch-run "$NRO" -- --gfx-prototype --gfx-backend gpu --smoke-frames 120`, and the rest of its comment |
-| [#235](https://github.com/armaatus/maplethief-port/issues/235) | the Homebrew Menu entry and an nxlink run | covered by I3 and F1 |
+| [#242](https://github.com/armaatus/maplethief-port/issues/242) | the GPU picture against the software one, every filter, the GPU time per frame | `NRO=build/switch-player/MapleThief.nro`, then `scripts/switch-run "$NRO" -- --gfx-prototype --gfx-backend gpu --smoke-frames 120`, and the rest of its comment |
+| [#235](https://github.com/armaatus/maplethief-port/issues/235) | the hello NRO's Homebrew Menu entry and an nxlink run | not covered by I3 and F1, which run the game: see [the Switch hand-offs](handoffs/switch.md#235-the-hello-nro-on-the-console) |
 
 ## How to report
 
@@ -412,7 +414,7 @@ Each exit criterion of [#233](https://github.com/armaatus/maplethief-port/issues
 
 | Exit criterion | Evidence |
 |---|---|
-| **Build.** `cmake --workflow --preset switch-release` builds `MapleThief.nro` with the generated code in the pinned devkitA64 container; the `switch` job of `scripts/local-ci` and of CI is green, without the IPA | Agent: the `switch` job on the epic PR's CI and `scripts/local-ci --only switch`; `scripts/build-switch --gen work/gen` locally (the builds of *Before you start*) |
+| **Build.** `cmake --workflow --preset switch-release` builds `MapleThief.nro` with the generated code in the pinned devkitA64 container; the `switch` job of `scripts/local-ci` and of CI is green, without the IPA | Agent: the `switch` job on the epic PR's CI and `scripts/local-ci --only switch`; `scripts/build-switch --preset switch-player --gen work/gen` locally (the builds of *Before you start*) |
 | **Hardware run:** starts from the Homebrew Menu, in applet mode and in title takeover | I3, M1, M2 |
 | **Hardware run:** imports the player's IPA from the SD card and reaches the first map | I2, I4, I5, I6 |
 | **Hardware run:** playable with Joy-Con (attached and detached), a Pro Controller and the touch screen | C1 to C8 (C2 attached, C3 and C4 detached, C5 Pro Controller, C6 touch) |

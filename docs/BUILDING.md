@@ -12,7 +12,7 @@ For every step by hand, the presets and all the options, see the deep reference:
 | Windows 10/11, x64 | builds a portable folder and a zip |
 | Linux x86_64 | builds a folder and a tarball, in Docker |
 | Steam Deck | [built on another computer](#steam-deck), then copied over |
-| iOS | [not yet](#ios) |
+| iOS 16 or later | [built on a Mac with Xcode](#ios), then installed from Xcode |
 
 ## 1. Install the tools
 
@@ -128,7 +128,7 @@ Build on another computer with `just build linux` (it needs Docker), then copy t
 
 ## iOS
 
-Not yet. `just build ios` stops and points at [#83](https://github.com/armaatus/maplethief-port/issues/83), which tracks the Xcode project and the sideload steps.
+On a Mac with Xcode, `just build ios` builds `dist/ios/MapleThief.app` and the Xcode project you install it from ([ADR 0136](adr/0136-ios-app-through-xcode.md)). [Playing on your iPhone](play/iphone.md) has the steps: the signing team, the build, and installing it on the phone.
 
 ## When doctor complains
 

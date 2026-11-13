@@ -5,8 +5,15 @@
 # and kept in one log, then judged by python3 -m mtport.perfsession against #244's criterion.
 # Never runs in CI: it needs a console on this network.
 #
-# Usage: scripts/switch-perf [--ip ADDRESS] [--preset switch-release|switch-debug] [--build]
+# Usage: scripts/switch-perf [--ip ADDRESS] [--preset switch-player] [--build] [--build-only]
 #                            [--displays handheld,docked] [--judge LOG] [-- GAME_ARGS...]
+#
+# It measures the game: the player build's NRO (build/switch-player/MapleThief.nro, with the
+# recompiled code of your own work/gen; #284). --build makes it with
+# scripts/build-switch HEAD --preset switch-player --gen work/gen. Before sending, the NRO must
+# pass the release guard's player mode against work/gen/dispatch.c: the hello NRO of
+# switch-release or switch-debug (no generated code, ADR 0139) is refused, since its numbers
+# say nothing about the game.
 #
 # The game gets --perf-session --fast-forward x2 --gfx-gpu-timing and GAME_ARGS (e.g.
 # --gfx-backend software to measure the other backend). Play as #244's steps say: five minutes
@@ -25,13 +32,15 @@ cd "$REPO"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: scripts/switch-perf [--ip ADDRESS] [--preset switch-release|switch-debug] [--build]
+Usage: scripts/switch-perf [--ip ADDRESS] [--preset switch-player] [--build] [--build-only]
                            [--displays handheld,docked] [--judge LOG] [-- GAME_ARGS...]
 
   --ip ADDRESS  the console's IP address (the Homebrew Menu's NetLoader, Y); default:
                 $MAPLETHIEF_SWITCH_IP
-  --preset P    which build's NRO: switch-release (default) or switch-debug
-  --build       build it first (scripts/build-switch HEAD --preset P)
+  --preset P    which build's NRO: switch-player (the default and the only one: the game
+                with your work/gen; switch-release and switch-debug make the hello NRO)
+  --build       build it first (scripts/build-switch HEAD --preset P --gen work/gen)
+  --build-only  stop after the build and the check that the NRO holds the game; send nothing
   --displays D  the screens that must each pass (default handheld,docked)
   --judge LOG   only judge LOG (a kept log, or the player log from the SD card)
   GAME_ARGS     passed to the game after its session arguments
@@ -40,8 +49,9 @@ EOF
 }
 
 ip_args=()
-preset=switch-release
+preset=switch-player
 build=0
+build_only=0
 displays=handheld,docked
 judge_only=""
 extra=()
@@ -68,6 +78,7 @@ while [ "$#" -gt 0 ]; do
             shift 2
             ;;
         --build) build=1; shift ;;
+        --build-only) build_only=1; shift ;;
         --)
             shift
             extra=("$@")
@@ -89,17 +100,40 @@ if [ -n "$judge_only" ]; then
 fi
 
 case "$preset" in
-    switch-release | switch-debug) ;;
-    *) echo "scripts/switch-perf: --preset must be switch-release or switch-debug" >&2; exit 2 ;;
+    switch-player) ;;
+    switch-release | switch-debug)
+        echo "scripts/switch-perf: --preset $preset builds the hello NRO (no generated code," \
+            "ADR 0139), which says nothing about the game: measure switch-player" >&2
+        exit 2
+        ;;
+    *) echo "scripts/switch-perf: --preset must be switch-player" >&2; exit 2 ;;
 esac
+gen=work/gen
+if [ ! -f "$gen/gen.cmake" ] || [ ! -f "$gen/dispatch.c" ]; then
+    echo "scripts/switch-perf: no $gen/gen.cmake or $gen/dispatch.c: the game's NRO needs your" \
+        "own generated code (scripts/bootstrap, then python3 -m recomp all)" >&2
+    exit 2
+fi
 if [ "$build" = 1 ]; then
-    scripts/build-switch HEAD --preset "$preset"
+    scripts/build-switch HEAD --preset "$preset" --gen "$gen"
 fi
 nro="build/$preset/MapleThief.nro"
 if [ ! -f "$nro" ]; then
-    echo "scripts/switch-perf: no $nro: scripts/build-switch --preset $preset builds it" \
-        "(or pass --build)" >&2
+    echo "scripts/switch-perf: no $nro: scripts/build-switch --preset $preset --gen $gen" \
+        "builds it (or pass --build)" >&2
     exit 2
+fi
+# The hello NRO holds none of the recompiled code: the guard's player mode refuses it.
+if ! guard_out="$(PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" python3 -B -m mtport.release \
+    guard "$nro" --mode player --dispatch "$gen/dispatch.c" 2>&1)"; then
+    printf '%s\n' "$guard_out" >&2
+    echo "scripts/switch-perf: $nro is not the game's NRO (the hello NRO, or one built from" \
+        "another work/gen): refusing to measure it (scripts/switch-perf --build makes the game NRO)" >&2
+    exit 1
+fi
+echo "== $nro holds the game (the release guard's player mode)"
+if [ "$build_only" = 1 ]; then
+    exit 0
 fi
 
 out_dir="build/test-output/switch"

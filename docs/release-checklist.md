@@ -74,6 +74,30 @@ scripts/release publish TAG
 
 It checks that the draft has all seven files and their `.sha256`: the macOS, Linux and Windows kits and player builds, and the Switch zip. It downloads them to `build/release/TAG/download/` and checks each against its `.sha256`. It runs the guard again (each file in its mode; the Switch zip in player mode, its NRO split into code, icon and NACP), writes `SHA256SUMS` over all seven and checks it with `shasum -a 256 -c`. Then it uploads `SHA256SUMS` and publishes the release.
 
+## 5. itch.io
+
+Not for `-rc.N`: pre-releases stay on GitHub ([ADR 0146](adr/0146-distribution-on-itch-io.md)). `BUTLER_API_KEY` must be set in the environment (itch.io, Settings, API keys); never put it in a file of the repository or on a command line.
+
+On the Mac (the macOS, Linux and Switch channels):
+
+```sh
+scripts/release itch TAG --dry-run   # the checks, and the butler commands printed
+scripts/release itch TAG
+```
+
+On the Windows PC (the Windows channel):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\release.ps1 itch TAG -DryRun
+powershell -ExecutionPolicy Bypass -File scripts\release.ps1 itch TAG
+```
+
+Each downloads the published release's player builds and `SHA256SUMS` into `build/release/TAG/itch/`, checks every file against `SHA256SUMS` and runs the guard in player mode again; it refuses a file that is missing, doesn't match or fails the guard, and then nothing is pushed. Then it runs `butler push <file> armaatus/maplethief:<channel> --userversion <version>` per channel (`macos-universal`, `linux-x86_64`, `switch`, `windows-x64`) and `butler status armaatus/maplethief`. butler 15.32.0 is downloaded once into `build/_downloads/` and checked by SHA-256.
+
+- [ ] `butler status armaatus/maplethief` shows the four channels at the tag's version.
+- [ ] Download each file from the page into an empty directory and compare its `shasum -a 256` with `SHA256SUMS` (a `needs-human` check; ADR 0146 says what to do if itch.io serves other bytes).
+- [ ] If the page text changed ([docs/itch/page.md](itch/page.md)), paste it into the page in itch.io's editor. The launch devlog is posted once, in Joris's own words; release history stays in the GitHub Release notes.
+
 ## After
 
 - [ ] On the release page: four player builds (one the Switch zip), three kits, seven `.sha256`, `SHA256SUMS`, the notes with the header on top, and "Pre-release" for `-rc.N`.

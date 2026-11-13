@@ -72,3 +72,7 @@ Measured on the Mac only. There is no console here, and the console's numbers ar
 - The GPU session fails on the console with the CPU busy (guest, compositor): then the next step is #279's profile and flags, not a higher render scale.
 - The GPU session fails with the CPU idle and SDL_RenderPresent long (the GPU's time, `--gfx-gpu-timing`): then deko3d's path, not the CPU, is the limit.
 - The console passes with a lot of headroom: then `render_scale = auto` (or 2 handheld) is worth a measured run, with the GPU's time in the guard's budget.
+
+## Addendum (#284)
+
+`scripts/switch-perf` measured whatever `build/switch-release/MapleThief.nro` was, and `--build` made the hello NRO there (ADR 0139), so its numbers said nothing about the game. It now sends the player build's NRO, `build/switch-player/MapleThief.nro`, and `--build` runs `scripts/build-switch HEAD --preset switch-player --gen work/gen`. Before sending, the release guard's player mode checks the NRO against `work/gen/dispatch.c`, and a hello NRO (no recompiled code) is refused. `--build-only` stops after the build and that check. `just build switch` with the IPA builds the same `switch-player` preset, since `switch-release`'s kit guard refuses the generated code; the game's Switch build is Release only. `tests/test_switch_perf.py` and `tests/test_build_oneshot.py` pin both choices.
