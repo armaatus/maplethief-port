@@ -13,10 +13,12 @@
 #include <vector>
 
 #include "cg/cg_objects.h"
+#include "dir_state.h"
 #include "golden.h"
 #include "maplethief/diag.h"
 #include "maplethief/gfx.h"
 #include "maplethief/texpack.h"
+#include "texpack/texpack_internal.h"
 
 namespace {
 
@@ -111,6 +113,22 @@ std::vector<std::string> read_lines(const fs::path &path) {
         out.push_back(line);
     }
     return out;
+}
+
+// A symbolic link at `link` to `target`; false (and a message) where the system makes none (Windows
+// without the privilege), so the caller skips what needs one.
+bool make_symlink(const fs::path &target, const fs::path &link) {
+    std::error_code ec;
+    if (fs::is_directory(target)) {
+        fs::create_directory_symlink(target, link, ec);
+    } else {
+        fs::create_symlink(target, link, ec);
+    }
+    if (ec) {
+        MESSAGE("no symbolic link here (" << ec.message() << "): that part is skipped");
+        return false;
+    }
+    return true;
 }
 
 // Premultiplied texels as the game's loader makes them (ADR 0041): 4 x 2 of varied alpha.
@@ -354,4 +372,148 @@ TEST_CASE("texpack: a pack that is no directory opens nothing") {
     CHECK(mt_texpack_open(nullptr) == -1);
     CHECK(fresh.count("is no directory: no pack") == 4);
     CHECK(mt_gfx_replace_hook_count() == 0);
+}
+
+TEST_CASE("texpack: a symbolic link in a pack is not followed, logged once (#413)") {
+    Fresh fresh;
+    Dir pack("links");
+    Dir outside("links-outside");
+    const std::vector<u8> linked(2 * 2 * 4, 61), real(2 * 2 * 4, 62);
+    write_png(outside.path / "far.png", std::vector<u8>(2 * 2 * 4, 200), 2, 2);
+    fs::create_directories(outside.path / "art");
+    write_png(outside.path / "art" / "Menu.png", std::vector<u8>(2 * 2 * 4, 200), 2, 2);
+    write_png(pack.path / name_of(real, 2, 2), std::vector<u8>(2 * 2 * 4, 201), 2, 2);
+    fs::create_directories(pack.path / "ui");
+    write_png(pack.path / "ui" / "Real.png", std::vector<u8>(2 * 2 * 4, 201), 2, 2);
+    if (!make_symlink(outside.path / "far.png", pack.path / name_of(linked, 2, 2)) ||
+        !make_symlink(outside.path / "far.png", pack.path / "ui" / "Linked.png") ||
+        !make_symlink(outside.path / "art", pack.path / "ui" / "art")) {
+        return;
+    }
+    // The real texture and the real ui/ image only; the links are skipped, in one line.
+    REQUIRE(mt_texpack_open(pack.str().c_str()) == 2);
+    CHECK(mt_texpack_get_stats().files == 1);
+    CHECK(mt_texpack_get_stats().ui_files == 1);
+    CHECK(fresh.count("symbolic link") == 1);
+    const u32 tex = upload(linked, 2, 2);
+    u32 w = 0, h = 0;
+    CHECK(texels_of(tex, &w, &h) == linked); // the game's texture
+    CHECK(mt_texpack_get_stats().missing == 1);
+    // A ui/ folder that is itself a link: nothing below it is indexed.
+    Dir pack2("links-ui");
+    if (!make_symlink(outside.path / "art", pack2.path / "ui")) {
+        return;
+    }
+    CHECK(mt_texpack_open(pack2.str().c_str()) == 0);
+    CHECK(mt_texpack_get_stats().ui_files == 0);
+    CHECK(fresh.count("symbolic link") == 2);
+}
+
+TEST_CASE("texpack: a pack indexes at most MT_TEXPACK_MAX_FILES files, the rest skipped and "
+          "logged once (#413)") {
+    CHECK(MT_TEXPACK_MAX_FILES == 65536u);
+    Fresh fresh;
+    Dir pack("count");
+    for (u32 i = 0; i < 4; ++i) {
+        char name[MT_TEXPACK_NAME_MAX];
+        mt_texpack_file_name(0x1000u + i, 2, 2, 0, name);
+        write_png(pack.path / name, std::vector<u8>(2 * 2 * 4, 9), 2, 2);
+    }
+    fs::create_directories(pack.path / "ui");
+    write_png(pack.path / "ui" / "a.png", std::vector<u8>(2 * 2 * 4, 9), 2, 2);
+    write_png(pack.path / "ui" / "b.png", std::vector<u8>(2 * 2 * 4, 9), 2, 2);
+    const std::uint32_t old = mt_texpack::set_max_files(3);
+    const int indexed = mt_texpack_open(pack.str().c_str());
+    mt_texpack::set_max_files(old);
+    CHECK(indexed == 3);
+    CHECK(mt_texpack_get_stats().files + mt_texpack_get_stats().ui_files == 3);
+    CHECK(fresh.count("3 files past the first 3 skipped") == 1);
+    // Under the cap, all of them.
+    CHECK(mt_texpack_open(pack.str().c_str()) == 6);
+    CHECK(fresh.count("skipped") == 1);
+}
+
+TEST_CASE("texpack: a file over 80 MiB is rejected unread; one of 80 MiB is read (#413)") {
+    Fresh fresh;
+    Dir pack("large");
+    const std::vector<u8> at(2 * 2 * 4, 71), over(2 * 2 * 4, 72);
+    // Sparse files: a PNG's signature, then zeros.
+    const auto sparse = [](const fs::path &path, std::uintmax_t size) {
+        write_bytes(path, {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'});
+        fs::resize_file(path, size);
+    };
+    sparse(pack.path / name_of(at, 2, 2), std::uintmax_t{80} << 20);
+    sparse(pack.path / name_of(over, 2, 2), (std::uintmax_t{80} << 20) + 1);
+    const std::vector<std::string> before = dir_state(pack.path);
+    REQUIRE(mt_texpack_open(pack.str().c_str()) == 2);
+    u32 w = 0, h = 0;
+    CHECK(texels_of(upload(at, 2, 2), &w, &h) == at);
+    CHECK(texels_of(upload(over, 2, 2), &w, &h) == over);
+    CHECK(fresh.count(name_of(at, 2, 2) + " is no PNG") == 1); // read, then refused
+    CHECK(fresh.count(name_of(over, 2, 2) + " is larger than 80 MiB") == 1);
+    CHECK(mt_texpack_get_stats().rejected == 2);
+    CHECK(dir_state(pack.path) == before); // nothing moved, renamed or written
+}
+
+TEST_CASE("texpack: a name's width and height are 1 to 5 digits, at most 4096 (#413)") {
+    Fresh fresh;
+    Dir pack("names");
+    const char *const good[] = {"00000000000000aa_4096x1.png", "00000000000000ab_1x4096.raw.png",
+                                "00000000000000AC_64x64.png"};
+    const char *const bad[] = {
+        "00000000000000ba_4097x1.png",   // above 4,096
+        "00000000000000bb_99999x1.png",  // 5 digits, above 4,096
+        "00000000000000bc_000064x1.png", // 6 digits
+        "00000000000000bd_100000x1.png", // 6 digits
+        "00000000000000be_064x64.png",   // a leading zero
+        "00000000000000bf_0x64.png",     // 0
+        "00000000000000c0_x64.png",      // no digits
+        "00000000000000c1_64x64.jpg",    // not .png
+        "00000000000000c2_64-64.png",    // no x
+        "0000000000000c3_64x64.png",     // 15 hex digits
+        "00000000000000g4_64x64.png",    // not hex
+    };
+    for (const char *n : good) {
+        write_bytes(pack.path / n, {1});
+    }
+    for (const char *n : bad) {
+        write_bytes(pack.path / n, {1});
+    }
+    CHECK(mt_texpack_open(pack.str().c_str()) == static_cast<int>(std::size(good)));
+    CHECK(fresh.count(", " + std::to_string(std::size(bad)) + " other files ignored") == 1);
+}
+
+TEST_CASE("texpack: ui/ paths are 5 to 255 bytes of [A-Za-z0-9 _-+.@] parts ending .png (#413)") {
+    Fresh fresh;
+    Dir pack("ui-names");
+    const fs::path ui = pack.path / "ui";
+    const std::string part(200, 'a');
+    const std::vector<std::string> good = {"a.png", "Menu BG@2x.png", "x_y-z+1.png",
+                                           "sub/dir/Icon.png",
+                                           part + "/" + std::string(50, 'b') + ".png"}; // 255
+    const std::vector<std::string> bad = {
+        "Menu.PNG",                                 // .png in lower case only
+        "Menu.png.txt",                             // not .png
+        "caf\xC3\xA9.png",                          // not ASCII
+        "a$b.png",                                  // a character outside the set
+        "sub/(x).png",                              // in a folder too
+        part + "/" + std::string(51, 'b') + ".png", // 256 bytes
+    };
+    // Each file made; a path too long for the system (Windows' 260 characters) is left out.
+    const auto make = [&](const std::vector<std::string> &list) {
+        std::size_t made = 0;
+        for (const std::string &rel : list) {
+            const fs::path p = ui / fs::path(std::u8string(rel.begin(), rel.end()));
+            std::error_code ec;
+            fs::create_directories(p.parent_path(), ec);
+            write_bytes(p, {1});
+            made += fs::exists(p, ec) ? 1u : 0u;
+        }
+        return made;
+    };
+    const std::size_t good_made = make(good), bad_made = make(bad);
+    CHECK(good_made >= good.size() - 1);
+    CHECK(mt_texpack_open(pack.str().c_str()) == static_cast<int>(good_made));
+    CHECK(mt_texpack_get_stats().ui_files == good_made);
+    CHECK(fresh.count(", " + std::to_string(bad_made) + " other files ignored") == 1);
 }

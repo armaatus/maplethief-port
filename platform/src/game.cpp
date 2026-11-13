@@ -2755,6 +2755,16 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         g.data_notice = wrap_notice(*m, kDataNoticeColumns);
         g.data_notice_until = 0; // shown from the next frame, for kDataNoticeSeconds
     }
+    // Notices queued during play (a save refused as the game read it, #413): shown the same way.
+    for (const std::string &n : take_data_notices()) {
+        if (!g.data_notice.empty()) {
+            g.data_notice.emplace_back();
+        }
+        for (std::string &line : wrap_notice(n, kDataNoticeColumns)) {
+            g.data_notice.push_back(std::move(line));
+        }
+        g.data_notice_until = 0;
+    }
     // save_states (#204): a quick-save or quick-load asked for, at this safe turn.
     run_quick_state(g, cpu, now);
     // stick_mode and direction_priority (#138, ADR 0128), as in effect now; the clock a menu's

@@ -211,26 +211,26 @@ void Mp3Stream::set_loop(const Loop *loop) {
     audible_ = std::min(audible_, length_);
 }
 
-bool decode_file(std::vector<std::uint8_t> bytes, Mp3Stream::Codec codec, u32 max_seconds,
-                 std::vector<std::int16_t> *samples, u32 *rate, u32 *channels) {
+namespace {
+std::atomic<u64> g_whole_decodes{0};
+} // namespace
+
+std::uint64_t whole_decodes() { return g_whole_decodes.load(); }
+
+bool decode_whole(Mp3Stream &s, std::vector<std::int16_t> *samples) {
     // The pack's stream, read whole: the same decode, limits and timeline.
-    const auto s = Mp3Stream::open_pack(std::move(bytes), codec, nullptr, false, max_seconds);
-    if (!s) {
-        return false;
-    }
-    samples->assign(static_cast<std::size_t>(s->length()) * s->channels(), 0);
+    g_whole_decodes.fetch_add(1);
+    samples->assign(static_cast<std::size_t>(s.length()) * s.channels(), 0);
     u64 done = 0;
-    while (done < s->length()) {
-        const u32 n = static_cast<u32>(std::min<u64>(mix::kMusicBlock, s->length() - done));
-        const u32 got = s->read(samples->data() + done * s->channels(), n);
+    while (done < s.length()) {
+        const u32 n = static_cast<u32>(std::min<u64>(mix::kMusicBlock, s.length() - done));
+        const u32 got = s.read(samples->data() + done * s.channels(), n);
         done += got;
         if (got < n) {
             break;
         }
     }
-    samples->resize(static_cast<std::size_t>(done) * s->channels());
-    *rate = s->rate();
-    *channels = s->channels();
+    samples->resize(static_cast<std::size_t>(done) * s.channels());
     return done != 0;
 }
 

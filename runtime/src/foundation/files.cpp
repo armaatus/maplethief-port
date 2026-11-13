@@ -26,11 +26,14 @@
 // -createFileAtPath:contents:nil makes is only remembered until a handle on it saves: SaveIO_Open
 // 0x6F65 (the only caller) creates the file and then writes it, so a crash in between leaves no
 // empty slot file behind. The bytes a handle reads of a save file go through mt_saves_sanitise
-// (config's game speed, maplethief/saves.h).
+// (config's game speed, maplethief/saves.h). A theif<N> or quest<N> is checked with
+// mt_saves_check before the guest sees it, and moved aside if it fails (#413, ADR 0154 (a)).
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <set>
 #include <string>
@@ -66,6 +69,11 @@ constexpr std::int32_t k_file_write_unknown = 512;
 
 fs::path to_path(const std::string &utf8) {
     return fs::path(std::u8string(utf8.begin(), utf8.end()));
+}
+
+std::string utf8_of(const fs::path &p) {
+    const std::u8string s = p.u8string();
+    return std::string(s.begin(), s.end());
 }
 
 std::FILE *open_file(const std::string &host, const char *mode) {
@@ -160,6 +168,117 @@ std::string save_name(const std::string &host) {
     return name.find('/') == std::string::npos ? name : std::string();
 }
 
+// --- a save copied in by hand (#413, ADR 0154 (a), maplethief/saves.h) -------------------------
+
+mt_saves_refused_fn g_refused_fn = nullptr;
+void *g_refused_user = nullptr;
+
+// More than any save the game reads (quest's 4,781 bytes): a file over this is refused unread.
+constexpr std::uintmax_t k_max_checked_save = 64 * 1024;
+
+// theif<N> and quest<N>: the files whose fields the game's loaders trust (ADR 0154 (a)).
+bool is_checked_save(const std::string &name) {
+    return name.size() == 6 &&
+           (name.compare(0, 5, "theif") == 0 || name.compare(0, 5, "quest") == 0) &&
+           name[5] >= '0' && name[5] <= '2';
+}
+
+// The time of a refusal as backups/ names its folders: UTC YYYYMMDD-HHMMSS-mmm.
+std::string refused_stamp() {
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch());
+    const std::time_t seconds = static_cast<std::time_t>(ms.count() / 1000);
+    std::tm tm{};
+#if defined(_WIN32)
+    gmtime_s(&tm, &seconds);
+#else
+    gmtime_r(&seconds, &tm);
+#endif
+    char text[80];
+    std::snprintf(text, sizeof text, "%04d%02d%02d-%02d%02d%02d-%03d", tm.tm_year + 1900,
+                  tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+                  static_cast<int>(ms.count() % 1000));
+    return text;
+}
+
+// Moves `host` (the save `name`) to a new folder under backups/refused/ with its reason; the
+// folder, or "" if it could not be moved.
+std::string move_aside(const std::string &host, const std::string &name, const std::string &line) {
+    const std::string data = mt_stubs_data_dir();
+    if (data.empty()) {
+        return std::string();
+    }
+    std::error_code ec;
+    const fs::path parent = to_path(data) / MT_SAVES_REFUSED_DIR;
+    const std::string stamp = refused_stamp();
+    fs::path dir;
+    for (int n = 1; n < 100; n++) {
+        dir = parent / (n == 1 ? stamp : stamp + "-" + std::to_string(n));
+        if (!fs::exists(dir / name, ec)) {
+            break;
+        }
+    }
+    fs::create_directories(dir, ec);
+    const fs::path to = dir / to_path(name);
+    fs::rename(to_path(host), to, ec);
+    if (ec) { // another volume (a save_dir elsewhere): copy, then remove
+        ec.clear();
+        if (!fs::copy_file(to_path(host), to, fs::copy_options::overwrite_existing, ec) ||
+            !fs::remove(to_path(host), ec)) {
+            fs::remove(to, ec);
+            return std::string();
+        }
+    }
+    const std::string reason = line + "\n";
+    if (std::FILE *f = open_file(utf8_of(dir / MT_SAVES_REFUSED_REASON), "ab"); f != nullptr) {
+        std::fwrite(reason.data(), 1, reason.size(), f);
+        std::fclose(f);
+    }
+    return utf8_of(dir);
+}
+
+// ADR 0154 (a): if `host` is a theif<N> or quest<N> in Documents/ that fails mt_saves_check, it
+// is moved aside (logged, the hook told) and true is returned: the guest sees no file.
+bool refuse_bad_save(mt_cpu *cpu, const std::string &host, const char *method) {
+    const std::string name = save_name(host);
+    if (!is_checked_save(name) || pending(cpu, host)) {
+        return false;
+    }
+    std::error_code ec;
+    if (!fs::is_regular_file(to_path(host), ec)) {
+        return false;
+    }
+    const std::uintmax_t size = fs::file_size(to_path(host), ec);
+    char why[256] = "";
+    mt_saves_verdict v = MT_SAVES_BAD_SIZE;
+    if (ec || size > k_max_checked_save) {
+        std::snprintf(why, sizeof why, "%s has %llu bytes, more than any save", name.c_str(),
+                      static_cast<unsigned long long>(ec ? 0 : size));
+    } else {
+        std::vector<std::uint8_t> bytes;
+        if (!read_whole(host, &bytes)) {
+            return false; // unreadable: the handle fails as before
+        }
+        v = mt_saves_check(name.c_str(), bytes.data(), bytes.size(), why, sizeof why);
+        if (v == MT_SAVES_OK) {
+            return false;
+        }
+    }
+    const std::string line = name + ": " + mt_saves_verdict_name(v) + ": " + why;
+    const std::string moved = move_aside(host, name, line);
+    if (moved.empty()) {
+        log(cpu, "%s: %s refused (%s), and it could not be moved aside: the game sees no file",
+            method, name.c_str(), why);
+    } else {
+        log(cpu, "%s: %s refused (%s): moved to %s; the game sees no file", method, name.c_str(),
+            why, moved.c_str());
+    }
+    if (g_refused_fn != nullptr) {
+        g_refused_fn(name.c_str(), why, moved.c_str(), g_refused_user);
+    }
+    return true;
+}
+
 // Replaces the file with `bytes` in one step; false (logged) if it could not be written, and the
 // file keeps its last saved bytes.
 bool save_whole(mt_cpu *cpu, const std::string &host, const std::vector<std::uint8_t> &bytes,
@@ -220,7 +339,8 @@ void open_handle(mt_cpu *cpu, const char *method, bool read, bool write) {
         f->dirty = write; // created, not saved yet: empty, and saved when this handle saves
     } else if (ok) {
         std::error_code ec;
-        ok = fs::is_regular_file(to_path(host), ec) && read_whole(host, &f->bytes);
+        ok = !refuse_bad_save(cpu, host, method) && fs::is_regular_file(to_path(host), ec) &&
+             read_whole(host, &f->bytes);
     }
     if (!ok) {
         if (host.empty()) {
@@ -358,10 +478,13 @@ void manager_default(mt_cpu *cpu) { cpu->r[0] = singleton(cpu, "NSFileManager");
 
 // -fileExistsAtPath: (a file or a directory)
 void manager_exists(mt_cpu *cpu) {
-    const std::string host =
-        host_path(path_arg(cpu, cpu->r[2], "-[NSFileManager fileExistsAtPath:]"), false);
+    const char *method = "-[NSFileManager fileExistsAtPath:]";
+    const std::string host = host_path(path_arg(cpu, cpu->r[2], method), false);
     std::error_code ec;
-    cpu->r[0] = !host.empty() && (pending(cpu, host) || fs::exists(to_path(host), ec)) ? 1u : 0u;
+    cpu->r[0] = !host.empty() && (pending(cpu, host) || (!refuse_bad_save(cpu, host, method) &&
+                                                         fs::exists(to_path(host), ec)))
+                    ? 1u
+                    : 0u;
 }
 
 // -createFileAtPath:contents:attributes: a new file (or a replaced one) with the bytes of the
@@ -533,6 +656,11 @@ std::string host_path(const std::string &guest, bool for_writing) {
 } // namespace mt_ns
 
 using namespace mt_ns;
+
+extern "C" void mt_saves_set_refused_hook(mt_saves_refused_fn fn, void *user) noexcept {
+    g_refused_fn = fn;
+    g_refused_user = user;
+}
 
 // NSString *NSHomeDirectory(void)
 extern "C" void mt_hle_NSHomeDirectory(mt_cpu *cpu, std::uint32_t) noexcept {

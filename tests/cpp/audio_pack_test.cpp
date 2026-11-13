@@ -30,6 +30,7 @@
 
 #include <dr_mp3.h> // the reference decode: the runtime's own dr_mp3
 
+#include "dir_state.h"
 #include "gles_fixture.h"
 
 namespace {
@@ -665,4 +666,174 @@ TEST_CASE("audio.pack: without a pack the trace and the samples are the game's")
     CHECK(mt_audio_pack_get_stats().effects == 0);
     CHECK(!logged("audio pack"));
     CHECK(!logged("audiopack"));
+}
+
+namespace {
+
+// A FLAC's STREAMINFO (the first metadata block, at byte 8) with another rate, channel count and
+// stated length; its bits per sample and its frames left as they are.
+std::vector<u8> with_streaminfo(std::vector<u8> b, u32 rate, u32 channels, u64 frames) {
+    REQUIRE(b.size() > 26);
+    REQUIRE(std::memcmp(b.data(), "fLaC", 4) == 0);
+    REQUIRE((b[4] & 0x7F) == 0); // STREAMINFO
+    u64 v = 0;
+    for (int k = 0; k < 8; k++) {
+        v = v << 8 | b[18 + k];
+    }
+    const u64 bps = (v >> 36) & 0x1F;
+    v = u64{rate} << 44 | u64{channels - 1} << 41 | bps << 36 | (frames & 0xFFFFFFFFFull);
+    for (int k = 7; k >= 0; k--) {
+        b[static_cast<std::size_t>(18 + k)] = static_cast<u8>(v);
+        v >>= 8;
+    }
+    return b;
+}
+
+// A symbolic link at `link` to `target`; false (and a message) where the system makes none (Windows
+// without the privilege), so the caller skips what needs one.
+bool make_symlink(const fs::path &target, const fs::path &link) {
+    std::error_code ec;
+    fs::create_symlink(target, link, ec);
+    if (ec) {
+        MESSAGE("no symbolic link here (" << ec.message() << "): that part is skipped");
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
+TEST_CASE("audio.pack: an MP3 or FLAC effect's rate and channels are checked before it is decoded "
+          "(#413)") {
+    Clean clean;
+    Env e;
+    const std::vector<u8> flac = file_bytes(k_data / "ramp48_24.flac"); // 4,800 frames, mono
+    const fs::path dir = pack_dir();
+    write_file(dir / "22.flac", with_streaminfo(flac, 4000, 1, 4800));
+    write_file(dir / "23.flac", with_streaminfo(flac, 192001, 1, 4800));
+    write_file(dir / "24.flac", with_streaminfo(flac, 48000, 3, 4800));
+    write_file(dir / "25.flac", flac);
+    REQUIRE(mt_audio_pack_open(dir.string().c_str()) == 4);
+    const std::uint64_t before = mt_audio::whole_decodes();
+    mt_audio::pack::Sound s;
+    CHECK_FALSE(mt_audio::pack::effect("/x/sound/22.wav", &s));
+    CHECK(count_logged("22.flac is at 4000 Hz (8000 to 192000)") == 1);
+    CHECK_FALSE(mt_audio::pack::effect("/x/sound/23.wav", &s));
+    CHECK(count_logged("23.flac is at 192001 Hz (8000 to 192000)") == 1);
+    CHECK_FALSE(mt_audio::pack::effect("/x/sound/24.wav", &s));
+    CHECK(count_logged("24.flac holds no FLAC audio of 1 or 2 channels") == 1);
+    CHECK(mt_audio::whole_decodes() == before); // none of the three was decoded
+    // A good one is decoded whole, once: the counter counts.
+    CHECK(mt_audio::pack::effect("/x/sound/25.wav", &s));
+    CHECK(s.rate == 48000);
+    CHECK(mt_audio::whole_decodes() == before + 1);
+    CHECK(mt_audio_pack_get_stats().rejected == 3);
+}
+
+TEST_CASE("audio.pack: up to 192 kHz; a track up to 1,800 s; a FLAC without its length is refused "
+          "(#413)") {
+    Clean clean;
+    Env e;
+    const std::vector<u8> flac = file_bytes(k_data / "ramp48_24.flac");
+    const fs::path dir = pack_dir();
+    write_file(dir / "30.wav", make_wav(tone(100, 1), 192000, 1));
+    write_file(dir / "31.wav", make_wav(tone(100, 1), 192001, 1));
+    // The length a FLAC states is what counts; these are never decoded to their end.
+    write_file(dir / "32.flac",
+               with_streaminfo(flac, 8000, 1, u64{8000} * MT_AUDIO_PACK_MAX_MUSIC_SECONDS));
+    write_file(dir / "33.flac",
+               with_streaminfo(flac, 8000, 1, u64{8000} * MT_AUDIO_PACK_MAX_MUSIC_SECONDS + 1));
+    write_file(dir / "34.flac", with_streaminfo(flac, 48000, 1, 0));
+    REQUIRE(mt_audio_pack_open(dir.string().c_str()) == 5);
+    mt_audio::pack::Sound s;
+    CHECK(mt_audio::pack::effect("/x/sound/30.wav", &s));
+    CHECK(s.rate == 192000);
+    CHECK_FALSE(mt_audio::pack::effect("/x/sound/31.wav", &s));
+    CHECK(count_logged("31.wav is at 192001 Hz (8000 to 192000)") == 1);
+    std::string from;
+    const auto at_limit = mt_audio::pack::music("/x/sound/32.mp3", false, &from);
+    REQUIRE(at_limit);
+    CHECK(at_limit->length() == u64{8000} * 1800);
+    CHECK_FALSE(mt_audio::pack::music("/x/sound/33.mp3", false, &from));
+    CHECK(count_logged("33.flac holds no FLAC audio of 1 or 2 channels with its length, or is "
+                       "longer than 1800 s") == 1);
+    CHECK_FALSE(mt_audio::pack::music("/x/sound/34.mp3", false, &from));
+    CHECK(count_logged("34.flac holds no FLAC audio of 1 or 2 channels with its length") == 1);
+    const mt_audio_pack_stats st = mt_audio_pack_get_stats();
+    CHECK(st.effects_replaced == 1);
+    CHECK(st.music_replaced == 1);
+    CHECK(st.rejected == 3);
+}
+
+TEST_CASE("audio.pack: a .loop file is at most 256 bytes (#413)") {
+    Clean clean;
+    Env e;
+    const fs::path dir = pack_dir();
+    write_file(dir / "40.wav", make_wav(tone(4000, 2), 44100, 2));
+    write_file(dir / "41.wav", make_wav(tone(4000, 2), 44100, 2));
+    std::string text = "1000 3000\n#";
+    text += std::string(256 - text.size(), 'x');
+    REQUIRE(text.size() == 256);
+    write_text(dir / "40.loop", text);
+    write_text(dir / "41.loop", text + "x");
+    const std::vector<std::string> before = dir_state(dir);
+    REQUIRE(mt_audio_pack_open(dir.string().c_str()) == 2);
+    std::string from;
+    const auto a = mt_audio::pack::music("/x/sound/40.mp3", false, &from);
+    REQUIRE(a);
+    CHECK(a->loop().start == 1000);
+    CHECK(a->loop().end == 3000);
+    const auto b = mt_audio::pack::music("/x/sound/41.mp3", false, &from);
+    REQUIRE(b); // the track plays, without the loop
+    CHECK(b->loop().end == 0);
+    CHECK(count_logged("41.loop is not \"start end\"") == 1);
+    CHECK(count_logged("40.loop") == 0);
+    CHECK(dir_state(dir) == before); // nothing moved, renamed or written
+}
+
+TEST_CASE("audio.pack: a symbolic link in a pack is not followed, logged once (#413)") {
+    Clean clean;
+    Env e;
+    const fs::path outside = test_dir() / "outside";
+    std::error_code ec;
+    fs::remove_all(outside, ec);
+    fs::create_directories(outside);
+    write_file(outside / "far.wav", make_wav(tone(100, 1), 22050, 1));
+    write_text(outside / "far.loop", "10 50");
+    const fs::path dir = pack_dir();
+    write_file(dir / "51.wav", make_wav(tone(100, 1), 22050, 1));
+    if (!make_symlink(outside / "far.wav", dir / "50.wav") ||
+        !make_symlink(outside / "far.loop", dir / "51.loop")) {
+        return;
+    }
+    CHECK(mt_audio_pack_open(dir.string().c_str()) == 1);
+    CHECK(mt_audio_pack_get_stats().loops == 0);
+    CHECK(count_logged("symbolic link") == 1);
+    mt_audio::pack::Sound s;
+    CHECK_FALSE(mt_audio::pack::effect("/x/sound/50.wav", &s)); // no file for it: the game's
+    CHECK(mt_audio::pack::effect("/x/sound/51.wav", &s));
+    CHECK(mt_audio_pack_get_stats().rejected == 0);
+}
+
+TEST_CASE("audio.pack: a pack indexes at most MT_AUDIO_PACK_MAX_FILES files, the rest skipped and "
+          "logged once (#413)") {
+    CHECK(MT_AUDIO_PACK_MAX_FILES == 65536u);
+    Clean clean;
+    Env e;
+    const fs::path dir = pack_dir();
+    for (int i = 0; i < 4; i++) {
+        write_file(dir / (std::to_string(60 + i) + ".wav"), make_wav(tone(100, 1), 22050, 1));
+    }
+    write_text(dir / "60.loop", "10 50");
+    write_text(dir / "readme.txt", "not counted");
+    const std::uint32_t old = mt_audio::pack::set_max_files(3);
+    mt_audio_pack_open(dir.string().c_str());
+    mt_audio::pack::set_max_files(old);
+    const mt_audio_pack_stats st = mt_audio_pack_get_stats();
+    CHECK(st.files + st.loops == 3);
+    CHECK(count_logged("2 files past the first 3 skipped") == 1);
+    // Under the cap, all of them.
+    CHECK(mt_audio_pack_open(dir.string().c_str()) == 4);
+    CHECK(mt_audio_pack_get_stats().loops == 1);
+    CHECK(count_logged("skipped") == 1);
 }

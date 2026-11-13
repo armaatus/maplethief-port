@@ -1,7 +1,8 @@
 // Text packs (#189, ADR 0108, maplethief/textpack.h, textpack_internal.h).
 //
-// The pack's files are untrusted data: each is read only after its size is checked, parsed by
-// strings_file.cpp's strict rules, and refused whole (one log line) if it breaks one. The
+// The pack's files are untrusted data: a symbolic link is skipped (#413), each file is read only
+// after its size is checked, parsed by strings_file.cpp's strict rules, and refused whole (one
+// log line) if it breaks one. The
 // manifest must be there and say format "1", a name and a language, or the pack is not opened.
 //
 // What the pack changes while it is open (docs/re/text.md has the evidence):
@@ -368,14 +369,26 @@ extern "C" int mt_textpack_open(const char *dir) noexcept {
             return -1;
         }
         // The pack's files by their role, matched in any case.
+        // A symbolic link is skipped, never followed (#413): the pack's files are its own.
         std::map<std::string, fs::path> found;
+        std::string links;
         for (const auto &entry : fs::directory_iterator(root, ec)) {
             const std::string name = lower(utf8_of(entry.path().filename()));
             for (const auto &f : k_files) {
-                if (name == f[0] && entry.is_regular_file(ec)) {
+                if (name != f[0]) {
+                    continue;
+                }
+                std::error_code fe;
+                const fs::file_status status = entry.symlink_status(fe);
+                if (fs::is_symlink(status)) {
+                    links += (links.empty() ? "" : ", ") + utf8_of(entry.path().filename());
+                } else if (!fe && fs::is_regular_file(status)) {
                     found[f[1]] = entry.path();
                 }
             }
+        }
+        if (!links.empty()) {
+            logf("textpack: %s: symbolic links not followed: %s", dir, links.c_str());
         }
         Pack pack;
         pack.dir = dir;

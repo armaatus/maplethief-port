@@ -81,3 +81,7 @@
 - The port's menus show translations without accents ("Einstellungen für" shows "Einstellungen fur"); scripts beyond Latin show as "?" there.
 - The game's own text draws exactly as before, with or without the new font: the fallback is only used for characters NanumGothic lacks.
 - How we'd know this is wrong: a pack's line that ends inside a character (the wrap hooks), Hangul where a pack has accents (the encoding rule), Korean text that changes with a pack open (the rule's assumption that no game text is valid UTF-8), or a crash on a pack from the wild (the parser's limits).
+
+## Addendum (#413)
+
+A symbolic link among a pack's five files is skipped and never followed, in one log line (`textpack: DIR: symbolic links not followed: ...`); a manifest that is a link leaves the pack unopened. Tests: `textpack: a symbolic link in a pack is not followed, logged once (#413)`; the limits that had none: `textpack: a file over 4 MiB is refused before it is read (#413)`, `textpack: the manifest's language is 1 to 35 characters (#413)`, `textpack: a Tables key's row is at most 5 digits (#413)`.

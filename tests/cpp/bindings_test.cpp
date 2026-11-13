@@ -19,6 +19,7 @@
 #include "bindings.h"
 #include "gamepad.h"
 #include "maplethief/input.h"
+#include "sdl_log_capture.h"
 
 namespace {
 
@@ -386,6 +387,35 @@ TEST_CASE("bindings: the overlay's edit: one control per device, taken from its 
     CHECK(has(fe::unbound_warnings(s.table), "slot1 has no gamepad control in the field"));
     // X in menus is untouched (back).
     CHECK(menu(s, MT_ACTION_BACK) == menu(fe::BindingSet{}, MT_ACTION_BACK));
+}
+
+TEST_CASE("bindings: the loader refuses a file over 64 KiB before reading it (#413)") {
+    TempDir dir("cap");
+    const std::string path = fe::bindings_path(dir.path.string(), "");
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << "[field]\nattack = key K\n";
+    }
+    // At the cap (the rest zeros, a sparse file): read, its good line counts.
+    fs::resize_file(path, fe::kMaxBindingsBytes);
+    {
+        const SdlLogCapture log;
+        fe::BindingSet s;
+        CHECK(fe::load_bindings(path, &s));
+        CHECK(field(s, MT_ACTION_ATTACK).front() == key(SDLK_K));
+        CHECK(log.has("bindings: read "));
+    }
+    // One byte more: the loader refuses it by its size, so the parser never sees it.
+    fs::resize_file(path, fe::kMaxBindingsBytes + 1);
+    {
+        const SdlLogCapture log;
+        fe::BindingSet s;
+        CHECK(fe::load_bindings(path, &s));
+        CHECK(fe::same_bindings(s.table, fe::default_bindings()));
+        CHECK(log.has(": too large, ignored: the defaults"));
+        CHECK_FALSE(log.has("larger than")); // parse_bindings' own refusal
+        CHECK_FALSE(log.has("bindings: read "));
+    }
 }
 
 TEST_CASE("bindings: load and save in a data directory; a missing file is the defaults") {

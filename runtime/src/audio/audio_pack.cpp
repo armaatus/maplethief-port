@@ -1,9 +1,10 @@
 // Audio packs (#188, ADR 0106, maplethief/audio.h, audio_pack.h).
 //
-// The pack's files are untrusted data: their names are matched when the pack is indexed, each
-// file is read (at most MT_AUDIO_PACK_MAX_FILE bytes, checked before reading) when the game
-// opens the sound it replaces, its format is checked (WAV: wav.h's chunk walk; MP3: dr_mp3
-// finds frames) and then its rate, channels and length against the limits before anything is
+// The pack's files are untrusted data: their names are matched when the pack is indexed (at most
+// MT_AUDIO_PACK_MAX_FILES files; a symbolic link is skipped, #413), each file is read (at most
+// MT_AUDIO_PACK_MAX_FILE bytes, checked before reading) when the game opens the sound it
+// replaces, its format is checked (WAV: wav.h's chunk walk; MP3: dr_mp3 finds frames; FLAC: its
+// STREAMINFO) and then its rate, channels and length against the limits before anything is
 // decoded. A rejected file is logged once and never read again; the game's own file is used.
 #include "audio/audio_pack.h"
 
@@ -81,6 +82,7 @@ struct Pack {
 
 Pack g_pack;
 mt_audio_pack_stats g_stats{};
+u32 g_max_files = MT_AUDIO_PACK_MAX_FILES; // the files a pack indexes (lower in a test)
 
 bool read_file(const std::string &path, std::vector<std::uint8_t> *out, std::string *why) {
     std::error_code ec;
@@ -248,6 +250,12 @@ bool read_loop(const std::string &stem_name, Mp3Stream::Loop *out) {
 
 } // namespace
 
+std::uint32_t set_max_files(std::uint32_t n) {
+    const u32 old = g_max_files;
+    g_max_files = n;
+    return old;
+}
+
 bool effect(const std::string &path, Sound *out) {
     if (!g_pack.open) {
         return false;
@@ -267,12 +275,19 @@ bool effect(const std::string &path, Sound *out) {
                 why = wav_pcm(bytes, MT_AUDIO_PACK_MAX_EFFECT_SECONDS, &w, &out->samples);
                 out->rate = w.rate;
                 out->channels = w.channels;
-            } else if (!decode_file(std::move(bytes), codec_of(f->path),
-                                    MT_AUDIO_PACK_MAX_EFFECT_SECONDS, &out->samples, &out->rate,
-                                    &out->channels)) {
-                why = no_audio(f->path, MT_AUDIO_PACK_MAX_EFFECT_SECONDS);
             } else {
-                why = check_format(out->rate, out->channels);
+                // The header's rate, channels and length are checked before any frame is
+                // decoded (#413): open_pack() reads only the header and walks the MP3's frames.
+                const auto stream =
+                    Mp3Stream::open_pack(std::move(bytes), codec_of(f->path), nullptr, false,
+                                         MT_AUDIO_PACK_MAX_EFFECT_SECONDS);
+                if (!stream) {
+                    why = no_audio(f->path, MT_AUDIO_PACK_MAX_EFFECT_SECONDS);
+                } else if (why = check_format(stream->rate(), stream->channels()); why.empty()) {
+                    out->rate = stream->rate();
+                    out->channels = stream->channels();
+                    why = decode_whole(*stream, &out->samples) ? "" : "holds no samples";
+                }
             }
         }
         if (!why.empty()) {
@@ -371,22 +386,49 @@ extern "C" int mt_audio_pack_open(const char *dir) noexcept {
         mt_audio::pack::Pack pack;
         pack.dir = d;
         mt_audio_pack_stats st{};
+        std::uint64_t links = 0, skipped = 0;
+        std::string first_link;
         for (fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+            // A pack's files are its own: a symbolic link is skipped, never followed (#413).
             std::error_code fe;
-            if (!it->is_regular_file(fe)) {
+            const fs::file_status status = it->symlink_status(fe);
+            if (fs::is_symlink(status)) {
+                first_link = links++ == 0 ? mt_audio::pack::utf8_of(it->path()) : first_link;
+                continue;
+            }
+            if (fe || !fs::is_regular_file(status)) {
                 continue;
             }
             const std::string name =
                 mt_audio::pack::lower(mt_audio::pack::utf8_of(it->path().filename()));
             const std::string ext = mt_audio::pack::extension(name);
+            const bool sound = ext == "wav" || ext == "mp3" || ext == "flac";
+            if (!sound && ext != "loop") {
+                continue;
+            }
+            if (st.files + st.loops >= mt_audio::pack::g_max_files) {
+                ++skipped;
+                continue;
+            }
             const mt_audio::pack::File file{mt_audio::pack::utf8_of(it->path()), false};
-            if (ext == "wav" || ext == "mp3" || ext == "flac") {
+            if (sound) {
                 pack.sounds[name] = file;
                 ++st.files;
-            } else if (ext == "loop") {
+            } else {
                 pack.loops[mt_audio::pack::stem(name)] = file;
                 ++st.loops;
             }
+        }
+        if (links != 0) {
+            mt_audio::pack::logf("audiopack: pack %s: %llu symbolic links not followed (the "
+                                 "first: %s)",
+                                 d.c_str(), static_cast<unsigned long long>(links),
+                                 first_link.c_str());
+        }
+        if (skipped != 0) {
+            mt_audio::pack::logf("audiopack: pack %s: %llu files past the first %u skipped",
+                                 d.c_str(), static_cast<unsigned long long>(skipped),
+                                 static_cast<unsigned>(mt_audio::pack::g_max_files));
         }
         pack.open = true;
         g_pack = std::move(pack);
