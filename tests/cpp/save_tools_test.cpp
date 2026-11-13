@@ -135,18 +135,18 @@ Bytes zip_of_zeros(const std::vector<std::string> &names, std::uint32_t size) {
             put((c >> i) & 1u, 1);
         }
     };
-    put(1, 1);           // the last block
-    put(1, 2);           // fixed codes
-    code(0x30, 8);       // literal 0
+    put(1, 1);     // the last block
+    put(1, 2);     // fixed codes
+    code(0x30, 8); // literal 0
     std::uint32_t left = size - 1;
     for (; left >= 258; left -= 258) {
-        code(0xC5, 8);   // length 258 (code 285)
-        code(0, 5);      // distance 1
+        code(0xC5, 8); // length 258 (code 285)
+        code(0, 5);    // distance 1
     }
     for (; left > 0; left--) {
         code(0x30, 8);
     }
-    code(0, 7);          // end of block
+    code(0, 7); // end of block
     if (bits != 0) {
         deflated.push_back(static_cast<std::uint8_t>(acc));
     }
@@ -701,8 +701,8 @@ TEST_CASE("save tools: a zip's names are filtered before anything is inflated, a
     // An entry that is no save is never inflated: its damaged data does not refuse the zip.
     Bytes junk = fe::zip_store(std::vector<fe::ZipEntry>{
         {"config", kConfig}, {"notes/junk.bin", Bytes{'J', 'U', 'N', 'K', 'J', 'U', 'N', 'K'}}});
-    const auto at = std::search(junk.begin(), junk.end(), std::begin("JUNKJUNK"),
-                                std::begin("JUNKJUNK") + 8);
+    const auto at =
+        std::search(junk.begin(), junk.end(), std::begin("JUNKJUNK"), std::begin("JUNKJUNK") + 8);
     REQUIRE(at != junk.end());
     *at ^= 1; // its CRC fails
     write_bytes(root / "junk.zip", junk);
