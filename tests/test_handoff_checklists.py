@@ -43,6 +43,31 @@ def test_the_list_covers_every_open_hand_off_on_github():
     assert not errors, "\n".join(errors)
 
 
+@pytest.mark.skipif(
+    os.environ.get("MAPLETHIEF_LIVE_GH") != "1" or shutil.which("gh") is None,
+    reason="live check: set MAPLETHIEF_LIVE_GH=1 with gh logged in",
+)
+def test_every_open_hand_off_on_github_has_a_gate_mark():
+    readme = (handoffs.ROOT / handoffs.HANDOFFS / "README.md").read_text(encoding="utf-8")
+    try:
+        open_now = handoffs.open_handoffs()
+    except (OSError, subprocess.SubprocessError) as e:
+        pytest.skip(f"gh failed: {e}")
+    marked = set(handoffs.gate_marks(readme))
+    errors = [e for e in handoffs.live_diff(set(), open_now, marked)[0] if "gate mark" in e]
+    assert not errors, "\n".join(errors)
+
+
+def test_the_v1_gates_follow_adr_0147():
+    marks = handoffs.gate_marks(
+        (handoffs.ROOT / handoffs.HANDOFFS / "README.md").read_text(encoding="utf-8")
+    )
+    assert {n for n, m in marks.items() if m == "gate"} == {79, 82, 92, 93, 94, 198, 208, 264}
+    assert {n for n, m in marks.items() if m == "preview"} == {73, 128, 197, 245}
+    for n in (60, 84, 118, 149, 272):
+        assert marks[n] == "not a gate"
+
+
 # Synthetic checkouts
 
 
@@ -69,9 +94,16 @@ def root(tmp_path):
     return tmp_path
 
 
-def write_list(root, lines: str) -> None:
+def write_list(root, lines: str, gates: str | None = None) -> None:
+    if gates is None:
+        gates = "".join(
+            f"- #{n}: not a gate (x)\n"
+            for n in handoffs.committed_list(f"{handoffs.BEGIN}\n{lines}{handoffs.END}")
+        )
     (root / handoffs.HANDOFFS / "README.md").write_text(
-        f"# Hand-offs\n\n{handoffs.BEGIN}\n{lines}{handoffs.END}\n", encoding="utf-8"
+        f"# Hand-offs\n\n{handoffs.BEGIN}\n{lines}{handoffs.END}\n\n"
+        f"{handoffs.GATES_BEGIN}\n{gates}{handoffs.GATES_END}\n",
+        encoding="utf-8",
     )
 
 
@@ -154,3 +186,29 @@ def test_the_live_diff_errs_on_missing_and_notes_extra():
     errors, notes = handoffs.live_diff({1, 2}, {2, 3})
     assert errors == ["#3: open needs-human issue missing from the README"]
     assert notes == ["#1: listed, but not an open needs-human issue"]
+
+
+def test_a_listed_issue_without_a_gate_mark_is_found(root):
+    write_list(root, "- #10: windows (one)\n- #20: windows, mac (two)\n", "- #10: gate (one)\n")
+    assert handoffs.check(root) == ["#20: listed, but has no v1.0 gate mark"]
+
+
+def test_the_gate_marks_are_parsed():
+    readme = (
+        f"{handoffs.GATES_BEGIN}\n- #1: gate (a)\n- #2: preview (b)\n\n"
+        f"- #3: not a gate, agent work (c)\n{handoffs.GATES_END}"
+    )
+    assert handoffs.gate_marks(readme) == {1: "gate", 2: "preview", 3: "not a gate"}
+
+
+@pytest.mark.parametrize(
+    "block", ["- #1: gate (a)\n- #1: preview (b)\n", "- #1: maybe (a)\n", "- #1: gate\n"]
+)
+def test_a_bad_gate_list_is_refused(block):
+    with pytest.raises(ValueError):
+        handoffs.gate_marks(f"{handoffs.GATES_BEGIN}\n{block}{handoffs.GATES_END}")
+
+
+def test_the_live_diff_errs_on_an_open_hand_off_without_a_gate_mark():
+    errors, _ = handoffs.live_diff({1, 2}, {1, 2}, {1})
+    assert errors == ["#2: open needs-human issue has no v1.0 gate mark"]
