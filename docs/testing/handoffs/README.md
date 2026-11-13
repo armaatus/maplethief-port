@@ -11,7 +11,7 @@ Everything that waits on Joris's hands (the `needs-human` issues), one page per 
 | Nintendo Switch | [switch.md](switch.md), with the [Switch sign-off checklist](../switch-checklist.md) | #235, #236, #243, #240, #239, #238, #241, #242, #244, #245, #279, #237 |
 | Playthrough, review and release | [playthrough.md](playthrough.md) | #132, #93, #79, #223, #228, #92, #94, #208 |
 
-Already done or obsolete, so their sections say how to close them: #114 (the v0.1.0 release went through the flow), #234 (ADR 0138 accepted and closed). Waiting on something else first: #279 (on the Switch's F1 row), #208 (on its child in epic #106), #94 (on the playthrough and review).
+Which of these hold up the v1.0 tag is in [v1.0 gates](#v10-gates) below ([ADR 0147](../../adr/0147-what-v1-is-and-what-gates-it.md)). Already done or obsolete, so their sections say how to close them: #114 (the v0.1.0 release went through the flow), #234 (ADR 0138 accepted and closed). Waiting on something else first: #279 (on the Switch's F1 row), #208 (on its child in epic #106), #94 (on the playthrough and review).
 
 ## How to report
 
@@ -70,3 +70,94 @@ The committed list of hand-off issues and the pages that cover them. `tests/test
 - #272: mac (1 ms grid pacing on a 144 Hz panel)
 - #279: switch (profile and tune)
 <!-- handoffs:end -->
+
+## v1.0 gates
+
+What each open `needs-human` issue means for the `v1.0.0` tag ([ADR 0147](../../adr/0147-what-v1-is-and-what-gates-it.md), decided by Joris on [#308](https://github.com/armaatus/maplethief-port/issues/308)). Windows, macOS and Linux gate the tag; the iPhone app and the Switch build ship with it as **preview**: playable, but not signed off on the device yet, and labelled so on their play pages, in the release notes and on itch.io until their sign-offs close.
+
+- **gate**: must be closed before `v1.0.0` is tagged.
+- **preview**: lifts the preview label of its platform; it doesn't hold the tag.
+- **not a gate**: doesn't hold the tag.
+- **agent work**: since 2026-11-13 a hand-off that is only a judgement call (a design ADR, a default, a look the agent can check on its own runs) or a repository setting is the agent's to do (CLAUDE.md, "Human hand-offs"). The agent decides it, records it as "Accepted (delegated by Joris)" where it is an ADR, and names the call in its PR so Joris can veto it there. Hardware, accounts, keys, money and legal wording stay with Joris.
+
+The list covers every open `needs-human` issue, including those of later milestones that have no device section yet. `PYTHONPATH=tools python3 -m mtport.handoffs --live` fails when an open one has no line here; add it when a new hand-off appears.
+
+<!-- gates:begin -->
+- #60: not a gate (golden images from a device; Joris)
+- #73: preview (iPhone: controllers, touch and the safe area)
+- #79: gate (full playthrough)
+- #82: gate (the Windows zip on a clean machine)
+- #84: not a gate (the Steam Deck, optional; Joris)
+- #85: not a gate (build from your IPA on Windows; the clean-machine build is #93)
+- #92: gate (the playthrough on every desktop system)
+- #93: gate (the build guide on a clean machine)
+- #94: gate (the tag itself)
+- #113: not a gate (build, test and package on Windows; the zip is checked by #82)
+- #114: not a gate (release flow, done with v0.1.0)
+- #118: not a gate (font calibration; Joris)
+- #124: not a gate (audio by ear; #79 plays every sound)
+- #128: preview (iPhone: app lifecycle)
+- #131: not a gate (the GPU renderer on D3D12 and Vulkan; the default is software)
+- #132: not a gate (gamepad only and keyboard only)
+- #141: not a gate (one-command build on Windows; the clean-machine build is #93)
+- #142: not a gate (performance; #92 plays at default settings)
+- #149: not a gate (saves from a device backup; Joris)
+- #179: not a gate (fullscreen first start on macOS 27)
+- #185: not a gate (gamepad pointer on real touchpads)
+- #192: not a gate (the Saves tab's dialogs)
+- #194: not a gate (iPhone key pad haptics)
+- #196: not a gate (window size keys and a second display)
+- #197: preview (iPhone: audio session)
+- #198: gate (crash dialog and safe start)
+- #208: gate (the itch.io page; v1.0 is on itch.io, part of #94)
+- #223: not a gate (compendium quests in the port)
+- #228: not a gate (the compendium review gates announcing the site, not the tag; its tone read is agent work)
+- #235: not a gate (Switch hello NRO; feeds #245)
+- #236: not a gate (Switch runtime test NRO; feeds #245)
+- #237: not a gate, agent work (the emulator choice is a judgement call)
+- #238: not a gate (Switch first map; feeds #245)
+- #239: not a gate (Switch input; feeds #245)
+- #240: not a gate (Switch lifecycle and audio; feeds #245)
+- #241: not a gate (Switch settings menu; feeds #245)
+- #242: not a gate (Switch GPU renderer; feeds #245)
+- #243: not a gate (Switch player build and import; feeds #245)
+- #244: not a gate (Switch performance; feeds #245)
+- #245: preview (Switch: the sign-off)
+- #263: not a gate (the macOS kit under App Translocation; the data folder is #264)
+- #264: gate (data folder on all three systems)
+- #272: not a gate (144 Hz pacing; Joris)
+- #279: not a gate (Switch profile and tune)
+- #308: not a gate (this decision, ADR 0147)
+- #314: not a gate (update notice on a real system)
+- #315: not a gate (Windows parity run)
+- #316: not a gate (release verify on the PC)
+- #317: not a gate (the release candidate rehearsal; #94 runs the same flow)
+- #318: not a gate (Joris approves the takedown runbook: legal wording)
+- #326: not a gate, agent work (private vulnerability reporting is a repository setting)
+- #329: not a gate, agent work (branch rulesets are a repository setting)
+- #330: not a gate, agent work (Discussions is a repository setting)
+- #331: not a gate, agent work (description and topics are repository settings)
+- #334: not a gate, agent work (an ADR on traps)
+- #338: not a gate (iOS crash notice on a device)
+- #342: not a gate (the self-hosted runner on the Mac)
+- #343: not a gate (one release command, cut on both machines)
+- #345: not a gate (Switch upstream patches)
+- #347: not a gate (signing, decided by Joris)
+- #348: not a gate (notarisation needs the developer account)
+- #351: not a gate (Homebrew App Store submission)
+- #352: not a gate (Scoop and winget on a clean PC)
+- #353: not a gate (the Deck's layout template)
+- #354: not a gate (signed checksums need the key)
+- #355: not a gate (Android, decided by Joris)
+- #356: not a gate (Android on a phone)
+- #357: not a gate (Android on a phone)
+- #358: not a gate (Android on a phone)
+- #359: not a gate (Android on a phone)
+- #360: not a gate (Android on a phone)
+- #361: not a gate (Android on a phone)
+- #367: not a gate, agent work (smooth frames as a default is a look the agent checks on its own runs)
+- #368: not a gate (session lines from Windows)
+- #369: not a gate (packs, decided by Joris)
+- #373: not a gate, agent work (the Dutch review is a judgement call)
+- #379: not a gate (content fixes, decided by Joris)
+<!-- gates:end -->

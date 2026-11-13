@@ -44,12 +44,14 @@ Nobody has confirmed these on the real thing yet. They may well be fine.
 | All 44 sounds and the music by ear, over a long session | [#124](https://github.com/armaatus/maplethief-port/issues/124) |
 | The picture against screenshots from a real iPhone or iPod | [#60](https://github.com/armaatus/maplethief-port/issues/60) |
 
-## Not available yet
+## Preview
+
+A preview platform ships with the release and plays, but hasn't been signed off on the device yet. The label comes off when the issues next to it are closed ([ADR 0147](adr/0147-what-v1-is-and-what-gates-it.md)).
 
 | What | Source |
 |---|---|
-| The iOS app beyond the first map: it installs and reaches the first map by touch on an iPhone 12, the only device checked so far. Controllers, the safe area, the app lifecycle and the audio session on iOS are not checked on a device yet. Steps: [Playing on your iPhone](play/iphone.md) | [#73](https://github.com/armaatus/maplethief-port/issues/73), [#128](https://github.com/armaatus/maplethief-port/issues/128), [#197](https://github.com/armaatus/maplethief-port/issues/197) |
-| A Nintendo Switch homebrew build | Epic [#233](https://github.com/armaatus/maplethief-port/issues/233) |
+| The iOS app: it installs and reaches the first map by touch on an iPhone 12, the only device checked so far. Controllers, the safe area, the app lifecycle and the audio session on iOS are not checked on a device yet. Steps: [Playing on your iPhone](play/iphone.md) | [#73](https://github.com/armaatus/maplethief-port/issues/73), [#128](https://github.com/armaatus/maplethief-port/issues/128), [#197](https://github.com/armaatus/maplethief-port/issues/197) |
+| The Nintendo Switch homebrew build: the zip is on the release, but the sign-off on a real console, handheld and docked, isn't done yet. Steps: [Playing on the Nintendo Switch](play/switch.md) | [#245](https://github.com/armaatus/maplethief-port/issues/245) |
 
 ## Building from source
 
