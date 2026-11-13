@@ -6,17 +6,17 @@ The short fields of the itch.io project form for `armaatus.itch.io/maplethief` (
 |---|---|
 | Title | MapleThief |
 | Project URL | `maplethief` (armaatus.itch.io/maplethief) |
-| Short description or tagline | MapleStory Thief Edition (2010, iPhone) running natively on your computer. Bring your own copy. |
+| Short description or tagline | MapleStory Thief Edition (2010, iPhone) on Windows, macOS, Linux, Steam Deck and Switch homebrew. Bring your own copy. |
 | Classification | Games |
 | Kind of project | Downloadable |
 | Release status | Released (before the first push: Draft visibility) |
 | Pricing | $0 or donate, with a suggested amount |
 | Genre | Platformer |
-| Tags | `fan-port`, `2d`, `side-scroller`, `action`, `rpg`, `retro`, `open-source`, `controller-support`, `steam-deck` |
-| Platforms (per upload, set by the butler channel) | `windows-x64`: Windows; `macos-universal`: macOS; `linux-x86_64`: Linux |
+| Tags | `fan-port`, `2d`, `side-scroller`, `action`, `rpg`, `retro`, `open-source`, `controller-support`, `steam-deck`, `nintendo-switch`, `homebrew` |
+| Platforms (per upload, set by the butler channel) | `windows-x64`: Windows; `macos-universal`: macOS; `linux-x86_64`: Linux; `switch`: no platform tick (itch.io has none for consoles), display name "Nintendo Switch (homebrew)" |
 | AI generation disclosure | Joris's answer (the port's code and docs are written with an AI coding agent; the page's images are not) |
 | Community | Comments on |
-| Links | Source: https://github.com/armaatus/maplethief-port; Buy Me a Coffee: Joris's link |
+| Links | Source: https://github.com/armaatus/maplethief-port; Buy Me a Coffee: https://buymeacoffee.com/armaatus |
 | Cover image (630 x 500) and banner | Our own art, like the port's icon: no Nexon logo, no game art |
 | Screenshots | Gameplay only, captured from a local build, uploaded here only, never committed |
 | Custom noun for downloads | (empty) |

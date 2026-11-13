@@ -12,7 +12,7 @@ MapleThief runs on the Nintendo Switch (the original model, OLED and Lite) as a 
 
 ## Download and copy
 
-1. Download `MapleThief-<version>-switch.zip` from the [Releases page](https://github.com/armaatus/maplethief-port/releases), under *Assets*. It holds the program and no file of the game. You can check it against the release's `SHA256SUMS`.
+1. Download `MapleThief-<version>-switch.zip` from the [Releases page](https://github.com/armaatus/maplethief-port/releases), under *Assets*, or from the [itch.io page](https://armaatus.itch.io/maplethief). It holds the program and no file of the game. You can check it against the release's `SHA256SUMS`.
 2. Unpack it. Copy its `switch` folder to the root of the SD card, so that the program is at `sdmc:/switch/maplethief/MapleThief.nro` (on the card in a computer: `switch/maplethief/MapleThief.nro`).
 3. Copy your `MapleThief-1.5.ipa` into the same folder: `switch/maplethief/MapleThief-1.5.ipa`. Another name works too, as long as it ends in `.ipa`.
 

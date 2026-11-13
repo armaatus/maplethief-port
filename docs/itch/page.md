@@ -2,13 +2,13 @@
 
 The text of the itch.io page `armaatus.itch.io/maplethief` ([ADR 0146](../adr/0146-distribution-on-itch-io.md)). itch.io has no API for project pages, so Joris pastes everything below the line into the page's description in the web editor. The short fields of the form (tagline, genre, tags, platforms) are in [metadata.md](metadata.md).
 
-Before pasting: replace `https://buymeacoffee.com/REPLACE_ME` with the Buy Me a Coffee link. Links are absolute, because the text lives on itch.io. It is our own words only: no game text, and no image in the description; the screenshots are uploaded in the page's screenshot section (gameplay only, from a local build, never committed).
+Links are absolute, because the text lives on itch.io. It is our own words only: no game text, and no image in the description; the screenshots are uploaded in the page's screenshot section (gameplay only, from a local build, never committed).
 
 ---
 
 ## MapleThief
 
-**MapleStory Thief Edition, the 2010 iPhone game, running natively on Windows, macOS and Linux.** The game is unchanged; the port adds a big window or fullscreen, keyboard and controller support, sharper graphics and save backups.
+**MapleStory Thief Edition, the 2010 iPhone game, running natively on Windows, macOS, Linux, the Steam Deck and, as a homebrew app, the Nintendo Switch.** The game is unchanged; the port adds a big window or fullscreen, keyboard and controller support, sharper graphics and save backups.
 
 This is an unofficial fan port. It contains none of the game's art, music, maps or text: you play it with **your own copy** of the game.
 
@@ -28,7 +28,7 @@ To check your file, open a terminal in its folder and compare the long string it
 - Mac: `shasum -a 256 MapleThief-1.5.ipa`
 - Linux: `sha256sum MapleThief-1.5.ipa`
 
-On the first start the game asks for this file, checks it and copies the game's files from it. You do this once. More in [Your game file](https://github.com/armaatus/maplethief-port/blob/main/docs/play/your-ipa.md).
+On the first start the game asks for this file (on the Switch: finds it on the SD card), checks it and copies the game's files from it. You do this once. More in [Your game file](https://github.com/armaatus/maplethief-port/blob/main/docs/play/your-ipa.md).
 
 ### Which download
 
@@ -37,8 +37,9 @@ On the first start the game asks for this file, checks it and copies the game's 
 | Windows 10 or 11, 64-bit | `MapleThief-<version>-windows-x64.zip` |
 | Mac, macOS 13 or later (Apple silicon or Intel) | `MapleThief-<version>-macos-universal.zip` |
 | Linux x86_64 with glibc 2.39 or later, Steam Deck | `MapleThief-<version>-linux-x86_64.tar.gz` |
+| Nintendo Switch that runs homebrew from the Homebrew Menu | `MapleThief-<version>-switch.zip` |
 
-The itch app installs and updates the right one for you. Each file is the same as on the project's [GitHub Releases page](https://github.com/armaatus/maplethief-port/releases), where `SHA256SUMS` lists its checksum.
+On a computer, the itch app installs and updates the right one for you. The Switch zip is copied to the SD card by hand (below). Each file is the same as on the project's [GitHub Releases page](https://github.com/armaatus/maplethief-port/releases), where `SHA256SUMS` lists its checksum.
 
 ### Install
 
@@ -70,6 +71,17 @@ It runs natively on Apple silicon and Intel Macs.
 
 In Desktop Mode, do the Linux steps above, including `--install-desktop`. Then in Steam choose **Add a Non-Steam Game to My Library** and tick MapleThief. Steam hands the Deck's controls to the game as an Xbox-style gamepad. Details in [Linux and Steam Deck](https://github.com/armaatus/maplethief-port/blob/main/docs/play/linux-and-steam-deck.md).
 
+**Nintendo Switch**
+
+You need a Switch that runs homebrew apps from the Homebrew Menu (custom firmware; we don't explain how to set that up). The Switch 2 is not supported.
+
+1. Unpack the zip on a computer and copy its `switch` folder to the root of the SD card, so the program is at `switch/maplethief/MapleThief.nro`.
+2. Copy your `MapleThief-1.5.ipa` into the same folder, `switch/maplethief/`.
+3. Open the Homebrew Menu **through a game** (hold R while starting any game), not from the Album, which leaves homebrew too little memory. Start **MapleThief**.
+4. The first start imports the game from the IPA (about a minute) and then offers to delete the IPA from the card. Later starts go straight to the game.
+
+Joy-Con, a Pro Controller and the touch screen in handheld mode all work. Details in [Playing on the Nintendo Switch](https://github.com/armaatus/maplethief-port/blob/main/docs/play/switch.md).
+
 ### Controls
 
 Mouse or touch works like your finger on the iPhone. Keyboard and gamepad work too, and every key and button can be changed in the settings menu.
@@ -83,7 +95,7 @@ Mouse or touch works like your finger on the iPhone. Keyboard and gamepad work t
 | Popup menu | Esc | Start |
 | Map | M | Back / View |
 
-The full list: [Controls](https://github.com/armaatus/maplethief-port/blob/main/docs/play/controls.md).
+The full list: [Controls](https://github.com/armaatus/maplethief-port/blob/main/docs/play/controls.md); on the Switch: [Nintendo Switch controls](https://github.com/armaatus/maplethief-port/blob/main/docs/controls/switch.md).
 
 ### Known issues
 
@@ -91,6 +103,7 @@ The full list: [Controls](https://github.com/armaatus/maplethief-port/blob/main/
 - The cash shop can't take real money. A setting lets it pay in the game's meso instead.
 - The download accepts only the exact game file above; a repacked copy is refused. Building from source accepts it.
 - It hasn't been checked on a real Steam Deck yet.
+- The Switch build hasn't been checked on a console yet.
 - macOS and Windows warn the first time, because the port isn't signed or notarised with paid certificates.
 
 The current list: [Known issues](https://github.com/armaatus/maplethief-port/blob/main/docs/KNOWN_ISSUES.md). Found something else? [Open an issue](https://github.com/armaatus/maplethief-port/issues).
@@ -103,7 +116,7 @@ The current list: [Known issues](https://github.com/armaatus/maplethief-port/blo
 
 ### Support
 
-The download is free. If you enjoy the port, you can leave a tip here, or [buy me a coffee](https://buymeacoffee.com/REPLACE_ME). It is entirely optional.
+The download is free. If you enjoy the port, you can leave a tip here, or [buy me a coffee](https://buymeacoffee.com/armaatus). It is entirely optional.
 
 ### Legal
 

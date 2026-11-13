@@ -44,11 +44,12 @@ from mtport import release as rel
 
 TARGET = "armaatus/maplethief"  # the itch.io page: armaatus.itch.io/maplethief
 # Platform (scripts/release --platforms) -> itch.io channel, which is also the player build's
-# platform name (mtport.release.PLAYER_PLATFORMS). The Switch zip is not pushed (ADR 0146).
+# platform name (mtport.release.PLAYER_PLATFORMS): every player build, the Switch zip included.
 CHANNELS = {
     "mac": "macos-universal",
     "linux": "linux-x86_64",
     "windows": "windows-x64",
+    "switch": "switch",
 }
 KEY_VARIABLE = "BUTLER_API_KEY"
 SUMS = "SHA256SUMS"
@@ -115,7 +116,7 @@ def channels(platforms: Sequence[str]) -> dict[str, str]:
     unknown = [p for p in platforms if p not in CHANNELS]
     if unknown:
         raise ItchError(
-            f"--platforms: unknown platform(s) {', '.join(unknown)} (mac, linux, windows)"
+            f"--platforms: unknown platform(s) {', '.join(unknown)} ({', '.join(CHANNELS)})"
         )
     return {p: CHANNELS[p] for p in platforms}
 
@@ -333,7 +334,7 @@ def add_parser(sub) -> None:
     p.add_argument(
         "--platforms",
         default=",".join(CHANNELS),
-        help="comma-separated, of mac,linux,windows (default all three)",
+        help="comma-separated, of mac,linux,windows,switch (default all four)",
     )
     p.add_argument("--target", default=TARGET, help=f"itch.io user/game (default {TARGET})")
     p.add_argument("--dry-run", action="store_true", help="print the butler commands")

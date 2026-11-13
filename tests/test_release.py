@@ -716,13 +716,13 @@ def test_module_runs_as_script(tmp_path):
 
 # --- itch.io pushes (mtport.itch, ADR 0146, #208) --------------------------------------------
 #
-# A synthetic published release: the three desktop player builds and SHA256SUMS, served by a
+# A synthetic published release: the four player builds and SHA256SUMS, served by a
 # fake `gh` (a function, or a shell script for scripts/release), and pushed with a fake
 # `butler` that logs its arguments and whether it saw the key.
 
 ITCH_VERSION = "1.0.0"
 ITCH_TAG = f"v{ITCH_VERSION}"
-ITCH_CHANNELS = ("macos-universal", "linux-x86_64", "windows-x64")
+ITCH_CHANNELS = ("macos-universal", "linux-x86_64", "windows-x64", "switch")
 MACHO64 = b"\xcf\xfa\xed\xfe" + b"\0" * 60 + b"f_000027E0\0f_0002A3C1\0"
 ELF64 = b"\x7fELF\x02\x01\x01\0" + b"\0" * 56 + b"f_000027E0\0f_0002A3C1\0"
 FAKE_BUTLER = """\
@@ -733,14 +733,15 @@ with open(os.environ["FAKE_BUTLER_LOG"], "a", encoding="utf-8") as log:
 
 
 def itch_release(root: Path, extra: dict[str, bytes] | None = None) -> Path:
-    """The player builds of ITCH_VERSION and their SHA256SUMS in root; ``extra`` is planted in
-    the Windows build."""
+    """The player builds of ITCH_VERSION (the Switch zip included) and their SHA256SUMS in root;
+    ``extra`` is planted in the Windows build."""
     root.mkdir(parents=True, exist_ok=True)
     licences = {k: v for k, v in PLAYER.items() if k != "MapleThief.exe"}
     builds = {
         "macos-universal": {"MapleThief.app/Contents/MacOS/MapleThief": MACHO64, **licences},
         "linux-x86_64": {"bin/MapleThief": ELF64, "MapleThief.sh": b"#!/bin/sh\n", **licences},
         "windows-x64": {**PLAYER, **(extra or {})},
+        "switch": SWITCH_PLAYER,
     }
     sums = []
     for channel, files in builds.items():
@@ -822,7 +823,7 @@ def test_itch_dry_run_prints_one_push_per_channel(tmp_path, itch_env, capsys):
     assert status == 0, out
     assert butler == []
     pushes = [line for line in out.splitlines() if "dry-run, not run: butler push" in line]
-    assert len(pushes) == 3
+    assert len(pushes) == 4  # every player build, the Switch zip included
     for line, channel in zip(pushes, ITCH_CHANNELS, strict=True):
         assert line.endswith(
             f"MapleThief-{ITCH_VERSION}-{channel}."
@@ -832,7 +833,7 @@ def test_itch_dry_run_prints_one_push_per_channel(tmp_path, itch_env, capsys):
     assert "dry-run, not run: butler status armaatus/maplethief" in out
     assert [c[2] for c in calls] == ["view", "download"]
     # Pushed bytes are the release's.
-    for name in rel.player_names(ITCH_VERSION)[:3]:
+    for name in rel.player_names(ITCH_VERSION):
         assert (tmp_path / "out" / name).read_bytes() == (release / name).read_bytes()
 
 
@@ -915,8 +916,8 @@ def test_itch_push_runs_butler_with_the_key_from_the_environment(tmp_path, itch_
     status, butler = itch_run(tmp_path, itch_args(tmp_path), gh_run, {"BUTLER_API_KEY": key})
     out = capsys.readouterr().out
     assert status == 0, out
-    assert [c["argv"][0] for c in butler] == ["push", "push", "push", "status"]
-    for call, channel in zip(butler[:3], ITCH_CHANNELS, strict=True):
+    assert [c["argv"][0] for c in butler] == ["push", "push", "push", "push", "status"]
+    for call, channel in zip(butler[:4], ITCH_CHANNELS, strict=True):
         path, target, flag, version = call["argv"][1:]
         assert Path(path).parent == tmp_path / "out"
         assert (target, flag, version) == (
@@ -924,7 +925,7 @@ def test_itch_push_runs_butler_with_the_key_from_the_environment(tmp_path, itch_
             "--userversion",
             "1.0.0",
         )
-    assert butler[3]["argv"] == ["status", "armaatus/maplethief"]
+    assert butler[4]["argv"] == ["status", "armaatus/maplethief"]
     assert all(c["key"] == key for c in butler)  # from the environment...
     assert not any(key in " ".join(c["argv"]) for c in butler)  # ...never on the command line
     assert key not in out
@@ -952,9 +953,9 @@ def test_itch_channels_are_the_player_build_names():
     from mtport import itch
 
     assert tuple(itch.CHANNELS.values()) == ITCH_CHANNELS
-    assert [itch.file_name("1.0.0", c) for c in ITCH_CHANNELS] == rel.player_names("1.0.0")[:3]
+    assert [itch.file_name("1.0.0", c) for c in ITCH_CHANNELS] == rel.player_names("1.0.0")
     with pytest.raises(itch.ItchError):
-        itch.channels(["switch"])
+        itch.channels(["ios"])
 
 
 def test_itch_butler_is_pinned_per_os():
@@ -1097,10 +1098,11 @@ def test_scripts_release_itch_dry_run(tmp_path):
     )
     assert out.returncode == 0, out.stdout + out.stderr
     pushes = [line for line in out.stdout.splitlines() if "not run: butler push" in line]
-    # The Mac pushes macOS and Linux; Windows pushes its own (scripts/release.ps1 itch).
+    # The Mac pushes macOS, Linux and the Switch; Windows pushes its own (scripts/release.ps1).
     assert [p.split()[-3] for p in pushes] == [
         "armaatus/maplethief:macos-universal",
         "armaatus/maplethief:linux-x86_64",
+        "armaatus/maplethief:switch",
     ]
     assert all(p.endswith("--userversion 1.0.0") for p in pushes)
     assert "not run: butler status armaatus/maplethief" in out.stdout
