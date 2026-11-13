@@ -1,6 +1,6 @@
 # 146. Distribution on itch.io: every published player build pushed with butler, "$0 or donate"
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-13, [Joris on #208](https://github.com/armaatus/maplethief-port/issues/208#issuecomment-6850845409))
 - **Date:** 2026-11-13
 - **Issue:** [#208](https://github.com/armaatus/maplethief-port/issues/208) (epic [#106](https://github.com/armaatus/maplethief-port/issues/106))
 - **Builds on:** [ADR 0100](0100-public-repository-and-player-releases.md) (what a release may carry, the name, the withdrawal plan), [ADR 0125](0125-player-builds-icon-guard-modes-and-release-flow.md) (the player builds, the guard's player mode, the release flow), [ADR 0126](0126-dev-branch-release-pull-requests-and-ci-by-target.md) (release pull requests), [ADR 0003](0003-dependencies.md) (tools pinned by version and hash)
@@ -69,7 +69,7 @@ The cover (630 x 500) and banner are our own art, like the icon (ADR 0125): no N
 - **Screenshots:** gameplay only, from Joris's local build, on itch.io only, never committed. Cover and banner: our own art.
 - **The name:** as ADR 0100. "MapleStory" only descriptively ("a port of MapleStory Thief Edition"), the page title "MapleThief", no Nexon logo or branding, and the page says it is not affiliated with Nexon and includes no game content.
 - **On an objection** from Nexon, in this order: donations off (the page becomes free), then the screenshots removed, then the itch.io downloads withdrawn together with the GitHub Release's player builds (ADR 0100). The source stays. Money received is not a reason to keep anything up.
-- **#94:** ADR 0100 and ADR 0125 hold over #94's wording. #94 was written when releases could carry only own-code kits; ADR 0100 is the later, separate legal decision #94 itself asked for, and ADR 0125 made the player builds part of every release. So a published release, v1.0.0 included, carries the player builds, and this ADR pushes exactly those. This ADR stays Proposed until Joris confirms that reading (the open question on #208); #94's text is his to update.
+- **#94:** ADR 0100 and ADR 0125 hold over #94's wording. #94 was written when releases could carry only own-code kits; ADR 0100 is the later, separate legal decision #94 itself asked for, and ADR 0125 made the player builds part of every release. So a published release, v1.0.0 included, carries the player builds, and this ADR pushes exactly those. Joris confirmed that reading on #208 (2026-11-13); #94's title and text now say the same.
 
 ## Consequences
 
