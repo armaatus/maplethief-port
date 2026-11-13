@@ -1183,6 +1183,11 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
         check(ok, "MAPLETHIEF_SETTINGS applies" + (ok ? std::string() : ": " + why));
         std::printf("MAPLETHIEF_SETTINGS: %s\n", list);
     }
+    // A fixed render_scale (not auto) sizes the renderbuffers as game.cpp does; before the
+    // guest's first renderbuffer, so nothing is remade (#334 measures save states at each).
+    if (r.settings.render_scale != fe::kRenderScaleAuto && r.settings.render_scale != 1) {
+        mt_gles_set_render_scale(r.settings.render_scale);
+    }
     mt_uikit_set_animation_scale(fe::ui_animation_scale(r.settings.ui_animations));
     fe::install_auto_loot(r.settings.auto_loot); // as game.cpp (#175); a flow may change it live
     if (r.before_run) {
