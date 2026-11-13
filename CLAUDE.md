@@ -96,7 +96,9 @@ Branches (ADR 0126): `dev` is the integration branch and the default. Every epic
 
 ## Human hand-offs
 
-Anything needing Joris's hands or judgement (testing on a real iPhone/iPod, code signing with his Apple ID, playthroughs, capturing reference screenshots, judging game feel) gets the `needs-human` label. Do the preparable part, comment exactly what is needed from him on the issue, and carry on with the rest of the epic. The epic PR lists every open hand-off.
+`needs-human` is only for what an agent cannot do on the Mac: real hardware (iPhone/iPod, a Switch console, the Windows PC with his IPA, a Steam Deck, a high-refresh panel, reference screenshots from a device), his identity or money (signing, store and itch.io accounts, keys), and approving legal wording (legal.md, SECURITY, the takedown runbook). Do the preparable part, comment exactly what is needed from him on the issue, and carry on with the rest of the epic. The epic PR lists every open hand-off.
+
+Since 2026-11-13 Joris delegates judgement calls: product and design ADRs, defaults, and look-and-feel checks an agent can run itself (headless runs, bots, golden images, emulators, screenshots of its own runs). Decide them, record the ADR as "Accepted (delegated by Joris, YYYY-MM-DD)", and name the call in the PR so he can veto it there. Repository settings (rulesets, Discussions, labels, topics) are applied directly with `gh` and listed in the PR.
 
 ## Platform targets
 
