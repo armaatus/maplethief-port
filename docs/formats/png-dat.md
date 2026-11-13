@@ -95,7 +95,7 @@ void LoadPack(Mgr *mgr, const char *path, CMImage img[], int count, int id) {
 // 0xF34D: walks the same row, skipping `index` lengths, and loads only image `index` into dst.
 ```
 
-The 2-D loader draws every image once, at `(50·i, 50·j)`, right after loading it. Nothing else happens there, so this is probably a texture warm-up. It has no effect on slicing.
+The 2-D loader draws every image once, at `(50·i, 50·j)`, right after loading it. The loads run outside a frame (`CStateTitle::Enter` `0x98751`, and the popup-menu loader `0x14C59` from `CStateGame::OnKeyPressed` `0x8D4C9`), so the images land in the back buffer between frames, under the next frame, which draws the whole screen before it is presented ([ANALYSIS.md](../ANALYSIS.md): the game never calls `glClear` and every frame overdraws the full screen). The draw is not meant to be seen; why the authors added it can't be read from the code. It has no effect on slicing.
 
 **No checks.** The loader never compares the lengths with the file size or looks at the PNG framing. A short file reads past the buffer, and a wrong length gives a broken PNG to the decoder. The parser rejects both: a pack must be an exact concatenation of valid PNGs, every chunk CRC must match, and with the binary given the pieces must equal the table row.
 
@@ -137,31 +137,31 @@ Everything else (`0x24A65` mirrored draw, list viewports in `0x4E499`, `0x4ED75`
 | 18 | `game/yeti.dat` | 4 | 44×55 … 56×30 | `0x100EF8` | `0x16AF1` @ `0x17FE2` | flat `[4]` | `+0x310` | effect frames; `0x6E2C9` |
 | 19 | `ui/bossface.dat` | 5 | 24×24 | `0x1012F4` | `0x16AF1` @ `0x18162` | flat `[5]` | `+0x408` | boss portraits; `0x5A465`, `0x87501`, `0x8D4C9` |
 | 20 | `ui/mktext.dat` | 4 | 20×7 … 54×11 | `0x1016F0` | `0x16AF1` @ `0x18130` | flat `[4]` | `+0x394` | market labels (loose `ui/mktext0…3.png` also exist) |
-| 21 | `ui/npcnotify.dat` | 5 | 12×12 … 25×26 | `0x101AEC` | `0x16AF1` @ `0x180CC` | flat `[5]` | `+0x38C` | NPC quest markers; `0x8572D` |
+| 21 | `ui/npcnotify.dat` | 5 | 12×12 … 25×26 | `0x101AEC` | `0x16AF1` @ `0x180CC` | flat `[5]` | `+0x38C` | NPC quest markers, by the object's marker `Obj+4` ([obj.md](obj.md#load-routine-0xd259)): image 0 is the balloon behind any marker; 0 (a quest to take) adds image 1, and image 2 while bit 0 of `CStateGame +0x80` is clear (a blink); 1 (in progress) draws text instead; 2 (ready to hand in) adds image 3; image 4 marks a portal whose marker is 1, on maps 2.8 and 2.9 only; `0x8572D` |
 | 22 | `ui/qnline.dat` | 2 | 4×3 | `0x101EE8` | `0x16AF1` @ `0x180FE` | flat `[2]` | `+0x390` | quest-list line pieces; `0x77C19` |
 | 23 | `ui/reqmark.dat` | 2 | 14×14, 17×9 | `0x1022E4` | `0x16AF1` @ `0x18068` | flat `[2]` | `+0x33C` | "required" marks; `0x3243D` |
 | 24 | `ui/rewmark.dat` | 2 | 14×14, 20×10 | `0x1026E0` | `0x16AF1` @ `0x1809A` | flat `[2]` | `+0x364` | "reward" marks; `0x31EC1` |
 | 25 | `ui/ui.dat` | 11 | 10×10 … 111×24 | `0x102ADC` | `0x16AF1` @ `0x18036` | flat `[11]` | `+0x338` | HUD pieces (image 7 = `mainmenu/rank1.png`, byte-identical); `0x5A465`, `0x87501` |
 | 26 | `minimap/continent.dat` | 4 | 24×22 … 84×13 | `0x102ED8` | `0x12E6D` @ `0x131B4` | flat `[4]` | `+0x528` | world-map continent labels |
 | 27 | `minimap/worldmap.dat` | 4 | 82×70 … 220×180 | `0x1032D4` | `0x12E6D` @ `0x13196` | flat `[4]` | `+0x500` | world-map pieces |
-| 28 | `popmenu/class.dat` | 5 | 17×7 … 45×7 | `0x1036D0` | `0x14C59` @ `0x161CC` | flat `[5]` | `+0x460` | class names; `class0…4.png` load into the parallel array `+0x464` |
+| 28 | `popmenu/class.dat` | 5 | 17×7 … 45×7 | `0x1036D0` | `0x14C59` @ `0x161CC` | flat `[5]` | `+0x460` | class names, **never drawn**: `PopupMenu_PaintStatusTab` (`0x56321`) draws the loose `class0…4.png` of the parallel array `+0x464` |
 | 29 | `popmenu/classMark.dat` | 2 | 13×13 | `0x103ACC` | `0x14C59` @ `0x161F4` | flat `[2]` | `+0x468` | class marks; `0x56321` |
 | 30 | `popmenu/optIcon.dat` | 8 | 14×20 … 20×19 | `0x103EC8` | `0x14C59` @ `0x160D0` | 2-D `[4×2]` | `+0x440` | option icons × 2 states |
-| 31 | `popmenu/optText.dat` | 8 | 48×11 … 55×16 | `0x1042C4` | `0x14C59` @ `0x160A0` | 2-D `[4×2]` | `+0x438` | option labels × 2 states; `optText00…31.png` load into the parallel `+0x43C` |
+| 31 | `popmenu/optText.dat` | 8 | 48×11 … 55×16 | `0x1042C4` | `0x14C59` @ `0x160A0` | 2-D `[4×2]` | `+0x438` | option labels × 2 states, **never drawn**; nor are `optText00…31.png` in the parallel `+0x43C` |
 | 32 | `popmenu/ptext.dat` | 6 | 22×7 … 37×7 | `0x1046C0` | `0x14C59` @ `0x16070` | flat `[6]` | `+0x444` | pause-menu labels |
 | 33 | `popmenu/skillup.dat` | 2 | 11×12 | `0x104ABC` | `0x14C59` @ `0x16154` | flat `[2]` | `+0x454` | skill-up button × 2 states |
-| 34 | `popmenu/statInfo.dat` | 8 | 22×8 … 48×12 | `0x104EB8` | `0x14C59` @ `0x161A4` | flat `[8]` | `+0x45C` | stat labels; `statInfo4…7.png` load into `+0x4FC` |
+| 34 | `popmenu/statInfo.dat` | 8 | 22×8 … 48×12 | `0x104EB8` | `0x14C59` @ `0x161A4` | flat `[8]` | `+0x45C` | stat labels, **never drawn**; nor are `statInfo4…7.png` in `+0x4FC` |
 | 35 | `popmenu/stattext.dat` | 3 | 15×5 … 20×5 | `0x1052B4` | `0x14C59` @ `0x1617C` | flat `[3]` | `+0x458` | stat names; `0x56321` |
 | 36 | `popmenu/sticon.dat` | 3 | 17×19, 18×19 | `0x1056B0` | `0x14C59` @ `0x16104` | flat `[3]` | `+0x448` | stat icons |
-| 37 | `popmenu/sttext.dat` | 3 | 49×10 … 52×10 | `0x105AAC` | `0x14C59` @ `0x1612C` | flat `[3]` | `+0x44C` | status labels; `ui/sttext0…3.png` load into `+0x450` |
+| 37 | `popmenu/sttext.dat` | 3 | 49×10 … 52×10 | `0x105AAC` | `0x14C59` @ `0x1612C` | flat `[3]` | `+0x44C` | status labels, **never drawn**; nor are `ui/sttext0…3.png` in `+0x450` |
 | 38 | `popmenu/picon.dat` | 12 | 12×15 … 25×17 | `0x105EA8` | `0x14C59` @ `0x16038` | 2-D `[6×2]` | `+0x430` | pause-menu icons × 2 states; `0x5A465`, `0x87501` |
 | 39 | `logo/logo.dat` | 12 | 21×21 … 155×49 | `0x1062A4` | `0x1267D` @ `0x12794` | flat `[12]` | `+0x4` | title/logo pieces |
 
 Notes on the table:
 
 - **Not loaded.** The 5 `mainmenu/*.dat` packs still have their table rows (7–11), but no path string and no loader call refers to them. They are leftovers (the 1.5 main menu uses the root-level `MainMenu*.png` images instead). The port can ignore them.
-- **Uses** are functions found reading the field (decompiled code, `*(mgr) + field`). Fields with none listed had no direct read found. They may be reached through a computed offset, or the parallel array of loose PNGs may be what the UI draws (`class`, `optText`, `statInfo`, `sttext`). Which of each pair is drawn belongs to the UI work, not to this format.
-- **States.** Every 2-D pack has a second dimension of 2. Matching loose files are named the same way (`static/yesno00.png` … `yesno11.png`, `popmenu/optText00.png` … `optText31.png`), so `[i][j]` is presumably item `i` in state `j` (e.g. normal / pressed).
+- **Uses** are functions found reading the field (decompiled code, `*(mgr) + field`). Fields with none listed had no direct read found and may be reached through a computed offset. For the four pairs of a pack and a parallel array of loose PNGs the search is complete: apart from the loader `0x14C59` and the resource manager's free routine `0xF80D`, the only code that names any of the eight fields is `PopupMenu_PaintStatusTab`, reading the loose `class` array. The 1.5 popup menu draws its tabs from the loose sheets `IGM_ui/igmui_01.png`, `igmui_02.png` and `MainMenuHelp.png` (`+0x6F0`…`+0x6F8`) through the part draw `0x24B3D` instead.
+- **States.** Every 2-D pack has a second dimension of 2. Matching loose files are named the same way (`static/yesno00.png` … `yesno11.png`, `popmenu/optText00.png` … `optText31.png`), so `[i][j]` is item `i` in state `j` (normal / pressed, going by the image pairs; not traced in each UI routine).
 - Content descriptions come from file names, sizes and the code that reads each field. They are labels for inspection, not verified by playing.
 
 ## Parser and extractor
@@ -195,6 +195,7 @@ Notes on the table:
 
 ## Unknowns
 
-- Which index of the multi-image packs means what, beyond the item/skill icon indices and the two drawing routines above. That needs the UI and effect code (later milestones).
-- Why `LoadPack2D` draws each image at `(50·i, 50·j)` while loading (probably texture warm-up; harmless).
-- Whether the `.dat` arrays or the parallel loose-PNG arrays are drawn for `class`, `optText`, `statInfo` and `sttext`.
+- ~~Which index of the multi-image packs means what~~: answered where it matters to the port, and left to the code otherwise. The icon packs are indexed by the data tables (`skill.dat`, `item_equip.dat`, `item_etc.dat` `icon`), `num.dat` and `box.dat` by their drawing routines ([Parts](#parts-the-only-sub-rects)), `npcnotify.dat` by the NPC quest marker (table above), and `ui.dat` and `bossface.dat` are the pieces `HUD_Paint` (`0x5A465`) draws ([re/hud-extras.md](../re/hud-extras.md) describes what it shows). The rest are UI and effect pieces that the recompiled routines draw by constant index; the port runs those routines as they are, so it needs no table of them, and the extractor names images by position.
+- ~~Why `LoadPack2D` draws each image at `(50·i, 50·j)` while loading~~: the intent isn't recoverable from the binary, and the draw happens between frames, under the next one (see [Load routine](#load-routine)). The port keeps it as recompiled code.
+- ~~Whether the `.dat` arrays or the parallel loose-PNG arrays are drawn for `class`, `optText`, `statInfo` and `sttext`~~: for `class`, the loose PNGs (the status tab); for the other three, neither. See the notes under [The 40 files](#the-40-files).
+

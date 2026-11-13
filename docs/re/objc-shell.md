@@ -117,7 +117,7 @@ That's about **15–25 days**. Much of the ObjC runtime is needed either way. `e
 | `TouchKeyPadView` | in-game controls: color-mask hit test on `KeyPadArea.png`, two-finger tracking, polled `on…Key` state, 52 phone-key actions, container of the 10 panels, NPC "up" indicator | 5 | 3 | The core of the input work (#66). Emulation needs exact multi-touch and `CGBitmapContext` pixel reads. A native version can feed a controller layer directly. |
 | `NpcKeyPadView` | NPC dialogue: accept/refuse/OK and 6 invisible quest-row buttons | 1 | 0.5 | `CChatBox::paint` reads 12 of its selectors. |
 | `PopupKeyPadView` | in-game popup buttons (OK, Yes/No, ±, revive, return, main menu), placed by the engine | 1 | 0.5 | 11 `move…ButtonToX:toY:` methods called from C++. |
-| `MarketKeyPadView` | shop tabs/buttons and drag tracking points for the engine's list scrolling | 1.5 | 0.5 | The engine reads 17 of its selectors (`FUN_00056e90` `0x56E91`). |
+| `MarketKeyPadView` | shop tabs/buttons and drag tracking points for the engine's list scrolling | 1.5 | 0.5 | The engine reads 17 of its selectors (`Shop_Paint` `0x56E91`). |
 | `MapKeyPadView` | world/mini map overlay: three buttons (added by `TouchKeyPadView`) and a touch point | 0.5 | 0.2 | The map code reads `touchPoint` and the buttons. |
 | `CashShopKeyPadView` | 8 purchase tiles → key codes −27…−34 | 0.5 | 0.2 | Reachable only with StoreKit (#20). |
 | `HelpScrollKeyPadView` | in-game help pager (2 pages) | 0.5 | 0.3 | The same pager as `MainMenuView`'s Help screen. |
@@ -217,7 +217,7 @@ The window's only subview, and the root of everything the shell shows.
 - **Panel gate**: the 23 `enable…`/`disable…` key-pad methods compare `statusOfTouchKeyPad` with their panel number, store it and forward to `touchKeyPadView`.
 - **Loading view**: `addLoadingView` builds a spinner, a "Please Wait..." label (`MarkerFelt-Thin`) and `loadingBack.png`. The engine shows it before network or purchase work and removes it when that finishes.
 - **Character slots**: properties that `CStateMainMenu::LoadCharacterSlots` fills and `ChooseCharacterView` reads (`characterInfos`: an `NSMutableArray` of per-slot arrays of strings; `robinImages`: per-slot `UIImage` or `NSNull`).
-- **Portrait scaling**: `imageWithImage:scaledToSize:`, used by the engine (`FUN_0001e96c` `0x1E96D`) to make those portraits through a `UIGraphics` image context.
+- **Portrait scaling**: `imageWithImage:scaledToSize:`, used by the engine to make those portraits through a `UIGraphics` image context. `CStateMainMenu::LoadCharacterSlots` `0x96845` calls `CHero::RenderPortrait` `0x5FBCD` for each slot's hero, which goes through `CMAction::RenderPortrait` `0x1F051` (the current frame, if on screen) to `CMFrame::RenderPortrait` `0x1E96D`. That one copies the frame's layers into a 40 × 60 RGBA buffer, wraps it in a `UIImage`, scales it by 1.5 with `imageWithImage:scaledToSize:` and adds it to `robinImages`.
 
 `touchesBegan:` only logs. The pad view on top receives the touches.
 
@@ -266,15 +266,15 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 | `-flushLCD` | `FlushLCD` `0x6D65` |
 | `-getGameCenter` | `CHero::LevelUp` `0x65089`, `CMapleWorld::changeMap` `0x81369` |
 | `-getGameCenterLoginOKorError` | `Game_ExitToMainMenu` `0x54BF9`, `CStateGame::PaintExitToMenu` `0x83C71`, `CStateGame::OnKeyPressed` `0x8D4C9` |
-| `-imageWithImage:scaledToSize:` | `FUN_0001e96c` `0x1E96D` |
+| `-imageWithImage:scaledToSize:` | `CMFrame::RenderPortrait` `0x1E96D` |
 | `-m_pGameCenterManager` | `CHero::LevelUp` `0x65089`, `CMapleWorld::changeMap` `0x81369` |
 | `-mainMenuView` | `CStateMainMenu::OnKeyPressed` `0x9462D` |
 | `-removeLoadingView` | `CMSocket::Disconnect` `0x1BED5`, `CMSocket::Connect` `0x1C419`, `CDataMgr::OnServerPacket` `0x3ED19`, `CStateGame::Paint` `0x87501` |
-| `-robinImages` | `FUN_0001e96c` `0x1E96D`, `CStateMainMenu::OnKeyPressed` `0x9462D`, `CStateMainMenu::LoadCharacterSlots` `0x96845` |
+| `-robinImages` | `CMFrame::RenderPortrait` `0x1E96D`, `CStateMainMenu::OnKeyPressed` `0x9462D`, `CStateMainMenu::LoadCharacterSlots` `0x96845` |
 | `-selectedCharacterIndex` | `CStateMainMenu::OnKeyPressed` `0x9462D` |
 | `-setCharacterCount:` | `CStateMainMenu::LoadCharacterSlots` `0x96845` |
 | `-showMainMenu:` | `Game_ExitToMainMenu` `0x54BF9`, `CStateGame::OnKeyPressed` `0x8D4C9` |
-| `-touchKeyPadView` | `SkyCanvas::Tick` `0x2590D`, `CChatBox::paint` `0x32BBD`, `CChatBox::Close` `0x35E89`, `FUN_0004ab00` `0x4AB01` +10 more |
+| `-touchKeyPadView` | `SkyCanvas::Tick` `0x2590D`, `CChatBox::paint` `0x32BBD`, `CChatBox::Close` `0x35E89`, `Shop_PaintItemDetail` `0x4AB01` +10 more |
 <!-- END generated:class:EAGLView -->
 
 ### EAGLView_Instance
@@ -455,7 +455,7 @@ Panel 6: the shop.
 | Buy, Sell | `clickOkButton:` |
 | Charge (cash) | `clickPoundButton:` |
 
-`setBuyButtons`/`setSellButtons` switch which buttons show (alpha). The four touch methods track a drag: `startTrackingPoint`, `movedTrackingPoint`, `scrollTrackingPoint`, `currentTrackingPoint`, `isScroll`, `isTab`, `isTouchEnded`, `forceScrollValue`. The engine's shop code (`FUN_00056e90` `0x56E91`, `FUN_0004ab00` `0x4AB01`) reads and resets them to scroll its item list and show the detail popup.
+`setBuyButtons`/`setSellButtons` switch which buttons show (alpha). The four touch methods track a drag: `startTrackingPoint`, `movedTrackingPoint`, `scrollTrackingPoint`, `currentTrackingPoint`, `isScroll`, `isTab`, `isTouchEnded`, `forceScrollValue`. The engine's shop code (`Shop_Paint` `0x56E91`, `Shop_PaintItemDetail` `0x4AB01`) reads and resets them to scroll its item list and show the detail popup.
 
 <!-- BEGIN generated:class:MarketKeyPadView -->
 <!-- Generated by `python3 -m mtport.objcshell generate`: do not edit by hand. -->
@@ -474,23 +474,23 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 
 | Selector | Sent by |
 |---|---|
-| `-chargeButton` | `FUN_00056e90` `0x56E91` |
-| `-currentTrackingPoint` | `FUN_00056e90` `0x56E91` |
-| `-detailPopup` | `FUN_00056e90` `0x56E91` |
-| `-forceScrollValue` | `FUN_00056e90` `0x56E91` |
-| `-isScroll` | `FUN_00056e90` `0x56E91` |
-| `-isTab` | `FUN_00056e90` `0x56E91` |
-| `-isTouchEnded` | `FUN_00056e90` `0x56E91` |
-| `-movedTrackingPoint` | `FUN_0004ab00` `0x4AB01`, `FUN_00056e90` `0x56E91` |
-| `-scrollTrackingPoint` | `FUN_00056e90` `0x56E91` |
-| `-setBuyButtons` | `FUN_00056e90` `0x56E91` |
-| `-setDetailPopup:` | `FUN_00056e90` `0x56E91` |
-| `-setForceScrollValue:` | `FUN_00056e90` `0x56E91` |
-| `-setIsTouchEnded:` | `FUN_00056e90` `0x56E91` |
-| `-setMovedTrackingPoint:` | `FUN_0004ab00` `0x4AB01`, `FUN_00056e90` `0x56E91` |
-| `-setSellButtons` | `FUN_00056e90` `0x56E91` |
-| `-setStartTrackingPoint:` | `FUN_00056e90` `0x56E91` |
-| `-startTrackingPoint` | `FUN_00056e90` `0x56E91` |
+| `-chargeButton` | `Shop_Paint` `0x56E91` |
+| `-currentTrackingPoint` | `Shop_Paint` `0x56E91` |
+| `-detailPopup` | `Shop_Paint` `0x56E91` |
+| `-forceScrollValue` | `Shop_Paint` `0x56E91` |
+| `-isScroll` | `Shop_Paint` `0x56E91` |
+| `-isTab` | `Shop_Paint` `0x56E91` |
+| `-isTouchEnded` | `Shop_Paint` `0x56E91` |
+| `-movedTrackingPoint` | `Shop_PaintItemDetail` `0x4AB01`, `Shop_Paint` `0x56E91` |
+| `-scrollTrackingPoint` | `Shop_Paint` `0x56E91` |
+| `-setBuyButtons` | `Shop_Paint` `0x56E91` |
+| `-setDetailPopup:` | `Shop_Paint` `0x56E91` |
+| `-setForceScrollValue:` | `Shop_Paint` `0x56E91` |
+| `-setIsTouchEnded:` | `Shop_Paint` `0x56E91` |
+| `-setMovedTrackingPoint:` | `Shop_PaintItemDetail` `0x4AB01`, `Shop_Paint` `0x56E91` |
+| `-setSellButtons` | `Shop_Paint` `0x56E91` |
+| `-setStartTrackingPoint:` | `Shop_Paint` `0x56E91` |
+| `-startTrackingPoint` | `Shop_Paint` `0x56E91` |
 <!-- END generated:class:MarketKeyPadView -->
 
 ### NpcKeyPadView
@@ -601,7 +601,7 @@ The in-game control layer: a full-screen (480×320) multi-touch view created by 
 
 `touchesCancelled:` `0xB6BA5` is an empty 16-byte method: a cancelled touch leaves its key held until the next touch event. The hit-mask colours, every panel's rects and what the engine does with each key are in [controls/keypad.md](../controls/keypad.md) (#66).
 
-The engine also sets `heroPosition`/`npcPosition`/`isNearNPC` (`CHero::Paint` `0x61A19`, `FUN_0008572c` `0x8572D`) to show an "up" indicator (`onUpIndicate`/`offUpIndicate`) when the hero stands at an NPC.
+The engine also sets `heroPosition`/`npcPosition`/`isNearNPC` (`CHero::Paint` `0x61A19`, `CStateGame::PaintMapObjects` `0x8572D`) to show an "up" indicator (`onUpIndicate`/`offUpIndicate`) when the hero stands at a portal and the NPC button when it stands at an NPC ([formats/obj.md](../formats/obj.md)).
 
 The `Clet_HandleEvent` table below is the complete set of phone keys the shell can produce.
 
@@ -696,11 +696,11 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 | `-enableMarketKey` | `Shell_EnableMarketKey` `0x67E5` |
 | `-enableNPCKey` | `Shell_EnableNPCKey` `0x6835` |
 | `-enablePopupMenuKey` | `Shell_EnablePopupMenuKey` `0x6925` |
-| `-heroPosition` | `FUN_0008572c` `0x8572D` |
+| `-heroPosition` | `CStateGame::PaintMapObjects` `0x8572D` |
 | `-mapKeyPadView` | `Map_PaintSub2` `0x58AE9`, `Map_PaintSub1` `0x59119`, `Map_PaintSub0` `0x59BB1` |
-| `-marketKeyPadView` | `FUN_0004ab00` `0x4AB01`, `FUN_00056e90` `0x56E91` |
+| `-marketKeyPadView` | `Shop_PaintItemDetail` `0x4AB01`, `Shop_Paint` `0x56E91` |
 | `-npcKeyPadView` | `CChatBox::paint` `0x32BBD`, `CChatBox::Close` `0x35E89` |
-| `-offUpIndicate` | `FUN_0008572c` `0x8572D` |
+| `-offUpIndicate` | `CStateGame::PaintMapObjects` `0x8572D` |
 | `-onAttackKey` | `SkyCanvas::Tick` `0x2590D` |
 | `-onDownKey` | `SkyCanvas::Tick` `0x2590D` |
 | `-onInGamePopup` | `Popup_Paint` `0x791F5` |
@@ -711,12 +711,12 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 | `-onShort2Key` | `SkyCanvas::Tick` `0x2590D` |
 | `-onShort3Key` | `SkyCanvas::Tick` `0x2590D` |
 | `-onShort4Key` | `SkyCanvas::Tick` `0x2590D` |
-| `-onUpIndicate` | `FUN_0008572c` `0x8572D` |
+| `-onUpIndicate` | `CStateGame::PaintMapObjects` `0x8572D` |
 | `-onUpKey` | `SkyCanvas::Tick` `0x2590D` |
 | `-popupKeyPadView` | `Popup_PlaceShellButtons` `0x78E91`, `Popup_Paint` `0x791F5`, `CStateGame::Paint` `0x87501` |
 | `-setHeroPosition:` | `CHero::Paint` `0x61A19` |
-| `-setIsNearNPC:` | `FUN_0008572c` `0x8572D` |
-| `-setNpcPosition:` | `FUN_0008572c` `0x8572D` |
+| `-setIsNearNPC:` | `CStateGame::PaintMapObjects` `0x8572D` |
+| `-setNpcPosition:` | `CStateGame::PaintMapObjects` `0x8572D` |
 | `-touchKeyPadEnable` | `SkyCanvas::Tick` `0x2590D` |
 <!-- END generated:class:TouchKeyPadView -->
 
@@ -904,5 +904,12 @@ The root of `MapleThief.app` holds the shell's art. Every name below is matched 
 ## Open questions
 
 1. ~~The jump/attack chords in `setKeySequence:` and the joypad mode (`isJoyPad`)~~: solved in #66. The chord mode is dead (`setKeySequence:` only ever gets −1), `isJoyPad` is just "panel 0 handlers on", and the colour → key table is in [controls/keypad.md](../controls/keypad.md#panel-0-the-game-pad).
-2. The unnamed engine functions that drive the panels (`0x1E96D`, `0x35E89`, `0x4AB01`, `0x56E91`, `0x61A19`, `0x8572D`, `0x65089`) belong to the engine's UI states and are left for the engine passes. #66 named the map painters (`Map_PaintSub0/1/2`) and the popup layout functions (`Popup_PlaceShellButtons`, `Popup_Paint`).
-3. ~~Whether `TouchWidgets_Dispatch`'s 11 touch widgets duplicate the shell's hit-testing or serve the GL-drawn menus~~: they serve the GL popup menu only (dispatched while `invenEnable && !alertEnable`), see [controls/keypad.md](../controls/keypad.md#gl-touch-widgets-popup-menu). Their exact kinds are still open ([program-flow.md](program-flow.md#open-unknowns), question 4).
+2. ~~The unnamed engine functions that drive the panels (`0x1E96D`, `0x35E89`, `0x4AB01`, `0x56E91`, `0x61A19`, `0x8572D`, `0x65089`)~~: identified from the decompiler (#66 named the map painters `Map_PaintSub0/1/2` and the popup layout functions `Popup_PlaceShellButtons`, `Popup_Paint`):
+   - `CMFrame::RenderPortrait` `0x1E96D`: the main menu's slot portraits for `robinImages` ([above](#eaglview)).
+   - `CChatBox::Close` `0x35E89`: closes the NPC chat box and disables `npcKeyPadView`'s quest buttons (`disableAllQuestButtons`, `setQuestSelector:`).
+   - `Shop_PaintItemDetail` `0x4AB01`: the NPC shop's detail box for the chosen item, called only by `Shop_Paint`. It holds the box back for 500 ms of sub-timer 1 and nudges `MarketKeyPadView`'s moved point ([timing-threading.md](timing-threading.md#real-time-timers)).
+   - `Shop_Paint` `0x56E91`: the NPC shop screen (game mode 2), which reads the drag, the tab and the buttons from `MarketKeyPadView` (the name the port's hook `MT_HOOK_FN_SHOP_PAINT` already uses).
+   - `CHero::Paint` `0x61A19`: sends the hero's screen position (`setHeroPosition:`).
+   - `CStateGame::PaintMapObjects` `0x8572D`: called by `CStateGame::Paint` each frame; draws the map's sprite objects, shows the "up" hint at portals and the NPC button at NPCs ([formats/obj.md](../formats/obj.md)).
+   - `CHero::LevelUp` `0x65089`: reports the level to Game Center (`m_pGameCenterManager`, `ReportScore:forCategory:`).
+3. ~~Whether `TouchWidgets_Dispatch`'s 11 touch widgets duplicate the shell's hit-testing or serve the GL-drawn menus~~: they serve the GL popup menu only (dispatched while `invenEnable && !alertEnable`), see [controls/keypad.md](../controls/keypad.md#gl-touch-widgets-popup-menu). They have no kinds: all 11 are one structure that differs only in item capacity and rect ([program-flow.md](program-flow.md#open-unknowns), question 4).

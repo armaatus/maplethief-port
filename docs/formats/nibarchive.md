@@ -96,13 +96,13 @@ The delegate's `glView` and `m_ViewController` outlets are not connected. The de
 
 ## Unknowns
 
-The parser needs none of these to parse and re-encode the file byte-exact.
+These are questions about Apple's format, not about this game: the binary only hands the file to `UIApplicationMain`, so its code can't answer them. The game ships one nib, and the parser and the runtime's reader need none of the answers to round-trip it byte-exact and decode it, so each is closed with what the shipped file shows.
 
-- **The `0x06` geometry prefix** (observed, not documented). All 4 geometry values (`UIBounds`, `UICenter` of the window and the view) are data values that start with `0x06`, followed by `f32`s. What other prefixes exist, and whether `0x06` encodes the element type or the count, is unknown. The parser keeps the data as bytes. `Value.floats()` and `dump` read it as floats only when the first byte is `0x06` and the rest is a whole number of `f32`s.
-- **Format version 1 and coder version 9**: the only values seen. The parser accepts other versions and records them, but nothing here says what they change.
-- **Class fallbacks**: no class in this file has any, so the meaning of the `i32` entries (presumably indices of fallback classes, which the parser checks against the class table) is not confirmed.
-- **Value types not in this file**: the file uses types 0, 4, 5, 6, 8 and 10. Types 1, 2, 3, 7 and 9 (`i16`, `i32`, `i64`, `f64`, nil) follow the public descriptions of the format and are covered only by the synthetic tests.
-- **Root keys** `UINibAccessibilityConfigurationsKey` and `UINibKeyValuePairsKey` both point at the same empty array (#16). What UIKit does with them is not needed for this nib.
+- ~~**The `0x06` geometry prefix**~~: not needed. All 4 geometry values (`UIBounds`, `UICenter` of the window and the view) start with `0x06` followed by `f32`s, and no other data value in the file starts that way with a whole number of `f32`s after it. The parser keeps the data as bytes; `Value.floats()` and `dump` read it as floats only in that case.
+- ~~**Format version 1 and coder version 9**~~: not needed. They are the only values in the one shipped file; the parser accepts and records other versions.
+- ~~**Class fallbacks**~~: not needed. No class in the file has any, so the `fallback` entries are covered only by the synthetic tests, where the parser checks each against the class table.
+- ~~**Value types not in this file**~~: not needed. The file uses types 0, 4, 5, 6, 8 and 10; types 1, 2, 3, 7 and 9 (`i16`, `i32`, `i64`, `f64`, nil) follow the public descriptions of the format and are covered by the synthetic tests.
+- ~~**Root keys** `UINibAccessibilityConfigurationsKey` and `UINibKeyValuePairsKey`~~: not needed. Both point at the same empty array (#16), so there is nothing for the runtime to apply.
 
 ## Validation
 

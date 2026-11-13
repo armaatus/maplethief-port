@@ -31,9 +31,9 @@ A CgBI file is a PNG (ISO/IEC 15948) with four differences. All integers are big
 
 | Byte | Shipped values | Meaning |
 |---|---|---|
-| 0–1 | `30 00` | **unknown**; constant in all 113 files |
-| 2 | `20` | **unknown**; constant |
-| 3 | `02` (105 files), `06` (8 files) | `06` exactly in the 8 fully opaque files (every alpha 255): `ChooseCharacterBackground`, `ChooseCharacterStatusScrollTable`, `MainMenuBackground`, `MainMenuCompanyLogo`, `MainMenuHelp`, `MainMenuHelp_kor`, `marketBuyTab`, `marketSellTab`. Probably an "opaque" flag (an observed correlation, not checked against Apple's code); decoders ignore it |
+| 0–1 | `30 00` | constant in all 113 files; meaning not documented by Apple. Not needed: no decoder reads it |
+| 2 | `20` | constant; meaning not documented. Not needed: no decoder reads it |
+| 3 | `02` (105 files), `06` (8 files) | `06` in exactly the 8 fully opaque files (every alpha 255): `ChooseCharacterBackground`, `ChooseCharacterStatusScrollTable`, `MainMenuBackground`, `MainMenuCompanyLogo`, `MainMenuHelp`, `MainMenuHelp_kor`, `marketBuyTab`, `marketSellTab`; `02` in all 105 files with any alpha below 255. That is an observed rule over the whole bundle, not Apple's definition. Not needed: decoders ignore it |
 
 ### Pixels
 

@@ -3,7 +3,8 @@
 The game saves its state as **raw binary files in the app's `Documents/` directory**, written with `NSFileHandle`. It does not use `NSUserDefaults` or `NSKeyedArchiver` for save data, and no file has a checksum, signature or version field. Each of the three character slots is two files: `theif<slot>` (the character, 1,124 bytes) and `quest<slot>` (its quest state, 4,781 bytes). A few more small files hold options, scores and in-app-purchase receipts.
 
 - **Parser:** [`tools/mtport/savedata.py`](../../tools/mtport/savedata.py): parse and encode every file below, byte-exact. `python3 -m mtport.savedata dump FILE...` prints files as JSON, `new-character` writes the files of a new character, and `names` writes `work/re/names/save.json`. Tests: [`tests/test_savedata.py`](../../tests/test_savedata.py) (CI, synthetic saves) and [`tests/test_savedata_real.py`](../../tests/test_savedata_real.py) (local).
-- **Status:** every field `CDataMgr::SaveSaveData` writes is located and typed from the code. Most have a known meaning; the unknown ones are marked. No save from a real device has been checked yet ([pulling one](#pulling-a-save-from-a-device) is a `needs-human` step).
+- **Status:** every field `CDataMgr::SaveSaveData` writes is located and typed from the code, and every field has a known meaning (#380). Some keep their old `unknown_*` names in the parser for compatibility.
+- **Hand-off:** no save from a real device has been compared with this spec yet. [Pulling one](#pulling-a-save-from-a-device) needs Joris's iPhone or iPod (`needs-human`, [#149](https://github.com/armaatus/maplethief-port/issues/149)); `tests/test_savedata_real.py::test_pulled_device_saves_round_trip` runs as soon as one exists.
 
 Addresses are armv7 VM addresses; function pointers carry the Thumb bit. `CDataMgr` is the data manager, the object at `*0x11A970` ([data-tables.md](data-tables.md)). The hero object is `CHero` (its methods use `CHero.*` string keys, for example `CHero.setMeso.1` in `0x618E1`).
 
@@ -69,12 +70,12 @@ Written by `CDataMgr::SaveSaveData` `0x38711` from the hero (`this` = data manag
 | 0x325 | 48 × 3 | `etc_inventory` | `+0xD8[48]` | other items: `u8 id` (`item_etc`, `0xFF` = empty, item `+0x90`), `i16 count` (item `+0x100`) | `0x677E9` → `0x699A1` |
 | 0x3B5 | 13 × u8 | `skill_levels` | `[+0x114]+0xC+8i` | skill level per [skill slot](#skill-slots) | `0x677E9` → `0x7F99D` |
 | 0x3C2 | 5 × 16 | `equipped` | `+0xDC[5]` | worn items, [equipment records](#equipment-record-16-bytes), indexed by `item_equip.slot` (0 hat, 1 weapon, 2 overall, 3 earrings, 4 shoes) | `0x677E9`, `0x672A9` → `0x64CA1` |
-| 0x412 | 5 × 2 | `shortcuts` | `+0xE0+8i`, `+0xE4+8i` | five (kind, id) pairs; kind 0 = empty. A new character has (1, 3) and (1, 6) = its two potions. Other kinds are unknown (probably skills). | `0x677E9` |
+| 0x412 | 5 × 2 | `shortcuts` | `+0xE0+8i`, `+0xE4+8i` | five (kind, id) pairs, see [Shortcuts](#shortcuts). A new character has (1, 3) and (1, 6) = its two potions. | `0x677E9` |
 | 0x41C | u8 | `area` | world `+0x84` | map area: picks `<area>.mapprj` and `"%d%d.map"` (area, map) | `0x86C1D` |
 | 0x41D | u8 | `map` | world `+0x88` | map in the area | `0x86C1D` |
 | 0x41E | i16 | `x` | `+0x4` | position; −1 = the map's default | `0x86C1D` |
 | 0x420 | i16 | `y` | `+0x8` | position; −1 = the map's default | `0x86C1D` |
-| 0x422 | u8 | `flags` | `+0xC` | hero flag bits, low byte (bit 3 is cleared by `0x62ADD`); meaning unknown | `0x677E9`, `0x672A9` |
+| 0x422 | u8 | `flags` | `+0xC` | hero state bits, low byte, see [Hero flags](#hero-flags) | `0x677E9`, `0x672A9` |
 | 0x423 | u8 | `action` | `+0x10` | the hero's state, restored with `0x60551` (a new character has 2) | `0x677E9`, `0x672A9` |
 | 0x424 | char[64] | `caption` | | UTF-8 text shown on the slot: the title of the current quest's section from `CDataMgr::QuestCaption` `0x37095`, or ScriptExtra `CDataMgr.SaveSaveData.1` ("How it All Began", "모험의 시작") if there is none. Read with `stringWithCString:encoding:NSUTF8StringEncoding`. Korean text can be cut mid-character at 64 bytes. | `0x96845` |
 
@@ -95,6 +96,33 @@ Used by `equip_inventory` and `equipped`. Written from the item object, rebuilt 
 ### Skill slots
 
 `skill_levels[i]` is the level of the skill in slot `i` of the hero's skill list. That list is not stored: `0x7FD69` rebuilds it from `branch` and `job_tier` before the levels are applied. For each tier from `job_tier` down to 1, it takes every `skill.dat` row, in table order, with `type != 0` (not a basic attack), that `tier`, and `branch` 0 or the hero's branch. The unused slots are id −1. So a tier-4 Assassin has slots `[14, 11, 12, 13, 6, 7, 8, 9, 10, 2, 3, 4, 5]`: 13 slots, all filled. When the tier changes, `0x7FD69` carries each level over by skill id. `savedata.skill_slots()` computes the list.
+
+### Shortcuts
+
+The five shortcut slots belong to five keypad keys: slot 0 is `'5'` (also the attack key), 1 `'7'`, 2 `'9'`, 3 `'0'` and 4 `'#'` (`CHero::AssignShortcut` `0x6398D` and `CHero::KeyAttack` `0x66DD9` map the keys the same way). Each slot is a (kind, id) pair:
+
+| Kind | Id | Assigned by | Pressing the key |
+|---|---|---|---|
+| 0 | 0 | nothing (empty) | slot 0 makes a basic attack; the others do nothing |
+| 1 | an `item_etc` id | the item inventory (`CDataMgr::keyPopupItemInven` `0x5285D`, and `0x4E229`), only for an item of `type` 1 (potion) | uses the first inventory stack with that id (`CHero::UseItem`); nothing if there is none |
+| 2 | a `skill.dat` id | the skill tab (`PopupMenu_SkillTabOnKey` `0x54051`, and `0x4E229`), for any skill whose `type` is not 1 (passive), tested with `CSkill::GetType` `0x7EEBD` | a buff (`type` 2) is cast (`CSkill::CastBuff` through `0x7F939`); an attack skill (`type` 3) attacks (`CHero::onAttack`) |
+
+These are the only kinds: `0x6398D` writes only 1 and 2, and `KeyAttack` handles only 0, 1 and 2. Assigning what a slot already holds clears it (`CHero::ClearShortcut` `0x5FA95`). The skill reset item (special item `0x81`, [mechanics](../re/mechanics.md#potions-scrolls-return-scrolls-and-special-items)) clears every kind 2 slot.
+
+### Hero flags
+
+`flags` is the low byte of the hero's state bits at `+0xC`. Monsters, NPCs and dropped items (`CMapleObject`) use the same bits.
+
+| Bit | Meaning | Set by | Cleared by, read by |
+|---|---|---|---|
+| 0 (`0x01`) | falling | `0x6D159` when a jump has come back down to its starting height (vertical speed back at the jump impulse, [Movement](../re/mechanics.md#movement)); `0x6D9E1` when the ground under the hero ends; `0x6D759` when he climbs off the bottom of a ladder into the air | read by `CHero::TestFlag0` `0x6D101` |
+| 1 (`0x02`) | jumping | `CHero::KeyJump` `0x61651`, the side jump `0x607F9`, the knock-back in `CHero::TakeDamage` `0x65B55`, `CHero::KeyUpDown` `0x63665` (up jumps when there is no ladder to climb and nothing to talk to) | `CHero::IsInAir` `0x6D0E1` |
+| 2 (`0x04`) | on a ladder or rope | `KeyUpDown`, `KeyJump` when they grab one | `CHero::IsOnLadder` `0x6D139` |
+| 3 (`0x08`) | attacking | `CHero::onAttack` `0x605FD` | cleared by `CHero::Flush` `0x62ADD` when the attack's animation ends; `CHero::IsAttacking` `0x6D119` |
+| 4 (`0x10`) | dead | `CHero::Die` `0x65979` sets the whole value to `0x10` | `CHero::Revive` `0x6140D` sets it to 0. While it is set the movement keys, the update (`CHero::vf2` `0x66189`) and contact damage do nothing |
+| 5–7 | never set | | |
+
+Bits 0–2 together are "not standing" (`CHero::HasMoveFlags` `0x6D0BD`): landing (`0x6DA65`) and a ladder's end clear them, and `CHero::StopToStand` `0x61385` clears bits 0–4. A save made in mid-air or during an attack keeps those bits, and `LoadSave` restores them as they are.
 
 ### A new character
 
@@ -124,18 +152,28 @@ Written by `CDataMgr::SaveQuestData` `0x38F55` from the quest manager (`[hero+0x
 | Offset | Type | Field | Source | Meaning |
 |---|---|---|---|---|
 | 0x000 | u8 | `chapter` | questmgr `+0x4` | current chapter; 0 = new game (`0x86C1D` starts the intro) |
-| 0x001 | u8 × 100 | `flags_a` | questmgr `+0x8+4i` | one byte per entry; quest progress flags, meaning unknown |
-| 0x065 | u8 × 100 | `flags_b` | questmgr `+0x19C+4i` | one byte per entry; meaning unknown |
+| 0x001 | u8 × 100 | `flags_a` | questmgr `+0x8+4i` | state of main quest *i* (quest kind 0): 0 not taken, 1 taken, 2 done ([Quest states](#quest-states)) |
+| 0x065 | u8 × 100 | `flags_b` | questmgr `+0x19C+4i` | state of sub-quest *i* (quest kind 1), same values |
 | 0x0C9 | 10 × 0x1C9 | `records` | questmgr `+0x32C` list | the active quests, [quest records](#quest-record-0x1c9-bytes); loading stops at the first empty one |
 | 0x12A4 | 9 bytes | `unwritten_tail` | | **never written** |
+
+### Quest states
+
+`flags_a[i]` is the state of main quest *i* and `flags_b[i]` that of sub-quest *i* (the quest manager's arrays; `CQuestList::GetState` `0x799B1` picks one by the quest kind):
+
+- **0, not taken.** A new slot and the end of a chapter (`clearAll`, `0x996ED` → `CQuestList::ClearAll` `0x7C61D`, zeroes both arrays) start here. `removeQuest` (`0x995F1` → `CQuestList::Remove` `0x7BD75`) sets it back to 0; for a main quest it also sets main quest *i* − 1 back to 1.
+- **1, taken.** `startQuest` (`0x99D65` → `CQuestList::StartPrepared` `0x7C7ED`) adds the prepared quest to the list of active quests and sets it to 1. `QuestSave_Apply` also calls `0x7C7ED` for each saved record, so a loaded record is 1 again.
+- **2, done.** `getReward` (`0x9B099` → `CQuestList::GiveReward` `0x7BFC5`) and `makeEquipItem` (`Quest_MakeEquipItem` `0x7C2D9`) complete the quest through `CQuestList::Complete` `0x7BEB1`: it leaves the active list and its state becomes 2.
+
+The scripts read them with `getQuestState` (`0x9B269`, 663 calls, [script-vm.md](../re/script-vm.md#natives)): NPC state scripts pick an NPC's quest icon and portal scripts decide whether the portal opens. Nothing else reads them. Completing and removing main quests also counts them at questmgr `+0x198`; that count is not saved, and `getMainQuest`, its only reader, is never called by a script.
 
 ### Quest record (0x1C9 bytes)
 
 | Offset | Type | Field | Source | Meaning |
 |---|---|---|---|---|
-| +0x000 | u8 | `key_a` | quest `+0x4` | with `key_b`, identifies the quest (`0x7B150`); `0xFF` = empty slot |
-| +0x001 | u8 | `key_b` | quest `+0x8` | |
-| +0x002 | u8 | `extra` | quest `+0xC` | restored through `state+0xAC`; meaning unknown |
+| +0x000 | u8 | `key_a` | quest `+0x4` | quest kind: 0 main quest, 1 sub-quest. With `key_b`, identifies the quest (`0x7B150`); `0xFF` = empty slot |
+| +0x001 | u8 | `key_b` | quest `+0x8` | quest id, the index into `flags_a` or `flags_b` |
+| +0x002 | u8 | `extra` | quest `+0xC` | the NPC who gave the quest (NPC id = object `kind` − 4, [obj.md](obj.md)). The quest constructor `0x7AD69` copies it from the game state's current NPC (`CStateGame+0xAC`, set by `CHero::InteractWithObject` `0x63191` when the hero talks to an NPC), so `QuestSave_Apply` puts the saved byte there before it rebuilds the quest. The quest tab draws that NPC's sprite beside the quest (`PopupMenu_PaintQuestTab` `0x4ED75`); a debug dump in `0x7B921` calls the field `m_nNPC` |
 | +0x003 | char[64] | `title` | quest `+0x14` | a `Scripts.strings` key (shown via `0x6DD1(key, "Scripts")`) |
 | +0x043 | char[256] | `description` | quest `+0x18` | a `Scripts.strings` key |
 | +0x143 | 5 × 14 | `requirements` | quest `+0x24` list | see below; kind `0xFF` ends the list |
@@ -151,14 +189,16 @@ Written by `CDataMgr::SaveQuestData` `0x38F55` from the quest manager (`[hero+0x
 
 Loaded (and created with the defaults) by `CDataMgr::LoadConfig` `0x38611` into the buffer at `*0x11A98C` (`g_pConfig`). The options menu writes it back (`0x50131`, `0x46A29`).
 
+The options screen (`CDataMgr::drawConfig` `0x4D315`) has one row per byte, labelled `ScriptExtra` `CDataMgr.drawConfig.1`–`.6`, with the value names `.8`–`.19`. Only rows 0–3 can be selected (`0x46A29` moves over 4 rows, or 3 when `Device_GetModel` `0x65F5` is not 0, which leaves out vibration), so bytes 4 and 5 are not options in 1.5. The parser keeps the old `unknown_*` names.
+
 | Offset | Default | Field | Meaning |
 |---|---|---|---|
 | 0 | 3 | `sound` | `0x37C79` (`printf "sound=%d"`): 0–3, bit 0 = effects (OpenAL listener gain 1/0), bit 1 = music (`AVAudioPlayer` volume 0.7/0) ([audio.md](../re/audio.md#settings-pause-and-interruptions)). |
 | 1 | 1 | `speed` | game speed: 0 / 1 / 2 select 65 / 50 / 40 from table `0x108C58`, passed to `0x21DA1`. These are the `CMTimer` tick lengths in ms, applied by `CDataMgr::ApplyGameSpeed` `0x37C41` from `LoadConfig` and from the options menu `0x46A29` ([timing-threading.md](../re/timing-threading.md#interval-and-game-speed)). Values above 2 aren't guarded: 3 gives −1 (a tick on every 1 ms poll). |
-| 2 | 0 | `unknown_2` | not read by the config loader |
+| 2 | 0 | `unknown_2` | movement (row 2, values `CDataMgr.drawConfig.13` / `.14`, manual / automatic walking). With 0 a direction key walks while it is held: releasing it stops the walk or climb (`CStateGame::OnFieldKeyReleased` `0x807B9`). With 1 each press acts once (`CStateGame::OnFieldKeyPressed` `0x817F1`), the hero keeps walking after the key is released, and the other direction stops him (`CHero::KeyWalk` `0x60DD9`, the side jump `0x607F9`). The config loader doesn't apply it; these handlers read the byte directly. |
 | 3 | 1 | `unknown_3` | vibration: `0x37BD1` calls `CMSoundPlayer::SetVibrate` with 0 when the byte is 0, else with 1, and stores the byte in two player fields nothing reads (`0x1CC11`, `0x1CC39`). When on, `CMSoundPlayer::Vibrate` plays `kSystemSoundID_Vibrate` ([audio.md](../re/audio.md#vibration)) |
-| 4 | 1 | `unknown_4` | cleared by `0x3EAA1` in state `0x68` |
-| 5 | 1 | `unknown_5` | index into `{0, 1, 3}` (`0x108C4C`), read unchecked by `0x37B85` (passed to `0x785BD`) and `CStateGame::LoadGame` `0x86C1D`. Values above 2 read past the table. |
+| 4 | 1 | `unknown_4` | shortcut window shown (the row `CDataMgr.drawConfig.5`, values `.15` / `.16`, which can't be selected). `HUD_Paint` `0x5A465` draws the shortcut slots only when it is 1. In 1.5 the game uses it as run-time state: it sets it to 1 when play resumes (a menu or the dialogue box closes: `Menu_OnKey` `0x53B5D`, `CChatBox::Close` `0x35E89`, the shop, the map) and to 0 when something covers the field (`CChatBox::Show` `0x3573D`, `Popup_Open` `0x3EAA1` for popup `0x68`, scenes, `CStateGame::Enter` `0x80A35`). So the saved value is whatever it was at the last save, and entering the game resets it. |
+| 5 | 1 | `unknown_5` | information lines (the row `CDataMgr.drawConfig.6`, values `.17`–`.19`: off, one line, three lines; the row can't be selected, so it stays 1). The byte indexes `{0, 1, 3}` (`0x108C4C`), the most lines the on-screen message list (`CNotifyTextList`) keeps: `CStateGame::LoadGame` `0x86C1D` builds the list with it and `0x37B85` sets it with `CNotifyTextList::SetMaxLines` `0x785BD`. With 0, `CNotifyTextList::Add` `0x78339` adds nothing. Read unchecked: values above 2 read past the table. |
 
 The game writes only 0–2 to bytes 1 and 5, but never checks them on load. The port reads values above 2 as 2 (`mt_saves_sanitise`, [ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)), leaving the file itself unchanged; the original's out-of-bounds read is on [the list of original bugs](../re/original-bugs.md#4-unchecked-config-bytes).
 
@@ -169,7 +209,11 @@ The game writes only 0–2 to bytes 1 and 5, but never checks them on load. The 
 | Offset | Type | Field | Meaning |
 |---|---|---|---|
 | 0x000 | i32 × 3 | `best_scores` | data manager `+0x438`, `+0x43C`, `+0x440`: the best score of each of three modes of a mini-game; raised by its result screen `0x819E5` (`CStateGame.resultMonCa.*`) |
-| 0x00C | 50 × 0x77 | `entries` | `char[64] text_a; char[35] text_b; char[10] text_c; char[10] text_d` (data manager `+0x118`, `+0x1E0`, `+0x2A8`, `+0x370` pointer arrays), listed by the menu in `0x9462D`; meaning unknown (the name suggests coupons) |
+| 0x00C | 50 × 0x77 | `entries` | `char[64] text_a; char[35] text_b; char[10] text_c; char[10] text_d` (data manager `+0x118`, `+0x1E0`, `+0x2A8`, `+0x370` pointer arrays): a coupon list left over from the online version, [see below](#coupons) |
+
+### Coupons
+
+The entries are coupons that a server once issued. **Nothing in 1.5 adds one**: the only writers of the four arrays are `LoadCupon` (from the file) and `CDataMgr::DeleteCoupon` `0x491E1`, which empties entry *n* and moves the later ones up. The main menu's coupon screen (`CStateMainMenu::OnKeyPressed` `0x9462D`, states 10 and 11) counts the entries whose `text_a` is not empty (`CDataMgr::CountCoupons` `0x36D89`) to size its list, opens popup `0x21` on one, and deletes it through `0x491E1`. The strings themselves are never drawn: `CStateMainMenu::Paint` `0x944D1` only clears the screen, and the keys that would label them (`CStateMainMenu.Paint.11`–`.13`: no coupons, issue date, expiry date) are in `ScriptExtra.strings` but no code looks them up. By those keys and the sizes, `text_a` is the coupon's name (it marks the entry as used), `text_b` its code or description, and `text_c` and `text_d` its issue and expiry dates (ten bytes, a date string). So every `cupon` file that 1.5 writes holds 50 empty entries.
 
 ## `CTerms` (2 bytes)
 

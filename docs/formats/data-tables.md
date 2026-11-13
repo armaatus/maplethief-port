@@ -4,7 +4,7 @@ The game's static content (character levels, monsters, NPC names, items, skills,
 
 - **Files:** `English/data/`, `Korean/data/` and `Japanese/data/` in `MapleThief.app/`, each with `hero`, `mob`, `npc`, `item_equip`, `item_etc`, `skill`, `market` and `buildup` `.dat`: 24 files.
 - **Parser:** [`tools/mtport/datatables.py`](../../tools/mtport/datatables.py) (one typed dataclass per table; field order = byte order). Tests: [`tests/test_datatables.py`](../../tests/test_datatables.py) (synthetic) and [`tests/test_datatables_real.py`](../../tests/test_datatables_real.py) (every shipped file).
-- **Status:** all 24 files parse with zero leftover bytes (21 tables + 3 `buildup.dat`). Every column's position and type is known from code, and every column but `hero.unknown_9` and `skill.unknown_23` / `unknown_24` (never read) has a known use (#214). Three columns keep their old `unknown_*` names for compatibility: `mob.unknown_23` (speed), `mob.unknown_24` (movement kind) and `item_etc.unknown_84` (star value).
+- **Status:** all 24 files parse with zero leftover bytes (21 tables + 3 `buildup.dat`). Every column's position and type is known from code, and every column but `hero.unknown_9` and `skill.unknown_23` / `unknown_24`, which 1.5 never reads, has a known use (#214, #380). Three columns keep their old `unknown_*` names for compatibility: `mob.unknown_23` (speed), `mob.unknown_24` (movement kind) and `item_etc.unknown_84` (star value).
 
 ## Where the game loads them
 
@@ -86,7 +86,7 @@ One row per character level, 1–100 (`HeroLevel`).
 | 0x01 | i32 | `exp` | EXP needed to finish this level | 10–73,260 | code: the need of the current level, `CHero::ExpToLevelUp` `0x65919` (EXP bar; `CHero::setExp` `0x6654D` carries the rest over) |
 | 0x05 | i16 | `hp_gain` | max HP gained at this level; max HP = Σ over levels 1..L (`CHero::MaxHpFromTable` `0x63C3D`) | 10–100 | code: the HP sum, set as max HP by `CHero::LevelUp` `0x65089` |
 | 0x07 | i16 | `mp_gain` | max MP gained at this level; Σ in `CHero::MaxMpFromTable` `0x63BB9` | 10–100 | code: the MP sum, set as max MP by `0x65089` |
-| 0x09 | u8 | `unknown_9` | never read: no accessor call with offset 9 in the full-program decompile (#214). Skill points per level are fixed in `0x65089` (0 below level 10, 1 up to level 29, 2 from 30), not taken from this column. | 1 | unknown |
+| 0x09 | u8 | `unknown_9` | unused in 1.5. No accessor reads it: the `u8` accessor `0x398D5` is never called with offset 9 (`PopupMenu_PaintStatusTab` reads `0x0A + i` with *i* from 0 to 3), and the wider reads at offsets 1 (`i32`) and 5 and 7 (`i16`) end before it (#214, #380). Skill points per level are fixed in `0x65089` (0 below level 10, 1 up to level 29, 2 from 30), not taken from this column. | 1 | code (never read) |
 | 0x0A | u8 | `strength` | status-window stat 1 (read at offset `0x0A + i` by `PopupMenu_PaintStatusTab` `0x56321`); display only, no rule reads it | 5–39 | code + data: STR |
 | 0x0B | u8 | `dexterity` | status-window stat 2; display only | 4–54 | code + data: DEX |
 | 0x0C | u8 | `intelligence` | status-window stat 3; display only | 4–20 | code + data: INT |
@@ -129,11 +129,11 @@ In Korean the name is `c6 c4 b6 f5 b4 de c6 d8 c0 cc` = "파란달팽이" and th
 
 ### Drop odds
 
-A kill rolls each drop slot on its own (the rolls go through `Rand_Chance(n, d)` `0x22685`, true when `Rand_Next() % d + 1 <= n`). The level is read from `+0x80` of the hero object reached through the mob (`getLevel`, [script-vm.md](../re/script-vm.md), reads the same field), so it is probably the hero's level.
+A kill rolls each drop slot on its own (the rolls go through `Rand_Chance(n, d)` `0x22685`, true when `Rand_Next() % d + 1 <= n`). The level is the hero's: the drop routines read `+0x80` (the level, [save.md](save.md)) of the hero at `CStateGame+0x30`, reached through the drop list's game-state pointer (`+4`). The script's `getLevel` reads the same field.
 
 - **Equipment** (`0x5C8ED`): only when `equip_drop_chance` is 1 or more, `Rand_Chance(equip_drop_chance + level, 100000)`. A chance of 600 is 0.6 % before the level bonus, not 60 %. The id is not checked: `equip_drop` 0 with a chance drops item 0 (the Red Snail's Red Woolen Hat).
 - **Other items** (`0x5C699`, slots 1 to 3): only when the slot's chance is 1 or more, `Rand_Chance(level / 10 + chance, 1000)`. An id of 0 with a chance drops `item_etc` 0.
-- **Meso** (`0x5C3C1`): an amount `Rand_Range(meso × 8 / 10, meso × 12 / 10)` (integer division), dropped when it is 1 or more and `Rand_Percent(80)` passes. The drop is the `item_etc` meso item 0 for 1 to 99, 1 for 100 to 199 and 2 for 200 and up. A flag argument of the routine switches to a second formula (`meso / k − 5` to `meso / 18`, with a divisor not yet read); where it is set is not known.
+- **Meso** (`0x5C3C1`): an amount `Rand_Range(meso × 8 / 10, meso × 12 / 10)` (integer division), dropped when it is 1 or more and `Rand_Percent(80)` passes. The drop is the `item_etc` meso item 0 for 1 to 99, 1 for 100 to 199 and 2 for 200 and up. A flag argument switches to a second formula, `Rand_Range(meso / 18 − 5, meso / 18)`: the divisor is 18 at both ends (the decompiler drops the first one; the code loads 18 into `r1` for both divisions at `0x5C4A6`). Only `CSkill::Pickpocket` `0x7EB35` sets the flag; `RollMobDrops` `0x5CAD9` passes 0. A mob with `meso` below 108 gives at most 5, and one below 18 nothing, since an amount of 0 or less drops no bag ([mechanics](../re/mechanics.md#taking-damage)).
 
 The compendium knowledge base gives each drop its chance, its divisor (`per`) and its percentage before the level bonus ([compendium/kb.md](../compendium/kb.md)).
 
@@ -223,8 +223,8 @@ One row per skill (`Skill`). Each value pair gives `base + (skill_level − 1) �
 | 0x14 | u8 | `tier` | skill-window tier | 1–4 | code (`0x7FD69`) + data |
 | 0x15 | u8 | `type` | 0 basic attack, 1 passive, 2 buff, 3 active attack (`0x7EEBD` tests 1) | 0–3 | code + data |
 | 0x16 | u8 | `max_level` | maximum skill level; 0 = not learnable | 0–20 | code + data |
-| 0x17 | u8 | `unknown_23` | never read: no accessor call with offset `0x17` in the full-program decompile (#214); 0 in every row | 0 | unknown |
-| 0x18 | u8 | `unknown_24` | never read: no accessor call with offset `0x18` (#214); 0 in every row | 0 | unknown |
+| 0x17 | u8 | `unknown_23` | unused in 1.5: 0 in every row. The only accessor calls with offset `0x17` read the mob table (`CMob::LoadStats` `0x73B51`), and the `skill.dat` reads go to `0x15`, `0x16` and the `i16` pairs from `0x19` (#214, #380) | 0 | code (never read) |
+| 0x18 | u8 | `unknown_24` | unused in 1.5: 0 in every row; the only offset-`0x18` read is again the mob table's (`0x73B51`) | 0 | code (never read) |
 | 0x19 | i16 | `damage_base` | `@dmg` (damage %) at level 1: the damage roll adds this % of the base (`0x64DA1`); Concentration's attack bonus | 0–65 | code |
 | 0x1B | i16 | `damage_per_level` | added per level | 0–31 | code |
 | 0x1D | i16 | `time_base` | `@time` (buff duration, ticks) at level 1 (`0x7EC3D`) | 0–500 | code |
@@ -257,7 +257,7 @@ Example: `00 00 00 | aa000000` (shop 0 sells equip 0, Red Woolen Hat, for 170).
 
 `0x980B5` handles one state of the title/logo scene (state 3, just before `SetState(TITLE_MAIN)`). In that state it loads the file through `0xB5DD` and copies its bytes into a NUL-terminated string (`0x1BDB1`). It converts the string with `atoi` and stores the result at `+0x40` of the object at `*0x11A970`. The parser (`parse_buildup`) returns that integer.
 
-No reader of that field was found. The search covered the 93 field reads through the `0x11A970` pointer, the `this`-relative reads in the data-manager methods, and `SaveSaveData` (`0x38711`) / `LoadSaveData` (`0x39989`). A second search in the full-program Ghidra decompile (#214, 2026-11-06) found data manager `+0x40` written only by `0x980B5` and read nowhere. So what it controls is still unknown, and it looks unused in 1.5. The name suggests a build or content revision ("build-up").
+**Nothing reads that field, so `buildup.dat` is unused in 1.5.** The search covered the 93 field reads through the `0x11A970` pointer, the `this`-relative reads in the data-manager methods, and `SaveSaveData` (`0x38711`) / `LoadSaveData` (`0x39989`). The full-program Ghidra decompile (#214, 2026-11-06) has data manager `+0x40` written only by `0x980B5`. A third pass (#380) followed every local that holds the data manager pointer (`*0xF1454`) in every function, and `this` in every `CDataMgr` method: the only access to `+0x40` is that write. The name suggests a build or content revision ("build-up"); the value is never compared with anything.
 
 ## Validation
 
