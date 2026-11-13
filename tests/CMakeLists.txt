@@ -11,6 +11,12 @@ set(MAPLETHIEF_TEST_OUTPUT_DIR
     "${CMAKE_BINARY_DIR}/test-output"
     CACHE PATH "Directory for test output files such as golden-image diffs (ADR 0005)")
 
+# The linux-fuzz preset (#322, ADR 0158) builds the libFuzzer targets and nothing else here.
+if(MAPLETHIEF_FUZZ)
+    add_subdirectory(fuzz)
+    return()
+endif()
+
 # One main() for every doctest executable.
 add_library(maplethief_doctest_main OBJECT cpp/doctest_main.cpp)
 target_link_libraries(maplethief_doctest_main PUBLIC doctest::doctest)

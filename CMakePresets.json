@@ -198,6 +198,17 @@
       }
     },
     {
+      "name": "linux-fuzz",
+      "displayName": "Linux libFuzzer targets of tests/fuzz/ with ASan and UBSan (clang)",
+      "description": "linux-asan plus MAPLETHIEF_FUZZ, at -O1: only the fuzz targets and their seed corpora (ADR 0158, #322)",
+      "inherits": "linux-asan",
+      "cacheVariables": {
+        "MAPLETHIEF_FUZZ": "ON",
+        "CMAKE_C_FLAGS_DEBUG": "-g -O1",
+        "CMAKE_CXX_FLAGS_DEBUG": "-g -O1"
+      }
+    },
+    {
       "name": "linux-release",
       "displayName": "Linux Release",
       "inherits": "linux-base",
@@ -272,6 +283,7 @@
     { "name": "win-player", "configurePreset": "win-player", "targets": ["MapleThief"] },
     { "name": "linux-debug", "configurePreset": "linux-debug" },
     { "name": "linux-asan", "configurePreset": "linux-asan" },
+    { "name": "linux-fuzz", "configurePreset": "linux-fuzz", "targets": ["maplethief_fuzz"] },
     { "name": "linux-release", "configurePreset": "linux-release" },
     { "name": "linux-player", "configurePreset": "linux-player", "targets": ["MapleThief"] },
     { "name": "switch-debug", "configurePreset": "switch-debug" },
@@ -312,6 +324,14 @@
     { "name": "win-player", "inherits": "player-base", "configurePreset": "win-player" },
     { "name": "linux-debug", "inherits": "test-base", "configurePreset": "linux-debug" },
     { "name": "linux-asan", "inherits": "asan-base", "configurePreset": "linux-asan" },
+    {
+      "name": "linux-fuzz",
+      "inherits": "test-base",
+      "configurePreset": "linux-fuzz",
+      "description": "The CI smoke: each fuzz target for MAPLETHIEF_FUZZ_SMOKE_SECONDS from its seeds (fuzz_run.py sets the sanitizer options)",
+      "filter": { "include": { "label": "^fuzz$" } },
+      "execution": { "noTestsAction": "error", "jobs": 4 }
+    },
     { "name": "linux-release", "inherits": "test-base", "configurePreset": "linux-release" },
     { "name": "linux-player", "inherits": "player-base", "configurePreset": "linux-player" },
     {
@@ -413,6 +433,14 @@
         { "type": "configure", "name": "linux-asan" },
         { "type": "build", "name": "linux-asan" },
         { "type": "test", "name": "linux-asan" }
+      ]
+    },
+    {
+      "name": "linux-fuzz",
+      "steps": [
+        { "type": "configure", "name": "linux-fuzz" },
+        { "type": "build", "name": "linux-fuzz" },
+        { "type": "test", "name": "linux-fuzz" }
       ]
     },
     {
