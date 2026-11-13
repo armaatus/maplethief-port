@@ -81,7 +81,7 @@ Closes [#92](https://github.com/armaatus/maplethief-port/issues/92). The #79 pla
 
 ## #94: Release v1.0.0
 
-Closes [#94](https://github.com/armaatus/maplethief-port/issues/94). Needs #79, #92, #93 and #228 signed off. The issue body predates ADR 0126 and the public repository: there is no hand-pushed tag, the release goes through a release PR, and the assets are the player builds and the kits (as in v0.1.0). [The release checklist](../../release-checklist.md) is the full procedure; in short:
+Closes [#94](https://github.com/armaatus/maplethief-port/issues/94). Needs #79, #92, #93 and #228 signed off. The release goes through a release PR, and the assets are the player builds, the kits and the Switch zip (as in v0.1.0); #94 was reworded to match on 2026-11-13, when ADR 0146 was accepted. [The release checklist](../../release-checklist.md) is the full procedure; in short:
 
 1. Before: label the epic PRs since v0.1.0, read `.github/release-notes-header.md`, `gh auth status` and `scripts/bootstrap && python3 -m recomp all` on both machines.
 2. Optional rehearsal: `git tag -a v0.0.0-rc.99 -m rehearsal`, `scripts/release build v0.0.0-rc.99 --dry-run`, `git tag -d v0.0.0-rc.99`.
@@ -89,15 +89,18 @@ Closes [#94](https://github.com/armaatus/maplethief-port/issues/94). Needs #79, 
 4. Mac: `git fetch origin --tags && scripts/release build v1.0.0 --players-only`.
 5. Windows PC: `git fetch origin --tags`, then `powershell -ExecutionPolicy Bypass -File scripts\release.ps1 build v1.0.0 -PlayersOnly`.
 6. Mac: `scripts/release publish v1.0.0` (add `--platforms mac,linux,windows` if there is no Switch zip).
-7. After: in an empty folder, `shasum -a 256 -c SHA256SUMS`; each player build's `--version` prints `MapleThief 1.0.0`; a fresh-folder import per player build.
+7. itch.io (after the #208 one-time steps below): `scripts/release itch v1.0.0 --dry-run`, then `scripts/release itch v1.0.0` on the Mac, and `scripts\release.ps1 itch v1.0.0` on the PC.
+8. After: in an empty folder, `shasum -a 256 -c SHA256SUMS`; each player build's `--version` prints `MapleThief 1.0.0`; a fresh-folder import per player build.
 
 **Post back:** the release URL, the `shasum -c` output and the `--version` lines.
 
 ## #208: itch.io page
 
-Covers [#208](https://github.com/armaatus/maplethief-port/issues/208)'s human part. The tooling (`scripts/release itch`, the page text) lands with the #208 child of epic #106; until it is merged, only the one-time steps can be done, and this section gets its exact commands then.
+Covers [#208](https://github.com/armaatus/maplethief-port/issues/208)'s human part. The tooling and the page text are in this repository ([ADR 0146](../../adr/0146-distribution-on-itch-io.md), accepted): `scripts/release itch TAG` pushes the published player builds, the Switch zip included, and [the release checklist](../../release-checklist.md), step 5, has the full procedure.
 
-1. One time: create the itch.io project (downloadable, draft) with "$0 or donate", payouts and the tax form. Create an itch API key and set it as `BUTLER_API_KEY` on the Mac and the PC; never commit or paste it. Supply the donation link and a cover and banner of your own art.
-2. After #94's publish: push the builds with butler from both machines, paste the page text into the itch editor and publish, then post the launch devlog in your own words.
+1. One time: create the itch.io project `armaatus/maplethief` (downloadable, draft) with "$0 or donate", payouts and the tax form. Create an itch API key and set it as `BUTLER_API_KEY` in the environment on the Mac and the PC; never commit it or put it on a command line. Add a cover and banner of your own art, and gameplay screenshots from a local build (never committed).
+2. Paste [docs/itch/page.md](../../itch/page.md) into the page editor and fill the fields from [docs/itch/metadata.md](../../itch/metadata.md).
+3. After #94's publish, on the Mac: `scripts/release itch v1.0.0 --dry-run`, then `scripts/release itch v1.0.0` (macOS, Linux and Switch channels). On the PC: `powershell -ExecutionPolicy Bypass -File scripts\release.ps1 itch v1.0.0` (Windows channel).
+4. Download each file from the page into an empty folder and compare its `shasum -a 256` with `SHA256SUMS`. Publish the page, then post the launch devlog in your own words.
 
-**Post back:** `butler status` showing every channel at 1.0.0, that each download's checksum matches `SHA256SUMS`, and the page's address.
+**Post back:** `butler status` showing every channel at 1.0.0, the checksum comparison, and the page's address.
