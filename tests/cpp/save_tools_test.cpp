@@ -739,6 +739,44 @@ TEST_CASE("save tools: a symbolic link in a folder of saves is not followed (#41
     CHECK(files.empty());
 }
 
+TEST_CASE("save tools: an allocation that fails while reading a set is a refusal, and nothing "
+          "is written (#413)") {
+    // The inflate's output cannot be allocated: the import, the restore and --check-saves's
+    // read refuse the set with a reason. Without the catch, std::bad_alloc left the save tools
+    // and ended the game.
+    const TempDir tmp("alloc");
+    const fs::path &root = tmp.path;
+    const fe::SaveLocation loc = location(root);
+    const Tree before = {{"theif0", new_character(9)}, {"quest0", new_quests()}};
+    write_tree(loc.documents_dir, before);
+    std::vector<fe::ZipEntry> entries;
+    for (const auto &[name, bytes] : valid_set()) {
+        entries.push_back({"Documents/" + name, bytes});
+    }
+    write_bytes(root / "set.zip", fe::zip_store(entries));
+    fe::SaveSet files;
+    std::vector<std::string> ignored;
+    std::string why;
+    fe::zip_fail_alloc_for_test(true);
+    bool read = true;
+    CHECK_NOTHROW(read = fe::read_save_source((root / "set.zip").string(), &files, &ignored, &why));
+    CHECK_FALSE(read);
+    CHECK(why.find("out of memory") != std::string::npos);
+    CHECK(files.empty());
+    fe::ImportResult result;
+    bool imported = true;
+    CHECK_NOTHROW(imported =
+                      fe::import_saves(loc, (root / "set.zip").string(), stamp(2), &result, &why));
+    fe::zip_fail_alloc_for_test(false);
+    CHECK_FALSE(imported);
+    CHECK(why.find("out of memory") != std::string::npos);
+    CHECK(result.imported.empty());
+    CHECK(tree(loc.documents_dir) == before);
+    CHECK_FALSE(fs::exists(loc.backups_dir));
+    // With the memory there, the same zip imports.
+    CHECK(fe::import_saves(loc, (root / "set.zip").string(), stamp(3), &result, &why));
+}
+
 TEST_CASE("save tools: the base folder around the executable or the app (ADR 0127)") {
     CHECK(fe::portable_base_dir("/Games/MapleThief/") == "/Games/MapleThief");
     CHECK(fe::portable_base_dir("C:\\Games\\MapleThief\\") == "C:\\Games\\MapleThief");

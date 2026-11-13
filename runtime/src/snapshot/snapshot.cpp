@@ -24,6 +24,7 @@
 #include <cstring>
 #include <functional>
 #include <mutex>
+#include <new>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -58,10 +59,13 @@ constexpr u32 k_page = 4096u;
 
 mt_snapshot_config g_config = {0x11AA00u, 0x108C64u, 1};
 
-void set_why(char *why, std::size_t size, const std::string &text) {
+void set_why(char *why, std::size_t size, const char *text) {
     if (why != nullptr && size != 0) {
-        std::snprintf(why, size, "%s", text.c_str());
+        std::snprintf(why, size, "%s", text);
     }
+}
+void set_why(char *why, std::size_t size, const std::string &text) {
+    set_why(why, size, text.c_str());
 }
 
 // The guest's clock now, Unix microseconds (what gettimeofday and CFAbsoluteTime read).
@@ -1034,8 +1038,9 @@ extern "C" mt_snapshot_expect mt_snapshot_expect_default(void) noexcept {
     return e;
 }
 
-extern "C" int mt_snapshot_save(mt_cpu *cpu, const mt_snapshot_meta *meta, std::uint8_t **out,
-                                std::size_t *size, char *why, std::size_t why_size) noexcept {
+// mt_snapshot_save, which may throw std::bad_alloc.
+static int save_state(mt_cpu *cpu, const mt_snapshot_meta *meta, std::uint8_t **out,
+                      std::size_t *size, char *why, std::size_t why_size) {
     const mt_snapshot_meta m = meta != nullptr ? *meta : mt_snapshot_meta_default();
     *out = nullptr;
     *size = 0;
@@ -1127,13 +1132,30 @@ extern "C" int mt_snapshot_save(mt_cpu *cpu, const mt_snapshot_meta *meta, std::
     return 0;
 }
 
+extern "C" int mt_snapshot_save(mt_cpu *cpu, const mt_snapshot_meta *meta, std::uint8_t **out,
+                                std::size_t *size, char *why, std::size_t why_size) noexcept {
+    *out = nullptr;
+    *size = 0;
+    try {
+        return save_state(cpu, meta, out, size, why, why_size);
+    } catch (const std::bad_alloc &) {
+        set_why(why, why_size, "out of memory");
+        return -1;
+    }
+}
+
 extern "C" int mt_snapshot_read_header(const std::uint8_t *bytes, std::size_t size,
                                        const mt_snapshot_expect *expect, mt_snapshot_header *header,
                                        char *why, std::size_t why_size) noexcept {
     std::string reason;
     mt_snapshot_header h{};
-    if (!read_state_file(bytes, size, expect, &h, nullptr, &reason)) {
-        set_why(why, why_size, reason);
+    try {
+        if (!read_state_file(bytes, size, expect, &h, nullptr, &reason)) {
+            set_why(why, why_size, reason);
+            return -1;
+        }
+    } catch (const std::bad_alloc &) {
+        set_why(why, why_size, "out of memory while reading the state");
         return -1;
     }
     if (header != nullptr) {
@@ -1152,16 +1174,29 @@ extern "C" int mt_snapshot_restore(mt_cpu *cpu, const std::uint8_t *bytes, std::
     std::string reason;
     mt_snapshot_header h{};
     std::vector<Section> sections;
-    if (!read_state_file(bytes, size, expect, &h, &sections, &reason)) {
-        set_why(why, why_size, reason);
-        return -1;
-    }
     Staged st;
-    if (!stage(cpu, rt, sections, &st, &reason)) {
-        set_why(why, why_size, reason);
+    // Reading and staging change nothing, so an allocation that fails there is one more refusal
+    // (#413, ADR 0154): std::bad_alloc must not leave this noexcept function.
+    try {
+        if (!read_state_file(bytes, size, expect, &h, &sections, &reason)) {
+            set_why(why, why_size, reason);
+            return -1;
+        }
+        if (!stage(cpu, rt, sections, &st, &reason)) {
+            set_why(why, why_size, reason);
+            return -1;
+        }
+    } catch (const std::bad_alloc &) {
+        set_why(why, why_size, "out of memory while reading the state: nothing changed");
         return -1;
     }
-    if (!apply(cpu, rt, st)) {
+    bool applied = false;
+    try {
+        applied = apply(cpu, rt, st);
+    } catch (const std::bad_alloc &) {
+        applied = false;
+    }
+    if (!applied) {
         set_why(why, why_size, "out of memory while restoring: the game is in an unknown state");
         return -1;
     }

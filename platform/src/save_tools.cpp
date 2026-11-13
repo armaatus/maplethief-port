@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <new>
 #include <optional>
 #include <system_error>
 #include <utility>
@@ -243,8 +244,11 @@ SaveSet read_save_dir(const std::string &dir) {
     return files;
 }
 
-bool read_save_source(const std::string &source, SaveSet *files, std::vector<std::string> *ignored,
-                      std::string *why) {
+namespace {
+
+// read_save_source, which may throw std::bad_alloc.
+bool read_source(const std::string &source, SaveSet *files, std::vector<std::string> *ignored,
+                 std::string *why) {
     files->clear();
     ignored->clear();
     std::error_code ec;
@@ -345,6 +349,21 @@ bool read_save_source(const std::string &source, SaveSet *files, std::vector<std
     return true;
 }
 
+} // namespace
+
+bool read_save_source(const std::string &source, SaveSet *files, std::vector<std::string> *ignored,
+                      std::string *why) {
+    // The set is untrusted (ADR 0154): an allocation that fails while reading it is a refusal
+    // like any other, never an exception out of the import, the restore or --check-saves (#413).
+    try {
+        return read_source(source, files, ignored, why);
+    } catch (const std::bad_alloc &) {
+        files->clear();
+        ignored->clear();
+        return fail(why, "out of memory while reading " + source + ": nothing was read");
+    }
+}
+
 std::vector<SaveProblem> check_save_set(const SaveSet &files) {
     std::vector<SaveProblem> problems;
     for (const SaveFile &f : files) {
@@ -424,8 +443,11 @@ bool export_saves(const SaveLocation &loc, const std::string &dest,
     return true;
 }
 
-bool import_saves(const SaveLocation &loc, const std::string &source, const std::string &stamp,
-                  ImportResult *result, std::string *why) {
+namespace {
+
+// import_saves, which may throw std::bad_alloc.
+bool import_set(const SaveLocation &loc, const std::string &source, const std::string &stamp,
+                ImportResult *result, std::string *why) {
     ImportResult local;
     ImportResult &r = result != nullptr ? *result : local;
     r = ImportResult{};
@@ -521,6 +543,17 @@ bool import_saves(const SaveLocation &loc, const std::string &source, const std:
         }
     }
     return true;
+}
+
+} // namespace
+
+bool import_saves(const SaveLocation &loc, const std::string &source, const std::string &stamp,
+                  ImportResult *result, std::string *why) {
+    try {
+        return import_set(loc, source, stamp, result, why);
+    } catch (const std::bad_alloc &) {
+        return fail(why, "out of memory while importing " + source);
+    }
 }
 
 // --- Backups -----------------------------------------------------------------------------------

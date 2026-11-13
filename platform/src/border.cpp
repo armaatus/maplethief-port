@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <new>
 #include <utility>
 
 // The pinned stb_image (ADR 0003), a private copy (static linkage) for the player's border art:
@@ -80,11 +81,16 @@ bool decode_border_image(const std::uint8_t *data, std::size_t size, BorderImage
     if (pixels == nullptr) {
         return fail(std::string("the PNG is broken (") + stbi_failure_reason() + ")");
     }
+    const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4;
+    try {
+        out->rgba.assign(pixels, pixels + n);
+    } catch (const std::bad_alloc &) {
+        stbi_image_free(pixels);
+        return fail("out of memory");
+    }
+    stbi_image_free(pixels);
     out->width = static_cast<std::uint32_t>(w);
     out->height = static_cast<std::uint32_t>(h);
-    const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4;
-    out->rgba.assign(pixels, pixels + n);
-    stbi_image_free(pixels);
     return true;
 }
 
@@ -109,13 +115,23 @@ bool load_border_image(const std::string &path, BorderImage *out, std::string *w
                              : "the file is over " + std::to_string(kMaxBorderImageBytes >> 20) +
                                    " MiB");
     }
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
-    const std::size_t got = bytes.empty() ? 0 : SDL_ReadIO(io, bytes.data(), bytes.size());
-    SDL_CloseIO(io);
-    if (got != bytes.size()) {
-        return fail("cannot read it");
+    // The art is untrusted (ADR 0154): an allocation that fails is a refusal, not an exception
+    // out of the frame (#413).
+    try {
+        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+        const std::size_t got = bytes.empty() ? 0 : SDL_ReadIO(io, bytes.data(), bytes.size());
+        SDL_CloseIO(io);
+        io = nullptr;
+        if (got != bytes.size()) {
+            return fail("cannot read it");
+        }
+        return decode_border_image(bytes.data(), bytes.size(), out, why);
+    } catch (const std::bad_alloc &) {
+        if (io != nullptr) {
+            SDL_CloseIO(io);
+        }
+        return fail("out of memory");
     }
-    return decode_border_image(bytes.data(), bytes.size(), out, why);
 }
 
 // --- Border -----------------------------------------------------------------------------------

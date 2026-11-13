@@ -48,6 +48,8 @@ namespace {
 constexpr u32 k_text_max = 512;
 constexpr const char *k_format = "maplethief-gamecenter";
 constexpr std::int64_t k_version = 1;
+// A larger gamecenter.json is not read (#413, ADR 0154): the port's own is a few kilobytes.
+constexpr std::size_t k_max_file_bytes = 1u << 20;
 
 // --- the file ------------------------------------------------------------------------------
 
@@ -206,8 +208,13 @@ void store_load(Store *st) {
         return;
     }
     std::size_t size = 0;
-    char *text = read_file(path, &size);
+    bool too_large = false;
+    char *text = read_file(path, &size, k_max_file_bytes, &too_large);
     if (text == nullptr) {
+        if (too_large) {
+            log("GameKit: %s is larger than %zu bytes; starting empty", path, k_max_file_bytes);
+            st->unreadable = true;
+        }
         return;
     }
     JsonValue root{};

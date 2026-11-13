@@ -19,6 +19,7 @@
 #include "cf/cf_hle.h"
 #include "cf/cf_objects.h"
 #include "cg/cg_objects.h"
+#include "cg/zlib.h"
 #include "foundation/foundation.h"
 #include "maplethief/cf.h"
 #include "maplethief/gfx.h"
@@ -384,6 +385,84 @@ TEST_CASE("snapshot: the sections' inflated total is capped before any is inflat
     CHECK_FALSE(mt_snap::read_state_file(b.data(), b.size(), nullptr, &h, &sections, &why));
     CHECK(why.find("the sections come to more than") != std::string::npos);
     CHECK(sections.empty());
+}
+
+TEST_CASE("snapshot: a section named twice or with a bad name is refused (#413)") {
+    const auto read_why = [](const Bytes &b) {
+        mt_snapshot_header h{};
+        std::vector<mt_snap::Section> sections;
+        std::string why;
+        CHECK_FALSE(mt_snap::read_state_file(b.data(), b.size(), nullptr, &h, &sections, &why));
+        CHECK(sections.empty());
+        return why;
+    };
+    {
+        mt_snapshot_header h{};
+        h.format = MT_SNAPSHOT_FORMAT;
+        std::vector<mt_snap::Section> twice;
+        twice.push_back(mt_snap::Section{"alpha", Bytes(10, 1)});
+        twice.push_back(mt_snap::Section{"alpha", Bytes(10, 2)});
+        Bytes b;
+        std::string why;
+        REQUIRE(mt_snap::write_state_file(h, twice, true, &b, &why));
+        CHECK(read_why(b) == "section alpha appears twice");
+    }
+    const Bytes good = synthetic_file(true);
+    REQUIRE(good[104] == 5u); // "alpha"
+    for (const u8 c : {u8(' '), u8(0x7F), u8(0), u8(0xC3)}) {
+        CAPTURE(int(c));
+        Bytes b = good;
+        b[106] = c; // "a?pha": the name is outside every CRC
+        CHECK(read_why(b) == "section 0: malformed name");
+        CHECK(header_why(b) == "section 0: malformed name");
+    }
+    for (const u8 len : {u8(0), u8(mt_snap::k_max_name + 1)}) {
+        CAPTURE(int(len));
+        Bytes b = good;
+        b[104] = len;
+        CHECK(read_why(b) == "section 0: truncated or malformed name");
+    }
+    // A name of k_max_name printable bytes is read.
+    mt_snapshot_header h{};
+    h.format = MT_SNAPSHOT_FORMAT;
+    const std::string longest(mt_snap::k_max_name, '~');
+    std::vector<mt_snap::Section> one;
+    one.push_back(mt_snap::Section{longest, Bytes(4, 7)});
+    Bytes b;
+    std::string why;
+    REQUIRE(mt_snap::write_state_file(h, one, true, &b, &why));
+    std::vector<mt_snap::Section> got;
+    REQUIRE(mt_snap::read_state_file(b.data(), b.size(), nullptr, &h, &got, &why));
+    CHECK(got.at(0).name == longest);
+}
+
+TEST_CASE("snapshot: an allocation that fails while reading a state is a refusal, and nothing "
+          "changes (#413)") {
+    // The inflate's output cannot be allocated: the restore says so and leaves the game as it
+    // was, as for any other refusal. Without the catch, std::bad_alloc left the noexcept
+    // mt_snapshot_restore and terminated the process.
+    World w;
+    mt_cpu &cpu = w.cpu;
+    const u32 str = mt_cf::string_create(&cpu, u"before", true);
+    const Bytes file = save(w);
+    mt_cf::string_mutable_chars(&cpu, str)->assign(u"after");
+    mt_heap_stats now{};
+    mt_heap_get_stats(w.mem, &now);
+    mt_cg::zlib_inflate_fail_alloc_for_test(true);
+    std::string why;
+    CHECK_NOTHROW(why = restore_why(w, file));
+    // The header alone inflates nothing: it still reads.
+    CHECK(header_why(file).empty());
+    mt_cg::zlib_inflate_fail_alloc_for_test(false);
+    CHECK(why == "out of memory while reading the state: nothing changed");
+    mt_heap_stats after{};
+    mt_heap_get_stats(w.mem, &after);
+    CHECK(after.top == now.top);
+    CHECK(after.live_blocks == now.live_blocks);
+    CHECK(w.text(str) == u"after");
+    // With the memory there, the same file restores.
+    CHECK(restore_why(w, file).empty());
+    CHECK(w.text(str) == u"before");
 }
 
 TEST_CASE("snapshot: the safe point refuses outside the field, with a touch, a key or work "

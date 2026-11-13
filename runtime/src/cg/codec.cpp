@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -128,10 +129,19 @@ bool zlib_deflate(const u8 *data, std::size_t size, std::vector<u8> &out) {
     return true;
 }
 
+namespace {
+bool g_inflate_fail_alloc = false; // zlib_inflate_fail_alloc_for_test
+} // namespace
+
+void zlib_inflate_fail_alloc_for_test(bool on) { g_inflate_fail_alloc = on; }
+
 bool zlib_inflate(const u8 *data, std::size_t size, std::size_t expected, std::vector<u8> &out) {
     out.clear();
     if (size > 0x7FFFFFFFu || expected > 0x7FFFFFFFu) {
         return false;
+    }
+    if (g_inflate_fail_alloc) {
+        throw std::bad_alloc();
     }
     out.resize(expected != 0 ? expected : 1u);
     const int got =
