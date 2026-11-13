@@ -16,8 +16,9 @@
 # select them; the doctest programs become NROs of their own in tests/ and run on a console):
 #   platform.switch_nro    mtport.nro reads MapleThief.nro: NACP name, author and version, and
 #                          an icon that is a 256 x 256 baseline JPEG (docs/formats/nro.md)
-#   platform.switch_guard  the release guard's checks on MapleThief.nro (mtport.release); in
-#                          the player build (switch-player, #243) its player mode
+#   platform.switch_guard  the release guard's checks on MapleThief.nro (mtport.release); its
+#                          player mode when the NRO links the generated code (switch-player,
+#                          #243, or a build with --gen)
 #
 # The NACP's version is MAPLETHIEF_VERSION: from the environment on the first configure, which
 # scripts/release sets from the tag (scripts/build-switch passes it into the container), so the
@@ -66,10 +67,13 @@ add_test(
         --icon-size 256
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tools")
 set_tests_properties(platform.switch_nro PROPERTIES TIMEOUT 60)
-# The player build (MAPLETHIEF_PLAYER_BUILD, #243) holds the recompiled code: the guard's player
-# mode, which also requires it, found by the generated dispatch table's first entries.
+# An NRO that links the generated code holds the recompiled code: the player build
+# (MAPLETHIEF_PLAYER_BUILD, #243), and a local switch-release or switch-debug build with
+# --gen work/gen (ADR 0139, the game for your own console). Those get the guard's player mode,
+# which also requires the code, found by the generated dispatch table's first entries. Without
+# the generated code (the hello NRO, CI's kit) the kit mode refuses any.
 set(_maplethief_switch_guard_mode)
-if(MAPLETHIEF_PLAYER_BUILD)
+if(MAPLETHIEF_PLAYER_BUILD OR TARGET maplethief_gen)
     cmake_path(ABSOLUTE_PATH MAPLETHIEF_GEN_DIR BASE_DIRECTORY "${PROJECT_SOURCE_DIR}" NORMALIZE
                OUTPUT_VARIABLE _maplethief_switch_gen_dir)
     set(_maplethief_switch_guard_mode --mode player --dispatch

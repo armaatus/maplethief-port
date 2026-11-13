@@ -5,7 +5,7 @@
 # and kept in one log, then judged by python3 -m mtport.perfsession against #244's criterion.
 # Never runs in CI: it needs a console on this network.
 #
-# Usage: scripts/switch-perf [--ip ADDRESS] [--preset switch-release|switch-debug] [--build]
+# Usage: scripts/switch-perf [--ip ADDRESS] [--preset PRESET] [--build] [--gen DIR]
 #                            [--displays handheld,docked] [--judge LOG] [-- GAME_ARGS...]
 #
 # The game gets --perf-session --fast-forward x2 --gfx-gpu-timing and GAME_ARGS (e.g.
@@ -25,13 +25,15 @@ cd "$REPO"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: scripts/switch-perf [--ip ADDRESS] [--preset switch-release|switch-debug] [--build]
+Usage: scripts/switch-perf [--ip ADDRESS] [--preset PRESET] [--build] [--gen DIR]
                            [--displays handheld,docked] [--judge LOG] [-- GAME_ARGS...]
 
   --ip ADDRESS  the console's IP address (the Homebrew Menu's NetLoader, Y); default:
                 $MAPLETHIEF_SWITCH_IP
-  --preset P    which build's NRO: switch-release (default) or switch-debug
-  --build       build it first (scripts/build-switch HEAD --preset P)
+  --preset P    which build's NRO: switch-release (default), switch-debug or switch-player
+  --build       build it first: scripts/build-switch HEAD --preset P --gen DIR
+  --gen DIR     the generated code for --build (default work/gen, from python3 -m recomp all);
+                without it the NRO would be the hello path, which has no game to measure
   --displays D  the screens that must each pass (default handheld,docked)
   --judge LOG   only judge LOG (a kept log, or the player log from the SD card)
   GAME_ARGS     passed to the game after its session arguments
@@ -42,6 +44,7 @@ EOF
 ip_args=()
 preset=switch-release
 build=0
+gen=work/gen
 displays=handheld,docked
 judge_only=""
 extra=()
@@ -55,6 +58,11 @@ while [ "$#" -gt 0 ]; do
         --preset)
             [ "$#" -ge 2 ] || usage
             preset="$2"
+            shift 2
+            ;;
+        --gen)
+            [ "$#" -ge 2 ] || usage
+            gen="$2"
             shift 2
             ;;
         --displays)
@@ -89,16 +97,24 @@ if [ -n "$judge_only" ]; then
 fi
 
 case "$preset" in
-    switch-release | switch-debug) ;;
-    *) echo "scripts/switch-perf: --preset must be switch-release or switch-debug" >&2; exit 2 ;;
+    switch-release | switch-debug | switch-player) ;;
+    *)
+        echo "scripts/switch-perf: --preset must be switch-release, switch-debug or switch-player" >&2
+        exit 2
+        ;;
 esac
 if [ "$build" = 1 ]; then
-    scripts/build-switch HEAD --preset "$preset"
+    if [ ! -f "$gen/gen.cmake" ]; then
+        echo "scripts/switch-perf: no $gen/gen.cmake: the session measures the game, which needs" \
+            "the generated code (scripts/bootstrap && python3 -m recomp all, or --gen DIR)" >&2
+        exit 2
+    fi
+    scripts/build-switch HEAD --preset "$preset" --gen "$gen"
 fi
 nro="build/$preset/MapleThief.nro"
 if [ ! -f "$nro" ]; then
-    echo "scripts/switch-perf: no $nro: scripts/build-switch --preset $preset builds it" \
-        "(or pass --build)" >&2
+    echo "scripts/switch-perf: no $nro: scripts/build-switch --preset $preset --gen work/gen" \
+        "builds it (or pass --build)" >&2
     exit 2
 fi
 
