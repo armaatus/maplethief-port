@@ -30,6 +30,8 @@ while IFS= read -r path || [ -n "$path" ]; do
         tests/test_compendium*.py) continue ;;
         tests/test_prose_lint.py) continue ;;
         tests/test_doc_links.py) continue ;;
+        tools/mtport/handoffs.py) continue ;;
+        tests/test_handoff_checklists.py) continue ;;
         tests/test_ci_scope.py) continue ;;
         tests/fixtures/compendium/*) continue ;;
         scripts/compendium) continue ;;
