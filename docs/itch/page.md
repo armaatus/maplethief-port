@@ -2,7 +2,7 @@
 
 The text of the itch.io page `armaatus.itch.io/maplethief` ([ADR 0146](../adr/0146-distribution-on-itch-io.md)). itch.io has no API for project pages, so Joris pastes everything below the line into the page's description in the web editor. The short fields of the form (tagline, genre, tags, platforms) are in [metadata.md](metadata.md).
 
-Before pasting: replace `BUY_ME_A_COFFEE_URL` with the Buy Me a Coffee link. Links are absolute, because the text lives on itch.io. It is our own words only: no game text, and no image in the description; the screenshots are uploaded in the page's screenshot section (gameplay only, from a local build, never committed).
+Before pasting: replace `https://buymeacoffee.com/REPLACE_ME` with the Buy Me a Coffee link. Links are absolute, because the text lives on itch.io. It is our own words only: no game text, and no image in the description; the screenshots are uploaded in the page's screenshot section (gameplay only, from a local build, never committed).
 
 ---
 
@@ -103,7 +103,7 @@ The current list: [Known issues](https://github.com/armaatus/maplethief-port/blo
 
 ### Support
 
-The download is free. If you enjoy the port, you can leave a tip here, or [buy me a coffee](BUY_ME_A_COFFEE_URL). It is entirely optional.
+The download is free. If you enjoy the port, you can leave a tip here, or [buy me a coffee](https://buymeacoffee.com/REPLACE_ME). It is entirely optional.
 
 ### Legal
 
