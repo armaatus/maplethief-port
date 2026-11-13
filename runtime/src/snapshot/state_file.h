@@ -41,6 +41,8 @@ inline constexpr std::size_t k_header_size = 104;
 inline constexpr std::size_t k_max_name = 32;
 // A payload larger than this is refused (the whole guest arena is 512 MiB).
 inline constexpr std::uint32_t k_max_section = 0x30000000u;
+// The payloads together: larger is refused before any section is inflated (#324).
+inline constexpr std::uint32_t k_max_total = 0x40000000u;
 inline constexpr std::uint32_t k_section_deflated = 1u;
 
 struct Section {
