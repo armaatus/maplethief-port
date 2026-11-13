@@ -1,4 +1,4 @@
-# 147. The decompilation track: a rewrite is a hook proved equal, and the script VM goes first
+# 153. The decompilation track: a rewrite is a hook proved equal, and the script VM goes first
 
 - **Status:** Accepted (delegated by Joris, 2026-11-13)
 - **Date:** 2026-11-13
