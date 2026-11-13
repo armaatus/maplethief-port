@@ -294,8 +294,8 @@ jobs:
 
       - *linux-deps
 
-      - name: Install clang's sanitizer runtimes
-        run: sudo apt-get install -y clang libclang-rt-dev
+      - name: Install clang's sanitizer runtimes and llvm-symbolizer
+        run: sudo apt-get install -y clang libclang-rt-dev llvm
 
       - name: Show toolchain versions
         run: |
