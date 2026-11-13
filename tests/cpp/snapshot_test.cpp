@@ -555,7 +555,7 @@ TEST_CASE("snapshot: the census names every live host state type without a seria
     mt_cf::string_create(&w.cpu, u"a value", false);
     CHECK(mt_snapshot_missing(w.rt, missing, 4) == 0u);
     // A host state type nobody wrote a serializer for: named, and a save refuses.
-    static const mt_objc_state_type k_widget = {"TestWidget", 8, nullptr};
+    static const mt_objc_state_type k_widget = {"TestWidget", 8, nullptr, nullptr};
     const u32 obj = mt_objc_create_instance(w.rt, mt_objc_class_named(w.rt, "NSObject"));
     REQUIRE(mt_objc_state(w.rt, obj, &k_widget) != nullptr);
     REQUIRE(mt_snapshot_missing(w.rt, missing, 4) == 1u);

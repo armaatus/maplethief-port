@@ -40,3 +40,17 @@ What the first runs found, all fixed:
 - ASan sees the guest arena as one mapping, so it does not see a guest overflow from one guest object into the next. That is the game's memory; the checked model still traps an access outside the arena.
 - The real game runs under ASan only locally (`ctest --preset mac-asan -R '^play\.regress$'` with your own `work/gen/`). On an Apple M4 on 2026-11-13, `play.regress` took 80.5 s and `play.chapter_1_a` 360.9 s, both clean.
 - The `asan` job builds everything a second time; it runs in parallel with the `build` jobs, so the wait for a pull request grows only by its own length.
+
+## Addendum: LeakSanitizer on (#414, 2026-11-13)
+
+Accepted (delegated by Joris, 2026-11-13). This replaces point 6: the `asan-base` test preset no longer sets `detect_leaks=0`, so `linux-asan` and CI's `asan` job run LeakSanitizer (Linux's default; macOS has none, so `mac-asan` is unchanged).
+
+1. **A host state type has a `drop`** (`mt_objc_state_type`, `maplethief/objc/host.h`): it frees the host memory a state owns without calling into the guest, no messages and no guest memory. `destroy` still runs at `dealloc`; `drop` runs instead of it, never after it, in two places: `mt_objc_destroy` (`free_services`) for the states of objects still alive, and a save state's restore for the live states it replaces and for a state whose load failed half-way.
+2. **It is the snapshot's old `drop`, moved.** `mt_snap::StateOps` had the same function for restores (ADR 0105) but only for the types with a serializer, and teardown never called it. It now lives on the state type and `StateOps` lost the field, so one function serves both. The types that own host memory have one: CFString, CFURL, NSURL, NSArray, NSSet, NSDictionary, UIView, UIBezierPath, the seven CG boxes (CGContext's is new) and NSFileHandle (new: its open file; unsaved writes go with it, as when a process exits without closing the handle). Every other type holds only values and guest addresses, and has none.
+3. **What else LeakSanitizer found, all fixed:**
+   - **GL renderbuffer targets**: mt_gles frees its `mt_gfx` targets when the runtime changes, and the last runtime's were never freed. They now go at exit, from an `atexit` handler that mt_gles registers after mt_gfx makes its first target, so it runs before mt_gfx's own registry of targets is destroyed.
+   - **`__assert_rtn`'s message**: a `std::string` alive when `guest_abort`, which does not return, was called. Its scope now ends before the call.
+   - **A test thread's SDL error text**: `thread_priority_test` raises a priority on a `std::thread`, which SDL does not know, so the thread-local error buffer stayed. The test calls `SDL_CleanupTLS` at the end of the thread.
+4. **No suppressions.** `tests/test_sanitizer_suppressions.py` also fails if `detect_leaks=0` comes back into `ASAN_OPTIONS` or `LSAN_OPTIONS`.
+
+Consequence: destroying a runtime (each test's own, or the frontend's when it starts another) frees every live state's host memory, and a new state type that owns host memory needs a `drop` or the `asan` job fails on its first test that tears a runtime down with one alive.

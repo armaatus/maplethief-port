@@ -59,8 +59,8 @@ struct SessionState {
 void session_destroy(mt_cpu *cpu, u32, void *block) {
     mt_objc_release(cpu, static_cast<SessionState *>(block)->category);
 }
-const mt_objc_state_type k_session_state = {"AVAudioSession", sizeof(SessionState),
-                                            session_destroy};
+const mt_objc_state_type k_session_state = {"AVAudioSession", sizeof(SessionState), session_destroy,
+                                            nullptr};
 
 // +[AVAudioSession sharedInstance]
 void session_shared(mt_cpu *cpu) {
@@ -144,7 +144,8 @@ void player_destroy(mt_cpu *cpu, u32 self, void *block) {
     g_players.sources.erase(self);
     mt_objc_release(cpu, s->url);
 }
-const mt_objc_state_type k_player_state = {"AVAudioPlayer", sizeof(PlayerState), player_destroy};
+const mt_objc_state_type k_player_state = {"AVAudioPlayer", sizeof(PlayerState), player_destroy,
+                                           nullptr};
 
 bool read_file(const std::string &path, std::vector<std::uint8_t> *out) {
     std::ifstream in(path, std::ios::binary);
@@ -413,9 +414,9 @@ std::shared_ptr<Mp3Stream> reopen(const std::string &path, bool gapless) {
 
 extern const mt_snap::StateOps k_snap_session, k_snap_player;
 const mt_snap::StateOps k_snap_session = {&k_session_state, "AVAudioSession", save_session,
-                                          load_session,     nullptr,          nullptr};
-const mt_snap::StateOps k_snap_player = {&k_player_state, "AVAudioPlayer", save_player,
-                                         load_player,     nullptr,         nullptr};
+                                          load_session, nullptr};
+const mt_snap::StateOps k_snap_player = {&k_player_state, "AVAudioPlayer", save_player, load_player,
+                                         nullptr};
 
 namespace snapshot {
 

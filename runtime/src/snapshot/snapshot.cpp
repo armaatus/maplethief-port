@@ -548,8 +548,8 @@ struct LoadedState {
 
 void free_loaded(std::vector<LoadedState> &states) {
     for (LoadedState &s : states) {
-        if (s.ops->drop != nullptr) {
-            s.ops->drop(s.data);
+        if (s.ops->type->drop != nullptr) {
+            s.ops->type->drop(s.data);
         }
         std::free(s.data);
     }
@@ -585,8 +585,8 @@ bool read_states(mt_cpu *cpu, Reader &r, std::vector<LoadedState> *out) {
         Reader pr(payload, len, name + " state of " + hex32(obj));
         if (!ops->load(cpu, obj, data, pr) || !pr.done()) {
             // A load that failed half-way may hold host memory: drop frees what it set.
-            if (ops->drop != nullptr) {
-                ops->drop(data);
+            if (ops->type->drop != nullptr) {
+                ops->type->drop(data);
             }
             std::free(data);
             return r.fail(pr.error().empty() ? name + " state malformed" : pr.error());
@@ -600,9 +600,8 @@ void drop_live_states(mt_objc *rt) {
     for (u32 i = 0; i < rt->state_count; i++) {
         State &s = rt->states[i];
         if (s.type != nullptr) {
-            const StateOps *ops = ops_for(s.type);
-            if (ops != nullptr && ops->drop != nullptr) {
-                ops->drop(s.data);
+            if (s.type->drop != nullptr) {
+                s.type->drop(s.data);
             }
             std::free(s.data);
         }

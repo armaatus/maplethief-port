@@ -60,9 +60,10 @@ struct SourceState {
     u32 socket;
 };
 
-const mt_objc_state_type k_socket_state = {"CFSocket (offline)", sizeof(SocketState), nullptr};
+const mt_objc_state_type k_socket_state = {"CFSocket (offline)", sizeof(SocketState), nullptr,
+                                           nullptr};
 const mt_objc_state_type k_source_state = {"CFRunLoopSource of a CFSocket (offline)",
-                                           sizeof(SourceState), nullptr};
+                                           sizeof(SourceState), nullptr, nullptr};
 
 u32 new_object() {
     mt_objc *rt = runtime();
@@ -263,11 +264,10 @@ bool load_source(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
 } // namespace
 
 extern const mt_snap::StateOps k_snap_socket, k_snap_socket_source;
-const mt_snap::StateOps k_snap_socket = {
-    &k_socket_state, "CFSocket (offline)", save_socket, load_socket, nullptr, nullptr};
+const mt_snap::StateOps k_snap_socket = {&k_socket_state, "CFSocket (offline)", save_socket,
+                                         load_socket, nullptr};
 const mt_snap::StateOps k_snap_socket_source = {
-    &k_source_state, "CFRunLoopSource of a CFSocket (offline)", save_source, load_source, nullptr,
-    nullptr};
+    &k_source_state, "CFRunLoopSource of a CFSocket (offline)", save_source, load_source, nullptr};
 
 } // namespace mt_stubs_impl
 

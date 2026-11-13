@@ -326,7 +326,11 @@ void handle_destroy(mt_cpu *cpu, u32, void *p) {
         s->file = nullptr;
     }
 }
-const mt_objc_state_type k_handle_state = {"NSFileHandle", sizeof(HandleState), handle_destroy};
+// A handle still open when the runtime goes: its unsaved changes go with it, as a process
+// that exits without -closeFile or a release.
+void drop_handle(void *p) { delete static_cast<HandleState *>(p)->file; }
+const mt_objc_state_type k_handle_state = {"NSFileHandle", sizeof(HandleState), handle_destroy,
+                                           drop_handle};
 
 // An autoreleased NSFileHandle on `guest`, or nil if the file cannot be opened that way.
 void open_handle(mt_cpu *cpu, const char *method, bool read, bool write) {

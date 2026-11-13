@@ -55,7 +55,7 @@ struct Decoding {
     u32 coder = 0;            // the UINibDecoder guest object
 };
 
-const mt_objc_state_type k_decoder_state = {"UINibDecoder", sizeof(Decoding *), nullptr};
+const mt_objc_state_type k_decoder_state = {"UINibDecoder", sizeof(Decoding *), nullptr, nullptr};
 
 Decoding *decoding_of(mt_cpu *cpu, u32 coder) {
     mt_objc *rt = runtime(cpu);
@@ -432,7 +432,7 @@ void controller_destroy(mt_cpu *cpu, u32, void *block) {
     mt_objc_release(cpu, c->modal);
 }
 const mt_objc_state_type k_controller_state = {"UIViewController", sizeof(Controller),
-                                               controller_destroy};
+                                               controller_destroy, nullptr};
 
 Controller *controller(mt_cpu *cpu, u32 obj) {
     return obj != 0
@@ -922,8 +922,8 @@ bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *ap
 
 extern const mt_snap::StateOps k_snap_controller;
 extern const mt_snap::Module k_snap_uikit;
-const mt_snap::StateOps k_snap_controller = {
-    &k_controller_state, "UIViewController", save_controller, load_controller, nullptr, nullptr};
+const mt_snap::StateOps k_snap_controller = {&k_controller_state, "UIViewController",
+                                             save_controller, load_controller, nullptr};
 const mt_snap::Module k_snap_uikit = {"uikit", save_module, load_module};
 
 } // namespace mt_ui

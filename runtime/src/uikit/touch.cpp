@@ -119,7 +119,7 @@ struct TouchState {
     double timestamp;
     u32 tap_count;
 };
-const mt_objc_state_type k_touch_state = {"UITouch", sizeof(TouchState), nullptr};
+const mt_objc_state_type k_touch_state = {"UITouch", sizeof(TouchState), nullptr, nullptr};
 
 TouchState *touch_state(mt_cpu *cpu, u32 obj) {
     mt_objc *rt = runtime(cpu);

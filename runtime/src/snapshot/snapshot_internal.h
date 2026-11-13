@@ -18,9 +18,12 @@
 //         s->name = new std::string(std::move(name));
 //         return true;
 //     }
+//     const mt_snap::StateOps k_snap_foo = {&k_foo_state, "Foo", save_foo, load_foo, nullptr};
+//
+// where the type frees the name without the guest:
+//
 //     void drop_foo(void *state) { delete static_cast<FooState *>(state)->name; }
-//     const mt_snap::StateOps k_snap_foo = {&k_foo_state, "Foo", save_foo, load_foo, drop_foo,
-//                                           nullptr};
+//     const mt_objc_state_type k_foo_state = {"Foo", sizeof(FooState), destroy_foo, drop_foo};
 //
 // and one line in runtime/src/snapshot/registry.cpp. The rules:
 //   - save writes only host values; guest objects are written as their guest addresses (a
@@ -28,8 +31,9 @@
 //   - load runs before guest memory is restored, on a detached zeroed block: it reads the
 //     payload into the block and must not touch guest memory, send messages or create states.
 //     It returns false on a malformed payload (the whole restore is then refused).
-//   - drop frees the host memory a state owns without calling into the guest (the guest memory
-//     it refers to is replaced wholesale); NULL when the block owns nothing.
+//   - the type's drop (mt_objc_state_type, #414) frees what a load set, and the host memory of
+//     the live states a restore replaces, without calling into the guest (the guest memory they
+//     refer to is replaced wholesale).
 //   - link, if not NULL, runs after every state is attached and guest memory restored: for
 //     host pointers between states (UIView's boxes, #203).
 //   - name is stable: it is written into the file and looked up at restore; never rename one.
@@ -302,7 +306,6 @@ struct StateOps {
     const char *name; // stable: written into the file
     bool (*save)(mt_cpu *cpu, u32 obj, const void *state, Writer &w);
     bool (*load)(mt_cpu *cpu, u32 obj, void *state, Reader &r);
-    void (*drop)(void *state);
     void (*link)(mt_cpu *cpu, u32 obj, void *state);
 };
 

@@ -50,7 +50,13 @@ void destroy_string(mt_cpu *cpu, u32, void *p) {
     }
 }
 
-const mt_objc_state_type k_string_state = {"CFString", sizeof(StringState), destroy_string};
+void drop_string(void *state) {
+    auto *s = static_cast<StringState *>(state);
+    delete s->text;
+    delete s->cstrings;
+}
+const mt_objc_state_type k_string_state = {"CFString", sizeof(StringState), destroy_string,
+                                           drop_string};
 
 bool get32(const mt_cpu *cpu, u32 addr, u32 *v) {
     if (addr < MT_GUEST_PAGE_ZERO_END || static_cast<std::uint64_t>(addr) + 4 > cpu->mem_size) {
@@ -314,16 +320,10 @@ bool load_string(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
     return true;
 }
 
-void drop_string(void *state) {
-    auto *s = static_cast<StringState *>(state);
-    delete s->text;
-    delete s->cstrings;
-}
-
 } // namespace
 
 extern const mt_snap::StateOps k_snap_string;
-const mt_snap::StateOps k_snap_string = {&k_string_state, "CFString",  save_string,
-                                         load_string,     drop_string, nullptr};
+const mt_snap::StateOps k_snap_string = {&k_string_state, "CFString", save_string, load_string,
+                                         nullptr};
 
 } // namespace mt_cf

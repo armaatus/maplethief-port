@@ -141,7 +141,7 @@ std::vector<float> advances(const FontFile &f, const std::vector<int> &cps, floa
 struct FontState {
     Font font;
 };
-const mt_objc_state_type k_font_state = {"UIFont", sizeof(FontState), nullptr};
+const mt_objc_state_type k_font_state = {"UIFont", sizeof(FontState), nullptr, nullptr};
 
 // The iOS 4 font names the port knows (the game's three, the system fonts, Hangul's
 // AppleGothic, and close relatives); `bold` faces are synthesized. +fontWithName:size: returns
@@ -419,7 +419,6 @@ bool load_font(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
 } // namespace
 
 extern const mt_snap::StateOps k_snap_font;
-const mt_snap::StateOps k_snap_font = {&k_font_state, "UIFont", save_font,
-                                       load_font,     nullptr,  nullptr};
+const mt_snap::StateOps k_snap_font = {&k_font_state, "UIFont", save_font, load_font, nullptr};
 
 } // namespace mt_cg
