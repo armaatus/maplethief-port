@@ -305,9 +305,20 @@ bool Border::draw(SDL_Renderer *renderer, SDL_Texture *screen, int screen_w, int
     if (!ensure_art(renderer)) {
         return true; // the border colour (logged)
     }
+    // Only the part of the art that covers the output, drawn over the output: a long, thin
+    // image's cover rectangle can be a million pixels long, which SDL's software renderer
+    // cannot blit (#413).
     const Rect c = cover_rect(output_w, output_h, art_w_, art_h_);
-    const SDL_FRect dst{c.x, c.y, c.w, c.h};
-    if (!SDL_RenderTexture(renderer, art_, nullptr, &dst)) {
+    if (c.w <= 0 || c.h <= 0) {
+        drawn_ = BorderMode::kImage; // no output: nothing to cover
+        return true;
+    }
+    const float sx = static_cast<float>(art_w_) / c.w;
+    const float sy = static_cast<float>(art_h_) / c.h;
+    const SDL_FRect src{-c.x * sx, -c.y * sy, static_cast<float>(output_w) * sx,
+                        static_cast<float>(output_h) * sy};
+    const SDL_FRect dst{0, 0, static_cast<float>(output_w), static_cast<float>(output_h)};
+    if (!SDL_RenderTexture(renderer, art_, &src, &dst)) {
         SDL_Log("present: border image failed: %s", SDL_GetError());
         return false;
     }
