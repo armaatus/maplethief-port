@@ -65,7 +65,7 @@ The cover (630 x 500) and banner are our own art, like the icon (ADR 0125): no N
 - **The key:** butler reads `BUTLER_API_KEY` from the environment. It is never written to the repository, a file or a command line, and the tool refuses to push without it.
 - **butler:** 15.32.0, pinned per OS by SHA-256 in `mtport.itch.BUTLER`, downloaded once into `build/_downloads/`.
 - **The page text** is ours, in `docs/itch/page.md` (what it is, the player's own file and its SHA-256, which download, install steps per OS, controls, known issues, credits, the legal note, links), with the form's short fields in `docs/itch/metadata.md`. The one devlog post is Joris's launch post, in his own words; the repository generates none.
-- **Pricing:** "$0 or donate", and a Buy Me a Coffee link. Comments on.
+- **Pricing:** "$0 or donate", and a Buy Me a Coffee link (https://buymeacoffee.com/armaatus). Comments on.
 - **Screenshots:** gameplay only, from Joris's local build, on itch.io only, never committed. Cover and banner: our own art.
 - **The name:** as ADR 0100. "MapleStory" only descriptively ("a port of MapleStory Thief Edition"), the page title "MapleThief", no Nexon logo or branding, and the page says it is not affiliated with Nexon and includes no game content.
 - **On an objection** from Nexon, in this order: donations off (the page becomes free), then the screenshots removed, then the itch.io downloads withdrawn together with the GitHub Release's player builds (ADR 0100). The source stays. Money received is not a reason to keep anything up.
