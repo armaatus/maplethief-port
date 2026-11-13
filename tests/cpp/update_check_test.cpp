@@ -29,6 +29,14 @@
 #include "settings_menu.h"
 #include "update_check.h"
 
+#if defined(__APPLE__)
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
 namespace {
 
 namespace fe = maplethief::frontend;
@@ -441,6 +449,227 @@ TEST_CASE("update check: libcurl speaks HTTPS only, on the request and every red
     CHECK(options[52] == 1L); // CURLOPT_FOLLOWLOCATION: GitHub's API may redirect
     CHECK(options[13] == fe::kUpdateTimeoutSeconds);
 }
+
+TEST_CASE("update check: the response cap, 4 MiB, holds while the body streams (#413)") {
+    // Every fetcher keeps the body through UpdateBody (libcurl's writer, Apple's data delegate).
+    CHECK(fe::kUpdateMaxResponseBytes == 4u * 1024u * 1024u);
+    CHECK_FALSE(fe::UpdateBody::stated_too_long(-1)); // no Content-Length
+    CHECK_FALSE(fe::UpdateBody::stated_too_long(0));
+    CHECK_FALSE(
+        fe::UpdateBody::stated_too_long(static_cast<std::int64_t>(fe::kUpdateMaxResponseBytes)));
+    CHECK(fe::UpdateBody::stated_too_long(static_cast<std::int64_t>(fe::kUpdateMaxResponseBytes) +
+                                          1));
+    fe::UpdateBody body;
+    const std::string piece(64 * 1024, 'x');
+    for (std::size_t i = 0; i < fe::kUpdateMaxResponseBytes / piece.size(); i++) {
+        REQUIRE(body.append(piece.data(), piece.size()));
+    }
+    CHECK(body.size() == fe::kUpdateMaxResponseBytes);
+    CHECK_FALSE(body.too_long());
+    // One byte more is refused, and nothing is kept from then on.
+    CHECK_FALSE(body.append("y", 1));
+    CHECK(body.too_long());
+    CHECK_FALSE(body.append("", 0));
+    CHECK(body.size() == fe::kUpdateMaxResponseBytes);
+    // A piece that would cross the cap is refused whole.
+    fe::UpdateBody other;
+    REQUIRE(other.append(piece.data(), 10));
+    const std::string huge(fe::kUpdateMaxResponseBytes, 'z');
+    CHECK_FALSE(other.append(huge.data(), huge.size()));
+    CHECK(other.size() == 10u);
+    fe::UpdateBody small;
+    REQUIRE(small.append("{}", 2));
+    CHECK(small.take() == "{}");
+}
+
+TEST_CASE("update check: a redirect is followed to an HTTPS address only (#413)") {
+    for (const char *ok : {"https://api.github.com/repos/x/y/releases/latest",
+                           "HTTPS://api.github.com/", "https://objects.githubusercontent.com"}) {
+        CAPTURE(ok);
+        CHECK(fe::update_redirect_allowed(ok));
+    }
+    for (const char *bad : {"http://api.github.com/", "file:///etc/passwd", "ftp://example.com/",
+                            "data:text/plain,{}", "https://", "https:///path", "https:example.com",
+                            "//api.github.com/", "", "https:/api.github.com", " https://x/",
+                            "https://:443/", "https://@host/"}) {
+        CAPTURE(bad);
+        CHECK_FALSE(fe::update_redirect_allowed(bad));
+    }
+}
+
+#if defined(__APPLE__)
+
+namespace {
+
+// A plain-HTTP server on 127.0.0.1 for the Apple fetcher's own tests (#413): no TLS and no
+// network beyond the loopback. Each path is one answer:
+//   /small     200, "{}"
+//   /redirect  302 to http://127.0.0.1:<port>/small
+//   /stated    200 with a Content-Length of 5 MiB, then 1 KiB (CFNetwork reports a response
+//              with its first bytes), then nothing
+//   /endless   200 without a length, 8 MiB, then the connection held open
+// A connection is held until the client closes it or the server stops; sent counts the body
+// bytes written to all of them.
+class LoopbackServer {
+  public:
+    LoopbackServer() {
+        listener_ = ::socket(AF_INET, SOCK_STREAM, 0);
+        REQUIRE(listener_ >= 0);
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        REQUIRE(::bind(listener_, reinterpret_cast<sockaddr *>(&addr), sizeof addr) == 0);
+        REQUIRE(::listen(listener_, 8) == 0);
+        socklen_t len = sizeof addr;
+        REQUIRE(::getsockname(listener_, reinterpret_cast<sockaddr *>(&addr), &len) == 0);
+        port_ = ntohs(addr.sin_port);
+        accepter_ = std::thread([this] { accept_loop(); });
+    }
+    ~LoopbackServer() {
+        stop_ = true;
+        accepter_.join();
+        ::close(listener_);
+        for (std::thread &t : connections_) {
+            t.join();
+        }
+    }
+    LoopbackServer(const LoopbackServer &) = delete;
+    LoopbackServer &operator=(const LoopbackServer &) = delete;
+
+    std::string url(const char *path) const {
+        return "http://127.0.0.1:" + std::to_string(port_) + path;
+    }
+    std::atomic<std::size_t> sent{0};
+
+  private:
+    void accept_loop() {
+        while (!stop_) {
+            pollfd p{listener_, POLLIN, 0};
+            if (::poll(&p, 1, 50) <= 0) {
+                continue;
+            }
+            const int fd = ::accept(listener_, nullptr, nullptr);
+            if (fd >= 0) {
+                connections_.emplace_back([this, fd] { serve(fd); });
+            }
+        }
+    }
+    // Waits until the client closes the connection or the server stops.
+    void hold(int fd) {
+        char c;
+        while (!stop_) {
+            pollfd p{fd, POLLIN, 0};
+            if (::poll(&p, 1, 50) > 0 && ::recv(fd, &c, 1, 0) <= 0) {
+                return;
+            }
+        }
+    }
+    bool write_all(int fd, const char *data, std::size_t n) {
+        while (n > 0 && !stop_) {
+            const ssize_t w = ::send(fd, data, n, 0);
+            if (w <= 0) {
+                return false;
+            }
+            data += w;
+            n -= static_cast<std::size_t>(w);
+        }
+        return n == 0;
+    }
+    void serve(int fd) {
+        const int one = 1;
+        ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+        std::string request;
+        char buf[1024];
+        while (request.find("\r\n\r\n") == std::string::npos && !stop_) {
+            pollfd p{fd, POLLIN, 0};
+            if (::poll(&p, 1, 50) <= 0) {
+                continue;
+            }
+            const ssize_t n = ::recv(fd, buf, sizeof buf, 0);
+            if (n <= 0) {
+                ::close(fd);
+                return;
+            }
+            request.append(buf, static_cast<std::size_t>(n));
+        }
+        const std::size_t sp = request.find(' ');
+        const std::string path = request.substr(sp + 1, request.find(' ', sp + 1) - sp - 1);
+        std::string head;
+        if (path == "/small") {
+            head = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+            write_all(fd, head.data(), head.size());
+        } else if (path == "/redirect") {
+            head = "HTTP/1.1 302 Found\r\nLocation: " + url("/small") +
+                   "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            write_all(fd, head.data(), head.size());
+        } else if (path == "/stated") {
+            head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                   "Content-Length: 5242880\r\n\r\n" +
+                   std::string(1024, ' ');
+            write_all(fd, head.data(), head.size());
+            hold(fd);
+        } else if (path == "/endless") {
+            head = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n";
+            bool ok = write_all(fd, head.data(), head.size());
+            const std::string chunk(64 * 1024, 'x');
+            for (int i = 0; ok && i < 128; i++) { // 8 MiB
+                ok = write_all(fd, chunk.data(), chunk.size());
+                if (ok) {
+                    sent += chunk.size();
+                }
+            }
+            hold(fd);
+        } else {
+            head = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            write_all(fd, head.data(), head.size());
+        }
+        ::close(fd);
+    }
+
+    int listener_ = -1;
+    std::uint16_t port_ = 0;
+    std::atomic<bool> stop_{false};
+    std::thread accepter_;
+    std::vector<std::thread> connections_; // the accepter's own until it is joined
+};
+
+double seconds_since(std::chrono::steady_clock::time_point t0) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+}
+
+} // namespace
+
+TEST_CASE("update check: the Apple fetcher caps the body while it streams and follows HTTPS "
+          "redirects only (#413)") {
+    // Against a loopback server, never online. Before #413 the fetcher kept the whole body and
+    // checked its size at the end, so an endless body ran into the timeout (15 s) with all of it
+    // in memory, and it followed a redirect anywhere.
+    LoopbackServer server;
+    const std::unique_ptr<fe::UpdateFetcher> fetcher = fe::make_platform_update_fetcher();
+    REQUIRE(fetcher != nullptr);
+    std::string why;
+    CHECK(fetcher->get(server.url("/small"), &why) == std::optional<std::string>("{}"));
+    INFO(why);
+    {
+        why.clear();
+        const auto t0 = std::chrono::steady_clock::now();
+        CHECK_FALSE(fetcher->get(server.url("/endless"), &why).has_value());
+        CHECK(why == "the response is too long");
+        CHECK(seconds_since(t0) < 10.0);
+    }
+    {
+        why.clear();
+        const auto t0 = std::chrono::steady_clock::now();
+        CHECK_FALSE(fetcher->get(server.url("/stated"), &why).has_value());
+        CHECK(why == "the response is too long");
+        CHECK(seconds_since(t0) < 10.0);
+    }
+    why.clear();
+    CHECK_FALSE(fetcher->get(server.url("/redirect"), &why).has_value());
+    CHECK(why == "a redirect to a non-HTTPS address was refused");
+}
+
+#endif
 
 TEST_CASE("update check: the title corner's line is one box at the frame's bottom left") {
     const std::string line = "Port v1.2.0 is out: github.com/armaatus/maplethief-port";

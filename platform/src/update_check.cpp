@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <charconv>
 #include <chrono>
 #include <condition_variable>
@@ -466,6 +467,33 @@ std::string serialise_update_state(const UpdateState &state) {
 }
 
 std::string update_user_agent() { return std::string("MapleThief/") + MT_VERSION; }
+
+bool update_redirect_allowed(std::string_view url) {
+    constexpr std::string_view scheme = "https://";
+    if (url.size() <= scheme.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < scheme.size(); i++) {
+        if (std::tolower(static_cast<unsigned char>(url[i])) != scheme[i]) {
+            return false;
+        }
+    }
+    const char host = url[scheme.size()];
+    return host != '/' && host != '?' && host != '#' && host != ':' && host != '@';
+}
+
+bool UpdateBody::stated_too_long(std::int64_t stated) {
+    return stated > static_cast<std::int64_t>(kUpdateMaxResponseBytes);
+}
+
+bool UpdateBody::append(const void *data, std::size_t n) {
+    if (too_long_ || n > kUpdateMaxResponseBytes - body_.size()) {
+        too_long_ = true;
+        return false;
+    }
+    body_.append(static_cast<const char *>(data), n);
+    return true;
+}
 
 struct UpdateCheck::Shared {
     mutable std::mutex mutex;
