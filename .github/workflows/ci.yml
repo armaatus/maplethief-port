@@ -429,10 +429,16 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # clang-tidy (ADR 0002's addendum, #325) needs the native build configured, so it runs when
+  # the scope job finds a native change (or could not decide); a docs-only change skips it.
   lint-python:
     name: lint + Python min/latest
+    needs: scope
+    if: ${{ !cancelled() }}
     runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && '["self-hosted","Linux","X64"]' || '"ubuntu-latest"') }}
-    timeout-minutes: 15
+    timeout-minutes: 25
+    env:
+      TIDY: ${{ needs.scope.outputs.native != 'false' }}
     steps:
       - name: Check out (without Git LFS objects)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -474,8 +480,26 @@ jobs:
             uv.lock
             scripts/lint
 
+      - name: Cache third-party downloads (build/_downloads)
+        if: env.TIDY == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/_downloads
+          key: downloads-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - name: Install SDL3 build dependencies and clang (for clang-tidy's compile database)
+        if: env.TIDY == 'true'
+        run: |
+          # The build job's list (&linux-deps, docs/build/README.md), plus clang.
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libasound2-dev libpulse-dev libpipewire-0.3-dev libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl1-mesa-dev \
+            libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev libdbus-1-dev libudev-dev
+
       - name: Lint (scripts/lint)
-        run: scripts/lint
+        run: scripts/lint $([ "$TIDY" = true ] || echo --no-tidy)
 
       - name: Python tests on Python ${{ steps.python-min.outputs.python-version }}
         run: scripts/test --python-only
