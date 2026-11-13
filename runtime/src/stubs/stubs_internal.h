@@ -78,8 +78,10 @@ void words_free(Words &w);
 
 // --- files ----------------------------------------------------------------------------------
 
-// The whole file, malloc'd and NUL-terminated (*size without the NUL); NULL if it can't be read.
-char *read_file(const char *path, std::size_t *size);
+// The whole file, malloc'd and NUL-terminated (*size without the NUL); NULL if it can't be read
+// or holds more than `max` bytes, checked before it is read (*too_large then set, if given).
+char *read_file(const char *path, std::size_t *size, std::size_t max = SIZE_MAX,
+                bool *too_large = nullptr);
 // Replaces `path` atomically (mt_saves_replace_file, maplethief/saves.h: the parents created,
 // the bytes flushed to a temporary file renamed over `path`), so a crash never leaves a
 // half-written file. False (and logs) on failure.

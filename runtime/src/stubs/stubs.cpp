@@ -261,17 +261,40 @@ void words_free(Words &w) {
     w.count = w.cap = 0;
 }
 
-char *read_file(const char *path, std::size_t *size) {
+char *read_file(const char *path, std::size_t *size, std::size_t max, bool *too_large) {
     *size = 0;
+    if (too_large != nullptr) {
+        *too_large = false;
+    }
     std::FILE *f = open_file(path, "rb");
     if (f == nullptr) {
         return nullptr;
+    }
+    if (max != SIZE_MAX) {
+        // Its size first: a file over `max` is never read (ftell's -1 past 2 GiB on Windows
+        // counts as over).
+        const long end = std::fseek(f, 0, SEEK_END) == 0 ? std::ftell(f) : -1L;
+        if (end < 0 || static_cast<unsigned long>(end) > max || std::fseek(f, 0, SEEK_SET) != 0) {
+            std::fclose(f);
+            if (too_large != nullptr) {
+                *too_large = true;
+            }
+            return nullptr;
+        }
     }
     std::size_t cap = 4096, n = 0;
     char *buf = static_cast<char *>(std::malloc(cap + 1));
     while (buf != nullptr) {
         n += std::fread(buf + n, 1, cap - n, f);
         if (n < cap) {
+            break;
+        }
+        if (n > max) { // it grew while being read
+            std::free(buf);
+            buf = nullptr;
+            if (too_large != nullptr) {
+                *too_large = true;
+            }
             break;
         }
         cap *= 2;
