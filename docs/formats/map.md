@@ -135,7 +135,7 @@ The loader does not keep the layers for drawing. At `0xD9E4`–`0xDE1C` it compo
 - The tile copy loop (16 rows of 64 bytes) and the destination stride (`16·w` pixels) are hard-coded, so tiles must be 16×16. Every `.mapprj` declares 16×16.
 - With more than one tileset, the index is walked across sheets at `0xDC02`–`0xDC4C`: `while (sheet[k].count (+0x34) <= v) { v -= sheet[k].count - 1; k++; }`. Note the `- 1`. No shipped project has more than one tileset, so this path is dead. `+0x34` is the sheet's tile count; see [mapprj.md](mapprj.md#resolution-end-to-end) for the whole tileset side.
 
-The finished bitmap becomes a `CGImage` (format copied from tileset 0), then a `UIImage`, then PNG data (`UIImagePNGRepresentation`). The loader then resets the member at `CMMap+0x78` (`0xB979`) and loads the PNG bytes into it (`0xBABD`); this is presumably the map's texture. The port can skip the PNG round trip and upload the composed pixels directly. Because the layers are baked together, **no layer is drawn above the sprites** by this path. Whether some other code reads `CMMap+0x30` again (for example, for foreground tiles) is **unknown** until the rest of `CMMap` is mapped.
+The finished bitmap becomes a `CGImage` (format copied from tileset 0), then a `UIImage`, then PNG data (`UIImagePNGRepresentation`). The loader then resets the `CMImage` at `CMMap+0x78` (`0xB979`) and loads the PNG bytes into it (`0xBABD`). That image is the map's texture: `CMMap::Draw` (`0xD225`) draws it each frame at the camera offset ([mapprj.md](mapprj.md#resolution-end-to-end)). The port can skip the PNG round trip and upload the composed pixels directly. Because the layers are baked together, **no layer is drawn above the sprites**. The cells at `CMMap+0x30` stay readable after the bake, but apart from the map clear `0xC2B1` that frees them, their only later reader is `GetTile` (`0xBC89`), which the minimap calls ([Unknowns](#unknowns)); no foreground pass exists.
 
 ## Encoder used for the shipped files
 
@@ -204,6 +204,6 @@ The batch mode reports parse errors and missing files (`.map`/`.att`/`.obj`, pro
 
 ## Unknowns
 
-- What `area` and `map` mean in game terms (world and zone?). The map-change caller at `0x86699` still needs to be traced back to the script/portal side.
+- ~~What `area` and `map` mean in game terms~~: an area is a region with its own tileset project (`<area>.mapprj`): 0 Kerning City, 1 Perion, 2 Henesys, 3 the Ant Tunnel, 4 and 5 Orbis, 6 to 8 Magatia, 9 and 10 El Nath. A map is one playfield within it, numbered from 0. The names come from `CDataMgr::AreaWorldSpot` and `MapSpotIndex` ([re/map-names.md](../re/map-names.md)). The loader `0x86699` is reached from the map change `0x868D5`, which reads the target that the script native `changeMap(area, map, portal)` stored in the world ([obj.md](obj.md#portals-and-arrival-points)).
 - ~~Whether any code besides the loader reads the per-layer cells (`CMMap+0x30`) after load.~~ Yes: `GetTile` at `0xBC89` reads `CMMap+0x30`, and the minimap (`0x59BB1`) calls it (found while working on #14).
 - ~~`CMMapTileSet+0x34` and the `- 1` in the multi-tileset walk~~: answered in [mapprj.md](mapprj.md#cmmaptileset-fields). `+0x34` is `cols × rows`, and the `- 1` is a game bug on a path no shipped data takes.

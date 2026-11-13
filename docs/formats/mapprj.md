@@ -21,7 +21,7 @@ Addresses are armv7 VM addresses. Function pointers carry the Thumb bit. Names a
 | `0xB951` / `0xB965` | `CMImage` width / height (`+0x18` / `+0x1C` of the image) | one `ldr` each |
 | `0xD6D1` | `.map` loader. Its bake (`0xD9E4`–`0xDE1C`) turns tile indices into sheet pixels | see [map.md](map.md#rendering-at-load-time) |
 | `0x86109` | `CStateGame::LoadBack(this, area)`: loads `map/back/<n>.png` into the `CMImage` at `CStateGame+0x454` | `sprintf("%s%d%s", "/map/back/", n, ".png")`: `0xE2829`, `0xE59B2`, `0xE5052`. Callers `0x87318`, `0x8790A` pass `CStateGame+0x84` (the current area) |
-| `0x884C4` | inside the `CStateGame` virtual `0x87501` (vtable slot `+0x24`, presumably the per-frame update/draw): the back image at screen (0, 0), then the map | `bl 0x24dc8` with `r1 = r2 = 0` on `this + 0x454` |
+| `0x884C4` | inside `CStateGame::Paint` `0x87501` (vtable slot `+0x24`, run once per game tick, [re/timing-threading.md](../re/timing-threading.md#what-one-tick-runs)): the back image at screen (0, 0), then the map | `bl 0x24dc8` with `r1 = r2 = 0` on `this + 0x454` |
 | `0xD225` | `CMMap::Draw`: draws the baked map image (`+0x78`) at `(+0x68 − camX, +0x6C − camY)` | `bl 0x247dc` |
 | `0xC069` / `0xC175` / `0xC225` | camera clamp / follow a point / scroll by a delta (`CMMap+0x70`, `+0x74`) | see [Resolution step 7](#resolution-end-to-end) |
 | `0x26529` | `SkyCanvas` constructor | vtable `0x119780` (typeinfo name `9SkyCanvas`), see [SkyCanvas](#skycanvas) |
@@ -50,7 +50,7 @@ None of these are CgBI-crushed: they are standard PNGs (checked with [`pnginfo`]
 | … | | | `len[i]`, `name[i]` | repeated `count` times, back to back |
 | end | | | | the file ends right after the last name |
 
-There is no magic number, version or checksum. The loader also stores half the tile size at `CMMap+0x0C` / `+0x10` (signed `/ 2`, so 8 and 8). Given that the `.att` grid is `2w × 2h` cells, that is presumably the 8 × 8 attribute cell size ([#14](https://github.com/armaatus/maplethief-port/issues/14)).
+There is no magic number, version or checksum. The loader also stores half the tile size at `CMMap+0x0C` / `+0x10` (signed `/ 2`, so 8 and 8). That is the `.att` cell size: `GetAttAt` (`0xBC51`) and the pixel-to-cell helpers `0xE3F1`/`0xE411` divide by these two fields ([att.md](att.md#where-the-game-loads-and-reads-it)).
 
 ## Load routine (`0xE13D`, `0xD019`)
 
@@ -118,7 +118,7 @@ How a cell on screen gets its pixels, for area `a`, map `m`:
    ```
    The `- 1` disagrees with `first` from step 3: with two 160-tile sheets, global index 160 lands on tile **1** of sheet 1, not tile 0, and tile 0 of every later sheet is unreachable. `first` (`+0x38`) is never read by the bake. This is a game bug on a path no shipped data takes. A port that wants the original behaviour must keep the `- 1` (the parser's `TileLayout.locate` does). If `v` runs past the last sheet, `k` ends one past the array (out of bounds).
 6. **Tile → pixel rect.** `src = ((v % cols[k]) · tw, (v / cols[k]) · th)`, size `tw × th` (`0xDC4E`–`0xDCB2`). With one sheet, `cols` is taken from sheet 0 up front (`0xDA22`). There is **no check** that `v < count`: a larger index reads past the end of the sheet's pixels. Every shipped index is in range (see [Validation](#validation)). The rect is copied to `(tw · x, th · y)` in the map's baked bitmap, with an alpha test and higher layers on top. The copy loop is hard-coded to 16 × 16, so `tw = th = 16` is required in practice ([map.md](map.md#rendering-at-load-time)).
-7. **Bitmap → screen.** In the frame routine, `CMMap::Draw` (`0xD225`) draws the baked image at `(+0x68 − camX, +0x6C − camY)`. `+0x68`/`+0x6C` are zeroed by the constructor (`0xCF70`), and `camX`/`camY` are `CMMap+0x70`/`+0x74`. The camera is clamped by `0xC069` to `0 … mapPixels − screen` on each axis, or to 0 when the map is smaller than the screen. The screen size is `SkyCanvas+0x88`/`+0x8C`. `0xC175` follows a point: `target = p − screen/2`, then either `cam = target` or `cam += (target − cam) / 3` (smoothed). `CStateGame` feeds it the position of the object at `CStateGame+0x30` (presumably the hero), offset ±30 px horizontally by its facing. It uses 32 px higher for area/map (4, 17), (9, 5), (7, 4) and (10, 5).
+7. **Bitmap → screen.** In the frame routine, `CMMap::Draw` (`0xD225`) draws the baked image at `(+0x68 − camX, +0x6C − camY)`. `+0x68`/`+0x6C` are zeroed by the constructor (`0xCF70`), and `camX`/`camY` are `CMMap+0x70`/`+0x74`. The camera is clamped by `0xC069` to `0 … mapPixels − screen` on each axis, or to 0 when the map is smaller than the screen. The screen size is `SkyCanvas+0x88`/`+0x8C`. `0xC175` follows a point: `target = p − screen/2`, then either `cam = target` or `cam += (target − cam) / 3` (smoothed). `CStateGame` feeds it the position of the hero (`CStateGame+0x30`), offset ±30 px horizontally by its facing. It uses 32 px higher for area/map (4, 17), (9, 5), (7, 4) and (10, 5).
 
 So for the shipped data the whole chain is: `tile v of map a·m` → `map/tile/<name of a>.png`, rect `(16·(v mod 20), 16·(v div 20), 16, 16)`. Every shipped sheet is 320 px wide, so `cols = 20`.
 
@@ -225,6 +225,6 @@ CI runs only the synthetic tests (`tests/test_mapprj.py`, `tests/test_pnginfo.py
 
 ## Unknowns
 
-- How the bake's 4-bytes-per-pixel read of a **palette** PNG works: it goes through `UIImage` → `CGImage` → `CGDataProviderCopyData` and assumes RGBA with alpha in byte 3. Presumably ImageIO expands palette + `tRNS` to RGBA. The port should decode the sheets to RGBA8 and keep the "copy if alpha ≠ 0" rule. Whether the source alpha is premultiplied does not matter for that test.
-- The scripted camera modes in the `CStateGame` frame (`+0x47D`, `+0x47E`, `+0x480`–`+0x490`, which look like a camera shake from a random offset). They are not traced; they only move `camX`/`camY`.
-- `CMMap+0x0C`/`+0x10` (half tile size): who reads them. Presumably the `.att` code ([#14](https://github.com/armaatus/maplethief-port/issues/14)).
+- ~~How the bake's 4-bytes-per-pixel read of a **palette** PNG works~~: inside Apple's ImageIO, not in the game. The bake (and the portrait builder `0x1E96D`, [sprprj.md](sprprj.md#drawing)) takes `CGDataProviderCopyData` of the decoded sheet and indexes it as 4 bytes per pixel with alpha in byte 3, so on the device ImageIO must have handed back 32-bit RGBA for these palette + `tRNS` sheets, or the maps would be garbage. The port doesn't depend on how: its CoreGraphics stand-in decodes every PNG to straight RGBA8 ([ADR 0036](../adr/0036-coregraphics-and-uikit-drawing.md)), and the bake's "copy if alpha ≠ 0" test gives the same result for premultiplied or straight alpha.
+- ~~The scripted camera modes in the `CStateGame` frame (`+0x47D`, `+0x47E`, `+0x480`–`+0x490`)~~: scene camera fields, answered in [re/screen-shake.md](../re/screen-shake.md#the-fields-cstategame). `+0x47D` makes a scene's camera follow a point (`CMMap_FollowCamera` `0xC175`) instead of scrolling by `+0x480`/`+0x484` per frame (`CMMap::ScrollCamera` `0xC225`); `+0x47E` turns the shake on with amplitude `+0x488`, and `+0x48C`/`+0x490` are this frame's random offset, undone after the map is drawn. Only scenes (game mode 9) use them.
+- ~~`CMMap+0x0C`/`+0x10` (half tile size): who reads them~~: the `.att` lookups `GetAttAt` (`0xBC51`) and `0xE3F1`/`0xE411`; see [Layout](#layout).

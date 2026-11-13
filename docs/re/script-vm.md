@@ -43,7 +43,7 @@ None of the opcodes affected by 1–4 occurs in the shipped files (24 of the 67 
 | function slots | `0x78`-byte table (30 × `TFunc*`) | filled by `FunctionSlots::add` `0x9ED09` in file order, read by `PUSHFUNCTION` |
 | `TFunc` (0x24 bytes) | per function | `+8` marked, `+0xC` size, `+0x10` code, `+0x14` line, `+0x18` file name, `+0x1C` pc, `+0x20` `DataReader` over the code. Operands are fetched through `TFunc::fetchU8/U16/U32` (`0x9EE95`/`0x9EE71`/`0x9EE45`), and jumps re-seek the reader (`TFunc::jumpForward` `0x9EE21`, `::jumpBack` `0x9EDF1`) |
 
-`world` is the object at `hero+0x150` that owns the map, its objects and the VM (the "world object" of [obj.md](../formats/obj.md#portals-and-arrival-points), probably `CMapleWorld`). The natives use its `+0x2C` map objects, `+0x30` hero, `+0x58` quest manager, `+0x5C` dialogue box and `+0xB0` current NPC index.
+`world` is the object at `hero+0x150` that owns the map, its objects and the VM (the "world object" of [obj.md](../formats/obj.md#portals-and-arrival-points)). It is the game state, `CStateGame`: `CStateGame::LoadGame` `0x86C1D` passes itself to the `CHero` constructor `0x68A59`, which stores it at `+0x150`. `CMapleWorld` is a different, 12-byte object that `LoadGame` keeps at `CStateGame+0x28`; the function named `CMapleWorld::changeMap` `0x81369` is in fact a `CStateGame` method. The natives use its `+0x2C` map objects, `+0x30` hero, `+0x58` quest manager, `+0x5C` dialogue box and `+0xB0` current NPC index.
 
 ## Execution
 
@@ -140,7 +140,7 @@ A portal script is a main only: it reads a quest state with `getQuestState`, the
 | 47 | `showPortalErrMsg` | `0x99765` | – | – | 20 | popup 0x11 (portal scripts call it when a condition fails) |
 | 48 | `setNPC` | `0x99731` | int | – | 3 | msg: speaker portrait = NPC arg |
 | 49 | `startBoss` | `0x9971D` | – | – | 5 | world+0x1E4 = boss scene of the area (world+0x84) |
-| 50 | `setBoss` | `0x99705` | – | – | 5 | msg: speaker sprite from the map's mobs (probably the boss) |
+| 50 | `setBoss` | `0x99705` | – | – | 5 | msg: the speaker is the map's boss: `0x32B4D` sets the speaker NPC to −1 and takes the sprite of the first mob whose id is 64 or more and not 65, the Malady Bomb (`CMobs_FindBoss` `0x75711`) |
 | 51 | `updateNPCState` | `0x99435` | – | – | 102 | msg+0x2D = 1: re-run NPC state scripts |
 | 52 | `clearAll` | `0x996ED` | – | – | 3 | end the chapter: reset quest states, chapter += 1 |
 | 53 | `getHeroClass` | `0x9AF29` | – | int | 10 | hero job (hero+0x88) |
@@ -149,7 +149,7 @@ A portal script is a main only: it reads a quest state with `getQuestState`, the
 | 56 | `checkItemCount` | `0x9AF7D` | int, int | int | 3 | count of item (kind, id) in the inventory |
 | 57 | `getQuestTitle` | `0x9A795` | int, int | string | 1 | title key of quest (kind, id) |
 | 58 | `removeQuest` | `0x995F1` | int, int | – | 10 | drop quest (kind, id), re-run NPC states |
-| 59 | `makeEquipItem` | `0x99575` | int, int | – | 3 | quests 0x7C2D9 (probably crafting, ManufactureItem_*) |
+| 59 | `makeEquipItem` | `0x99575` | int, int | – | 3 | craft an equip: `Quest_MakeEquipItem` 0x7C2D9 completes quest (kind, id), taking its items and meso and giving rolled equips ([mechanics](mechanics.md#drops)). Called only by the three `smith` scripts (chapters 1–3), from their manufacturing callbacks |
 | 60 | `invenFullNotify` | `0x9966D` | – | – | 21 | popup 8 (inventory full) |
 | 61 | `isInvenAvailable` | `0x9A691` | int, int | int | 32 | 1 if inventory kind has >= n free slots |
 | 62 | `initMonCa` | `0x99545` | int | – | 3 | start Monster Carnival arg (0x82271) |
