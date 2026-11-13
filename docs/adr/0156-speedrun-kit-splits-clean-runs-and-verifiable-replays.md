@@ -1,4 +1,4 @@
-# 147. A speedrun kit: splits from observed functions, clean runs by the Assists rule, replays verified headless
+# 156. A speedrun kit: splits from observed functions, clean runs by the Assists rule, replays verified headless
 
 - **Status:** Accepted (delegated by Joris, 2026-11-13)
 - **Date:** 2026-11-13
