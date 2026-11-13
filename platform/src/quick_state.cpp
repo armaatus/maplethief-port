@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <new>
 #include <string_view>
 
 #include "actions.h"
@@ -33,9 +34,6 @@ namespace {
 bool starts_with(std::string_view s, std::string_view head) {
     return s.size() >= head.size() && s.substr(0, head.size()) == head;
 }
-
-// A state file larger than this is not read (the runtime's own limit is 768 MiB a section).
-constexpr std::streamoff kMaxStateBytes = std::streamoff(1) << 30;
 
 fs::path utf8_path(const std::string &s) { return fs::path(std::u8string(s.begin(), s.end())); }
 
@@ -135,16 +133,21 @@ std::optional<std::vector<std::uint8_t>> read_quick_state(const std::string &pat
         return std::nullopt;
     }
     const std::streamoff size = f.tellg();
-    if (size < 0 || size > kMaxStateBytes) {
+    if (size < 0 || static_cast<std::uint64_t>(size) > kMaxStateBytes) {
         return std::nullopt;
     }
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
-    f.seekg(0);
-    if (size > 0 &&
-        !f.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(size))) {
+    // Untrusted (ADR 0154): an allocation that fails is no state, not an exception (#413).
+    try {
+        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+        f.seekg(0);
+        if (size > 0 &&
+            !f.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(size))) {
+            return std::nullopt;
+        }
+        return bytes;
+    } catch (const std::bad_alloc &) {
         return std::nullopt;
     }
-    return bytes;
 }
 
 const char *quick_request_name(QuickRequest r) {

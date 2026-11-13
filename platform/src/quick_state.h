@@ -60,9 +60,12 @@ bool held_input_reason(const std::string &why);
 std::string check_quick_state(const std::vector<std::uint8_t> &bytes, const std::uint8_t sha[32],
                               std::uint32_t slot, const char *port_version);
 
+// A state file larger than this is not read (the runtime's own limit is 768 MiB a section).
+inline constexpr std::uint64_t kMaxStateBytes = std::uint64_t(1) << 30;
+
 // The state file: written atomically through mt_saves_replace_file (ADR 0074: "<path>.mt-tmp",
-// flushed, renamed over `path`; the directories made), read whole (nullopt: none, unreadable, or
-// over 1 GiB).
+// flushed, renamed over `path`; the directories made), read whole (nullopt: none, unreadable,
+// over kMaxStateBytes, checked before reading, or more than the host can allocate).
 bool write_quick_state(const std::string &path, const std::vector<std::uint8_t> &bytes);
 std::optional<std::vector<std::uint8_t>> read_quick_state(const std::string &path);
 

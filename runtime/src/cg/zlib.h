@@ -17,6 +17,10 @@ bool zlib_deflate(const std::uint8_t *data, std::size_t size, std::vector<std::u
 bool zlib_inflate(const std::uint8_t *data, std::size_t size, std::size_t expected,
                   std::vector<std::uint8_t> &out);
 
+// Test seam (#413): while on, zlib_inflate's output allocation throws std::bad_alloc, as an
+// allocation the host cannot satisfy would. Off by default; tests only.
+void zlib_inflate_fail_alloc_for_test(bool on);
+
 } // namespace mt_cg
 
 #endif // MAPLETHIEF_RUNTIME_CG_ZLIB_H
