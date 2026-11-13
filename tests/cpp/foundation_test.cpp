@@ -979,6 +979,45 @@ TEST_CASE("Foundation: the binary plist reader") {
     CHECK(error == "too many object references");
 }
 
+TEST_CASE("Foundation: a binary plist's shared references are bounded by the bytes they copy "
+          "(#323)") {
+    // An array of `refs` references to one data object of `size` bytes; 4-byte offsets.
+    const auto shared = [](std::size_t refs, std::uint32_t size) {
+        std::string f = "bplist00";
+        const auto be = [&f](std::uint64_t v, int bytes) {
+            for (int k = bytes - 1; k >= 0; k--) {
+                f.push_back(static_cast<char>(v >> (8 * k)));
+            }
+        };
+        const std::size_t array_at = f.size();
+        f += "\xAF\x11";
+        be(refs, 2);
+        f += std::string(refs, '\x01');
+        const std::size_t data_at = f.size();
+        f += "\x4F\x12";
+        be(size, 4);
+        f += std::string(size, 'd');
+        const std::size_t table = f.size();
+        be(array_at, 4);
+        be(data_at, 4);
+        f += std::string(6, '\0');
+        f += "\x04\x01";
+        be(2, 8);     // objects
+        be(0, 8);     // top
+        be(table, 8); // offset table
+        return f;
+    };
+    mt_ns::PlistValue v;
+    std::string error;
+    // 4,000 references to 64 KiB: 250 MiB once expanded, from a 70 KB file.
+    CHECK_FALSE(parse(shared(4000, 64u << 10), &v, &error));
+    CHECK(error == "shared references copy too many bytes");
+    // A few copies are fine.
+    REQUIRE(parse(shared(8, 64u << 10), &v, &error));
+    REQUIRE(v.items.size() == 8u);
+    CHECK(v.items[7].bytes.size() == 64u << 10);
+}
+
 // --- the save files
 // ----------------------------------------------------------------------------------
 

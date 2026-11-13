@@ -619,6 +619,28 @@ TEST_CASE("gamecenter.json's JSON: parsing, escapes, errors, number forms") {
     json_out_free(&o);
 }
 
+TEST_CASE("gamecenter.json's JSON: a lone surrogate is refused, not made invalid UTF-8 (#323)") {
+    using namespace mt_stubs_impl;
+    JsonValue v{};
+    const char *error = nullptr;
+    for (const char *lone : {R"("\ud800")", R"("\udc00")", R"("a\ud83dz")", R"("\ud83dA")",
+                             R"("\ude00\ud83d")", R"(["\udbff"])", R"({"\udfff": 1})"}) {
+        INFO(lone);
+        error = nullptr;
+        CHECK_FALSE(json_parse(lone, std::strlen(lone), &v, &error));
+        REQUIRE(error != nullptr);
+        CHECK(std::string(error) == "lone surrogate");
+    }
+    const char *bad_low = R"("\ud83d\uzzzz")";
+    CHECK_FALSE(json_parse(bad_low, std::strlen(bad_low), &v, &error));
+    CHECK(std::string(error) == "bad \\u escape");
+    // The first and the last pair decode to U+10000 and U+10FFFF.
+    const char *pairs = R"("𐀀􏿿")";
+    REQUIRE(json_parse(pairs, std::strlen(pairs), &v, &error));
+    CHECK(std::string(v.string) == "\xF0\x90\x80\x80\xF4\x8F\xBF\xBF");
+    json_free(&v);
+}
+
 // --- the offline cash shop's store and receipt server (#156, ADR 0072) -----------------------
 
 namespace {

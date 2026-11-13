@@ -150,17 +150,27 @@ bool parse_string(Parser &ps, char **out) {
                     std::free(b.data);
                     return false;
                 }
-                if (cp >= 0xD800 && cp < 0xDC00 && ps.end - ps.p >= 6 && ps.p[0] == '\\' &&
-                    ps.p[1] == 'u') {
-                    const char *save = ps.p;
-                    ps.p += 2;
+                // A surrogate only as a high one followed by a low one: alone, it has no UTF-8
+                // form, and encoding it anyway gave invalid UTF-8 (#323).
+                if (cp >= 0xD800 && cp < 0xDC00) {
                     std::uint32_t lo = 0;
-                    if (hex4(ps, &lo) && lo >= 0xDC00 && lo < 0xE000) {
-                        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
-                    } else {
-                        ps.p = save;
-                        ps.error = nullptr;
+                    if (ps.end - ps.p < 6 || ps.p[0] != '\\' || ps.p[1] != 'u') {
+                        std::free(b.data);
+                        return fail(ps, "lone surrogate");
                     }
+                    ps.p += 2;
+                    if (!hex4(ps, &lo)) {
+                        std::free(b.data);
+                        return false;
+                    }
+                    if (lo < 0xDC00 || lo >= 0xE000) {
+                        std::free(b.data);
+                        return fail(ps, "lone surrogate");
+                    }
+                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                } else if (cp >= 0xDC00 && cp < 0xE000) {
+                    std::free(b.data);
+                    return fail(ps, "lone surrogate");
                 }
                 ok = put_utf8(b, cp);
                 break;
