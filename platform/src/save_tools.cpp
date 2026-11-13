@@ -261,7 +261,9 @@ bool read_save_source(const std::string &source, SaveSet *files, std::vector<std
             }
             return false;
         };
-        if (!has_game_files(path) && fs::is_directory(path / "Documents", ec)) {
+        // A symbolic link in the folder is never followed (#413): neither a Documents/ that is
+        // one nor a file. The folder itself is the one the player named.
+        if (!has_game_files(path) && fs::is_directory(fs::symlink_status(path / "Documents", ec))) {
             path /= "Documents";
         }
         std::vector<fs::path> entries;
@@ -274,7 +276,16 @@ bool read_save_source(const std::string &source, SaveSet *files, std::vector<std
         std::sort(entries.begin(), entries.end());
         for (const fs::path &p : entries) {
             const std::string name = path_utf8(p.filename());
-            if (is_tmp(name) || name.empty() || name[0] == '.' || !fs::is_regular_file(p, ec)) {
+            const fs::file_status status = fs::symlink_status(p, ec);
+            if (is_tmp(name) || name.empty() || name[0] == '.') {
+                continue;
+            }
+            if (fs::is_symlink(status)) {
+                SDL_Log("saves: %s is a symbolic link: not followed", path_utf8(p).c_str());
+                ignored->push_back(name + " (a symbolic link: not followed)");
+                continue;
+            }
+            if (ec || !fs::is_regular_file(status)) {
                 continue;
             }
             if (!is_game_file(name)) {

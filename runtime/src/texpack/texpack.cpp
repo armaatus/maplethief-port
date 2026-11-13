@@ -1,9 +1,10 @@
 // Texture packs and texture dumps (#153, ADR 0081, maplethief/texpack.h).
 //
 // The pack's files are untrusted data: their names are matched against a fixed pattern when the
-// pack is indexed, each file is read (at most k_max_file bytes) when its upload comes, its PNG
-// signature and header size are checked against the upload before stb_image (PNG only) decodes
-// it, and the decoded size is checked again. A rejected file is logged once and never read
+// pack is indexed (at most MT_TEXPACK_MAX_FILES files; a symbolic link is skipped, #413), each
+// file is read (at most k_max_file bytes) when its upload comes, its PNG signature and header
+// size are checked against the upload before stb_image (PNG only) decodes it, and the decoded
+// size is checked again. A rejected file is logged once and never read
 // again; the game's texture is kept.
 #include "maplethief/texpack.h"
 
@@ -408,6 +409,29 @@ int image_hook(void *, const mt_cg_image_file *image, mt_cg_image_replacement *o
     }
 }
 
+// The symbolic links an index skipped (#413): a pack's files are its own, never a link's target.
+struct Links {
+    u64 count = 0;
+    std::string first; // UTF-8, for the log
+    void add(const fs::path &p) {
+        if (count++ == 0) {
+            first = utf8_of(p);
+        }
+    }
+};
+
+// Whether a pack's directory entry is a regular file itself, not a link to one (a link is
+// counted in *links).
+bool regular_file(const fs::directory_entry &entry, Links *links) {
+    std::error_code ec;
+    const fs::file_status st = entry.symlink_status(ec);
+    if (fs::is_symlink(st)) {
+        links->add(entry.path());
+        return false;
+    }
+    return !ec && fs::is_regular_file(st);
+}
+
 void update_image_hook() {
     mt_cg_set_image_replace_hook(g_pack.open || g_dump.open ? image_hook : nullptr, nullptr);
 }
@@ -447,10 +471,16 @@ extern "C" int mt_texpack_open(const char *dir) noexcept {
         reset_pack_stats();
         Pack pack;
         pack.dir = dir;
-        u64 ignored = 0;
+        u64 ignored = 0, skipped = 0;
+        Links links;
+        // Whether one more file may be indexed (at most g_max_files; the rest counted).
+        const auto room = [&pack, &skipped]() {
+            const bool ok = pack.files.size() + pack.ui.size() < g_max_files;
+            skipped += ok ? 0u : 1u;
+            return ok;
+        };
         for (fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
-            std::error_code fe;
-            if (!it->is_regular_file(fe)) {
+            if (!regular_file(*it, &links)) {
                 continue;
             }
             const std::string name = utf8_of(it->path().filename());
@@ -460,18 +490,25 @@ extern "C" int mt_texpack_open(const char *dir) noexcept {
                 ignored += name != "manifest.jsonl" ? 1u : 0u;
                 continue;
             }
-            File &f = pack.files[key];
-            if (!f.path.empty() && !raw) {
-                continue; // <hash>.png and .raw.png: the .raw.png counts
+            const auto have = pack.files.find(key);
+            if (have != pack.files.end()) {
+                if (raw) { // <hash>.png and .raw.png: the .raw.png counts
+                    have->second = File{utf8_of(it->path()), raw, false};
+                }
+            } else if (room()) {
+                pack.files[key] = File{utf8_of(it->path()), raw, false};
             }
-            f = File{utf8_of(it->path()), raw, false};
         }
         const fs::path ui = root / "ui";
-        if (fs::is_directory(ui, ec)) {
+        std::error_code ue;
+        const fs::file_status ui_status = fs::symlink_status(ui, ue);
+        if (fs::is_symlink(ui_status)) {
+            links.add(ui);
+        } else if (fs::is_directory(ui_status)) {
+            // A link to a folder below ui/ is an entry like any other: never followed into.
             for (fs::recursive_directory_iterator it(ui, ec), end; !ec && it != end;
                  it.increment(ec)) {
-                std::error_code fe;
-                if (!it->is_regular_file(fe)) {
+                if (!regular_file(*it, &links)) {
                     continue;
                 }
                 const std::string rel = utf8_of(it->path().lexically_relative(ui));
@@ -479,8 +516,18 @@ extern "C" int mt_texpack_open(const char *dir) noexcept {
                     ++ignored;
                     continue;
                 }
-                pack.ui[rel] = File{utf8_of(it->path()), false, false};
+                if (pack.ui.count(rel) != 0 || room()) {
+                    pack.ui[rel] = File{utf8_of(it->path()), false, false};
+                }
             }
+        }
+        if (links.count != 0) {
+            logf("texpack: pack %s: %llu symbolic links not followed (the first: %s)", dir,
+                 static_cast<unsigned long long>(links.count), links.first.c_str());
+        }
+        if (skipped != 0) {
+            logf("texpack: pack %s: %llu files past the first %u skipped", dir,
+                 static_cast<unsigned long long>(skipped), static_cast<unsigned>(g_max_files));
         }
         pack.open = true;
         g_pack = std::move(pack);

@@ -130,12 +130,12 @@ class Mp3Stream final : public mix::MusicStream {
     std::atomic<bool> ended_{false};
 };
 
-// An audio pack's MP3 or FLAC decoded whole to 16-bit interleaved PCM (#188: an effect, which
-// the game reads in one piece), as open_pack() would play it: false where open_pack() gives
-// null (the length is checked before anything is decoded).
-bool decode_file(std::vector<std::uint8_t> bytes, Mp3Stream::Codec codec, std::uint32_t max_seconds,
-                 std::vector<std::int16_t> *samples, std::uint32_t *rate, std::uint32_t *channels);
-// How many files have been decoded whole since start-up (a test's proof that one was not).
+// An audio pack's stream (open_pack(), not yet read) decoded whole to 16-bit interleaved PCM
+// (#188: an effect, which the game reads in one piece), as it would play; false if it gives no
+// frames. open_pack() has checked the length; the caller checks the rate and the channels, from
+// the file's header, before it asks for this (#413).
+bool decode_whole(Mp3Stream &stream, std::vector<std::int16_t> *samples);
+// How many streams decode_whole() has decoded since start-up (a test's proof that one was not).
 std::uint64_t whole_decodes();
 
 } // namespace mt_audio
