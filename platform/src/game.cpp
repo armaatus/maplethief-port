@@ -1854,7 +1854,7 @@ void smooth_frame(Game &g) {
     g.smooth_between = !g.smooth_first;
     if (mt_trace_enabled("interp") != 0) {
         mt_tracef("interp", "window frame %llu: GL frame %u at %.3f of its tick",
-                  static_cast<unsigned long long>(g.presents + 1), f.index, alpha);
+                  static_cast<unsigned long long>(g.presents) + 1, f.index, alpha);
     }
     g.stats.add(Phase::kTake, SDL_GetTicksNS() - t0);
 }
@@ -3025,6 +3025,8 @@ void start_menu(Game &g, const GameOptions &options) {
     const auto switch_inputs = [] {
         DataSwitchInputs in;
         in.user_dir = [] { return user_data_dir(false); };
+        // Returned by value, and its lambda captures nothing: no stack address escapes.
+        // NOLINTNEXTLINE(clang-analyzer-core.StackAddressEscape)
         return in;
     };
     g.menu.set_action_question("data_location", [switch_inputs] {

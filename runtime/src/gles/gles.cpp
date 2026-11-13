@@ -666,7 +666,7 @@ void format_call(const mt_gles_cmd &c, char *text, std::size_t size) {
         const std::size_t left = size - static_cast<std::size_t>(n);
         const char *sep = i != 0 ? ", " : "";
         const u32 v = c.args[i];
-        const char kind = kinds[i] != 0 ? kinds[i] : 'u';
+        const char kind = *kinds != 0 ? *kinds++ : 'u'; // past the end of the kinds: 'u'
         const char *name = nullptr;
         if (kind == 'e' || kind == 't') {
             name = find_name(k_enums, sizeof k_enums / sizeof k_enums[0], v);

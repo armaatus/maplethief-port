@@ -186,7 +186,7 @@ void format_hex_float(std::string &out, const mt_format_spec &s, double v, char 
 
 // e E f F g G a A.
 void format_float(std::string &out, const mt_format_spec &s, double v) {
-    char sign = s.plus ? '+' : s.space ? ' ' : 0;
+    char sign = s.plus ? '+' : s.space ? ' ' : '\0';
     if (std::signbit(v)) {
         sign = '-';
     }
@@ -356,16 +356,13 @@ int mt_format(mt_cpu *cpu, const char *fmt, mt_args *args, const mt_format_hooks
             continue;
         }
         char conv = s.conv;
-        if (conv == 'D' || conv == 'O' || conv == 'U') { // %ld %lo %lu
-            conv = static_cast<char>(conv - 'A' + 'a');
-            s.length[0] = 'l';
-            s.length[1] = 0;
-        } else if (conv == 'C' || conv == 'S') { // %lc %ls
+        if (conv == 'D' || conv == 'O' || conv == 'U' || // %ld %lo %lu
+            conv == 'C' || conv == 'S') {                // %lc %ls
             conv = static_cast<char>(conv - 'A' + 'a');
             s.length[0] = 'l';
             s.length[1] = 0;
         }
-        const char sign_flag = s.plus ? '+' : s.space ? ' ' : 0;
+        const char sign_flag = s.plus ? '+' : s.space ? ' ' : '\0';
         switch (conv) {
         case 'd':
         case 'i': {

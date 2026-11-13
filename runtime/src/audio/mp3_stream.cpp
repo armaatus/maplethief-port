@@ -3,10 +3,13 @@
 // DR_FLAC_IMPLEMENTATION (ADR 0003); compiled without floating-point contraction
 // (maplethief_strict_fp), with dr_mp3's scalar float path, so the decode is the same on every
 // host (FLAC is integer arithmetic; its SIMD paths are off too, and so is Ogg-FLAC).
+// clang-tidy sees the declarations only: the third-party bodies are not ours to check.
+#if !defined(__clang_analyzer__)
 #define DR_MP3_IMPLEMENTATION
+#define DR_FLAC_IMPLEMENTATION
+#endif
 #define DR_MP3_NO_SIMD
 #define DR_MP3_NO_STDIO
-#define DR_FLAC_IMPLEMENTATION
 #define DR_FLAC_NO_SIMD
 #define DR_FLAC_NO_STDIO
 #define DR_FLAC_NO_OGG

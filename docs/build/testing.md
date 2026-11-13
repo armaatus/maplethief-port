@@ -75,9 +75,11 @@ scripts/test-linux --arch arm64 -- --preset linux-asan --cpp-only   # Linux, in 
 Run the quick local check ([ADR 0126](../adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md)):
 
 ```sh
-scripts/lint                            # formatters and linters, on tracked files
+scripts/lint                            # formatters and linters, on tracked files, and clang-tidy
 cmake --workflow --preset mac-debug     # or scripts/test, which adds the Python tests
 ```
+
+`scripts/lint` runs clang-tidy over `runtime/` and `platform/` ([ADR 0002](../adr/0002-language-and-toolchain.md)'s addendum): it configures the host's Debug preset into `build/tidy` for the compile database (the first time takes about a minute) and checks every translation unit in parallel, a minute and a half to three minutes on a 10-core Mac. `scripts/lint --no-tidy` skips it for a quick pass. Check one file with `uvx clang-tidy@23.1.3 -p build/tidy <file>` (on macOS add `--extra-arg=-isysroot$(xcrun --show-sdk-path)`). A finding is fixed, or marked on its line with `// NOLINT(check-name): the reason`; a check that is wrong for this code is disabled in `.clang-tidy` with its reason.
 
 Add the real-asset tests your change touches, since CI can't run them. The Mac build has clang warnings that match MSVC's (`-Wshadow` and the int and float conversions), so a clean Mac build is the best local stand-in for Windows.
 
@@ -130,7 +132,8 @@ A pull request is merged only when its checks are green (`gh pr checks --watch`)
 
 - **The `build` jobs** run the same `scripts/test` and `scripts/test.ps1` as above: the Debug build, CTest (including the headless `platform.smoke`) and pytest, with warnings as errors. The Release jobs run the release workflows and package the kits; the universal binary must contain both `arm64` and `x86_64`.
 - **The `asan` job** (Linux, on every pull request and manual run that builds) runs the `linux-asan` workflow: the C/C++ tests built with clang under ASan and UBSan, no recovery, the guest memory model checked ([Sanitizers](#sanitizers-asan-and-ubsan)). It uses clang so that the fuzz targets' smoke runs ([#322](https://github.com/armaatus/maplethief-port/issues/322), [#323](https://github.com/armaatus/maplethief-port/issues/323)) can join it as later steps.
-- **The `lint + Python min/latest` job** (Linux) runs `scripts/lint`, then `scripts/test --python-only` on Python 3.10 and the latest Python, and the guard that no compendium output is tracked ([ADR 0121](../adr/0121-public-compendium-site.md)).
+- **The `lint (clang-tidy)` job** (Linux, on every pull request and manual run that builds) runs `scripts/lint` in full, clang-tidy included, after installing the SDL3 build dependencies and clang for the compile database. It runs beside the build jobs and takes about 6 minutes, most of it clang-tidy.
+- **The `lint + Python min/latest` job** (Linux) runs `scripts/lint --no-tidy`, then `scripts/test --python-only` on Python 3.10 and the latest Python, and the guard that no compendium output is tracked ([ADR 0121](../adr/0121-public-compendium-site.md)).
 - **The `ios` job** (macOS, on the runs that build every OS: the release pull request and manual runs) runs the `ios-ci` workflow: our own code for iOS arm64, Debug and Release, no IPA and no signing. It links the frontend and runtime into the placeholder shell and checks the app is arm64 ([ADR 0136](../adr/0136-ios-app-through-xcode.md)). The game itself and a device are local.
 - **The `switch` job** (Linux, on every pull request and manual run) runs `scripts/build-switch HEAD --preset switch-release --arch amd64`: `MapleThief.nro` from our own code in the devkitA64 image pinned by digest, no IPA. Its CTest checks read the NRO's NACP and icon (`platform.switch_nro`) and run the release guard on it (`platform.switch_guard`). It also builds every test NRO, `MapleThiefTests.nro` among them. A console is never involved: hardware runs are local, with `scripts/switch-run` and `scripts/switch-test` ([ADR 0138](../adr/0138-nintendo-switch-homebrew-target.md)).
 - **Docs-only changes.** A pull request that touches only documentation or compendium work skips the build jobs, and one whose native changes only touch another platform's own files (`platform/macos/`, `scripts/*.ps1`, the Linux containers, …) skips the `switch` job. `scripts/ci-scope` decides, from an allow-list ([ADR 0006](../adr/0006-continuous-integration.md)'s addendum).

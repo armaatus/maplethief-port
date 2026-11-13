@@ -314,6 +314,7 @@ std::uint32_t patch_table(const std::string &rel, std::vector<std::uint8_t> &byt
         }
         std::uint8_t *field = bytes.data() + 6u + f.row * f.column->stride + f.column->offset;
         std::memset(field, 0, f.column->width);
+        // NOLINTNEXTLINE(bugprone-not-null-terminated-result): a zero-padded fixed-width field
         std::memcpy(field, v.data(), v.size());
         written++;
     }

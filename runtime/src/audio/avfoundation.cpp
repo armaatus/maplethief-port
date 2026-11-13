@@ -192,7 +192,9 @@ void player_init(mt_cpu *cpu) {
     if (!path.empty()) {
         stream = pack::music(path, gapless, &from_pack);
     }
+    bool read = false; // the file was there (bytes is moved into the stream)
     if (!stream && !path.empty() && read_file(path, &bytes)) {
+        read = !bytes.empty();
         stream = Mp3Stream::open(std::move(bytes), gapless);
     }
     auto *s =
@@ -200,7 +202,7 @@ void player_init(mt_cpu *cpu) {
                : nullptr;
     if (s == nullptr) {
         mt_tracef("audio", "-[AVAudioPlayer initWithContentsOfURL:%s error:]: %s: nil",
-                  path.c_str(), path.empty() || bytes.empty() ? "no such file" : "not an MP3");
+                  path.c_str(), !read ? "no such file" : "not an MP3");
         mt_objc_release(cpu, self);
         mt_ret_u32(cpu, 0);
         return;

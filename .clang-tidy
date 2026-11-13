@@ -1,0 +1,54 @@
+# clang-tidy for our own C and C++ in runtime/ and platform/ (ADR 0002 addendum, #325).
+# scripts/lint runs it at a pinned version over every translation unit of those two folders in
+# the host's compile database; generated code (work/gen/) and third-party code are never checked.
+#
+# Enabled: the bugprone, cert and clang-analyzer groups. Every finding is an error. A finding
+# that is wrong for one line is marked there: // NOLINT(check-name): the reason.
+#
+# Disabled, each with its reason:
+# - bugprone-easily-swappable-parameters: a style rule. Most of the hits are (x, y, w, h) and
+#   (cpu, addr, size) signatures that the guest ABI or SDL fixes.
+# - bugprone-signed-bitwise: the runtime emulates a 32-bit CPU and does bit work on int
+#   operands everywhere; UBSan (ADR 0157) catches the shifts that are actually undefined.
+# - bugprone-implicit-widening-of-multiplication-result: nearly every hit is a constant
+#   (64 * 1024) or a product of a few hundred pixels; sizes from files are bounded by the
+#   parsers' limits first (ADR 0154) and UBSan catches overflow at run time.
+# - bugprone-exception-escape: an exception that escapes a noexcept function (in practice
+#   std::bad_alloc) terminates, which is the crash path we want (ADR 0002: nothing throws into
+#   generated code), and the crash report records it.
+# - bugprone-throwing-static-initialization, cert-err58-cpp: the same, for tables built at
+#   start-up: running out of memory before main has nothing to recover to.
+# - bugprone-assignment-in-if-condition: a deliberate idiom here
+#   (if ((s = need(...)) == nullptr)); -Wparentheses already catches = written for ==.
+# - bugprone-multi-level-implicit-pointer-conversion: fires on std::free and std::realloc of
+#   arrays of pointers (char **), which is what those calls are for.
+# - cert-err52-cpp: setjmp and longjmp are how the guest's SjLj exceptions (ADR 0020) and the
+#   GCD workers' exits work; host C++ exceptions must never cross generated code (ADR 0002).
+# - cert-dcl50-cpp: the C-style variadic functions are printf-style logging entry points and
+#   the guest's own variadic imports; the format attribute and -Wformat check their callers.
+# - cert-err33-c: 90% of the hits are snprintf into fixed buffers (truncation is the intent)
+#   and stdio on stderr. The save writer, which must succeed, checks fwrite and fclose itself.
+# - clang-analyzer-optin.performance.Padding: a layout hint, not a defect.
+# - clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling: asks for the C11
+#   Annex K functions (fprintf_s), which only MSVC has.
+Checks: >-
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-signed-bitwise,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-exception-escape,
+  -bugprone-throwing-static-initialization,
+  -cert-err58-cpp,
+  -bugprone-assignment-in-if-condition,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -cert-dcl50-cpp,
+  -cert-err52-cpp,
+  -cert-err33-c,
+  -clang-analyzer-optin.performance.Padding,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
+WarningsAsErrors: '*'
+HeaderFilterRegex: '/(runtime|platform)/'
+ExcludeHeaderFilterRegex: '/_deps/'

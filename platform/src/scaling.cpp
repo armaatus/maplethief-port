@@ -256,8 +256,9 @@ Placement place(ScaleMode mode, int output_w, int output_h, int image_w, int ima
         const int ih = kScreenHeight * k;
         w = static_cast<float>(iw);
         h = static_cast<float>(ih);
-        x = static_cast<float>((output_w - iw) / 2);
-        y = static_cast<float>((output_h - ih) / 2);
+        const int left = (output_w - iw) / 2, top = (output_h - ih) / 2; // whole pixels
+        x = static_cast<float>(left);
+        y = static_cast<float>(top);
     } else {
         // The fit modes, and integer mode smaller than 1x (scaled down to fit, nearest).
         const Rect f = fit_rect(sw, sh, image_w, image_h);

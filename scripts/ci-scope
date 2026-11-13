@@ -3,8 +3,9 @@
 # changed paths, one per line, on stdin and prints two lines:
 #
 #   native=true|false   whether any path can affect the native build or its tests (the `build`
-#                       matrix); false when every path is documentation or compendium work that
-#                       the "lint + Python min/latest" job covers on its own
+#                       matrix and the clang-tidy job); false when every path is
+#                       documentation or compendium work that the "lint + Python min/latest" job
+#                       covers on its own. scripts/lint counts as native: it runs clang-tidy (#325)
 #   switch=true|false   whether any of those native paths can affect the Nintendo Switch build
 #                       (the `switch` job, ADR 0138); false when they only touch another
 #                       platform's own files (macOS, iOS, Windows, Linux packaging)
@@ -37,7 +38,6 @@ while IFS= read -r path || [ -n "$path" ]; do
         scripts/compendium) continue ;;
         scripts/ci-scope) continue ;;
         scripts/local-ci) continue ;;   # never runs in CI
-        scripts/lint) continue ;;       # the lint + Python job runs it
         .github/workflows/compendium.yml) continue ;;
         *) native=true ;;
     esac

@@ -607,9 +607,10 @@ bool Presenter::compose_picture(std::uint32_t view) {
     if (pad_wings_on_ && pad_wings_ != nullptr && wide_ > MT_UIKIT_SCREEN_WIDTH) {
         const std::uint32_t wing = (wide_ - MT_UIKIT_SCREEN_WIDTH) / 2;
         const std::uint32_t in = std::min((view - MT_UIKIT_SCREEN_WIDTH) / 2, wing);
-        const float per_point = static_cast<float>(pad_w_ / 2) / static_cast<float>(wing);
+        const std::uint32_t half_w = pad_w_ / 2; // whole texels
+        const float per_point = static_cast<float>(half_w) / static_cast<float>(wing);
         const float in_texels = static_cast<float>(in) * per_point;
-        const float half = static_cast<float>(pad_w_ / 2);
+        const float half = static_cast<float>(half_w);
         const SDL_FRect src_l{half - in_texels, 0, in_texels, static_cast<float>(pad_h_)};
         const SDL_FRect src_r{half, 0, in_texels, static_cast<float>(pad_h_)};
         const float cols = static_cast<float>(in * s);

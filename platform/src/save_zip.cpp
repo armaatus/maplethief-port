@@ -13,7 +13,10 @@
 #define STBI_ONLY_PNG
 #define STBI_NO_STDIO
 #define STB_IMAGE_STATIC
+// clang-tidy sees the declarations only: the third-party bodies are not ours to check.
+#if !defined(__clang_analyzer__)
 #define STB_IMAGE_IMPLEMENTATION
+#endif
 #include <stb_image.h>
 
 namespace maplethief::frontend {
@@ -147,6 +150,7 @@ bool zip_list(std::span<const std::uint8_t> zip, std::vector<ZipItem> *items, st
     }
     // The end record: the last one whose comment reaches the end of the file exactly.
     std::size_t end = n;
+    // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions): at-- > 0 is the whole countdown, read once
     for (std::size_t at = n - kEndSize + 1; at-- > 0 && n - at <= kEndSize + 0xFFFF;) {
         if (get32(z + at) == kEndSig && at + kEndSize + get16(z + at + 20) == n) {
             end = at;

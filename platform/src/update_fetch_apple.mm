@@ -95,7 +95,8 @@ class SessionFetcher final : public UpdateFetcher {
   public:
     std::optional<std::string> get(const std::string &url, std::string *why) override {
         @autoreleasepool {
-            NSURL *address = [NSURL URLWithString:[NSString stringWithUTF8String:url.c_str()]];
+            NSString *text = [NSString stringWithUTF8String:url.c_str()];
+            NSURL *address = text != nil ? [NSURL URLWithString:text] : nil;
             if (address == nil) {
                 set_why(why, "not an address");
                 return std::nullopt;
@@ -122,7 +123,9 @@ class SessionFetcher final : public UpdateFetcher {
             [task resume];
             const std::int64_t wait_ns =
                 static_cast<std::int64_t>(kUpdateTimeoutSeconds + 2) * 1000 * 1000 * 1000;
+            // The check has a thread of its own, which waits for the answer (update_check.h).
             const long timed_out =
+                // NOLINTNEXTLINE(clang-analyzer-optin.performance.GCDAntipattern)
                 dispatch_semaphore_wait(fetch.done, dispatch_time(DISPATCH_TIME_NOW, wait_ns));
             [session finishTasksAndInvalidate];
             if (timed_out != 0) {
