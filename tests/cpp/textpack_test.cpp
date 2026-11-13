@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "cf/cf_objects.h"
+#include "dir_state.h"
 #include "maplethief/diag.h"
 #include "maplethief/hooks.h"
 #include "maplethief/textpack.h"
@@ -406,6 +407,7 @@ TEST_CASE("textpack: a file over 4 MiB is refused before it is read (#413)") {
     p.write("textpack.strings", k_manifest);
     p.write("Scripts.strings", "\"k\" = \"v\";");
     fs::resize_file(p.dir / "Scripts.strings", std::uintmax_t{MT_TEXTPACK_MAX_FILE} + 1); // sparse
+    const std::vector<std::string> before = dir_state(p.dir);
     // Unreadable as well, where the system has permissions: only the size can refuse it then.
     std::error_code ec;
     fs::permissions(p.dir / "Scripts.strings", fs::perms::none, ec);
@@ -414,6 +416,7 @@ TEST_CASE("textpack: a file over 4 MiB is refused before it is read (#413)") {
     CHECK(logged("Scripts.strings: larger than 4 MiB: refused"));
     CHECK(mt_textpack_lookup("Scripts", "k") == nullptr);
     CHECK(mt_textpack_get_stats().refused == 1);
+    CHECK(dir_state(p.dir) == before); // nothing moved, renamed or written
 }
 
 TEST_CASE("textpack: the manifest's language is 1 to 35 characters (#413)") {

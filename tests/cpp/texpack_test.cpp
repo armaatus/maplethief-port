@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "cg/cg_objects.h"
+#include "dir_state.h"
 #include "golden.h"
 #include "maplethief/diag.h"
 #include "maplethief/gfx.h"
@@ -443,6 +444,7 @@ TEST_CASE("texpack: a file over 80 MiB is rejected unread; one of 80 MiB is read
     };
     sparse(pack.path / name_of(at, 2, 2), std::uintmax_t{80} << 20);
     sparse(pack.path / name_of(over, 2, 2), (std::uintmax_t{80} << 20) + 1);
+    const std::vector<std::string> before = dir_state(pack.path);
     REQUIRE(mt_texpack_open(pack.str().c_str()) == 2);
     u32 w = 0, h = 0;
     CHECK(texels_of(upload(at, 2, 2), &w, &h) == at);
@@ -450,6 +452,7 @@ TEST_CASE("texpack: a file over 80 MiB is rejected unread; one of 80 MiB is read
     CHECK(fresh.count(name_of(at, 2, 2) + " is no PNG") == 1); // read, then refused
     CHECK(fresh.count(name_of(over, 2, 2) + " is larger than 80 MiB") == 1);
     CHECK(mt_texpack_get_stats().rejected == 2);
+    CHECK(dir_state(pack.path) == before); // nothing moved, renamed or written
 }
 
 TEST_CASE("texpack: a name's width and height are 1 to 5 digits, at most 4096 (#413)") {

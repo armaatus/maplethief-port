@@ -30,6 +30,7 @@
 
 #include <dr_mp3.h> // the reference decode: the runtime's own dr_mp3
 
+#include "dir_state.h"
 #include "gles_fixture.h"
 
 namespace {
@@ -775,6 +776,7 @@ TEST_CASE("audio.pack: a .loop file is at most 256 bytes (#413)") {
     REQUIRE(text.size() == 256);
     write_text(dir / "40.loop", text);
     write_text(dir / "41.loop", text + "x");
+    const std::vector<std::string> before = dir_state(dir);
     REQUIRE(mt_audio_pack_open(dir.string().c_str()) == 2);
     std::string from;
     const auto a = mt_audio::pack::music("/x/sound/40.mp3", false, &from);
@@ -786,6 +788,7 @@ TEST_CASE("audio.pack: a .loop file is at most 256 bytes (#413)") {
     CHECK(b->loop().end == 0);
     CHECK(count_logged("41.loop is not \"start end\"") == 1);
     CHECK(count_logged("40.loop") == 0);
+    CHECK(dir_state(dir) == before); // nothing moved, renamed or written
 }
 
 TEST_CASE("audio.pack: a symbolic link in a pack is not followed, logged once (#413)") {
