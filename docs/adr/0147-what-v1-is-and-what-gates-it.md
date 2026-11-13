@@ -50,6 +50,7 @@ Option 3, decided by Joris on #308.
 - #94, #106 and #114 are reworded to match (public, desktop gates, preview platforms); ROADMAP M11 and KNOWN_ISSUES use "preview" in the same sense.
 - v1.0 waits on six hand-offs plus the release itself, all at a desk with a Mac, a Windows PC and Linux (the container or a PC). The Switch and the iPhone no longer hold it.
 - A preview platform can ship a bug that its sign-off would have found. The label and the linked issues say so, and a fix goes out in a patch release.
-- The play pages, the release notes header and the itch.io page still need the preview line; that is follow-up work in epic #106.
+- The play pages, the release notes header and the itch.io page still need the preview line: #394.
+- About 30 hand-offs filed on 2026-11-13 have a gate mark but no device section yet, so `--live` still reports them as missing from the hand-off list; #395 adds the sections and drops `needs-human` from the ones that are now agent work.
 - A new `needs-human` issue needs a mark in the index before `--live` passes, so the gate list stays current. If a later hand-off turns out to block players on a desktop system, it becomes a gate by a new ADR that supersedes this one's list.
 - This decision would be wrong if players on a desktop system hit problems that one of the non-gate hand-offs (#131, #142, #132) would have caught; then those join the gates for the next release.
