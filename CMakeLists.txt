@@ -179,6 +179,26 @@ if(MSVC)
     endforeach()
 endif()
 
+# AddressSanitizer and UndefinedBehaviorSanitizer (#321, ADR 0157): the linux-asan and mac-asan
+# presets. Every target from here on (the runtime, the generated code, the frontend, the tests)
+# is instrumented, and any finding aborts the program: no recovery. SDL, added above, keeps its
+# own flags. clang or GCC only; MSVC's ASan has no UBSan to pair it with.
+option(MAPLETHIEF_SANITIZE "Build our own code with ASan and UBSan, no recovery (ADR 0157)" OFF)
+if(MAPLETHIEF_SANITIZE)
+    if(MSVC)
+        message(FATAL_ERROR "MAPLETHIEF_SANITIZE needs clang or GCC (ADR 0157)")
+    endif()
+    add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all
+                        -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+    add_compile_definitions(MT_SANITIZE=1)
+    # A sanitized test runs a few times slower: every CTest's TIMEOUT is multiplied by this
+    # (maplethief_doctest_discover() and maplethief_scale_test_timeouts() below).
+    set(MAPLETHIEF_TEST_TIMEOUT_SCALE 4)
+else()
+    set(MAPLETHIEF_TEST_TIMEOUT_SCALE 1)
+endif()
+
 enable_testing()
 
 add_subdirectory(runtime)
@@ -188,6 +208,26 @@ add_subdirectory(platform)
 # The doctest programs run on the host; an iOS build has nowhere to run them (ADR 0136).
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     add_subdirectory(tests)
+endif()
+
+# maplethief_scale_test_timeouts(<dir>): multiplies the TIMEOUT of every CTest added in <dir>
+# and the directories below it by MAPLETHIEF_TEST_TIMEOUT_SCALE (the sanitizer presets).
+function(maplethief_scale_test_timeouts dir)
+    get_property(tests DIRECTORY "${dir}" PROPERTY TESTS)
+    foreach(test IN LISTS tests)
+        get_test_property(${test} TIMEOUT DIRECTORY "${dir}" timeout)
+        if(timeout)
+            math(EXPR timeout "${timeout} * ${MAPLETHIEF_TEST_TIMEOUT_SCALE}")
+            set_property(TEST ${test} DIRECTORY "${dir}" PROPERTY TIMEOUT ${timeout})
+        endif()
+    endforeach()
+    get_property(subdirs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
+    foreach(subdir IN LISTS subdirs)
+        maplethief_scale_test_timeouts("${subdir}")
+    endforeach()
+endfunction()
+if(MAPLETHIEF_TEST_TIMEOUT_SCALE GREATER 1)
+    maplethief_scale_test_timeouts("${PROJECT_SOURCE_DIR}")
 endif()
 
 # --- Python parts (tools/, recomp/) ----------------------------------------------------------

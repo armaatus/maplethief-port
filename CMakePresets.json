@@ -40,6 +40,17 @@
       }
     },
     {
+      "name": "mac-asan",
+      "displayName": "macOS Debug with ASan and UBSan, checked memory model (host architecture)",
+      "description": "Every finding aborts; MAPLETHIEF_SANITIZE (ADR 0157, #321)",
+      "inherits": "mac-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MAPLETHIEF_MEM_MODEL": "checked",
+        "MAPLETHIEF_SANITIZE": "ON"
+      }
+    },
+    {
       "name": "mac-release-universal",
       "displayName": "macOS Release, universal (arm64 + x86_64)",
       "inherits": "mac-base",
@@ -174,6 +185,19 @@
       }
     },
     {
+      "name": "linux-asan",
+      "displayName": "Linux Debug with ASan and UBSan, checked memory model (clang)",
+      "description": "Every finding aborts; MAPLETHIEF_SANITIZE. clang, so that libFuzzer targets can build alongside (ADR 0157, #321)",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "MAPLETHIEF_MEM_MODEL": "checked",
+        "MAPLETHIEF_SANITIZE": "ON"
+      }
+    },
+    {
       "name": "linux-release",
       "displayName": "Linux Release",
       "inherits": "linux-base",
@@ -235,6 +259,7 @@
   ],
   "buildPresets": [
     { "name": "mac-debug", "configurePreset": "mac-debug" },
+    { "name": "mac-asan", "configurePreset": "mac-asan" },
     { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
     { "name": "mac-app", "configurePreset": "mac-app" },
     { "name": "mac-player", "configurePreset": "mac-player", "targets": ["MapleThief"] },
@@ -246,6 +271,7 @@
     { "name": "win-release", "configurePreset": "win-release" },
     { "name": "win-player", "configurePreset": "win-player", "targets": ["MapleThief"] },
     { "name": "linux-debug", "configurePreset": "linux-debug" },
+    { "name": "linux-asan", "configurePreset": "linux-asan" },
     { "name": "linux-release", "configurePreset": "linux-release" },
     { "name": "linux-player", "configurePreset": "linux-player", "targets": ["MapleThief"] },
     { "name": "switch-debug", "configurePreset": "switch-debug" },
@@ -266,7 +292,18 @@
       "description": "The player build's own checks; its build preset builds only MapleThief (ADR 0125)",
       "filter": { "include": { "name": "^platform\\.(version|player_contents|linux_portable)$" } }
     },
+    {
+      "name": "asan-base",
+      "hidden": true,
+      "inherits": "test-base",
+      "description": "Sanitizer runs: any finding fails the test; suppressions, each with its reason, in tests/sanitizers/ (ADR 0157)",
+      "environment": {
+        "ASAN_OPTIONS": "abort_on_error=1:halt_on_error=1:detect_stack_use_after_return=1:strict_string_checks=1:check_initialization_order=1",
+        "UBSAN_OPTIONS": "halt_on_error=1:abort_on_error=1:print_stacktrace=1:report_error_type=1"
+      }
+    },
     { "name": "mac-debug", "inherits": "test-base", "configurePreset": "mac-debug" },
+    { "name": "mac-asan", "inherits": "asan-base", "configurePreset": "mac-asan" },
     { "name": "mac-release-universal", "inherits": "test-base", "configurePreset": "mac-release-universal" },
     { "name": "mac-app", "inherits": "test-base", "configurePreset": "mac-app" },
     { "name": "mac-player", "inherits": "player-base", "configurePreset": "mac-player" },
@@ -274,6 +311,7 @@
     { "name": "win-release", "inherits": "test-base", "configurePreset": "win-release" },
     { "name": "win-player", "inherits": "player-base", "configurePreset": "win-player" },
     { "name": "linux-debug", "inherits": "test-base", "configurePreset": "linux-debug" },
+    { "name": "linux-asan", "inherits": "asan-base", "configurePreset": "linux-asan" },
     { "name": "linux-release", "inherits": "test-base", "configurePreset": "linux-release" },
     { "name": "linux-player", "inherits": "player-base", "configurePreset": "linux-player" },
     {
@@ -310,6 +348,14 @@
         { "type": "configure", "name": "mac-debug" },
         { "type": "build", "name": "mac-debug" },
         { "type": "test", "name": "mac-debug" }
+      ]
+    },
+    {
+      "name": "mac-asan",
+      "steps": [
+        { "type": "configure", "name": "mac-asan" },
+        { "type": "build", "name": "mac-asan" },
+        { "type": "test", "name": "mac-asan" }
       ]
     },
     {
@@ -359,6 +405,14 @@
         { "type": "configure", "name": "linux-debug" },
         { "type": "build", "name": "linux-debug" },
         { "type": "test", "name": "linux-debug" }
+      ]
+    },
+    {
+      "name": "linux-asan",
+      "steps": [
+        { "type": "configure", "name": "linux-asan" },
+        { "type": "build", "name": "linux-asan" },
+        { "type": "test", "name": "linux-asan" }
       ]
     },
     {
