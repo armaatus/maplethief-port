@@ -58,7 +58,10 @@ fs::path unique_dir(const char *what) {
 
 // --- binary plists for the tests ---------------------------------------------------------------
 
-// A plist value to write: a tree of these.
+// A plist value to write: a tree of these. A dictionary's entries are VEntry, defined after V:
+// libstdc++ needs a std::pair complete where V's default constructor is, so clang rejects a
+// vector of pair<string, V> inside V.
+struct VEntry;
 struct V {
     enum Kind { ascii, utf16, integer, boolean, array, dict } kind = ascii;
     std::string a;
@@ -66,14 +69,18 @@ struct V {
     std::int64_t i = 0;
     bool b = false;
     std::vector<V> items;
-    std::vector<std::pair<std::string, V>> entries;
+    std::vector<VEntry> entries;
+};
+struct VEntry {
+    std::string first;
+    V second;
 };
 V str(const char *s) { return V{V::ascii, s, {}, 0, false, {}, {}}; }
 V ustr(const std::u16string &s) { return V{V::utf16, {}, s, 0, false, {}, {}}; }
 V num(std::int64_t i) { return V{V::integer, {}, {}, i, false, {}, {}}; }
 V yes(bool b) { return V{V::boolean, {}, {}, 0, b, {}, {}}; }
 V arr(std::vector<V> items) { return V{V::array, {}, {}, 0, false, std::move(items), {}}; }
-V dict(std::vector<std::pair<std::string, V>> e) {
+V dict(std::vector<VEntry> e) {
     return V{V::dict, {}, {}, 0, false, {}, std::move(e)};
 }
 
