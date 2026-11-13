@@ -2,6 +2,7 @@
 
 import json
 import struct
+import tracemalloc
 import zlib
 
 import pytest
@@ -227,6 +228,24 @@ def test_decode_rejects_short_idat_and_bad_filter():
     )
     with pytest.raises(FormatError, match="filter type 7"):
         pngdat.decode_indexed(bad)
+
+
+def test_decode_inflates_no_more_than_the_rows_need():
+    """#324: an IDAT that inflates far past what the rows need (64 MiB of zeros here) is refused
+    without ever holding it: the inflate stops one byte past the rows' size."""
+    good = palette_png([[1, 2], [3, 4]])
+    bomb = good.replace(
+        chunk(b"IDAT", zlib.compress(b"\0\1\2\0\3\4")),
+        chunk(b"IDAT", zlib.compress(bytes(64 << 20), 9)),
+    )
+    tracemalloc.start()
+    try:
+        with pytest.raises(FormatError, match="IDAT holds more than the 6 bytes 2 rows need"):
+            pngdat.decode_indexed(bomb)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 4 << 20
 
 
 def test_parts_rects():

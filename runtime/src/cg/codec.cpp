@@ -38,6 +38,15 @@ bool png_decode(const u8 *data, std::size_t size, Decoded *out, std::string *err
     stbi_convert_iphone_png_to_rgb_thread(1);
     stbi_set_unpremultiply_on_load_thread(1);
     int w = 0, h = 0, comp = 0;
+    // The header's size first: what the decoder would allocate for (bundle and guest images).
+    if (stbi_info_from_memory(data, static_cast<int>(size), &w, &h, &comp) != 0 &&
+        (static_cast<u32>(w) > k_png_max_side || static_cast<u32>(h) > k_png_max_side ||
+         static_cast<std::uint64_t>(w) * static_cast<std::uint64_t>(h) > k_png_max_pixels)) {
+        if (error != nullptr) {
+            *error = "image too large";
+        }
+        return false;
+    }
     stbi_uc *pixels = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
     if (pixels == nullptr) {
         if (error != nullptr) {

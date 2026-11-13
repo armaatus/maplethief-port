@@ -19,6 +19,7 @@
 
 #include "cf/cf_hle.h"
 #include "cf/cf_objects.h"
+#include "foundation/foundation.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
 #include "snapshot/snapshot_internal.h"
@@ -345,6 +346,10 @@ bool load_url(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
     std::string rel;
     if (!r.boolean(&has) || (has && !r.str(&rel))) {
         return false;
+    }
+    // Joined to the bundle's folder when read: it passes the guest path rules first (#324).
+    if (has && !mt_ns::is_safe_relative_path(rel)) {
+        return r.fail("a CFURL's \"" + rel + "\" is not a path in the bundle");
     }
     s->rel = has ? new std::string(std::move(rel)) : nullptr;
     return true;

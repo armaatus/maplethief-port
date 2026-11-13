@@ -37,6 +37,8 @@ inline constexpr const char *kBackupsDirName = "backups";
 inline constexpr const char *kImportBackupsName = "import";
 // The largest file a save set may hold (anything near it is refused by the checks anyway).
 inline constexpr std::size_t kMaxSaveSourceFileBytes = 16u * 1024u * 1024u;
+// The most a zip's save files may hold together, checked before any is inflated (#324).
+inline constexpr std::size_t kMaxSaveSetBytes = 64u * 1024u * 1024u;
 
 // --- Where -------------------------------------------------------------------------------------
 
