@@ -223,7 +223,11 @@ def _natives() -> tuple[Native, ...]:
             0x99705,
             (),
             None,
-            "msg: speaker sprite from the map's mobs (probably the boss)",
+            (
+                "msg: the speaker is the map's boss: `0x32B4D` sets the speaker NPC to −1 and "
+                "takes the sprite of the first mob whose id is 64 or more and not 65, the "
+                "Malady Bomb (`CMobs_FindBoss` `0x75711`)"
+            ),
         ),
         ("updateNPCState", 0x99435, (), None, "msg+0x2D = 1: re-run NPC state scripts"),
         ("clearAll", 0x996ED, (), None, "end the chapter: reset quest states, chapter += 1"),
@@ -238,7 +242,12 @@ def _natives() -> tuple[Native, ...]:
             0x99575,
             (i, i),
             None,
-            "quests 0x7C2D9 (probably crafting, ManufactureItem_*)",
+            (
+                "craft an equip: `Quest_MakeEquipItem` 0x7C2D9 completes quest (kind, id), "
+                "taking its items and meso and giving rolled equips "
+                "([mechanics](mechanics.md#drops)). Called only by the three `smith` scripts "
+                "(chapters 1–3), from their manufacturing callbacks"
+            ),
         ),
         ("invenFullNotify", 0x9966D, (), None, "popup 8 (inventory full)"),
         ("isInvenAvailable", 0x9A691, (i, i), "int", "1 if inventory kind has >= n free slots"),

@@ -16,8 +16,8 @@ What is open today, each with where it's tracked. An entry holds for as long as 
 | What | Workaround | Source |
 |---|---|---|
 | The download imports only the exact file. A repacked copy of the game is refused, and a re-signed copy is refused by the build too | Build from source: the build accepts a repacked copy | [ADR 0135](adr/0135-accept-an-ipa-by-its-main-binary.md), [Your game file](play/your-ipa.md#if-it-doesnt-match) |
-| macOS blocks the download the first time, because it isn't notarised | The steps are in [Troubleshooting](play/troubleshooting.md#mac-apple-could-not-verify-maplethief-is-free-of-malware) | [ADR 0024](adr/0024-release-contents-and-flow.md) |
-| Windows SmartScreen warns about the download | **More info**, then **Run anyway** | [Troubleshooting](play/troubleshooting.md#windows-windows-protected-your-pc) |
+| macOS blocks the download the first time, because it isn't notarised (by choice: no legal name on the binaries) | macOS 15 and later: open it once, then System Settings › Privacy & Security › **Open Anyway**. macOS 13 and 14: Control-click › **Open**. All steps in [Troubleshooting](play/troubleshooting.md#mac-apple-could-not-verify-maplethief-is-free-of-malware) | [ADR 0148](adr/0148-downloads-stay-unsigned.md) |
+| Windows SmartScreen warns about the download, again with every release, because it isn't signed | **More info**, then **Run anyway** ([Troubleshooting](play/troubleshooting.md#windows-windows-protected-your-pc)) | [ADR 0148](adr/0148-downloads-stay-unsigned.md) |
 | A freshly downloaded Mac app, or one that can't write next to itself, keeps its data in your user folder | [Troubleshooting](play/troubleshooting.md#the-game-keeps-its-data-in-the-user-folder) says how to fix each cause | [ADR 0127](adr/0127-data-folder-next-to-the-game.md) |
 | Linux needs glibc 2.39 or later (Ubuntu 24.04, Fedora 40, current SteamOS). Only x86_64 is built and checked, and there's no AppImage or Flatpak | Update your distribution | [ADR 0065](adr/0065-linux-and-steam-deck-build.md), [Linux and Steam Deck](play/linux-and-steam-deck.md#not-done-yet) |
 
@@ -44,12 +44,14 @@ Nobody has confirmed these on the real thing yet. They may well be fine.
 | All 44 sounds and the music by ear, over a long session | [#124](https://github.com/armaatus/maplethief-port/issues/124) |
 | The picture against screenshots from a real iPhone or iPod | [#60](https://github.com/armaatus/maplethief-port/issues/60) |
 
-## Not available yet
+## Preview
+
+A preview platform ships with the release and plays, but hasn't been signed off on the device yet. The label comes off when the issues next to it are closed ([ADR 0147](adr/0147-what-v1-is-and-what-gates-it.md)).
 
 | What | Source |
 |---|---|
-| The iOS app beyond the first map: it installs and reaches the first map by touch on an iPhone 12, the only device checked so far. Controllers, the safe area, the app lifecycle and the audio session on iOS are not checked on a device yet. Steps: [Playing on your iPhone](play/iphone.md) | [#73](https://github.com/armaatus/maplethief-port/issues/73), [#128](https://github.com/armaatus/maplethief-port/issues/128), [#197](https://github.com/armaatus/maplethief-port/issues/197) |
-| A Nintendo Switch homebrew build | Epic [#233](https://github.com/armaatus/maplethief-port/issues/233) |
+| The iOS app: it installs and reaches the first map by touch on an iPhone 12, the only device checked so far. Controllers, the safe area, the app lifecycle and the audio session on iOS are not checked on a device yet. Steps: [Playing on your iPhone](play/iphone.md) | [#73](https://github.com/armaatus/maplethief-port/issues/73), [#128](https://github.com/armaatus/maplethief-port/issues/128), [#197](https://github.com/armaatus/maplethief-port/issues/197) |
+| The Nintendo Switch homebrew build: the zip is on the release, but the sign-off on a real console, handheld and docked, isn't done yet. Steps: [Playing on the Nintendo Switch](play/switch.md) | [#245](https://github.com/armaatus/maplethief-port/issues/245) |
 
 ## Building from source
 

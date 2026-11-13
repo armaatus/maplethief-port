@@ -55,3 +55,15 @@ In an NPC shop, moving the cursor with keys stops at the third row, and the list
 ## Bug 13: the item grids assume six columns
 
 The item and equipment grids of the in-game menu are drawn four cells to a row, but their key handlers step six cells up and down. Down from the first cell lands two cells too far, on a cell that is not drawn, and the drawn grid never follows. No key reaches these grids on the device. **Neutralised:** the port's keys move one cell left or right and one drawn row up or down.
+
+## Bug 14: the way back from the climb's top lands in the wrong place
+
+{{map:6-2}} has a single portal, and its script sends the hero to a portal on {{map:6-1}} that does not exist. The map still changes, but the hero keeps the position it had on the map it left, so it appears near the left edge of {{map:6-1}} instead of beside the portal that leads back up. Nothing is lost and every portal still works. **Kept:** the port does what the device does; a fix under `fix_original_bugs` is planned ([#388](https://github.com/armaatus/maplethief-port/issues/388)).
+
+## Bug 15: a line shown as its key in Korean
+
+One line of dialogue, the first line of the Zenumist chief in chapter 3, is missing from the Korean text, so a Korean game shows the line's internal key in the speech box instead. English, and every language that falls back to English, is not affected. **Kept:** the port does what the device does; a fix that falls back to the English line is planned ([#388](https://github.com/armaatus/maplethief-port/issues/388)).
+
+## Bug 16: chapter 1's last main quest never completes
+
+{{quest:1-main-20}} stays in progress until the trip to chapter 2, which resets every quest, so it is the one main quest that is never shown as done. It has no rewards, so nothing is lost. **Kept:** the port does what the device does; a fix that completes it just before the trip is planned ([#388](https://github.com/armaatus/maplethief-port/issues/388)).

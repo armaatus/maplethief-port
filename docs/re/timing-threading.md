@@ -118,18 +118,40 @@ They advance in every callout, ticking or not.
 |---|---|---|---|
 | 0 | `CDataMgr::LoadConfig` `0x38611` (only when it creates the default config), `ResetSubTimers01` `0x386E1` | nobody | unused |
 | 1 | `ResetSubTimers01` `0x386E1`, `0x4AB01`, `0x56E91` | `0x4AB01` (call `0x4ABB6`) | ≥ 500 ms touch-hold in the `marketKeyPadView` touch code (`0x4AB01`, under `0x56E91`, called from `CStateGame::Paint`) |
-| 2 | `0x81FF1`, `0x8201D`, `0x8217D` (set `CStateGame+0x400` to 0, 2, 1) | `CStateGame::Paint` (calls `0x8D24A`, `0x8D284`) | `CStateGame+0x408` = elapsed **seconds** (`/1000`) of a timed in-game phase |
+| 2 | `MonCa_StartCountdown` `0x81FF1`, `MonCa_EndRound` `0x8201D`, `MonCa_StartRound` `0x8217D` (set `CStateGame+0x400` to 0, 2, 1) | `CStateGame::Paint` (calls `0x8D24A`, `0x8D284`) | the Monster Carnival clock ([below](#the-monster-carnival-clock)); `CStateGame+0x408` = whole **seconds** (`/1000`) since the phase began |
 | 3 | `CMSocket::Connect` `0x1C419` (call `0x1C58E`), `SkyCanvas::Tick` (call `0x264C8`) | `SkyCanvas::Tick` (call `0x2648E`) | the 10 s socket keep-alive ([network.md](network.md)) |
 
 **Other `GetTimeMs` users.**
 
 | Function | Does |
 |---|---|
-| `SkyCanvas::KeyPress` `0x2578D` | stores the press time at `SkyCanvas+0xE0` |
-| `CDataMgr` popup handlers `0x49481`, `CDataMgr::drawSkillInfoBox` `0x4C2C1`, `0x51685`, `0x5220D`, `0x524C1`, `CDataMgr::keyPopupItemInven_2` `0x554F1` | message-box timing. `CDataMgr+0xF0` is the start and `+0xF8` the current time. They compare the difference against 3,000 ms and 2,000 ms, and `0x524C1` moves the start back by 3 s. |
+| `SkyCanvas::KeyPress` `0x2578D` | stores the press time at `SkyCanvas+0xE0`, which nothing reads ([program-flow.md](program-flow.md#open-unknowns), item 2) |
+| `PopupMenu_PaintItemInfoBox` `0x49481`, `CDataMgr::drawSkillInfoBox` `0x4C2C1`; the popup menu's touch handlers `0x51685`, `0x5220D`, `0x524C1`, `CDataMgr::keyPopupItemInven_2` `0x554F1` | the popup menu's info box ([below](#the-info-box-fade)). `CDataMgr+0xF0` is the start and `+0xF8` the current time. |
 | `TouchWidget_StartRepeat` `0xA18B1`, `TouchWidget_RepeatDue` `0xA17AD` | touch-widget auto-repeat. Due when `ms < elapsed ≤ 5·ms`; a longer gap restarts it. |
 | `TouchWidget_HandleTouch` `0xA18E5` (from `TouchWidgets_Dispatch` `0x8B85`) | touch timestamps; a second tap within 300 ms counts as a double tap |
 | `Rand_SeedFromTime` `0x24DE9` | the random seed (below) |
+
+### The Monster Carnival clock
+
+Sub-timer 2 runs the Monster Carnival round ([mechanics.md](mechanics.md#monster-carnival-the-level-scaling-mode)). `CStateGame::Paint` `0x87501` drives it only while the Carnival flag `CStateGame+0x404` is set. The phase is `+0x400`, and `+0x408` holds the whole seconds of sub-timer 2 last seen (−1 after a reset):
+
+| Phase | Started by | Every new whole second |
+|---|---|---|
+| 0, countdown | `MonCa_StartCountdown` `0x81FF1`, when the Carnival map has loaded | a notice with the seconds left (`CStateGame.Paint.10`); at 5 s the start notice (`CStateGame.Paint.9`) and phase 1 |
+| 1, round | `MonCa_StartRound` `0x8217D`: spawns the mode's waves from the table behind `0xF13B4` | `+0x430` (180 at the start) minus 1; at 0, phase 2 |
+| 2, end | `MonCa_EndRound` `0x8201D`: resets the movement and state of every monster in `CStateGame+0x34` and closes popup `0x6A` if it is open | after 5 s, `CStateGame::resultMonCa` `0x819E5` (phase 3) |
+
+The round counts seconds that `Paint` sees change, not elapsed time. A suspend or a long load adds its whole gap to the sub-timer, but the round loses only 1 second.
+
+### The info box fade
+
+A touch's lift on a cell of the popup menu's item, equipment or skill list sets `CDataMgr+0xF0` to now (`0x51685`, `0x5220D`, `0x524C1`, `keyPopupItemInven_2` `0x554F1`, through `CDataMgr::Update` `0x55C85`). A drag (event 3) seen by the last three sets it 3,000 ms back, which hides the box at once. Each paint of the box (`PopupMenu_PaintItemInfoBox` `0x49481` from the item and equipment tabs, `CDataMgr::drawSkillInfoBox` `0x4C2C1`) reads the time again:
+
+- up to 2,000 ms: drawn at alpha 230;
+- 2,000 to 3,000 ms: fading, alpha 230 − (elapsed − 2,000) / 6, down to about 63;
+- after 3,000 ms: not drawn.
+
+The box doesn't close on its own, it just stops being drawn. The keys never restart the timer. A set byte `CDataMgr+0x100` skips the timing, but in this build every write to it is a 0.
 
 ### Random numbers
 
@@ -261,6 +283,6 @@ What the HLE runtime has to reproduce:
 
 ## Open questions
 
-1. Which game phase sub-timer 2 times (`CStateGame+0x400` modes 0–2, `+0x408` seconds), and who reads `SkyCanvas+0xE0`, the key press time.
-2. What the popup handlers' 2,000 and 3,000 ms thresholds govern on screen (auto-close or fade). This can be checked once the runtime renders.
-3. On which thread iOS 4–6 GameKit delivered the completion handlers. It doesn't matter for the port, because the game marshals them to the main queue itself.
+1. ~~Which game phase sub-timer 2 times, and who reads `SkyCanvas+0xE0`, the key press time~~: the Monster Carnival round: a 5 s countdown, the 180 s round and a 5 s pause before the result ([The Monster Carnival clock](#the-monster-carnival-clock)). Nothing reads `SkyCanvas+0xE0` ([program-flow.md](program-flow.md#open-unknowns), item 2).
+2. ~~What the popup handlers' 2,000 and 3,000 ms thresholds govern on screen~~: the popup menu's info box (item, equipment or skill) after a tap: solid for 2 s, faded out over the third second, then not drawn ([The info box fade](#the-info-box-fade)). Read from the code.
+3. ~~On which thread iOS 4–6 GameKit delivered the completion handlers~~: needs a device on iOS 4–6, and it doesn't matter for the port. `GameCenterManager` follows Apple's sample wrapper: every completion block calls `-[GameCenterManager callDelegateOnMainThread:withArg:error:]` `0xC0145`, which hands the call to the main queue, whichever thread GameKit used. The port's GameKit stubs deliver from the pump on the main thread.

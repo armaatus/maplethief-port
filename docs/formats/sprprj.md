@@ -96,7 +96,13 @@ There is no hitbox in the file. The only geometry the engine derives is each fra
 | `+0x20` / `+0x24` | `min_y = min(layer.y)`, `max_y = max(layer.y + image height)` |
 | `+0x10` / `+0x14` | width `max_x − min_x`, height `max_y − min_y` |
 
-The scan starts from `min = 10000` and `max = −10000`. A frame with no visible layer keeps those values, so the culling test below always rejects it. The `CMAction` draw culls with this box: it draws only when `x + max_x > 0`, `x + min_x < screen width`, `y + max_y > 0` and `y + min_y < screen height`. The screen size is read from the object at `0xF1440`, fields `+0x88` and `+0x8C`. The parser's `frame_bounds()` reproduces the box. Whether gameplay code also uses it for collision is not known yet.
+The scan starts from `min = 10000` and `max = −10000`. A frame with no visible layer keeps those values, so the culling test below always rejects it. The `CMAction` draw culls with this box: it draws only when `x + max_x > 0`, `x + min_x < screen width`, `y + max_y > 0` and `y + min_y < screen height`. The screen size is read from the object at `0xF1440`, fields `+0x88` and `+0x8C`. The parser's `frame_bounds()` reproduces the box.
+
+Besides the two culls (`0x1F2B9` and `0x1F051`), three places read the box of an action's **first** frame to place things around a sprite. None of them is gameplay: hits and contact use the objects' own boxes (`CMob +0x40`…`+0x4C`, [re/hud-extras.md](../re/hud-extras.md#the-mobs-and-their-hp)), not sprite frames.
+
+- `0x8572D`, the field's object pass: an NPC's quest marker is drawn above its head at `y − height` (`+0x14`).
+- `PopupMenu_PaintQuestTab` (`0x4ED75`): an NPC sprite in the quest tab is placed `width / 2` (`+0x10`) to the right of its slot.
+- The shop panel (`0x56E91`): the shopkeeper's sprite is placed with `height`.
 
 ## Actions and animation timing
 
@@ -154,14 +160,18 @@ What an action shows is up to its owner. A mob (`CNpc::SetAction`) plays action 
 
 `0x1F2B9`, the `CMAction` draw `(x, y)`, culls by the [bounds](#derived-frame-bounds), then calls `0x1F119`, the `CMFrame` draw `(x, y, flip, alpha, alpha_enabled)`, with the action's `+0x14`, `+0x20` and `+0x24`:
 
-- It adds 1 to `y` before drawing anything (reason unknown).
+- It adds 1 to `y` before drawing anything, so that feet touch the floor: see [the +1](#why-y--1).
 - If `alpha_enabled`, it sets the draw alpha to the action's alpha (`0x22479`). Only when that alpha is 255 does it also apply each layer's own `alpha`. At the end it restores 255.
 - It skips layers that aren't `visible`.
 - Unflipped, it draws the image at `(x + layer.x, y + layer.y)`. Flipped, it draws at `(x − layer.x − (image width − 1), y + layer.y)`.
 - A layer is drawn mirrored when exactly one of `flip` and `hflip` is set. `0x24A65` draws mirrored and `0x24DC9` draws normally (inferred from which call each combination takes).
 - Sprites are drawn **facing left** unflipped, so `facing == 2` (flipped) faces right. Checked against the game on the hero and mobs (issue #27).
 
-`0x1F051` → `0x1E96D` is a second draw path with one more argument. One caller (`0x5FBCD`) uses it, and it isn't decoded yet.
+`0x1F051` → `0x1E96D` is not a screen draw: it renders a character-select portrait. `0x1F051` culls exactly like `0x1F2B9` and passes the same action fields plus one more argument. `0x1E96D` composes the current frame's layers into a 40 × 60 RGBA bitmap, laid out like the flipped draw around an anchor at column 20 (a figure whose bottom edge is at 0 stands on the bottom row), copying only pixels whose alpha is non-zero (the alpha test of the map bake, [map.md](map.md#rendering-at-load-time)). It turns that bitmap into a `UIImage`, scales it by 1.5 with `-[EAGLView imageWithImage:scaledToSize:]` and appends it to the view's `robinImages`, which the main menu's character slots show ([re/objc-shell.md](../re/objc-shell.md)). Its screen position arguments only feed the cull. The one caller is `0x5FBCD` (a `CHero` method: set action, facing and frame, then render), called once per save slot from `CStateMainMenu::LoadCharacterSlots` (`0x96845`).
+
+### Why `y + 1`
+
+The engine keeps an object's `y` on the last row **above** the floor: a landing sets `y = cell top − 1` ([att.md](att.md#values)), and an `.obj` anchor is the bottom pixel of its tile (`(ty + 1) · th − 1`, [obj.md](obj.md#where-the-game-loads-and-reads-it)). The art puts the bottom edge of a standing or walking figure at `layer.y + height = 0`: in the walking and attacking frames of the hero (`hero/0` actions 3, 6, 7) and of ground mobs (`mob/60`, `mob/80`), every image does (`tests/test_spriteview_real.py`). Without the +1 the lowest drawn row would be `y − 1`, a pixel above the feet; with it, the lowest row is `y` itself, directly on the floor's top row `y + 1`. Floating mobs such as `mob/126` sit higher on purpose. The portrait path `0x1E96D` computes `y + 1` too, though only for the cull.
 
 ## Worked examples
 
@@ -194,10 +204,10 @@ What an action shows is up to its owner. A mob (`CNpc::SetAction`) plays action 
 
 ## Unknowns
 
-- The meaning of the options byte that selects the tick interval (`0x37C41`).
-- The second draw path (`0x1E96D`).
-- Whether anything besides culling uses the frame bounds.
-- Why the frame draw adds 1 to `y`. In the walking and attacking frames of the hero (`hero/0` actions 3, 6, 7) and of ground mobs (`mob/60`, `mob/80`), every image's bottom edge is at `layer.y + height = 0`, so the +1 puts the lowest drawn row on the sprite's own `y` row (`tests/test_spriteview_real.py`). Floating mobs such as `mob/126` sit higher.
+- ~~The meaning of the options byte that selects the tick interval (`0x37C41`)~~: it is the game-speed option, byte 1 of `config` (0, 1, 2 for 65, 50, 40 ms), applied by `CDataMgr::ApplyGameSpeed` (`0x37C41`) from `LoadConfig` and the options menu ([save.md](save.md#config-6-bytes), [re/timing-threading.md](../re/timing-threading.md)). A value of 3 or more reads past the table; the port reads such a value as 2 ([ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)).
+- ~~The second draw path (`0x1E96D`)~~: the character-select portrait builder; see [Drawing](#drawing).
+- ~~Whether anything besides culling uses the frame bounds~~: yes, three UI placements read the first frame's box (NPC quest markers, the quest tab, the shop); no gameplay code does. See [Derived frame bounds](#derived-frame-bounds).
+- ~~Why the frame draw adds 1 to `y`~~: object positions are one row above the floor, and the art's bottom edge is at 0; see [Why `y + 1`](#why-y--1).
 
 None of these affect parsing.
 

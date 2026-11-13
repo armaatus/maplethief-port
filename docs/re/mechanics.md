@@ -164,7 +164,7 @@ A high defense therefore never makes contact harmless: the damage falls to betwe
 
 - With Meso Guard (skill 22) on, `CSkill::MesoGuard` `0x7EAB1` tries to pay meso for the blow: (damage / 2) × `@etc` / 100 meso. If the hero can pay, the damage is halved.
 - HP drops by the damage. At 0 the hero [dies](#death).
-- Unless on a ladder, the hero is knocked back: away from the hit at 1.5 times the jump's horizontal speed (hero `+0x28`), and up at half the jump impulse.
+- Unless on a ladder, the hero is knocked back: away from the hit at 1.5 times the jump's horizontal speed (hero `+0x28`), and up at half the jump impulse, 12 px high ([Movement](#movement)).
 - A short invulnerability timer (`+0x11C`) starts; a missed (avoided) contact starts a shorter one (`+0x120`).
 
 **A mob** (`CMob::TakeHit` `0x73715`, after the checks above):
@@ -189,7 +189,7 @@ The drops are rolled in this order, each independently, so a mob can drop an equ
 
 **Etc items** (`DropEtc` `0x5C699`): for each of the three slots whose chance is above 0, `Rand_Chance`(hero level / 10 + chance, 1000), about (level / 10 + chance) in 993. One item each.
 
-**Meso** (`DropMeso` `0x5C3C1`): the amount is `Rand_Range`(meso × 8 / 10, meso × 12 / 10). If it is above 0, `Rand_Percent`(80) decides whether it drops. The bag is `item_etc` 0 below 100 meso, 1 from 100 to 199 and 2 from 200; its count is the amount.
+**Meso** (`DropMeso` `0x5C3C1`): the amount is `Rand_Range`(meso × 8 / 10, meso × 12 / 10). If it is above 0, `Rand_Percent`(80) decides whether it drops. The bag is `item_etc` 0 below 100 meso, 1 from 100 to 199 and 2 from 200; its count is the amount. Pickpocket calls the same routine with its flag set, which changes only the amount to `Rand_Range`(meso / 18 − 5, meso / 18); a kill passes the flag clear.
 
 Drops are skipped entirely in Monster Carnival.
 
@@ -298,15 +298,21 @@ Each skill's value columns in `skill.dat` give `base + (skill level − 1) × pe
 
 ## Movement
 
-What is known (`CHero` constructor `0x68A59` and the shared physics globals set in the `CMapleObject` constructor `0x6DBF5`):
+The values (`CHero` constructor `0x68A59` and the shared physics globals set in the `CMapleObject` constructor `0x6DBF5`):
 
-- the hero's walking speed (`+0x20`) is 5 and the jump's horizontal speed (`+0x28`) is 7, per tick; `+0x24` is 4 (probably the ladder speed);
-- the jump impulse is the global at `0x11A9C8` (`0x100`, reached through the pointer at `0xF13C4`); next to it `0x11A9D0` is `0x4A` (probably gravity) and `0x11A9D4` is `0x10000` (a 16.16 fixed-point one);
+- the hero walks at `+0x20` = 5 px a tick, and a jump carries him sideways at `+0x28` = 7 px a tick;
+- he climbs ladders and ropes at `+0x24` = 4 px a tick: on a ladder `CHero::vf2` `0x66189` adds the vertical value `+0x1C` to y as it is, and `CHero::KeyUpDown` `0x63665` sets it to ±4 (`0x6D159` doubles a smaller value up to 4);
+- the jump impulse is the global at `0x11A9C8` (`0x100` = 256, reached through the pointer at `0xF13C4`), gravity is `0x11A9D0` (`0x4A` = 74), the scale divisor is `0x11A9D4` (`0x10000`), and `0x11A9CC` (0) is added to every object's jump height;
+- the hero's jump height is `+0x2C` = 50 (`0x32`) px;
 - the movement keys are `KeyWalk` `0x60DD9`, `KeyJump` `0x61651` and `KeyUpDown` `0x63665`;
 - mobs walk at their `mob.dat` `unknown_23` (mob `+0x20`, `CNpc::Walk` `0x6FCBD`) and move by their movement kind `unknown_24` (1 walks and turns at edges, 2 floats and never lands (the bosses), 3 is the Malady Bomb, which explodes on contact);
 - on area 9 the ground is ice and the hero slides, unless wearing Snowshoes (shoes 52), which turn the slide off (`0x64CA1`, world `+0x94`).
 
-The units of the impulse and gravity (how many pixels a jump rises) were not worked out; see [Not found](#not-found).
+**Jumps and falls.** In the air the vertical value `+0x1C` is not a speed but a clock *v* on a parabola. The object is *H* × *v*² / 65536 px below the parabola's top, with *H* its jump height (`+0x2C` + `0x11A9CC`). Each tick `CMapleObject::FallStep` `0x6CF69` moves y down by *H* × (*v* + 74)² / 65536 − *H* × *v*² / 65536 (each term truncated on its own) and adds 74 to *v*. So the step grows by about *H* × 2 × 74² / 65536 per tick, 8.4 px for the hero, with no cap; the landing check (`0x6DA65`) scans every 8 px row of the step for a floor, so a fast fall can't pass through one.
+
+- **A jump** starts at *v* = −256 (`KeyJump`, and the up key with nothing to climb or talk to). The top, *v* = 0, is *H* × 256² / 65536 = *H* above the start: **50 px for the hero**. Tick by tick the hero is at −25, −42, −50, −49, −41, −24 and +2 px from the start, so on flat ground a jump lasts 7 ticks (0.35 s at the normal 50 ms tick) and covers 7 × 7 = 49 px sideways. When *v* reaches 256 again (back at the start height) bit 1 of the [hero flags](../formats/save.md#hero-flags), jumping, becomes bit 0, falling (`0x6D159`).
+- **A side jump** (`0x607F9`) and **the knock-back** of a hit (`CHero::TakeDamage` `0x65B55`) start at *v* = −128: *H* / 4, 12 px high.
+- **Walking off an edge** (`0x6D9E1`) starts the fall at *v* = 74, so the first step is 12 px.
 
 ## Death
 
@@ -323,9 +329,11 @@ In Monster Carnival a death costs carnival points instead (see above).
 
 ## Not found
 
-- **`buildup.dat`.** The full-program decompile has no reader of data manager `+0x40` (only its writer, `CStateTitle::LoadSettings` `0x980B5`). It is still unknown ([formats/data-tables.md](../formats/data-tables.md#buildupdat)).
-- **`hero.dat` `unknown_9`** and **`skill.dat` `unknown_23` / `unknown_24`** are never read.
-- **Movement units.** The jump and gravity globals' scale, and the exact jump height in pixels, need a trace of the hero's y position over a jump.
+Nothing is open. What used to be listed here:
+
+- ~~**`buildup.dat`**~~: unused in 1.5. Data manager `+0x40` is written by `CStateTitle::LoadSettings` `0x980B5` and read nowhere, which a pass over every local holding the data manager confirmed (#380, [formats/data-tables.md](../formats/data-tables.md#buildupdat)).
+- ~~**`hero.dat` `unknown_9`** and **`skill.dat` `unknown_23` / `unknown_24`**~~: unused in 1.5. No accessor call reads those offsets of those tables; the only offset-`0x17`/`0x18` reads are the mob table's ([formats/data-tables.md](../formats/data-tables.md)).
+- ~~**Movement units**~~: worked out from the code in [Movement](#movement): a jump is 50 px high and lasts 7 ticks.
 
 ## Verification
 

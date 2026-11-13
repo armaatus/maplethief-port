@@ -79,6 +79,23 @@ Each cell is a set of flags. The game always tests single bits (`and r0, r0, #bi
 
 `0x6D759` also handles the top of a ladder: with the feet on a `FOOTHOLD|LADDER` cell (`0x06`) and air above, climbing up ends standing on the floor (`y = floor8(y1) + 7`, state cleared). Climbing down onto a `FOOTHOLD` ends the climb.
 
+### Who moves through the grid
+
+The helpers sit next to `CMapleObject`'s destructor (`0x6DB59`) and work on fields of that base class, which `CHero`, `CItem` and `CMob` share: x `+0x04`, y `+0x08` (the feet), the motion flags `+0x0C` (bit 0 falling, bit 1 jumping or knocked back, bit 2 on a ladder), horizontal speed `+0x18`, vertical speed `+0x1C`, and for one tick the old position `+0x6C`/`+0x70`, the new position `+0x74`/`+0x78` and the vertical speed at the start of the tick `+0x7C`. Each class's `vf2` (vtable slot 2, the per-tick physics) fills the old and new positions, calls the helpers, then copies the new position into `+0x04`/`+0x08`.
+
+| Helper | `CHero::vf2` `0x66189` | `CItem::vf2` `0x69361` (a drop) | `CMob::vf2` `0x72CB5` |
+|---|---|---|---|
+| gravity step `0x6CF69` | yes | yes | yes |
+| clamp to the map `0x6CFED` | yes | yes | – |
+| wall sweep `0x6D3BD` | yes | yes | – (the mob walker `0x72A09` uses it to turn back) |
+| ladder `0x6D759` | yes | – | – |
+| landing sweep `0x6DA65` | yes | yes | yes |
+| start falling `0x6D9E1` | yes | yes | yes |
+
+### Staircases
+
+The `0x12` diagonals (`00.att` rows 40–47, one or two cells per row, one row lower every 8 or 16 px) are not ramps. An object standing on a floor has `y = cell top − 1`, so its feet are in the row **above** the floor. With no vertical speed the wall sweep tests only that row, from the old x to the new x. Walking into a staircase from below therefore meets the next step's `WALL` bit in that row and stops, and nothing lifts the hero onto it: the hero has to jump, and lands on the step through its `FOOTHOLD` bit. Walking down, the cell under the feet past a step's edge is `AIR`, so the hero falls and lands on the next step 8 px lower. This is read from the code, not checked in a run.
+
 Looking a cell up past the end of the grid returns **`FOOTHOLD` (2)**, not air (`0xBBFD`), so the bottom edge of every map acts as an invisible floor. A negative index (above the top row) is not checked and reads before the buffer. The parser's `AttFile.cell()` raises `IndexError` there instead.
 
 ### Shipped values
@@ -146,6 +163,6 @@ CI runs only the synthetic tests (`tests/test_attfile.py`).
 
 ## Unknowns
 
-- Bits `0x20`–`0x80`: no code tests them and no file uses them.
-- How the hero walks up the `FOOTHOLD|WALL` staircases despite the wall sweep. A step-up rule in the movement code (`0x66189`, `0x69361`) is not traced yet.
-- Which object classes own `+0x6C`…`+0x7C` (old and new position, velocity) in `0x6D3BD`, `0x6D759`, `0x6DA65`. Both the hero and mobs go through these helpers, and the class layout is for the runtime work.
+- ~~Bits `0x20`–`0x80`~~: unused. No code tests them (every reader masks one of `0x01`–`0x10`, and the minimap compares whole values) and no file sets them, so the parser's `decode_raw` rejects them and the port needs nothing for them.
+- ~~How the hero walks up the `FOOTHOLD|WALL` staircases despite the wall sweep~~: he doesn't. There is no step-up rule: `CHero::vf2` (`0x66189`) reverts the new x to the old one whenever the wall sweep `0x6D3BD` finds a `WALL`, and changes nothing else. A staircase is climbed by jumping and walked down as a series of 8-px drops; see [Staircases](#staircases). (`0x69361`, named here before, is `CItem::vf2`, the same physics for a dropped item.)
+- ~~Which object classes own `+0x6C`…`+0x7C`~~: `CMapleObject`, the base of `CHero`, `CItem` and `CMob` ([re/cpp-classes.md](../re/cpp-classes.md#cmapleobject)). See [Who moves through the grid](#who-moves-through-the-grid) for the fields and which subclass calls which helper.

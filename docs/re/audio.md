@@ -29,7 +29,7 @@ All 44 files parse with the standard-library readers in `mtport.audio` (WAV: RIF
 | 4 | `4.mp3` | BGM | MPEG-1 L3 joint stereo | 44100 | 2 | 128 kbit/s CBR | 47.05 | 754,012 |  | `CStateGame::PlayMapBGM` |
 | 5 | `5.mp3` | BGM | MPEG-1 L3 joint stereo | 44100 | 2 | 128 kbit/s CBR | 42.97 | 688,811 |  | `CStateGame::PlayMapBGM` |
 | 6 | `6.mp3` | BGM | MPEG-1 L3 joint stereo | 44100 | 2 | 128 kbit/s CBR | 39.03 | 625,699 |  | `CStateGame::PlayMapBGM` |
-| 7 | `7.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.18 | 8,064 |  | `FUN_00050130`, `CHero::InteractWithObject`, `FUN_00064a14`, `CStateGame::OnKeyPressed`, `CStateMainMenu::OnKeyPressed` |
+| 7 | `7.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.18 | 8,064 |  | `PopupMenu_OptionTabOnKey`, `CHero::InteractWithObject`, `CHero::EquipItem`, `CStateGame::OnKeyPressed`, `CStateMainMenu::OnKeyPressed` |
 | 8 | `8.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.97 | 42,876 |  | `CHero::UseItem` |
 | 9 | `9.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.43 | 25,678 |  | `CStateGame::PlayMapBGM`, `CMapleWorld::changeMap` |
 | 10 | `10.wav` | SFX | WAV PCM | 44100 | 2 | 16-bit | 1.22 | 214,534 |  | `CHero::Die` |
@@ -51,7 +51,7 @@ All 44 files parse with the standard-library readers in `mtport.audio` (WAV: RIF
 | 26 | `26.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.80 | 12,986 |  | `CSkill::CastBuff` |
 | 27 | `27.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.50 | 24,228 |  | `CSkill::setActiveSkill` |
 | 28 | `28.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.70 | 11,178 |  | `CSkill::setActiveSkill` |
-| 29 | `29.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.93 | 14,992 |  | `FUN_0005bc74` |
+| 29 | `29.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.93 | 14,992 |  | `CDropItems::Update` |
 | 30 | `30.mp3` | BGM | MPEG-1 L3 joint stereo | 44100 | 2 | 128 kbit/s CBR | 38.09 | 610,652 |  | `CAniManager::makeAni1` |
 | 31 | `31.mp3` | BGM | MPEG-1 L3 joint stereo | 44100 | 2 | 128 kbit/s CBR | 61.94 | 992,249 |  | `CStateMainMenu::OnKeyPressed`, `CStateMainMenu::LoadCharacterSlots` |
 | 32 | `32.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 1.46 | 64,300 |  | `CQuestList::checkQuestRequireMob`, `CQuestList::checkQuestRequireItem` |
@@ -170,7 +170,7 @@ The `AVAudioPlayer` pointers live in `CMResMgr` (`+0x590`, 44 slots), the OpenAL
 
 Checked through the recompiled function ([#124](https://github.com/armaatus/maplethief-port/issues/124)): `audio.game_map_music` calls `PlayMapBGM` for all 90 shipped maps in turn (only `+0x84`, `+0x88` and the flag `+0x3FC` of `this` are touched) and the trace gives this table exactly: 13 restarts (`setCurrentTime:0`, `play` at frame 0) and 77 resumes, each resumed track going on from the frame where `StopAllBGM` stopped it. An area outside 0–10 plays effect 9. In the game itself, a new game's intro scene plays 30 (restarted) and, after its fifth speech box, the first playable map (Henesys) starts 5 restarted; tapping through MacArthur's dialog there played effect 12 four times (the trace of the soak run, `alSourcePlay(13)`).
 
-A warp goes through `CMapleWorld::changeMap` `0x81369` (from the script native `changeMap`, [script-vm.md](script-vm.md)): `StopAllBGM` (`0x813AE`), then effect 9 (`0x813C4`), the warp sound. The next map's music starts when `PlayMapBGM` runs after the load. (Its `this` has the area and map at `+0x98`/`+0x9C` like `CStateGame`, so the `CMapleWorld::` in #19's name is probably the wrong class.)
+A warp goes through `CMapleWorld::changeMap` `0x81369` (from the script native `changeMap`, [script-vm.md](script-vm.md)): `StopAllBGM` (`0x813AE`), then effect 9 (`0x813C4`), the warp sound. The next map's music starts when `PlayMapBGM` runs after the load. (Its `this` is the `CStateGame`: the natives reach it through `hero+0x150`, which `CStateGame::LoadGame` `0x86C1D` sets to itself ([script-vm.md](script-vm.md)). The `CMapleWorld::` in #19's name is the wrong class; the name is kept because the port's code and ADRs use it.)
 
 ### Main menu
 
@@ -216,15 +216,54 @@ All but one scene start a track at step 1, and most stop all music near their en
 
 ### Effects
 
-Gameplay code plays effects through `Game_PlaySound(game, id)` `0x80F91`, which calls `Play(player, id, 0)` (`0x81028`). It skips the call when the current BGM is 29 or 8, the id equals it and the byte at `*0xF13A8` is 1; the current BGM is always a BGM id or −1, so that guard never fires (it looks like a leftover of looping effects on the phone version). The menu, interaction and key handlers call `Play` directly. The meaning of each effect isn't settled by the code alone; what is known from the callers:
+Gameplay code plays effects through `Game_PlaySound(game, id)` `0x80F91`, which calls `Play(player, id, 0)` (`0x81028`). It skips the call when the current BGM is 29 or 8, the id equals it and the byte at `*0xF13A8` is 1; the current BGM is always a BGM id or −1, so that guard never fires (it looks like a leftover of looping effects on the phone version). The menu, interaction and key handlers call `Play` directly. Every effect has a named caller and a trigger; the skill ids are `skill.dat` rows and the hero actions are `CHero +0x10`, both as in [mechanics.md](mechanics.md#attacking-hit-areas-targets-and-stars):
 
-- 7: confirm/select, the most common (menus, `CHero::InteractWithObject`, 15 sites in `CStateGame::OnKeyPressed`). 12: another key sound in `CStateGame::OnKeyPressed`, also played by `FUN_00061650` `0x61651` and `FUN_00063664` `0x63665`.
-- 9: warp (portal) in `CMapleWorld::changeMap`.
-- 16, 17, 18: probably a mob being hit, picked by its kind (`FUN_00073714` `0x73715` takes damage off `+0x88` and switches on `+0xA0` before `0x73B20`…`0x73B3C`). Its double-damage branch (a critical hit on the mob) also vibrates for 100 ms (`0x73888`).
-- 32: a quest requirement completed (`CQuestList::checkQuestRequireMob`, `CQuestList::checkQuestRequireItem`).
-- 13–15, 19–28, 33: probably skill effects (`CSkill::setActiveSkill` `0x7EFF1` and its neighbours `FUN_0007d780` `0x7D781`, `FUN_0007f748` `0x7F749`).
-- 8, 10, 11, 29: gameplay functions: 8 an item used (`FUN_00066694` `0x66695`, a potion's HP and MP), 10 the hero's death (`CHero::Die` `0x65979`), 11 the hero's draw (`CHero::Paint` `0x61A19`, with a level-up's white flash frame, [flashes.md](flashes.md)), 29 unnamed (`FUN_0005bc74` `0x5BC75`). `CHero::TakeDamage` `0x65B55` (`hero, damage, from_left`; nothing for a dead hero, "miss" for `damage <= 0`) vibrates for 100 ms (`0x65C18`) on every hit, then subtracts the damage (halved by a guard skill) from HP `+0x94`. Its callers are `CHero::CheckMobContact` `0x65F05` and `CHero::CheckAttackHit` `0x65DC5`. A level-up (`CHero::LevelUp` `0x65089`) doesn't vibrate. The port rumbles the gamepad on the vibration and on both events ([ADR 0053](../adr/0053-observed-functions-game-events-and-rumble.md)).
-- 43: main-menu key sound.
+**Interface**
+
+- 7, the window click: on the main menu Back (−16) and phone key `'9'` (cancel); in the field, opening the menu or the map with −7 or `'*'` while the hero is alive; Back in the menu (game mode 1) and `'*'` on the map (mode 3); opening the cash shop and each of its buy buttons and its close (mode `0xB`, the 15 `CStateGame::OnKeyPressed` sites); talking to an NPC or object (`CHero::InteractWithObject` `0x63191`); putting on an equipment item (`CHero::EquipItem` `0x64A15`, after `CHero::AddEquipStats`); the help row of the options tab (`PopupMenu_OptionTabOnKey` `0x50131`, which opens the help pages).
+- 12, the short tick (0.07 s): every other key in the menu, the shop (mode 2) and the map (`CStateGame::OnKeyPressed`, 4 sites), and the hero's jump (`CHero::KeyJump` `0x61651`, and `CHero::KeyUpDown` `0x63665` when Up has nothing to interact with), played as the jump action 5 starts.
+- 43, the main-menu key: on the main menu `'7'` (select), `'*'` and every key other than Back and `'9'` (`CStateMainMenu::OnKeyPressed`).
+
+**The field**
+
+- 8: a consumable used (`CHero::UseItem` `0x66695`, item kind 1: the HP and MP it restores are applied, then the sound).
+- 9: a warp (`CMapleWorld::changeMap` `0x81369`, after `StopAllBGM`), see [Map music](#map-music).
+- 10: the hero's death (`CHero::Die` `0x65979`).
+- 11: the hero's promotion sound, played by `CHero::Paint` `0x61A19` on frame 2 of hero effect 12 (a level-up, `CHero::LevelUp` `0x65089`) or of effect 13 (a job advancement: `CHero::SetClassUp` `0x655AD`, from the script native `ScriptNative_setClassUp`), together with the white flash ([flashes.md](flashes.md)), so only in the field with no popup.
+- 29: a drop picked up (`CDropItems::Update` `0x5BC75`): played when a taken drop has flown into the hero and `CHero::addInven` has stored it, meso included ([qol.md](qol.md#auto-loot)).
+- 32: a quest's count completed: `CQuestList::checkQuestRequireMob` `0x7B305` when the kill count of a required mob reaches the required number, `CQuestList::checkQuestRequireItem` `0x7B68D` the same for a required item, with the green progress line.
+
+**A mob hit.** `CMob::TakeHit` `0x73715` plays one of 16, 17, 18 for every hit that lands (not on a miss, and also on the killing hit), picked by the mob's `mob.dat` id (`+0xA0`); every id 1–69 is in exactly one group:
+
+- 16 for ids 4, 9, 12, 16, 31, 42 and 46 (the four stump mobs and the three skeletons);
+- 18 for ids 18, 19, 20, 59, 60, 61, 62, 63 and 65 (the three sentinels, the five metal constructs and the bomb);
+- 17 for the other 53, the default.
+
+Its critical branch (damage doubled) also vibrates for 100 ms (`0x73888`).
+
+**Skills, as the hero acts.** `CSkill::SpawnAttack` `0x7D781` runs every tick of an attack action and keys each sound to a frame of it (`FUN_0001e604` on the hero's sprite `+0x134`); "with Shadow Partner" means skill 14 is on.
+
+| Id | Skill (action) | When |
+|---|---|---|
+| 13 | basic attack, dagger swing or claw punch (6, 7) | frame 2, when the swing's box held no mob: the miss swish (a hit plays 16–18 instead) |
+| 14 | star throw (8), Lucky Seven (10, skill 2) | each star as it leaves: frame 1 (and 2 with Shadow Partner) for a throw; frames 1 and 3 (2 and 4 with Shadow Partner) for Lucky Seven |
+| 25 | Double Step (11, skill 3) | frame 0, as the box is built |
+| 21 | Drain (17, skill 7) | the star leaving, frame 1 (2 with Shadow Partner) |
+| 23 | Avenger (18, skill 10) | the star leaving, frame 5 (7 with Shadow Partner); also the scene builder `CAniManager::makeAni1` |
+| 24 | Shadow Web (19, skill 13) | frame 4, as the web binds |
+| 22 | Boomerang Stab (26, skill 23) | frame 0, as the box is built |
+
+Savage Blow (action 24) has no sound in `SpawnAttack`.
+
+**Skills, when cast.** `CSkill::setActiveSkill` `0x7EFF1` plays two attack skills' cast sounds once the weapon check, the stars and the MP have passed and the action is set: 28 for Lucky Seven (skill 2, action 10) and 27 for Savage Blow (skill 16, action 24). `CSkill::CastBuff` `0x7F749` plays a buff's sound after paying the MP, also when a recast only refreshes the timer:
+
+| Id | Buff | Hero effect started |
+|---|---|---|
+| 20 | Dark Sight (5) | 9, and the hero's alpha set to 140 |
+| 33 | Concentration (12 and 21) | 22 for 12, 28 for 21 |
+| 26 | Shadow Partner (14) | 20 |
+| 19 | Pickpocket (19) | 23 |
+| 15 | Meso Guard (22) | 25 |
 
 ### Every call of the player
 
@@ -254,13 +293,13 @@ Every direct call of a sound-player entry point from outside the player, with th
 | `FUN_00037c78` `0x37C79` | `CMSoundPlayer::ResumeBGM` |  |  | `0x37CFE`, `0x37D38`, `0x37D72` |
 | `FUN_00037c78` `0x37C79` | `CMSoundPlayer::MusicOn` |  |  | `0x37D28`, `0x37D6A` |
 | `FUN_00046a28` `0x46A29` | `CMSoundPlayer::VibratePreview` |  |  | `0x46BEA` |
-| `FUN_00050130` `0x50131` | `CMSoundPlayer::Play` | 7 | 0 | `0x50202` |
-| `FUN_0005bc74` `0x5BC75` | `Game_PlaySound` | 29 |  | `0x5C076` |
+| `PopupMenu_OptionTabOnKey` `0x50131` | `CMSoundPlayer::Play` | 7 | 0 | `0x50202` |
+| `CDropItems::Update` `0x5BC75` | `Game_PlaySound` | 29 |  | `0x5C076` |
 | `CHero::KeyJump` `0x61651` | `Game_PlaySound` | 12 |  | `0x6188A` |
 | `CHero::Paint` `0x61A19` | `Game_PlaySound` | 11 |  | `0x61FC2` |
 | `CHero::InteractWithObject` `0x63191` | `CMSoundPlayer::Play` | 7 | 0 | `0x63442` |
 | `CHero::KeyUpDown` `0x63665` | `Game_PlaySound` | 12 |  | `0x63982` |
-| `FUN_00064a14` `0x64A15` | `Game_PlaySound` | 7 |  | `0x64C3E` |
+| `CHero::EquipItem` `0x64A15` | `Game_PlaySound` | 7 |  | `0x64C3E` |
 | `CHero::Die` `0x65979` | `Game_PlaySound` | 10 |  | `0x65B4C` |
 | `CHero::TakeDamage` `0x65B55` | `CMSoundPlayer::Vibrate` | 100 ms |  | `0x65C18` |
 | `CHero::UseItem` `0x66695` | `Game_PlaySound` | 8 |  | `0x667BC` |
@@ -337,5 +376,5 @@ There are no indirect calls: `CMSoundPlayer`'s only virtual functions are its de
 
 ## Open questions
 
-- What each effect sounds like in game terms, beyond the callers above, needs listening or a playthrough. Several callers (`FUN_0007d780`, `FUN_0007f748`, the hero functions) are still unnamed.
-- Why the destructors of `CStateGame` free 22 effect ids through `FreeBGM` (a no-op): perhaps those ids were music on an earlier build.
+- ~~What each effect is in game terms~~: every effect id now has a named caller and its trigger ([Effects](#effects)): the interface clicks 7, 12 and 43; the field events 8–11, 29 and 32; the mob-hit sounds 16–18 by mob id; the attack sounds 13, 14 and 21–25 by action frame; the cast sounds 27 and 28; the buff sounds 15, 19, 20, 26 and 33. What they sound like is the files themselves.
+- ~~Why the destructors of `CStateGame` free 22 effect ids through `FreeBGM`~~: the code shows what happens, not why. Both destructors (`0x93015`, `0x93869`) call `FreeBGM` with 8, 11–29, 32 and 33 in ascending order. `FreeBGM` stops and releases a player only when its `CMResMgr +0x590` slot is set and `Sound_IsBGM(id)` holds; effects never use those slots (they are OpenAL buffers loaded once at start-up, `SoundPlayer_LoadEffects`), so each call only stores 0 in a slot that is already 0. The list is not "the effects the game state plays": 9 and 10 are field-only too and are missing, and 7 is shared with the menus. Nothing frees the effect buffers (`SoundPlayer_ShutdownOpenAL` is reached only from destructors nothing calls). Whether an earlier build kept these ids as `AVAudioPlayer`s cannot be answered from the one build we have; the port does not need it (freeing nothing is the behaviour).

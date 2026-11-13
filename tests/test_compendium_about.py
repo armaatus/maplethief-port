@@ -171,7 +171,7 @@ def test_every_original_bug_has_an_entry():
     entries = [int(n) for n in re.findall(r"^## Bug (\d+): ", ours, re.M)]
     assert listed == table
     assert entries == listed
-    assert len(entries) == 13
+    assert len(entries) == 16
 
 
 UNUSED_ENTRIES = {
