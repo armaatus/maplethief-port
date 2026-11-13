@@ -30,6 +30,7 @@ What the first runs found, all fixed:
 
 - **UBSan, invalid-enum-load** in `mt_audio_set_gain` and `mt_saves_verdict_name`: both range-check values a C caller may pass, but in C++ a value past an enum's enumerators (with no fixed underlying type) is undefined. `mt_audio_bus` and `mt_saves_verdict` gain a last enumerator at `0x7FFFFFFF`, which widens their range to every `int`.
 - **UBSan, nonnull-attribute** in `mt_stubs_pump`: with nothing due and no queue yet, it passed a null pointer to `memmove` (Linux only: glibc declares the argument non-null). It now moves only when something ran.
+- **Two of #324's new tests**: ASan, global-buffer-overflow (a 19-byte path with a NUL read as 21 bytes from its literal), and UBSan, invalid-shift-exponent (the test's zip writer shifted a `uint32_t` by 32 for the zero bytes past the fourth).
 - **clang with libstdc++** (the Linux job's combination, new to the project) rejects a `std::vector<std::pair<K, T>>` member inside `T` where `T`'s default constructor is implicit. `PlistValue` defines its constructor after the class; the plist test's writer keeps its entries in a struct of its own.
 
 ## Consequences
