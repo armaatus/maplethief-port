@@ -24,7 +24,8 @@
 # no IPA and no signing, so a build with the generated code and a device stay local.
 #
 # The `asan` job (Linux) builds our own C/C++ with clang under ASan and UBSan and runs its tests
-# (preset linux-asan, ADR 0157) on every pull request and manual run that builds.
+# (preset linux-asan, ADR 0157) on every pull request and manual run that builds, then runs each
+# libFuzzer target of tests/fuzz/ for 30 s (preset linux-fuzz, ADR 0158).
 #
 # The `switch` job builds the Nintendo Switch homebrew (ADR 0138) on every pull request and manual
 # run: scripts/build-switch, the switch-release workflow in the pinned devkitA64 container, without
@@ -270,7 +271,7 @@ jobs:
   # with clang, -fsanitize=address,undefined and no recovery, the guest memory model checked. Any
   # finding aborts its test. Suppressions, each with its reason, are in tests/sanitizers/. Runs
   # on every pull request and manual run that the build matrix runs on (scripts/ci-scope).
-  # The fuzz targets' smoke runs (#322, #323) are steps of this job, after the tests.
+  # The fuzz targets' smoke runs (#322, #323, ADR 0158) are a step of this job, after the tests.
   asan:
     name: linux asan+ubsan
     needs: scope
@@ -307,6 +308,12 @@ jobs:
       - name: Build and run the C/C++ tests under ASan + UBSan (preset linux-asan)
         run: cmake --workflow --preset linux-asan
 
+      # The fuzz smoke (#322, #323, ADR 0158): every libFuzzer target of tests/fuzz/ for 30 s
+      # from its synthetic seeds, four at a time. A finding fails the step and its input is in
+      # the uploaded build/test-output/linux-fuzz/fuzz/<target>/.
+      - name: Fuzz smoke, 30 s per target (preset linux-fuzz)
+        run: cmake --workflow --preset linux-fuzz
+
       - name: Upload test logs (on failure)
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -315,6 +322,7 @@ jobs:
           path: |
             build/test-output/
             build/linux-asan/Testing/Temporary/LastTest*.log
+            build/linux-fuzz/Testing/Temporary/LastTest*.log
           if-no-files-found: ignore
           retention-days: 7
 

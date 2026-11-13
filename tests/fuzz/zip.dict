@@ -1,0 +1,8 @@
+# Zip record signatures (platform/src/save_zip.cpp)
+"PK\x03\x04"
+"PK\x01\x02"
+"PK\x05\x06"
+"PK\x06\x06"
+"PK\x06\x07"
+"PK\x07\x08"
+"Documents/"

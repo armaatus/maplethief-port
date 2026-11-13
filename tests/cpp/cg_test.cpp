@@ -1064,6 +1064,48 @@ TEST_CASE("CG: CgBI PNGs decode to straight RGBA like ImageIO; PNG representatio
     CHECK(w.call(mt_hle_UIImagePNGRepresentation, {0}) == 0u);
 }
 
+// fuzz_png's findings (#322): stb_image grew its buffer to an IDAT's stated length before
+// reading it (a 2 GiB allocation from a 60-byte file), and copied an empty first IDAT through a
+// null pointer (UBSan: invalid-null-argument). mt_cg_png_check refuses both first.
+TEST_CASE("CG: a chunk past the file's end or an empty first IDAT is refused before stb_image") {
+    std::vector<u8> small;
+    const std::vector<u8> pixel(4, 0x80);
+    REQUIRE(mt_cg::png_encode(pixel.data(), 1, 1, 4, small));
+    REQUIRE(small.size() > 45);
+    REQUIRE(std::memcmp(small.data() + 37, "IDAT", 4) == 0); // after the signature and IHDR
+    CHECK(mt_cg_png_check(small.data(), small.size()) == nullptr);
+    const auto decode = [](const std::vector<u8> &png) {
+        mt_cg::Decoded d;
+        std::string why;
+        CHECK_FALSE(mt_cg::png_decode(png.data(), png.size(), &d, &why));
+        return why;
+    };
+    // The IDAT claims 2^30 bytes (stb_image's own cap) in a file of a few dozen.
+    std::vector<u8> claiming = small;
+    claiming[33] = 0x40;
+    claiming[34] = claiming[35] = claiming[36] = 0;
+    CHECK(decode(claiming) == "a chunk runs past the end of the file");
+    // Cut inside a chunk: the same.
+    CHECK(decode(std::vector<u8>(small.begin(), small.end() - 5)) ==
+          "a chunk runs past the end of the file");
+    // An empty IDAT before the one with the data: refused.
+    const u8 empty_idat[12] = {0, 0, 0, 0, 'I', 'D', 'A', 'T', 0x35, 0xAF, 0x06, 0x1E};
+    std::vector<u8> empty_first = small;
+    empty_first.insert(empty_first.begin() + 33, empty_idat, empty_idat + 12);
+    CHECK(decode(empty_first) == "an empty IDAT chunk before the image data");
+    // After it: still a good PNG (only the first is a problem).
+    std::vector<u8> empty_after = small;
+    empty_after.insert(empty_after.end() - 12, empty_idat, empty_idat + 12);
+    CHECK(mt_cg_png_check(empty_after.data(), empty_after.size()) == nullptr);
+    mt_cg::Decoded d;
+    CHECK(mt_cg::png_decode(empty_after.data(), empty_after.size(), &d, nullptr));
+    // Not a PNG at all, and bytes after IEND (ignored, as stb_image does).
+    CHECK(mt_cg_png_check(pixel.data(), pixel.size()) != nullptr);
+    std::vector<u8> trailing = small;
+    trailing.push_back(0xFF);
+    CHECK(mt_cg_png_check(trailing.data(), trailing.size()) == nullptr);
+}
+
 TEST_CASE("CG: a PNG over 8,192 pixels a side or 2^24 pixels is refused before decoding (#324)") {
     const auto decode = [](const std::vector<u8> &png, std::string *why) {
         mt_cg::Decoded d;

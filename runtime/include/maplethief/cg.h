@@ -35,6 +35,7 @@
 #ifndef MAPLETHIEF_CG_H
 #define MAPLETHIEF_CG_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "maplethief/gfx.h"
@@ -107,6 +108,16 @@ mt_cg_image_stats mt_cg_get_image_stats(void) MT_NOEXCEPT;
  * colorAtPixel:onImage:] 0xB4DB5 returns). Returns 1, or 0 (rgba untouched) for nil and
  * anything that is not a UIColor. Guest thread. */
 int mt_cg_color_rgba(mt_cpu *cpu, uint32_t color, float rgba[4]) MT_NOEXCEPT;
+
+/* --- PNG files before stb_image (#322, ADR 0158) ---------------------------------------------
+ *
+ * The chunk walk that every PNG decode runs before the pinned stb_image reads the file (CG's
+ * png_decode, the frontend's border image): NULL if the file starts with the PNG signature and
+ * each chunk up to IEND lies inside it; otherwise why not. Refused besides: an empty IDAT before
+ * the first one with data (stb_image copies its zero bytes through a null pointer). stb_image
+ * grows its buffer to a chunk's stated length before it reads the chunk, so a 100-byte file
+ * could claim 2 GiB; with this walk no chunk claims more than the file holds. */
+const char *mt_cg_png_check(const uint8_t *data, size_t size) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

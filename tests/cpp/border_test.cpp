@@ -313,6 +313,27 @@ TEST_CASE("border: a PNG within the limits decodes; hostile and oversized ones a
     SDL_Quit();
 }
 
+// fuzz_border's finding (#322): an empty first IDAT reached stb_image's copy through a null
+// pointer (UBSan: invalid-null-argument), and an IDAT may claim more bytes than the file has.
+TEST_CASE("border: a chunk past the file's end or an empty first IDAT is refused (#322)") {
+    std::vector<std::uint8_t> rgba(4 * 4 * 4, 0x60);
+    const std::vector<std::uint8_t> png = encode_png(4, 4, rgba);
+    REQUIRE(std::memcmp(png.data() + 37, "IDAT", 4) == 0);
+    const auto refused = [](const std::vector<std::uint8_t> &bytes, const char *reason) {
+        fe::BorderImage out;
+        std::string why;
+        CHECK_FALSE(fe::decode_border_image(bytes.data(), bytes.size(), &out, &why));
+        CHECK_MESSAGE(why.find(reason) != std::string::npos, why);
+    };
+    std::vector<std::uint8_t> claiming = png;
+    claiming[33] = 0x3F;
+    refused(claiming, "a chunk runs past the end of the file");
+    const std::uint8_t empty_idat[12] = {0, 0, 0, 0, 'I', 'D', 'A', 'T', 0x35, 0xAF, 0x06, 0x1E};
+    std::vector<std::uint8_t> empty_first = png;
+    empty_first.insert(empty_first.begin() + 33, empty_idat, empty_idat + 12);
+    refused(empty_first, "an empty IDAT chunk before the image data");
+}
+
 TEST_CASE("settings: border is color (the default), blur or image; border_image a file (#157)") {
     fe::Settings s;
     CHECK(s.border == BorderMode::kColor);

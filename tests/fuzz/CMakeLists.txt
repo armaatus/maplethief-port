@@ -9,6 +9,8 @@
 # and CTest fuzz.<name> runs it for MAPLETHIEF_FUZZ_SMOKE_SECONDS from those seeds (the CI
 # smoke). scripts/fuzz runs the same programs for hours.
 
+find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter) # make_corpus.py, fuzz_run.py
+
 set(MAPLETHIEF_FUZZ_SMOKE_SECONDS
     30
     CACHE STRING "How long CTest's fuzz.<name> runs each target, in seconds (ADR 0158)")
@@ -16,16 +18,20 @@ set(MAPLETHIEF_FUZZ_SMOKE_SECONDS
 # Every fuzz target, and the seed corpora: `cmake --build --preset linux-fuzz` builds this.
 add_custom_target(maplethief_fuzz)
 
-# maplethief_add_fuzz_target(<name> LIBRARIES <lib>... [SOURCES <src>...])
+# maplethief_add_fuzz_target(<name> LIBRARIES <lib>... [SOURCES <src>...] [OWN_DISPATCH])
 #
-# Builds fuzz_<name> from <name>_fuzz.cpp (plus SOURCES), linked with -fsanitize=fuzzer and the
+# Builds fuzz_<name> from <name>_fuzz.cpp (plus SOURCES and no_guest.cpp's mt_dispatch, which
+# aborts; OWN_DISPATCH: the target defines its own), linked with -fsanitize=fuzzer and the
 # LIBRARIES; generates its seeds from seeds/<name>.py into <build>/tests/fuzz/seeds/<name>/;
 # and registers CTest fuzz.<name>, which runs it for MAPLETHIEF_FUZZ_SMOKE_SECONDS through
 # fuzz_run.py (which takes the input size limit, MAX_LEN, from seeds/<name>.py).
 function(maplethief_add_fuzz_target name)
-    cmake_parse_arguments(PARSE_ARGV 1 arg "" "" "SOURCES;LIBRARIES")
+    cmake_parse_arguments(PARSE_ARGV 1 arg "OWN_DISPATCH" "" "SOURCES;LIBRARIES")
     set(target fuzz_${name})
     add_executable(${target} ${name}_fuzz.cpp ${arg_SOURCES})
+    if(NOT arg_OWN_DISPATCH)
+        target_sources(${target} PRIVATE no_guest.cpp)
+    endif()
     target_link_libraries(${target} PRIVATE ${arg_LIBRARIES})
     target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
                                                  "${PROJECT_SOURCE_DIR}/runtime/src")

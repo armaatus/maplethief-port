@@ -14,6 +14,7 @@
 
 #include "cg/cg_objects.h"
 #include "cg/zlib.h"
+#include "maplethief/cg.h"
 
 #define STBI_ONLY_PNG
 #define STBI_NO_STDIO
@@ -47,6 +48,12 @@ bool png_decode(const u8 *data, std::size_t size, Decoded *out, std::string *err
         }
         return false;
     }
+    if (const char *problem = mt_cg_png_check(data, size); problem != nullptr) {
+        if (error != nullptr) {
+            *error = problem;
+        }
+        return false;
+    }
     stbi_uc *pixels = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
     if (pixels == nullptr) {
         if (error != nullptr) {
@@ -64,6 +71,42 @@ bool png_decode(const u8 *data, std::size_t size, Decoded *out, std::string *err
     out->pixels = std::move(bytes);
     return true;
 }
+
+} // namespace mt_cg
+
+extern "C" const char *mt_cg_png_check(const std::uint8_t *data, std::size_t size) noexcept {
+    static constexpr std::uint8_t k_signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+    if (data == nullptr || size < sizeof k_signature ||
+        std::memcmp(data, k_signature, sizeof k_signature) != 0) {
+        return "not a PNG";
+    }
+    const auto be32 = [data](std::size_t at) {
+        return static_cast<std::uint32_t>(data[at]) << 24 |
+               static_cast<std::uint32_t>(data[at + 1]) << 16 |
+               static_cast<std::uint32_t>(data[at + 2]) << 8 | data[at + 3];
+    };
+    bool image_data = false;
+    for (std::size_t at = sizeof k_signature; at < size;) {
+        // Length, type, data, CRC: the 12 bytes around the data, then the data's own.
+        if (size - at < 12 || be32(at) > size - at - 12) {
+            return "a chunk runs past the end of the file";
+        }
+        const std::uint32_t length = be32(at);
+        const char *type = reinterpret_cast<const char *>(data + at + 4);
+        if (std::memcmp(type, "IDAT", 4) == 0) {
+            if (length == 0 && !image_data) {
+                return "an empty IDAT chunk before the image data";
+            }
+            image_data = true;
+        } else if (std::memcmp(type, "IEND", 4) == 0) {
+            break;
+        }
+        at += 12u + length;
+    }
+    return nullptr;
+}
+
+namespace mt_cg {
 
 bool png_info(const u8 *data, std::size_t size, u32 *width, u32 *height) {
     static constexpr u8 k_signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};

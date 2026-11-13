@@ -7,6 +7,8 @@
 #include <cstring>
 #include <utility>
 
+#include "maplethief/cg.h"
+
 // The pinned stb_image (ADR 0003), a private copy (static linkage) for the player's border art:
 // PNG only, from memory, no larger than the limits allow.
 #define STBI_ONLY_PNG
@@ -75,6 +77,9 @@ bool decode_border_image(const std::uint8_t *data, std::size_t size, BorderImage
         static_cast<std::uint64_t>(w) * static_cast<std::uint64_t>(h) > kMaxBorderImagePixels) {
         return fail(std::to_string(w) + "x" + std::to_string(h) + " is larger than " +
                     std::to_string(kMaxBorderImageSide) + " a side or 7680x4320 in all");
+    }
+    if (const char *problem = mt_cg_png_check(data, size); problem != nullptr) {
+        return fail(std::string("the PNG is broken (") + problem + ")");
     }
     stbi_uc *pixels = stbi_load_from_memory(data, len, &w, &h, &comp, 4);
     if (pixels == nullptr) {
