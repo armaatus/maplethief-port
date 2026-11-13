@@ -107,3 +107,4 @@ Since 2026-11-13 Joris delegates judgement calls: product and design ADRs, defau
 - iOS 16+ arm64 (sideloaded via Xcode)
 - Linux x86_64 / Steam Deck where it's cheap
 - Nintendo Switch (homebrew NRO, custom firmware), [ADR 0138](docs/adr/0138-nintendo-switch-homebrew-target.md)
+- Android 8.0+ (API 26) arm64, one sideloaded APK without assets, [ADR 0150](docs/adr/0150-android-target.md)
