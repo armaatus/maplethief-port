@@ -52,6 +52,24 @@ With the generated code, `platform.title_60s` runs `MapleThief --fixed-step 16.6
 
 Step-by-step runs for checking the game by hand are in [docs/testing/](../testing/). The Nintendo Switch's hardware sign-off is [switch-checklist.md](../testing/switch-checklist.md).
 
+## Sanitizers: ASan and UBSan
+
+The `mac-asan` and `linux-asan` presets build our own C and C++ (the runtime, the frontend, the generated code when it is there, and every test) with AddressSanitizer and UndefinedBehaviorSanitizer, and run CTest on it. Any finding aborts its test: there is no recovery ([ADR 0157](../adr/0157-asan-and-ubsan-preset-and-ci-job.md)).
+
+```sh
+cmake --workflow --preset mac-asan       # macOS: configure, build, test
+scripts/test --preset mac-asan --cpp-only
+scripts/test-linux --arch arm64 -- --preset linux-asan --cpp-only   # Linux, in the container
+```
+
+- **The guest memory model is checked** (`MAPLETHIEF_MEM_MODEL=checked`, [ADR 0025](../adr/0025-guest-memory-and-address-space.md)): every guest access is bounds-checked against the arena before it becomes a host pointer, so a bad guest address traps with its PC instead of reaching ASan's signal handler. The arena itself is one mapping, so ASan does not see an overflow from one guest object into the next; that is the game's memory, not ours.
+- **SDL keeps its own flags.** Only targets added after it are instrumented. ASan's allocator still covers every `malloc` and `new`, SDL's included.
+- **Timeouts** are four times the usual (`MAPLETHIEF_TEST_TIMEOUT_SCALE`): a sanitized test runs a few times slower.
+- **Options** come from the test presets (`asan-base` in `CMakePresets.json`): `halt_on_error`, `abort_on_error`, `detect_stack_use_after_return`, `strict_string_checks`, `check_initialization_order` for ASan, and `print_stacktrace` for UBSan. On Linux, ASan's LeakSanitizer runs too; macOS has none.
+- **Suppressions.** None are needed today. If one ever is, it goes in `tests/sanitizers/<tool>.supp` with a comment above each entry giving its reason, and the preset points `ASAN_OPTIONS` or `LSAN_OPTIONS` at it; `tests/test_sanitizer_suppressions.py` fails on an entry without one. UBSan cannot suppress a check that does not recover, so its findings are always fixed.
+- **The SjLj unwinder** ([ADR 0020](../adr/0020-sjlj-exceptions.md)) uses the host's `setjmp` and `longjmp`. ASan's `longjmp` interceptor clears the shadow of the frames it skips, so the unwinder needs nothing extra.
+- **With the generated code** (your own `work/gen/`, local only) the presets also build `play_real_test`, so the real-asset runs work under ASan: `ctest --preset mac-asan -R '^play\.regress$'`. On an Apple M4, `play.regress` took 80.5 s and `play.chapter_1_a` 360.9 s (2026-11-13), both clean.
+
 ## Before you push
 
 Run the quick local check ([ADR 0126](../adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md)):
@@ -97,8 +115,8 @@ Windows has no container: run `scripts\test.ps1` (Debug and pytest) and `scripts
 
 | Pull request into | Runs |
 |---|---|
-| `dev` | lint and Python 3.10 and latest (Linux), the Linux Debug build with the C/C++ tests, and the Switch NRO |
-| `main` | lint and Python, and Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux |
+| `dev` | lint and Python 3.10 and latest (Linux), the Linux Debug build with the C/C++ tests, the same tests under ASan and UBSan, and the Switch NRO |
+| `main` | lint and Python, Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux, and the ASan and UBSan tests |
 | manual run | the full set, Release unless its `release` input is off |
 
 GitHub's hosted runners are free for this public repository, so use them. To run all three OSes on any branch:
@@ -111,6 +129,7 @@ gh run watch
 A pull request is merged only when its checks are green (`gh pr checks --watch`).
 
 - **The `build` jobs** run the same `scripts/test` and `scripts/test.ps1` as above: the Debug build, CTest (including the headless `platform.smoke`) and pytest, with warnings as errors. The Release jobs run the release workflows and package the kits; the universal binary must contain both `arm64` and `x86_64`.
+- **The `asan` job** (Linux, on every pull request and manual run that builds) runs the `linux-asan` workflow: the C/C++ tests built with clang under ASan and UBSan, no recovery, the guest memory model checked ([Sanitizers](#sanitizers-asan-and-ubsan)). It uses clang so that the fuzz targets' smoke runs ([#322](https://github.com/armaatus/maplethief-port/issues/322), [#323](https://github.com/armaatus/maplethief-port/issues/323)) can join it as later steps.
 - **The `lint + Python min/latest` job** (Linux) runs `scripts/lint`, then `scripts/test --python-only` on Python 3.10 and the latest Python, and the guard that no compendium output is tracked ([ADR 0121](../adr/0121-public-compendium-site.md)).
 - **The `ios` job** (macOS, on the runs that build every OS: the release pull request and manual runs) runs the `ios-ci` workflow: our own code for iOS arm64, Debug and Release, no IPA and no signing. It links the frontend and runtime into the placeholder shell and checks the app is arm64 ([ADR 0136](../adr/0136-ios-app-through-xcode.md)). The game itself and a device are local.
 - **The `switch` job** (Linux, on every pull request and manual run) runs `scripts/build-switch HEAD --preset switch-release --arch amd64`: `MapleThief.nro` from our own code in the devkitA64 image pinned by digest, no IPA. Its CTest checks read the NRO's NACP and icon (`platform.switch_nro`) and run the release guard on it (`platform.switch_guard`). It also builds every test NRO, `MapleThiefTests.nro` among them. A console is never involved: hardware runs are local, with `scripts/switch-run` and `scripts/switch-test` ([ADR 0138](../adr/0138-nintendo-switch-homebrew-target.md)).
