@@ -8,9 +8,11 @@ Addresses are armv7 VM addresses; function pointers carry the Thumb bit.
 
 Each bug gets one of three decisions:
 
-- **Fixed in Enhanced.** A guest function hook ([ADR 0069](../adr/0069-guest-function-hooks.md)) changes the one function, and only while the setting `fix_original_bugs` is on. That setting is on in the Enhanced preset and off in Original and Original + controller ([ADR 0070](../adr/0070-settings-registry-and-presets.md)); the flag is `--fix-original-bugs on|off`. With it off, the game does exactly what the device does, the bug included. This decision is for bugs that **end the game or leave the player stuck**. A fix never changes balance: anything that changes gameplay belongs under Assists.
+- **Fixed in Enhanced.** A guest function hook ([ADR 0069](../adr/0069-guest-function-hooks.md)) changes the one function, and only while the setting `fix_original_bugs` is on. That setting is on in the Enhanced preset and off in Original and Original + controller ([ADR 0070](../adr/0070-settings-registry-and-presets.md)); the flag is `--fix-original-bugs on|off`. With it off, the game does exactly what the device does, the bug included. This decision is for bugs that **end the game or leave the player stuck**, and, since [#379](https://github.com/armaatus/maplethief-port/issues/379), for **content defects**: content the game ships and reaches but gets wrong, where the game's own data shows what was meant (a warp to a portal that does not exist, a missing translation, a quest no script completes). A fix never changes balance: anything that changes gameplay belongs under Assists.
 - **Neutralised in every mode.** The port's host side never lets the trigger reach the game, whatever the preset. This decision is for triggers the port's host creates itself (its clock, its files), where keeping the bug would make the port worse than the device without making it more faithful.
 - **Kept.** The port does what the device does. Either nothing in normal play reaches the bug, or fixing it would change what the game is.
+
+Content the game ships but never reaches (no map, NPC or script leads to it) is not a bug, and `fix_original_bugs` never touches it. Bringing it back is **restored content**: a setting of its own, `restored_content`, off in every preset, Enhanced included ([below](#unreachable-content); ADR 0069's #379 addendum). Neither setting ever changes the Original preset.
 
 Each fix has a test with the setting off (the original behaviour) and on.
 
@@ -31,6 +33,9 @@ Each fix has a test with the setting off (the original behaviour) and on.
 | 11 | [OK on a quest pages a quest it never stored](#11-ok-on-a-quest-pages-a-quest-it-never-stored) | `PopupMenu_QuestTabOnKey` `0x5462D`, `PopupMenu_PaintQuestTab` `0x4ED75` (`0x4F178`, the fault at `0x4F1C4`) | OK (−5) on a row of the popup menu's quest tab: the port's keys | a memory fault, the app ends (SIGBUS); after a touch on another quest, the wrong quest's title | **Neutralised in every mode** (hook on `0x5462D`) |
 | 12 | [The shop's keys stop at row 2](#12-the-shops-keys-stop-at-row-2) | `Shop_OnKey` `0x46DB9`, `Shop_Paint` `0x56E91` | up / down in an NPC shop: the port's keys | the cursor sticks at the third row, the list never scrolls | **Neutralised in every mode** (hook on `0x46DB9`, ADR 0102) |
 | 13 | [The item and equipment grids' keys assume 6 columns](#13-the-item-and-equipment-grids-keys-assume-6-columns) | `CDataMgr::keyPopupItemInven` `0x5285D`, `PopupMenu_EquipTabOnKey` `0x519F9` | the d-pad on the popup menu's item or equipment grid: the port's keys | down skips to an empty cell; the drawn grid never follows | **Neutralised in every mode** (hooks on both, ADR 0102) |
+| 14 | [`common/portal620` warps to a portal that does not exist](#14-commonportal620-warps-to-a-portal-that-does-not-exist) | `common/portal620.out` (`changeMap(6, 1, 2)`), the map change `0x868D5` (the object loop at `0x86A02`) | the portal on map 6.2 | the hero lands on 6.1 where it stood on 6.2, not at a portal | **Fixed in Enhanced** (to do, #388) |
+| 15 | [A dialogue key missing in Korean](#15-a-dialogue-key-missing-in-korean) | `ko.lproj/Scripts.strings`; `chapter3/ZenumistChief.out`; `-[NSBundle localizedStringForKey:value:table:]` (host, `runtime/src/foundation/ns_bundle.cpp`) | the Zenumist Chief's first line with the language Korean | the box shows the key itself | **Fixed in Enhanced** (to do, #388) |
+| 16 | [Chapter 1's main quest 20 is never completed](#16-chapter-1s-main-quest-20-is-never-completed) | `chapter1/Pirate.out` (`toOrbis`), `clearAll` `0x996ED` | chapter 1's end | main 20 stays in progress until `clearAll` resets it with every quest | **Fixed in Enhanced** (to do, #388) |
 
 ### 1. Play before the engine's main menu
 
@@ -156,6 +161,47 @@ Found with 12, [ADR 0102](../adr/0102-controller-lists-and-the-character-select-
 - **On the device.** No key reaches these handlers; a touch picks a cell.
 - **The fix** (`platform/src/list_keys.cpp`, on in every mode). Hooks on both handlers take the four directions while the grid is shown and has cells, and neither the shortcut panel (`+0xCC`) nor the quick slot choice (`+0xBC`) is open. Left and right go one cell, up and down to the nearest cell of the row drawn above or below; ends hold; up from the top row runs the original (back to the tab bar). The cursor is the cell's index with the key scroll at 0, and the drag follows the cell within the engine's clamp.
 - **Tests.** `platform_test` `list keys: grid moves *`, `list keys: the item grid's keys *` (synthetic). `input.menu_popup_grids` (real assets): with the hooks off, down goes to cell 6 of 4; with them on, the d-pad walks the 4 cells and up returns to the tab bar.
+
+### 14. `common/portal620` warps to a portal that does not exist
+
+From [ANALYSIS.md → Script VM](../ANALYSIS.md) (reachability) and [#379](https://github.com/armaatus/maplethief-port/issues/379).
+
+- **Cause.** Map 6.2 has one portal, `portal620` (kind 0). Its script, `common/portal620.out` (no chapter overrides it), calls `changeMap(6, 1, 2)`: map 6.1, portal 2. Map 6.1 has portals of kind 0 (`portal610`, to 6.0) and kind 1 (`portal611`, which leads to 6.2's portal 0). No object of kind 2 exists on it. The way back from 6.2 was clearly meant to be portal 1, the one that leads there.
+- **What the game does.** The map change `0x868D5` loads 6.1 and walks its objects for a `kind` equal to the target portal (`0x86A02`–`0x86A1A`); only a match writes the hero's x and y (`hero +4`, `+8`) and moves the camera. With no match nothing is written, so the hero keeps the coordinates it had on 6.2, about (56, 751): on 6.1 that is 32 points above `portal610` at the map's left edge, instead of at `portal611` on the right. This is read from the routine's code; no run has taken the portal yet. The hero is not stuck: 6.1's portals still work.
+- **In the port today.** The same as the device in every mode.
+- **The repair.** A hook on `CMapleWorld::changeMap` `0x81369` (or on the native's handler `0x99969`): with the setting on, a warp to (6, 1, 2) becomes (6, 1, 1). Touched: one hook, no data. **Risk: low.** Only where the hero appears changes; nothing else warps to 6.1's portal 2.
+- **Tests (to do).** A synthetic `runtime_test` case for the rewrite, on and off; a real-asset run that takes `portal620` and reads the hero's position on 6.1 with the setting off (the 6.2 coordinates) and on (at `portal611`).
+
+### 15. A dialogue key missing in Korean
+
+From [ANALYSIS.md → Script VM](../ANALYSIS.md) (dialogue text).
+
+- **Cause.** All 1,761 key-shaped constants in the scripts resolve in `en.lproj/Scripts.strings`. In `ko.lproj` one does not: `Chapter3_Quest_Zenumist_Chief.dialog.1`, the first line of the Zenumist Chief (`chapter3/ZenumistChief.out`). `regMsgNPC` localises the key at once through `LocalizedCString` `0x6DD1`, and `-[NSBundle localizedStringForKey:value:table:]` returns the key when the table lacks it.
+- **On the device.** A Korean device shows the key in the Chief's speech box. English (and every other language, which falls back to English) is not affected.
+- **In the port today.** The same: the host's `bundle_localized_string` returns the key when neither a text pack (ADR 0108) nor the language's table has it.
+- **The repair.** In the host's lookup, with the setting on, a key missing from the language's table falls back to the English table's string, as iOS does for a key a localisation lacks when the development region has it. Touched: `runtime/src/foundation/ns_bundle.cpp` and the setting passed to the CF layer; no hook. **Risk: low.** One line of the Chief shows in English on a Korean game instead of a key; the English game is unchanged. Writing a Korean line of our own would add text the game never had, so it is not the repair.
+- **Tests (to do).** A synthetic bundle with a key in `en` and not in `ko`: the key with the setting off, the English string with it on.
+
+### 16. Chapter 1's main quest 20 is never completed
+
+Found by [#162](https://github.com/armaatus/maplethief-port/issues/162) (`play.chapter_1_k`, `_l`; [testing/chapter-1-quests.md](../testing/chapter-1-quests.md)).
+
+- **Cause.** Stan gives main 20 (Master in Danger 2) after main 19. The Pirate (2.0) offers the trip to Orbis once side 11 is done, and `toOrbis` calls `clearAll` `0x996ED`, which sets every quest back to 0 and starts chapter 2. No script calls `getReward` for main 20 or sets it to 2, so it is the one main quest that never reads 2. The other chapters' last main quests without a `getReward` (chapter 0's 6, chapter 2's 9, chapter 3's 8) are finished by a scene or the chapter's end, as main 20 is, but main 20's own step (go to the Pirate) leads straight into the reset.
+- **On the device.** Main 20 is in progress (1) in the quest tab right up to the trip; the chapter goes on normally. Nothing is lost: main 20 has no rewards registered.
+- **In the port today.** The same; `play.chapter_1_l` checks `main 20:1` before the trip and 0 after it.
+- **The repair.** With the setting on, main 20 is completed through the game's own completion path when the hero accepts the trip, before `clearAll` runs, so the player sees it complete as the chapter ends. Touched: a hook on the `clearAll` native's handler `0x996ED` that completes chapter 1's main 20 first while it is active (1), or an in-memory override of `chapter1/Pirate.out`'s `toOrbis`. The hook is simpler and leaves the script bytes alone. **Risk: low to medium.** The visible effect is small (what a completion shows was not traced: a notice, the quest tab entry), and `clearAll` resets the state either way, so saves and chapter 2 are unchanged. The follow-up first traces what setting a quest to 2 shows, and records it here.
+- **Tests (to do).** A real-asset run from `play.chapter_1_k`'s save: off, main 20 reads 1 before `clearAll`; on, it reads 2 there, and chapter 2 starts on 4.1 as before.
+
+## Unreachable content
+
+Content the game ships but no reachable path leads to ([#379](https://github.com/armaatus/maplethief-port/issues/379)). It is not a bug, and `fix_original_bugs` leaves it alone. With the setting `restored_content` on (off in every preset; ADR 0069's #379 addendum), the port may make it reachable ([#389](https://github.com/armaatus/maplethief-port/issues/389)). In every mode, today, the port does what the device does: none of it is reachable.
+
+| Content | What exists | What a restore touches | Risk |
+|---|---|---|---|
+| [Monster Carnival](mechanics.md#monster-carnival-the-level-scaling-mode) | The three rooms (maps 0.5, 4.18, 6.3), the rules (`CStateGame::StartMonsterCarnival` `0x82271`, `resultMonCa` `0x819E5`), the tickets (`item_etc` 47–49) and the scripts that start it, `common/Spiegelman1`–`3.out`, which no map object names | An NPC object added in memory to one map's object list at load, naming the `Spiegelman` scripts, on a map the game itself suggests (where is not known: the follow-up looks for the intent in the data and the strings) | **High.** The place is a guess; the rules have a sign slip ([mechanics](mechanics.md#monster-carnival-the-level-scaling-mode)); the EXP rewards change the level curve; whether the tickets can be obtained was not checked. The no-save rule already covers the rooms (ADR 0089) |
+| Shops 0, 1 and 16 | 61, 30 and 7 `market.dat` listings; the shop screen `0x4628D` opens any shop number. Shop 0 also holds one listing of shop 8's (row 146, a data slip) | An extra choice in an existing merchant's list that calls `showMarket` with the shop number, by an in-memory override of a `common/Equip*` or `Etc*` script, or a hook on the shop's opening | **Medium.** The stock may be a test or a cut tier; prices and items change the economy. Who sells it is a guess |
+| The 21 unreached maps | 90 maps, of which chapter 3 reaches 69. Among the 21: the three Carnival rooms and the maps of the 4 portals no chapter reaches (`portal450`, `portal451`, `portal480`, `portal481`); the compendium's map pages list each one | Per map: a portal or warp added in memory, or an existing portal script's target changed | **High,** and per map: some may be unfinished (no objects: 4.18 and 6.3 have none), and a dead end or a fall with no way back would leave the player stuck. Each map gets its own check before it is restored |
+| The Pigmy hatch's online part | The dialog's states (`CStateGame::SetPigmeState` `0xF` → `0x10`) and its failure text ([network.md](network.md)). No packet is ever sent: the online part was cut from the iOS build | Nothing to restore: the client has no request for it, and what the server did is unknown | **Out of bounds.** Inventing it would add content the game never had. It stays the device's offline failure in every mode |
 
 ## Adding a fix
 
