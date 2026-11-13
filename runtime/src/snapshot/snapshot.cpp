@@ -386,6 +386,11 @@ bool read_objc(mt_objc *rt, Reader &r, ObjcTables *t) {
         !r.u32(&n) || !r.count_fits(n, 8)) {
         return false;
     }
+    // A save is made at a safe point, where no object waits in a pool; one in a file would be
+    // released at the next drain, whatever address it names (#323).
+    if (!t->pool_objects.empty()) {
+        return r.fail("autoreleased objects in a saved state");
+    }
     t->marks.resize(n);
     for (mt_objc_impl::PoolMark &m : t->marks) {
         r.u32(&m.pool);

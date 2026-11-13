@@ -728,6 +728,41 @@ TEST_CASE("snapshot: a CFURL whose bundle path leaves the bundle is refused, and
     CHECK(rel == "Data/Map.img");
 }
 
+TEST_CASE("snapshot: an objc section with autoreleased objects is refused, and nothing changes "
+          "(#323)") {
+    World w;
+    mt_cpu &cpu = w.cpu;
+    const u32 str = mt_cf::string_create(&cpu, u"before", true);
+    const Bytes good = save(w, MT_SNAPSHOT_STORE);
+    mt_snapshot_header h{};
+    std::vector<mt_snap::Section> sections;
+    std::string why;
+    REQUIRE(mt_snap::read_state_file(good.data(), good.size(), nullptr, &h, &sections, &why));
+    auto objc = std::find_if(sections.begin(), sections.end(),
+                             [](const mt_snap::Section &s) { return s.name == "objc"; });
+    REQUIRE(objc != sections.end());
+    // The retains and @synchronized maps (a count, then pairs), then the pool's objects.
+    std::size_t at = 0;
+    for (int map = 0; map < 2; map++) {
+        at += 4 + 8 * std::size_t{get_u32(objc->bytes, at)};
+    }
+    REQUIRE(get_u32(objc->bytes, at) == 0u);
+    put_u32(objc->bytes, at, 1);
+    const u8 object[4] = {static_cast<u8>(str), static_cast<u8>(str >> 8),
+                          static_cast<u8>(str >> 16), static_cast<u8>(str >> 24)};
+    objc->bytes.insert(objc->bytes.begin() + static_cast<std::ptrdiff_t>(at + 4), object,
+                       object + 4);
+    Bytes bad;
+    REQUIRE(mt_snap::write_state_file(h, sections, true, &bad, &why));
+    mt_cf::string_mutable_chars(&cpu, str)->assign(u"after");
+    CHECK(restore_why(w, bad).find("autoreleased objects in a saved state") != std::string::npos);
+    CHECK(w.text(str) == u"after");
+    char safe[160] = {};
+    CHECK(mt_snapshot_safe(&cpu, safe, sizeof safe) == 1);
+    CHECK(restore_why(w, good).empty());
+    CHECK(w.text(str) == u"before");
+}
+
 TEST_CASE("snapshot: a state round-trips through a second restore unchanged") {
     World w;
     mt_cpu &cpu = w.cpu;
