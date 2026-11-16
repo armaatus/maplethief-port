@@ -22,6 +22,13 @@
 #include <dr_flac.h> // SYSTEM include directories: their warnings are not ours
 #include <dr_mp3.h>
 
+#if defined(__clang_analyzer__)
+// Defined with dr_flac's implementation, which clang-tidy does not see (FlacDecoder::read).
+#pragma clang diagnostic ignored "-Wundefined-internal"
+// NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp): dr_flac's own name
+static drflac_bool32 drflac__read_and_decode_next_flac_frame(drflac *pFlac);
+#endif
+
 namespace mt_audio {
 
 using u32 = std::uint32_t;
@@ -93,7 +100,10 @@ struct Mp3Stream::FlacDecoder final : Mp3Stream::Decoder {
             return true;
         }
         const u32 block = f.header.blockSizeInPCMFrames;
-        const u32 n = drflac__get_channel_count_from_channel_assignment(f.header.channelAssignment);
+        // A frame's channel assignment: 0-7 are 1-8 independent channels, 8-10 stereo, the rest
+        // reserved.
+        const u32 a = f.header.channelAssignment;
+        const u32 n = a <= 7 ? a + 1 : a <= 10 ? 2 : 0;
         if (n != flac->channels || block > flac->maxBlockSizeInPCMFrames ||
             f.pcmFramesRemaining > block) {
             return false;
