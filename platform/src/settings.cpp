@@ -2078,7 +2078,9 @@ std::string serialise_settings(const Settings &settings, std::string_view old_te
             continue;
         }
         if (ends_open) {
-            out += newline;
+            // A last line that ends in a lone CR gets its LF (#322: a second CR before the
+            // newline would become part of that line's value when the file is read again).
+            out += out.back() == '\r' ? std::string_view("\n") : newline;
             ends_open = false;
         }
         put_comment(&out, keys[i].comment, newline);

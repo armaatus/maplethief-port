@@ -844,6 +844,20 @@ TEST_CASE("settings: serialise -> parse gives the same settings; a rewrite keeps
     }
 }
 
+// fuzz_settings' finding (#322): a last line that ends in a lone CR, with keys to append after
+// it, was written back with "\r\r\n", and the extra CR became part of its value when read.
+TEST_CASE("settings: a last line ending in a lone CR round trips through a rewrite") {
+    const std::string text = "\r\nborder_image=d\r";
+    fe::Settings s;
+    CHECK(fe::parse_settings(text, &s).empty());
+    CHECK(s.border_image == "d");
+    const std::string out = fe::serialise_settings(s, text);
+    CHECK(out.rfind("\r\nborder_image=d\r\n", 0) == 0);
+    fe::Settings back;
+    CHECK(fe::parse_settings(out, &back).empty());
+    CHECK(back == s);
+}
+
 TEST_CASE("settings: every key of both sides, in order, round trips and applies (#72, #88, #120, "
           "#125, #137)") {
     // The keys a new file lists, in its order: the rendering keys (#120, #88), the audio keys
