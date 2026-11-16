@@ -177,6 +177,7 @@ class Accumulator {
         for (std::size_t i = 0; i < out.size(); i++) {
             acc += a_[i];
             const float v = std::min(1.0f, std::fabs(acc));
+            // NOLINTNEXTLINE(bugprone-incorrect-roundings): v is in [0, 1]; the goldens use this
             out[i] = static_cast<u8>(v * 255.0f + 0.5f);
         }
     }

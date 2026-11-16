@@ -54,6 +54,9 @@ typedef struct mt_texpack_stats {
     uint64_t dump_errors; /* files that could not be written (logged) */
 } mt_texpack_stats;
 
+/* The files a pack indexes at most (GL and ui/ together); the rest are skipped, logged (#413). */
+#define MT_TEXPACK_MAX_FILES 65536u
+
 /* Opens the pack in the directory `dir` (UTF-8): indexes its file names and installs its hooks.
  * Returns the files indexed (GL and ui/), or -1 (logged) if `dir` is no directory. Another pack
  * open before is closed first. */

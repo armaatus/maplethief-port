@@ -50,8 +50,9 @@ void list_destroy(mt_cpu *cpu, u32, void *p) {
     }
 }
 
-const mt_objc_state_type k_array_state = {"NSArray", sizeof(ListState), list_destroy};
-const mt_objc_state_type k_set_state = {"NSSet", sizeof(ListState), list_destroy};
+void drop_list(void *state) { delete static_cast<ListState *>(state)->items; }
+const mt_objc_state_type k_array_state = {"NSArray", sizeof(ListState), list_destroy, drop_list};
+const mt_objc_state_type k_set_state = {"NSSet", sizeof(ListState), list_destroy, drop_list};
 
 struct DictState {
     std::vector<std::pair<u32, u32>> *entries; // retained (copied) keys, retained values
@@ -75,7 +76,9 @@ void dict_destroy(mt_cpu *cpu, u32, void *p) {
     }
 }
 
-const mt_objc_state_type k_dict_state = {"NSDictionary", sizeof(DictState), dict_destroy};
+void drop_dict(void *state) { delete static_cast<DictState *>(state)->entries; }
+const mt_objc_state_type k_dict_state = {"NSDictionary", sizeof(DictState), dict_destroy,
+                                         drop_dict};
 
 ListState *list_state(mt_cpu *cpu, u32 obj, const mt_objc_state_type *type) {
     mt_objc *rt = runtime(cpu);
@@ -573,8 +576,6 @@ bool load_list(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
     return true;
 }
 
-void drop_list(void *state) { delete static_cast<ListState *>(state)->items; }
-
 bool save_dict(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
     const auto *s = static_cast<const DictState *>(state);
     w.boolean(s->entries != nullptr);
@@ -615,18 +616,14 @@ bool load_dict(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
     return true;
 }
 
-void drop_dict(void *state) { delete static_cast<DictState *>(state)->entries; }
-
 } // namespace
 
 extern const mt_snap::StateOps k_snap_array;
-const mt_snap::StateOps k_snap_array = {&k_array_state, "NSArray", save_list,
-                                        load_list,      drop_list, nullptr};
+const mt_snap::StateOps k_snap_array = {&k_array_state, "NSArray", save_list, load_list, nullptr};
 extern const mt_snap::StateOps k_snap_set;
-const mt_snap::StateOps k_snap_set = {&k_set_state, "NSSet",   save_list,
-                                      load_list,    drop_list, nullptr};
+const mt_snap::StateOps k_snap_set = {&k_set_state, "NSSet", save_list, load_list, nullptr};
 extern const mt_snap::StateOps k_snap_dict;
-const mt_snap::StateOps k_snap_dict = {&k_dict_state, "NSDictionary", save_dict,
-                                       load_dict,     drop_dict,      nullptr};
+const mt_snap::StateOps k_snap_dict = {&k_dict_state, "NSDictionary", save_dict, load_dict,
+                                       nullptr};
 
 } // namespace mt_ns

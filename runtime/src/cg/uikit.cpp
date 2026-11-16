@@ -142,7 +142,7 @@ void image_destroy(mt_cpu *cpu, u32, void *state) {
     mt_objc_release(cpu, static_cast<ImageState *>(state)->cgimage);
     mt_objc_release(cpu, static_cast<ImageState *>(state)->display);
 }
-const mt_objc_state_type k_image_state = {"UIImage", sizeof(ImageState), image_destroy};
+const mt_objc_state_type k_image_state = {"UIImage", sizeof(ImageState), image_destroy, nullptr};
 
 ImageState *image_state(mt_cpu *cpu, u32 uiimage) {
     mt_objc *rt = runtime(cpu);
@@ -442,7 +442,7 @@ struct ColorState {
 void color_destroy(mt_cpu *cpu, u32, void *state) {
     mt_objc_release(cpu, static_cast<ColorState *>(state)->cgcolor);
 }
-const mt_objc_state_type k_color_state = {"UIColor", sizeof(ColorState), color_destroy};
+const mt_objc_state_type k_color_state = {"UIColor", sizeof(ColorState), color_destroy, nullptr};
 
 float clamp01(float v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
 
@@ -574,7 +574,12 @@ void bezier_destroy(mt_cpu *cpu, u32, void *state) {
         delete p;
     }
 }
-const mt_objc_state_type k_bezier_state = {"UIBezierPath", sizeof(void *), bezier_destroy};
+void drop_bezier(void *state) {
+    delete *static_cast<BezierPath **>(state);
+    *static_cast<BezierPath **>(state) = nullptr;
+}
+const mt_objc_state_type k_bezier_state = {"UIBezierPath", sizeof(void *), bezier_destroy,
+                                           drop_bezier};
 
 // The path of a UIBezierPath, created on first use; nullptr if out of memory.
 BezierPath *bezier(mt_cpu *cpu, u32 obj) {
@@ -865,10 +870,6 @@ bool load_bezier(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
     }
     return true;
 }
-void drop_bezier(void *state) {
-    delete *static_cast<BezierPath **>(state);
-    *static_cast<BezierPath **>(state) = nullptr;
-}
 
 // The module: +imageNamed:'s cache and the image hook's replacements (guest objects, by bundle
 // file). UIGraphics' context stack is only in use inside a drawing: never at a safe point.
@@ -931,12 +932,12 @@ bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *ap
 
 extern const mt_snap::StateOps k_snap_uiimage, k_snap_uicolor, k_snap_bezier;
 extern const mt_snap::Module k_snap_cg_uikit;
-const mt_snap::StateOps k_snap_uiimage = {&k_image_state, "UIImage", save_uiimage,
-                                          load_uiimage,   nullptr,   nullptr};
-const mt_snap::StateOps k_snap_uicolor = {&k_color_state, "UIColor", save_uicolor,
-                                          load_uicolor,   nullptr,   nullptr};
-const mt_snap::StateOps k_snap_bezier = {&k_bezier_state, "UIBezierPath", save_bezier,
-                                         load_bezier,     drop_bezier,    nullptr};
+const mt_snap::StateOps k_snap_uiimage = {&k_image_state, "UIImage", save_uiimage, load_uiimage,
+                                          nullptr};
+const mt_snap::StateOps k_snap_uicolor = {&k_color_state, "UIColor", save_uicolor, load_uicolor,
+                                          nullptr};
+const mt_snap::StateOps k_snap_bezier = {&k_bezier_state, "UIBezierPath", save_bezier, load_bezier,
+                                         nullptr};
 const mt_snap::Module k_snap_cg_uikit = {"cg.uikit", save_module, load_module};
 
 } // namespace mt_cg

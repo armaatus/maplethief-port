@@ -30,7 +30,7 @@ constexpr u32 k_api_gles1 = 1; // kEAGLRenderingAPIOpenGLES1
 struct ContextState {
     u32 api;
 };
-const mt_objc_state_type k_context_state = {"EAGLContext", sizeof(ContextState), nullptr};
+const mt_objc_state_type k_context_state = {"EAGLContext", sizeof(ContextState), nullptr, nullptr};
 
 // The current context (retained, as EAGL does), per runtime.
 struct Current {
@@ -195,7 +195,7 @@ u32 eagl_current() { return current(); }
 void eagl_restore_current(u32 context) { current() = context; }
 
 extern const mt_snap::StateOps k_snap_eagl;
-const mt_snap::StateOps k_snap_eagl = {&k_context_state, "EAGLContext", save_context,
-                                       load_context,     nullptr,       nullptr};
+const mt_snap::StateOps k_snap_eagl = {&k_context_state, "EAGLContext", save_context, load_context,
+                                       nullptr};
 
 } // namespace mt_gles

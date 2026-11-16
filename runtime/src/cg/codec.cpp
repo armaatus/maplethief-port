@@ -7,8 +7,10 @@
 // helper (tests/golden/) can be linked into one program. Inputs are the files of a hash-checked
 // IPA and images the game makes itself; they are parsed, never executed.
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -19,12 +21,21 @@
 #define STBI_ONLY_PNG
 #define STBI_NO_STDIO
 #define STB_IMAGE_STATIC
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
 #define STBI_WRITE_NO_STDIO
 #define STB_IMAGE_WRITE_STATIC
+// clang-tidy sees the declarations only: the third-party bodies are not ours to check.
+#if !defined(__clang_analyzer__)
+#define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#endif
+#include <stb_image.h>
 #include <stb_image_write.h>
+#if defined(__clang_analyzer__)
+// The writer's compressor, which the save states use (zlib_deflate), as the implementation has it.
+STBIWDEF unsigned char *stbi_zlib_compress(unsigned char *data, int data_len, int *out_len,
+                                           int quality);
+#define STBIW_FREE(p) std::free(p)
+#endif
 
 namespace mt_cg {
 
@@ -171,10 +182,19 @@ bool zlib_deflate(const u8 *data, std::size_t size, std::vector<u8> &out) {
     return true;
 }
 
+namespace {
+bool g_inflate_fail_alloc = false; // zlib_inflate_fail_alloc_for_test
+} // namespace
+
+void zlib_inflate_fail_alloc_for_test(bool on) { g_inflate_fail_alloc = on; }
+
 bool zlib_inflate(const u8 *data, std::size_t size, std::size_t expected, std::vector<u8> &out) {
     out.clear();
     if (size > 0x7FFFFFFFu || expected > 0x7FFFFFFFu) {
         return false;
+    }
+    if (g_inflate_fail_alloc) {
+        throw std::bad_alloc();
     }
     out.resize(expected != 0 ? expected : 1u);
     const int got =

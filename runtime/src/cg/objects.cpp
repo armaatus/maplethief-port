@@ -128,15 +128,24 @@ struct ContextObj {
     void release(mt_cpu *) {}
 };
 
-const mt_objc_state_type k_space_state = {"CGColorSpace", sizeof(void *), destroy_box<ColorSpace>};
-const mt_objc_state_type k_color_state = {"CGColor", sizeof(void *), destroy_box<ColorObj>};
+template <typename T> void drop_box(void *state) {
+    delete *static_cast<T **>(state);
+    *static_cast<T **>(state) = nullptr;
+}
+const mt_objc_state_type k_space_state = {"CGColorSpace", sizeof(void *), destroy_box<ColorSpace>,
+                                          drop_box<ColorSpace>};
+const mt_objc_state_type k_color_state = {"CGColor", sizeof(void *), destroy_box<ColorObj>,
+                                          drop_box<ColorObj>};
 const mt_objc_state_type k_provider_state = {"CGDataProvider", sizeof(void *),
-                                             destroy_box<Provider>};
-const mt_objc_state_type k_image_state = {"CGImage", sizeof(void *), destroy_box<ImageObj>};
-const mt_objc_state_type k_gradient_state = {"CGGradient", sizeof(void *),
-                                             destroy_box<GradientObj>};
-const mt_objc_state_type k_path_state = {"CGPath", sizeof(void *), destroy_box<PathObj>};
-const mt_objc_state_type k_context_state = {"CGContext", sizeof(void *), destroy_box<ContextObj>};
+                                             destroy_box<Provider>, drop_box<Provider>};
+const mt_objc_state_type k_image_state = {"CGImage", sizeof(void *), destroy_box<ImageObj>,
+                                          drop_box<ImageObj>};
+const mt_objc_state_type k_gradient_state = {"CGGradient", sizeof(void *), destroy_box<GradientObj>,
+                                             drop_box<GradientObj>};
+const mt_objc_state_type k_path_state = {"CGPath", sizeof(void *), destroy_box<PathObj>,
+                                         drop_box<PathObj>};
+const mt_objc_state_type k_context_state = {"CGContext", sizeof(void *), destroy_box<ContextObj>,
+                                            drop_box<ContextObj>};
 
 float f32(u32 bits) { return mt_f32(bits); }
 
@@ -308,6 +317,17 @@ bool provider_bytes(mt_cpu *cpu, u32 provider, const u8 **bytes, std::size_t *si
     return true;
 }
 
+namespace {
+
+// The bytes an image of `info` reads: every row but the last in full, then the last row's pixels.
+std::uint64_t bytes_needed(const ImageInfo &info, const Format &f) {
+    return info.height == 0 ? 0
+                            : static_cast<std::uint64_t>(info.bytes_per_row) * (info.height - 1) +
+                                  static_cast<std::uint64_t>(info.width) * f.bytes_per_pixel;
+}
+
+} // namespace
+
 u32 image_create(mt_cpu *cpu, const ImageInfo &info) {
     Format f;
     if (!format_of(info.bitmap_info, info.bpc, info.bpp, &f)) {
@@ -320,13 +340,9 @@ u32 image_create(mt_cpu *cpu, const ImageInfo &info) {
     }
     const u8 *bytes = nullptr;
     std::size_t size = 0;
-    const std::uint64_t need =
-        info.height == 0 ? 0
-                         : static_cast<std::uint64_t>(info.bytes_per_row) * (info.height - 1) +
-                               static_cast<std::uint64_t>(info.width) * f.bytes_per_pixel;
     if (info.width == 0 || info.height == 0 ||
         info.bytes_per_row < info.width * f.bytes_per_pixel ||
-        !provider_bytes(cpu, info.provider, &bytes, &size) || size < need) {
+        !provider_bytes(cpu, info.provider, &bytes, &size) || size < bytes_needed(info, f)) {
         log(cpu, "CGImageCreate: %ux%u image, %u bytes per row: no provider or too few bytes",
             static_cast<unsigned>(info.width), static_cast<unsigned>(info.height),
             static_cast<unsigned>(info.bytes_per_row));
@@ -366,8 +382,9 @@ bool image_surface(mt_cpu *cpu, u32 image, ConstSurface *out) {
     const ImageObj *i = image_arg(cpu, image);
     std::size_t size = 0;
     if (i == nullptr || !format_of(i->info.bitmap_info, i->info.bpc, i->info.bpp, &out->format) ||
-        !provider_bytes(cpu, i->info.provider, &out->pixels, &size)) {
-        return false;
+        !provider_bytes(cpu, i->info.provider, &out->pixels, &size) ||
+        size < bytes_needed(i->info, out->format) || out->pixels == nullptr) {
+        return false; // the provider's data shrank after CGImageCreate checked it
     }
     out->width = i->info.width;
     out->height = i->info.height;
@@ -873,10 +890,6 @@ namespace {
 template <typename T> const T *box_of(const void *state) {
     return *static_cast<const T *const *>(state);
 }
-template <typename T> void drop_box(void *state) {
-    delete *static_cast<T **>(state);
-    *static_cast<T **>(state) = nullptr;
-}
 // A box saved as a presence flag, then its values.
 template <typename T, typename F> bool save_box(const void *state, mt_snap::Writer &w, F values) {
     const T *p = box_of<T>(state);
@@ -1008,17 +1021,14 @@ bool load_path(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
 
 extern const mt_snap::StateOps k_snap_space, k_snap_color, k_snap_provider, k_snap_image,
     k_snap_gradient, k_snap_path;
-const mt_snap::StateOps k_snap_space = {&k_space_state, "CGColorSpace",       save_space,
-                                        load_space,     drop_box<ColorSpace>, nullptr};
-const mt_snap::StateOps k_snap_color = {&k_color_state, "CGColor",          save_color,
-                                        load_color,     drop_box<ColorObj>, nullptr};
-const mt_snap::StateOps k_snap_provider = {&k_provider_state, "CGDataProvider",   save_provider,
-                                           load_provider,     drop_box<Provider>, nullptr};
-const mt_snap::StateOps k_snap_image = {&k_image_state, "CGImage",          save_image,
-                                        load_image,     drop_box<ImageObj>, nullptr};
-const mt_snap::StateOps k_snap_gradient = {&k_gradient_state, "CGGradient",          save_gradient,
-                                           load_gradient,     drop_box<GradientObj>, nullptr};
-const mt_snap::StateOps k_snap_path = {&k_path_state, "CGPath",          save_path,
-                                       load_path,     drop_box<PathObj>, nullptr};
+const mt_snap::StateOps k_snap_space = {&k_space_state, "CGColorSpace", save_space, load_space,
+                                        nullptr};
+const mt_snap::StateOps k_snap_color = {&k_color_state, "CGColor", save_color, load_color, nullptr};
+const mt_snap::StateOps k_snap_provider = {&k_provider_state, "CGDataProvider", save_provider,
+                                           load_provider, nullptr};
+const mt_snap::StateOps k_snap_image = {&k_image_state, "CGImage", save_image, load_image, nullptr};
+const mt_snap::StateOps k_snap_gradient = {&k_gradient_state, "CGGradient", save_gradient,
+                                           load_gradient, nullptr};
+const mt_snap::StateOps k_snap_path = {&k_path_state, "CGPath", save_path, load_path, nullptr};
 
 } // namespace mt_cg

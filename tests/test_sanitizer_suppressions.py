@@ -52,8 +52,9 @@ def test_the_presets_sanitize_with_the_checked_memory_model() -> None:
     tests = {p["name"]: p for p in presets["testPresets"]}
     env = tests["asan-base"]["environment"]
     assert "halt_on_error=1" in env["ASAN_OPTIONS"]
-    # LeakSanitizer stays off until #414 frees host object state at runtime teardown.
-    assert "detect_leaks=0" in env["ASAN_OPTIONS"]
+    # LeakSanitizer is on (#414): Linux's default, never turned off.
+    assert "detect_leaks=0" not in env["ASAN_OPTIONS"]
+    assert "detect_leaks=0" not in env.get("LSAN_OPTIONS", "")
     assert "halt_on_error=1" in env["UBSAN_OPTIONS"]
     for name in ("linux-asan", "mac-asan"):
         assert tests[name]["inherits"] == "asan-base"

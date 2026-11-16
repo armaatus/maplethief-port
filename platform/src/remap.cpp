@@ -388,9 +388,9 @@ bool Remap::handle(const SDL_Event &e, double now) {
             move(static_cast<int>(kVisibleRows));
         } else if (e.key.repeat) {
             // Only the cursor repeats.
-        } else if (k == SDLK_RETURN || k == SDLK_KP_ENTER || k == SDLK_SPACE) {
-            choose(now);
-        } else if ((k == SDLK_LEFT || k == SDLK_RIGHT) && rows_[selected_].kind == RowKind::kFace) {
+        } else if (k == SDLK_RETURN || k == SDLK_KP_ENTER || k == SDLK_SPACE ||
+                   ((k == SDLK_LEFT || k == SDLK_RIGHT) &&
+                    rows_[selected_].kind == RowKind::kFace)) {
             choose(now);
         } else if (k == SDLK_ESCAPE || k == SDLK_F1) {
             back();
@@ -420,10 +420,9 @@ bool Remap::handle(const SDL_Event &e, double now) {
             move(-1);
         } else if (b == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
             move(+1);
-        } else if ((b == SDL_GAMEPAD_BUTTON_DPAD_LEFT || b == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) &&
-                   rows_[selected_].kind == RowKind::kFace) {
-            choose(now);
-        } else if (c.code == SDL_GAMEPAD_BUTTON_SOUTH) {
+        } else if (((b == SDL_GAMEPAD_BUTTON_DPAD_LEFT || b == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) &&
+                    rows_[selected_].kind == RowKind::kFace) ||
+                   c.code == SDL_GAMEPAD_BUTTON_SOUTH) {
             choose(now);
         } else if (c.code == SDL_GAMEPAD_BUTTON_EAST || settings_button(b)) {
             back();

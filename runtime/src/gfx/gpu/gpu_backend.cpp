@@ -142,6 +142,12 @@ struct GpuTexture {
     u64 generation = ~0ull; // of the texels uploaded
 };
 
+// Field by field: floats have no unique object representation for memcmp.
+bool same_viewport(const SDL_GPUViewport &a, const SDL_GPUViewport &b) {
+    return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h && a.min_depth == b.min_depth &&
+           a.max_depth == b.max_depth;
+}
+
 bool env_on(const char *name) {
     const char *v = SDL_getenv(name);
     return v != nullptr && v[0] != '\0' && std::strcmp(v, "0") != 0;
@@ -589,8 +595,7 @@ void GpuBackend::submit(mt_gfx_target &target, const Draw &d, mt_gfx_counters &c
     if (!batches_.empty()) {
         Batch &last = batches_.back();
         if (last.target == b.target && last.pipeline == b.pipeline && last.texture == b.texture &&
-            last.sampler == b.sampler &&
-            std::memcmp(&last.viewport, &b.viewport, sizeof b.viewport) == 0 &&
+            last.sampler == b.sampler && same_viewport(last.viewport, b.viewport) &&
             std::memcmp(&last.scissor, &b.scissor, sizeof b.scissor) == 0 &&
             last.first + last.count == b.first) {
             last.count += b.count;

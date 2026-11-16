@@ -11,11 +11,13 @@ namespace mt_stubs_impl {
 namespace {
 
 constexpr int k_max_depth = 64;
+static_assert(k_json_max_elements == 4096, "the error message names the limit");
 
 struct Parser {
     const char *p;
     const char *end;
     const char *error;
+    std::uint32_t elements; // array items and object members so far (k_json_max_elements)
 };
 
 void skip_space(Parser &ps) {
@@ -162,6 +164,11 @@ bool parse_string(Parser &ps, char **out) {
                         ps.error = nullptr;
                     }
                 }
+                if (cp == 0) {
+                    // It would cut the C string every reader of the value sees (#413).
+                    std::free(b.data);
+                    return fail(ps, "\\u0000 in string");
+                }
                 ok = put_utf8(b, cp);
                 break;
             }
@@ -277,6 +284,10 @@ bool parse_container(Parser &ps, JsonValue *v, int depth, bool object) {
             }
             ps.p++;
         }
+        if (++ps.elements > k_json_max_elements) {
+            std::free(key);
+            return fail(ps, "more than 4096 elements");
+        }
         JsonValue *item = add_item(v, key);
         if (item == nullptr) {
             std::free(key);
@@ -359,7 +370,7 @@ void append(JsonOut *o, const char *text, std::size_t n) {
 
 bool json_parse(const char *text, std::size_t size, JsonValue *out, const char **error) {
     std::memset(out, 0, sizeof *out);
-    Parser ps{text, text + size, nullptr};
+    Parser ps{text, text + size, nullptr, 0};
     bool ok = parse_value(ps, out, 0);
     if (ok) {
         skip_space(ps);

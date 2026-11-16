@@ -186,6 +186,8 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     const bool updates = now == Step::kUpdates;
     if (step2) {
         c.text(kListX, 16, tr(Txt::picker_ready), kText, 2);
+        // step() is past kPreset, so chosen_ is set.
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         c.text(kListX, 40, tr(Txt::picker_is_set, {line_title(*chosen_)}), kDim);
     } else if (updates) {
         c.text(kListX, 16, tr(Txt::picker_updates_title), kText, 2);

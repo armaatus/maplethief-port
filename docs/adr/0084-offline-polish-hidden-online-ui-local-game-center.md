@@ -100,3 +100,7 @@ Each unlocks once. A new unlock queues a notice (`mt_achievement_next_notice`, a
 - The achievements are the port's, not Nexon's. Their identifiers carry the `maplethief.local.` prefix so they never pose as the game's.
 - The overrides key on the touch-up selectors and two ivar offsets of this one binary (v1.5). The image has one `MainMenuView`, and `offline UI` logs when it is missing.
 - #89's settings menu can show the achievements (`achievement_rows`) and toggle both keys like any registry row. Both are `game_only`, read at the boot.
+
+## Addendum: limits on reading `gamecenter.json` (#413, 2026-11-13)
+
+ADR 0154 calls `gamecenter.json` untrusted: a shared data folder carries it. The reader (`runtime/src/stubs/json.cpp`, `store_load` in `gamekit.cpp`) now refuses a file over 1 MiB before reading it, a document of more than 4,096 elements (array items and object members, all containers together; each lookup is a linear scan, so more would cost quadratic time), and a `\u0000` escape, which would cut the C strings the stubs keep. A refused file is handled like any unreadable one: logged, read as empty, and kept aside as `gamecenter.json.bad` at the next save. Nothing else in the data folder changes. The port's own file is a few kilobytes and a few dozen elements. Tests (`stubs_test.cpp`): `gamecenter.json's JSON: at most 4,096 elements, no \u0000, numbers of at most 63 characters (#413)` and `GameKit: a gamecenter.json over 1 MiB, 4,096 elements or with \u0000 is kept aside (#413)`.

@@ -7,6 +7,7 @@
 // stubs and the game use (NSString, NSArray, NSMutableArray, NSSet) are the runtime's own (#49).
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -352,6 +353,73 @@ TEST_CASE("GameKit: an unreadable gamecenter.json is kept aside, not overwritten
     CHECK(logged);
 }
 
+TEST_CASE("GameKit: a gamecenter.json over 1 MiB, 4,096 elements or with \\u0000 is kept aside "
+          "(#413)") {
+    // Each file would read as a good store but for its limit. Refused, it is read as empty and
+    // kept aside as .bad at the next save; nothing else in the data folder changes.
+    const std::string head = R"({"format": "maplethief-gamecenter", "version": 1, )";
+    std::string many = head + R"("achievements": [)";
+    for (int i = 0; i < 4093; i++) { // 4,093 + the root's 5 members = 4,098 elements
+        many += i == 0 ? "null" : ",null";
+    }
+    many += R"(], "scores": [], "entries": []})";
+    std::string big = head + R"("achievements": [], "scores": [], "entries": []})";
+    big.insert(big.size() - 1, std::string((1u << 20) + 1 - big.size(), ' '));
+    REQUIRE(big.size() == (1u << 20) + 1);
+    const struct {
+        const char *name;
+        std::string text;
+        const char *log;
+    } cases[] = {
+        {"over 1 MiB", big, "larger than 1048576 bytes"},
+        {"4,098 elements", many, "more than 4096 elements"},
+        {"\\u0000",
+         head + R"("achievements": [{"identifier": "a\u0000b", "percentComplete": 100}], )" +
+             R"("scores": [], "entries": []})",
+         "\\u0000 in string"},
+    };
+    for (const auto &c : cases) {
+        CAPTURE(c.name);
+        Env e;
+        fs::create_directories(test_dir() / "saves");
+        {
+            std::ofstream(test_dir() / "saves" / "theif0", std::ios::binary) << "keep";
+        }
+        {
+            std::ofstream out(gamecenter_file(), std::ios::binary);
+            out << c.text;
+        }
+        const auto listing = [] {
+            std::vector<std::string> names;
+            for (const auto &entry : fs::recursive_directory_iterator(test_dir())) {
+                names.push_back(entry.path().lexically_relative(test_dir()).generic_string());
+            }
+            std::sort(names.begin(), names.end());
+            return names;
+        };
+        std::vector<std::string> expected = listing();
+        expected.push_back(gamecenter_file().lexically_relative(test_dir()).generic_string() +
+                           ".bad");
+        std::sort(expected.begin(), expected.end());
+        u32 score =
+            e.send(e.send(e.cls("GKScore"), "alloc"), "initWithCategory:", {e.string(k_ranking)});
+        e.send(score, "setValue:", {5u, 0u});
+        e.send(score, "reportScoreWithCompletionHandler:", {0u});
+        e.send(score, "release");
+        CHECK(slurp(fs::path(gamecenter_file().string() + ".bad")) == c.text);
+        const std::string now = slurp(gamecenter_file());
+        CHECK(now.find("\"best\": 5") != std::string::npos);
+        CHECK(now.find("identifier") == std::string::npos); // the refused file's are gone
+        CHECK(listing() == expected);
+        CHECK(slurp(test_dir() / "saves" / "theif0") == "keep");
+        bool logged = false;
+        for (const auto &line : g_log) {
+            logged |= line.find(c.log) != std::string::npos;
+        }
+        CHECK(logged);
+    }
+}
+
 TEST_CASE(
     "GameKit: leaderboards have no online scores and the leaderboard screen finishes at once") {
     Env e;
@@ -617,6 +685,53 @@ TEST_CASE("gamecenter.json's JSON: parsing, escapes, errors, number forms") {
     json_int(&o, -9007199254740993LL);
     CHECK(std::string(o.data) == "\"a\\\"b\\\\c\\n\\u0001\" 0.1 100 -9007199254740993");
     json_out_free(&o);
+}
+
+TEST_CASE("gamecenter.json's JSON: at most 4,096 elements, no \\u0000, numbers of at most 63 "
+          "characters (#413)") {
+    using namespace mt_stubs_impl;
+    JsonValue v{};
+    const char *error = nullptr;
+    const auto array_of = [](std::uint32_t n) {
+        std::string t = "[";
+        for (std::uint32_t i = 0; i < n; i++) {
+            t += i == 0 ? "0" : ",0";
+        }
+        return t + "]";
+    };
+    // The elements of every array and object count together.
+    std::string t = array_of(k_json_max_elements);
+    REQUIRE(json_parse(t.c_str(), t.size(), &v, &error));
+    CHECK(v.count == 4096u);
+    json_free(&v);
+    t = array_of(k_json_max_elements + 1);
+    CHECK_FALSE(json_parse(t.c_str(), t.size(), &v, &error));
+    CHECK(std::string(error) == "more than 4096 elements");
+    t = "{\"a\": " + array_of(2047) + ", \"b\": " + array_of(2047) + "}"; // 2 + 4,094
+    REQUIRE(json_parse(t.c_str(), t.size(), &v, &error));
+    json_free(&v);
+    t = "{\"a\": " + array_of(2047) + ", \"b\": " + array_of(2048) + "}"; // 2 + 4,095
+    CHECK_FALSE(json_parse(t.c_str(), t.size(), &v, &error));
+    CHECK(std::string(error) == "more than 4096 elements");
+    CHECK(v.type == JsonType::null); // freed
+    // \u0000 would cut the C string the stubs use: refused, in a value and in a key.
+    for (const char *bad : {R"("a\u0000b")", R"({"a\u0000": 1})", R"(["\u0000"])"}) {
+        CAPTURE(bad);
+        CHECK_FALSE(json_parse(bad, std::strlen(bad), &v, &error));
+        CHECK(std::string(error) == "\\u0000 in string");
+    }
+    const char *one = R"("a\u0001b")";
+    REQUIRE(json_parse(one, std::strlen(one), &v, &error));
+    CHECK(std::string(v.string) == std::string{'a', '\x01', 'b'});
+    json_free(&v);
+    // A number of 63 characters is read, 64 are too long.
+    const std::string n63 = "1" + std::string(62, '0');
+    REQUIRE(json_parse(n63.c_str(), n63.size(), &v, &error));
+    CHECK(v.number == doctest::Approx(1e62));
+    json_free(&v);
+    const std::string n64 = "1" + std::string(63, '0');
+    CHECK_FALSE(json_parse(n64.c_str(), n64.size(), &v, &error));
+    CHECK(std::string(error) == "number too long");
 }
 
 // --- the offline cash shop's store and receipt server (#156, ADR 0072) -----------------------

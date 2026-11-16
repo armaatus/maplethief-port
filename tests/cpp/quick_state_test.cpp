@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <vector>
@@ -223,6 +224,27 @@ TEST_CASE("save states: a press is one request at the next turn; never the runti
     CHECK(q.take(8, 9, true) == QuickRequest::kNone);
     CHECK(q.take(9, 9, true) == QuickRequest::kSave);
     CHECK(std::string(fe::quick_request_name(QuickRequest::kLoad)) == "quick_load");
+}
+
+TEST_CASE("save states: a state file over kMaxStateBytes is refused before it is read (#413)") {
+    // A sparse file one byte over 1 GiB: refused from its size, so nothing is allocated for it.
+    const fs::path dir = fs::temp_directory_path() / "maplethief_quick_state_cap_test";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir);
+    const fs::path big = dir / "slot0.state";
+    {
+        std::ofstream(big, std::ios::binary).put('\x01');
+    }
+    fs::resize_file(big, fe::kMaxStateBytes + 1, ec);
+    REQUIRE_FALSE(ec);
+    CHECK(fe::kMaxStateBytes == std::uint64_t(1) << 30);
+    CHECK_FALSE(fe::read_quick_state(big.string()).has_value());
+    // A small one reads.
+    fs::resize_file(big, 3, ec);
+    REQUIRE_FALSE(ec);
+    CHECK(fe::read_quick_state(big.string()) == Bytes{1, 0, 0});
+    fs::remove_all(dir, ec);
 }
 
 TEST_CASE("save states: one state per character slot, written atomically") {

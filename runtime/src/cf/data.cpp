@@ -30,7 +30,7 @@ void destroy_data(mt_cpu *cpu, u32, void *p) {
     }
 }
 
-const mt_objc_state_type k_data_state = {"CFData", sizeof(DataState), destroy_data};
+const mt_objc_state_type k_data_state = {"CFData", sizeof(DataState), destroy_data, nullptr};
 
 DataState *state_of(mt_cpu *cpu, u32 obj) {
     mt_objc *rt = runtime(cpu);
@@ -232,7 +232,6 @@ bool load_data(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
 } // namespace
 
 extern const mt_snap::StateOps k_snap_data;
-const mt_snap::StateOps k_snap_data = {&k_data_state, "CFData", save_data,
-                                       load_data,     nullptr,  nullptr};
+const mt_snap::StateOps k_snap_data = {&k_data_state, "CFData", save_data, load_data, nullptr};
 
 } // namespace mt_cf

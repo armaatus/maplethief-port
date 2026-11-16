@@ -482,6 +482,7 @@ void worker_main(Worker *w) {
     if (MT_HOST_SETJMP(jb) == 0) {
         worker_loop(w);
     }
+    w->exit_jmp = nullptr; // jb ends with this frame
     mt_crash_set_cpu(nullptr);
     t_worker = nullptr;
 }

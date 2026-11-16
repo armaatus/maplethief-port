@@ -29,7 +29,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import make_corpus  # noqa: E402
 
-# The asan-base test preset's options (ADR 0157), plus LeakSanitizer: libFuzzer reports a leak
+# The asan-base test preset's options (ADR 0157), LeakSanitizer explicitly on: libFuzzer reports a leak
 # within one input, which the parsers must not have.
 SANITIZER_ENV = {
     "ASAN_OPTIONS": "abort_on_error=1:halt_on_error=1:detect_leaks=1:"

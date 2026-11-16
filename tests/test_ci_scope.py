@@ -50,7 +50,6 @@ def test_compendium_and_docs_only_skip_the_build():
             "tests/fixtures/compendium/kb/monster.json",
             "scripts/compendium",
             "scripts/local-ci",
-            "scripts/lint",
             ".github/workflows/compendium.yml",
         )
         == NONE
@@ -65,6 +64,8 @@ def test_compendium_and_docs_only_skip_the_build():
         "tools/mtport/datatables.py",
         "tests/test_datatables.py",
         "scripts/test",
+        "scripts/lint",
+        ".clang-tidy",
         ".github/workflows/ci.yml",
         "uv.lock",
         "tools/mtport/compendium_extra.py",

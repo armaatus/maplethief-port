@@ -191,20 +191,10 @@ using CurlPerform = int (*)(void *);
 using CurlCleanup = void (*)(void *);
 using CurlStrerror = const char *(*)(int);
 
-struct Sink {
-    std::string body;
-    bool too_long = false;
-};
-
 std::size_t curl_write(const char *data, std::size_t size, std::size_t count, void *user) {
-    auto *sink = static_cast<Sink *>(user);
     const std::size_t bytes = size * count;
-    if (sink->body.size() + bytes > kUpdateMaxResponseBytes) {
-        sink->too_long = true;
-        return 0; // libcurl stops with a write error
-    }
-    sink->body.append(data, bytes);
-    return bytes;
+    // Past the cap libcurl gets 0 and stops with a write error.
+    return static_cast<UpdateBody *>(user)->append(data, bytes) ? bytes : 0;
 }
 
 class CurlFetcher final : public UpdateFetcher {
@@ -238,7 +228,7 @@ class CurlFetcher final : public UpdateFetcher {
             return std::nullopt;
         }
         const std::string agent = update_user_agent();
-        Sink sink;
+        UpdateBody sink;
         setopt_(curl, kCurlOptUrl, url.c_str());
         setopt_(curl, kCurlOptUserAgent, agent.c_str());
         setopt_(curl, kCurlOptWriteFunction, &curl_write);
@@ -250,12 +240,12 @@ class CurlFetcher final : public UpdateFetcher {
         cleanup_(curl);
         if (code != 0) {
             if (why != nullptr) {
-                *why = sink.too_long ? std::string("the response is too long")
-                                     : std::string(strerror_(code));
+                *why = sink.too_long() ? std::string("the response is too long")
+                                       : std::string(strerror_(code));
             }
             return std::nullopt;
         }
-        return std::optional<std::string>(std::move(sink.body));
+        return std::optional<std::string>(sink.take());
     }
 
   private:

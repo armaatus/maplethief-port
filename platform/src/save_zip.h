@@ -85,6 +85,10 @@ bool zip_list(std::span<const std::uint8_t> zip, std::vector<ZipItem> *items, st
 bool zip_extract(std::span<const std::uint8_t> zip, const ZipItem &item,
                  std::size_t max_entry_bytes, std::vector<std::uint8_t> *bytes, std::string *why);
 
+// Test seam (#413): while on, zip_extract's allocation for an entry's bytes throws
+// std::bad_alloc, as one the host cannot satisfy would. Off by default; tests only.
+void zip_fail_alloc_for_test(bool on);
+
 } // namespace maplethief::frontend
 
 #endif // MAPLETHIEF_PLATFORM_SAVE_ZIP_H

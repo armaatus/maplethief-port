@@ -13,6 +13,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <iterator>
+#include <map>
 #include <random>
 #include <string>
 #include <utility>
@@ -979,6 +980,98 @@ TEST_CASE("Foundation: the binary plist reader") {
     CHECK(error == "too many object references");
 }
 
+namespace {
+
+// A binary plist of hand-written objects (1-byte offsets and references), object `top` the root.
+std::string raw_bplist(const std::vector<std::string> &objects, std::uint8_t top = 0) {
+    std::string out = "bplist00";
+    std::vector<std::size_t> offsets;
+    for (const std::string &o : objects) {
+        offsets.push_back(out.size());
+        out += o;
+    }
+    const std::size_t table = out.size();
+    for (const std::size_t o : offsets) {
+        out.push_back(static_cast<char>(o));
+    }
+    std::string trailer(32, '\0');
+    trailer[6] = 1;
+    trailer[7] = 1;
+    trailer[15] = static_cast<char>(objects.size());
+    trailer[23] = static_cast<char>(top);
+    trailer[31] = static_cast<char>(table);
+    return out + trailer;
+}
+
+} // namespace
+
+TEST_CASE("Foundation: the binary plist reader's refusals, each by its message (#413)") {
+    mt_ns::PlistValue v;
+    std::string error;
+    const auto refused = [&v, &error](const std::string &file, const char *message) {
+        error.clear();
+        CHECK_FALSE(parse(file, &v, &error));
+        CHECK(error == message);
+    };
+    // Depth: 64 nested arrays around a number are read; 65 are not.
+    V nested = num(7);
+    for (int i = 0; i < 64; i++) {
+        nested = arr({nested});
+    }
+    REQUIRE(parse(bplist(nested), &v, &error));
+    refused(bplist(arr({nested})), "nested too deeply");
+    // A cycle through two arrays: 0 holds 1, 1 holds 0.
+    refused(raw_bplist({std::string("\xA1\x01", 2), std::string("\xA1\x00", 2)}),
+            "reference cycle");
+    // The shared-reference bound: count x 16 + 4,096 objects parsed. 13 levels of [x, x] parse
+    // 2^14 - 1 = 16,383 objects (over 14 x 16 + 4,096); 11 levels parse 4,095.
+    const auto doubling = [](int levels) {
+        std::vector<std::string> objects;
+        for (int level = 0; level < levels; level++) {
+            objects.push_back(std::string("\xA2", 1) + static_cast<char>(level + 1) +
+                              static_cast<char>(level + 1));
+        }
+        objects.emplace_back("\x08", 1);
+        return raw_bplist(objects);
+    };
+    REQUIRE(parse(doubling(11), &v, &error));
+    refused(doubling(13), "too many object references");
+    // The trailer and the root.
+    refused("bplist00", "not a binary plist");
+    refused("bplist01" + std::string(40, '\0'), "not a binary plist");
+    std::string top = raw_bplist({std::string("\x08", 1)});
+    top[top.size() - 9] = 1; // the root, object 1 of 1
+    refused(top, "bad trailer");
+    std::string cut = raw_bplist({std::string("\x08", 1), std::string("\x09", 1)});
+    cut[cut.size() - 17] = 9; // 9 objects, a table of 2
+    refused(cut, "bad trailer");
+    // Truncated or out-of-range objects, each with its own message.
+    refused(raw_bplist({std::string("\x5F\x10\xF0", 3) + "ab"}), "object runs past the end");
+    refused(raw_bplist({std::string("\x4F\x10\xF0", 3)}), "object runs past the end");
+    refused(raw_bplist({std::string("\x5F\x20\x01", 3)}), "bad length object");
+    refused(raw_bplist({std::string("\x6F\x10\xF0", 3)}), "UTF-16 string out of bounds");
+    refused(raw_bplist({std::string("\xAF\x10\xF0", 3)}), "collection out of bounds");
+    refused(raw_bplist({std::string("\xA1\x05", 2)}), "object reference out of range");
+    std::string offset = raw_bplist({std::string("\x08", 1)});
+    offset[offset.size() - 33] = static_cast<char>(offset.size() - 4); // into the trailer
+    refused(offset, "object offset out of bounds");
+    refused(raw_bplist({std::string("\x15", 1)}), "integer too wide");
+    refused(raw_bplist({std::string("\x24", 1)}), "bad real or date");
+    refused(raw_bplist({std::string("\x07", 1)}), "unknown simple object");
+    refused(raw_bplist({std::string("\xF0", 1)}), "unknown object type");
+    refused(raw_bplist({std::string("\x52\x41\xC3", 3)}), "non-ASCII byte in an ASCII string");
+    refused(raw_bplist({std::string("\xD1\x01\x01", 3), std::string("\x10\x01", 2)}),
+            "dictionary key is not a string");
+    // Every truncation of a good file is refused with one of the messages above, never "".
+    const std::string good = bplist(dict({{"k", arr({str("x"), num(-1), yes(true)})}}));
+    for (std::size_t n = 0; n < good.size(); n++) {
+        CAPTURE(n);
+        error.clear();
+        CHECK_FALSE(parse(good.substr(0, n), &v, &error));
+        CHECK_FALSE(error.empty());
+    }
+}
+
 // --- the save files
 // ----------------------------------------------------------------------------------
 
@@ -992,6 +1085,25 @@ u32 documents_path(Ns &w, const char *name) {
     const u32 home = w.cpu.r[0];
     const u32 docs = w.send(home, "stringByAppendingPathComponent:", {w.nsstr("Documents")});
     return w.send(docs, "stringByAppendingPathComponent:", {w.nsstr(name)});
+}
+
+// A new character (docs/formats/save.md, "A new character"), its EXP and meso from `seed`: a
+// character file that mt_saves_check passes.
+std::string character(char seed) {
+    std::string b(0x464, '\0');
+    b[2] = 1;
+    b[3] = seed, b[0x11] = seed;
+    for (std::size_t i = 0; i < 48; i++) {
+        b[0x015 + 16 * i] = '\xFF';
+        b[0x325 + 3 * i] = '\xFF';
+    }
+    b[0x325] = 3, b[0x326] = 5, b[0x328] = 6, b[0x329] = 5;
+    for (std::size_t i = 0; i < 5; i++) {
+        b[0x3C2 + 16 * i] = '\xFF';
+    }
+    b[0x3C2 + 16] = 0x48;
+    b[0x41C] = 2, b[0x41D] = 8;
+    return b;
 }
 
 // The game's write (0xB729 after opening in mode 8): create the file if missing, then
@@ -1036,18 +1148,19 @@ std::string game_read(Ns &w, const char *name) {
 
 TEST_CASE("Foundation: save files written through NSFileHandle persist across process restarts") {
     const fs::path dir = unique_dir("saves");
-    std::string theif(1124, '\0'), quest(4781, '\0');
-    for (std::size_t i = 0; i < theif.size(); i++) {
-        theif[i] = static_cast<char>(i * 7 + 1);
-    }
-    for (std::size_t i = 0; i < quest.size(); i++) {
-        quest[i] = static_cast<char>(i * 13 + 5);
+    // Files the checks pass (#413): a new character and a quest file with nothing started. The
+    // file layer's own behaviour (offsets, truncation) is shown on cupon, which is not checked.
+    const std::string theif = character(42), quest(4781, '\0');
+    std::string cupon(5962, '\0');
+    for (std::size_t i = 0; i < cupon.size(); i++) {
+        cupon[i] = static_cast<char>(i * 7 + 1);
     }
     {
         Ns w(dir);
         CHECK(game_read(w, "theif0") == "<missing>");
         game_write(w, "theif0", theif);
         game_write(w, "quest0", quest);
+        game_write(w, "cupon", cupon);
         CHECK(game_read(w, "theif0") == theif); // and within the process
     } // the process ends: runtime, guest memory and every object are gone
     {
@@ -1057,16 +1170,16 @@ TEST_CASE("Foundation: save files written through NSFileHandle persist across pr
         // On the host: <data dir>/Documents/<name>, the bytes as the game wrote them.
         CHECK(read_host(dir / "Documents" / "theif0") == theif);
         // The game writes at offset 0 and never truncates: a shorter write keeps the tail.
-        game_write(w, "theif0", "AB");
-        CHECK(game_read(w, "theif0") == "AB" + theif.substr(2));
+        game_write(w, "cupon", "AB");
+        CHECK(game_read(w, "cupon") == "AB" + cupon.substr(2));
         // Mode 4: fileHandleForWritingAtPath: + truncateFileAtOffset:0, then writeData:.
-        const u32 path = documents_path(w, "theif0");
+        const u32 path = documents_path(w, "cupon");
         const u32 h = w.send(w.cls("NSFileHandle"), "fileHandleForWritingAtPath:", {path});
         REQUIRE(h != 0u);
         w.send(h, "truncateFileAtOffset:", {0, 0});
         w.send(h, "writeData:", {w.data("xyz")});
         w.send(h, "closeFile");
-        CHECK(game_read(w, "theif0") == "xyz");
+        CHECK(game_read(w, "cupon") == "xyz");
         // A handle for writing does not read; a closed one does nothing more.
         CHECK(raises(w, [](Ns &x) {
             const u32 p = documents_path(x, "theif0");
@@ -1081,9 +1194,9 @@ TEST_CASE("Foundation: save files written through NSFileHandle persist across pr
         }));
         // Missing files: no handle (the game checks fileExistsAtPath: first anyway).
         CHECK(w.send(w.cls("NSFileHandle"),
-                     "fileHandleForReadingAtPath:", {documents_path(w, "cupon")}) == 0u);
+                     "fileHandleForReadingAtPath:", {documents_path(w, "CTerms")}) == 0u);
         CHECK(w.send(w.cls("NSFileHandle"),
-                     "fileHandleForUpdatingAtPath:", {documents_path(w, "cupon")}) == 0u);
+                     "fileHandleForUpdatingAtPath:", {documents_path(w, "CTerms")}) == 0u);
 
         // Deleting a slot (0x9462D): NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
         // NSUserDomainMask, YES)[0], "%@/%@", removeItemAtPath:error:.
@@ -1118,13 +1231,7 @@ TEST_CASE("Foundation: save files written through NSFileHandle persist across pr
 namespace {
 
 // Two versions of a character file: what the slot held, what the game saves over it.
-std::string version(char seed) {
-    std::string s(1124, '\0');
-    for (std::size_t i = 0; i < s.size(); i++) {
-        s[i] = static_cast<char>(seed + static_cast<char>(i * 11));
-    }
-    return s;
-}
+std::string version(char seed) { return character(seed); }
 
 const char *fault_name(mt_saves_fault f) {
     switch (f) {
@@ -1259,11 +1366,101 @@ TEST_CASE("Foundation: a config with speed byte 3 loads as a valid speed") {
     game_write(w, "config", game_read(w, "config"));
     CHECK(read_host(file) == std::string{3, 2, 7, 9, 9, 2});
     // Other files with the same bytes are not touched; a short config neither crashes nor grows.
-    const std::string quest{3, 3, 3, 3, 3, 3};
-    game_write(w, "quest0", quest);
-    CHECK(game_read(w, "quest0") == quest);
+    const std::string cupon{3, 3, 3, 3, 3, 3};
+    game_write(w, "cupon", cupon);
+    CHECK(game_read(w, "cupon") == cupon);
     put(std::string{1, 9});
     CHECK(game_read(w, "config") == std::string{1, 2});
+    std::error_code ec;
+    fs::remove_all(w.data_dir, ec);
+}
+
+namespace {
+
+// Every file under `dir` with its bytes (relative path -> bytes).
+std::map<std::string, std::string> tree(const fs::path &dir) {
+    std::map<std::string, std::string> files;
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        if (it->is_regular_file()) {
+            files[fs::relative(it->path(), dir).generic_string()] = read_host(it->path());
+        }
+    }
+    return files;
+}
+
+struct Refusal {
+    std::string name, why, moved_to;
+};
+
+void on_refused(const char *name, const char *why, const char *moved_to, void *user) {
+    static_cast<std::vector<Refusal> *>(user)->push_back({name, why, moved_to});
+}
+
+} // namespace
+
+TEST_CASE("Foundation: a theif or quest copied in that fails the checks is moved aside, and the "
+          "game sees no file (#413)") {
+    Ns w;
+    std::vector<Refusal> heard;
+    mt_saves_set_refused_hook(on_refused, &heard);
+    const fs::path docs = w.data_dir / "Documents";
+    fs::create_directories(docs);
+    const auto put = [&docs](const char *name, const std::string &bytes) {
+        std::ofstream(docs / name, std::ios::binary | std::ios::trunc) << bytes;
+    };
+    const u32 fm = w.send(w.cls("NSFileManager"), "defaultManager");
+    // A valid character copied in comes through as it is; so does the game's own save.
+    put("theif0", character(5));
+    CHECK(game_read(w, "theif0") == character(5));
+    game_write(w, "theif0", character(9));
+    CHECK(game_read(w, "theif0") == character(9));
+    CHECK(heard.empty());
+    CHECK_FALSE(fs::exists(w.data_dir / MT_SAVES_REFUSED_DIR));
+    // Level 0 (hero.dat has levels 1-100): fileExistsAtPath: says NO, and the file is moved.
+    std::string bad = character(5);
+    bad[2] = 0;
+    put("theif1", bad);
+    put("config", std::string{3, 9, 0, 1, 1, 9}); // only sanitised, never moved
+    const std::map<std::string, std::string> before = tree(w.data_dir);
+    CHECK(w.send(fm, "fileExistsAtPath:", {documents_path(w, "theif1")}) == 0u);
+    REQUIRE(heard.size() == 1u);
+    CHECK(heard[0].name == "theif1");
+    CHECK(heard[0].why.find("level") != std::string::npos);
+    CHECK(logged("theif1 refused"));
+    const fs::path aside = fs::path(heard[0].moved_to);
+    CHECK(aside.parent_path() == w.data_dir / MT_SAVES_REFUSED_DIR);
+    CHECK(read_host(aside / "theif1") == bad);
+    CHECK(read_host(aside / MT_SAVES_REFUSED_REASON).rfind("theif1: bad_level: ", 0) == 0u);
+    // The data folder is as it was, apart from the moved file.
+    std::map<std::string, std::string> after = tree(w.data_dir);
+    const std::string rel = fs::relative(aside, w.data_dir).generic_string();
+    CHECK(after.erase(rel + "/theif1") == 1u);
+    CHECK(after.erase(rel + "/" MT_SAVES_REFUSED_REASON) == 1u);
+    std::map<std::string, std::string> expected = before;
+    CHECK(expected.erase("Documents/theif1") == 1u);
+    CHECK(after == expected);
+    CHECK(game_read(w, "theif1") == "<missing>"); // asked again: still no file, nothing heard
+    CHECK(heard.size() == 1u);
+    // A handle opened straight on a broken quest file is nil; one far too large is not read.
+    put("quest2", "not a quest");
+    CHECK(w.send(w.cls("NSFileHandle"),
+                 "fileHandleForReadingAtPath:", {documents_path(w, "quest2")}) == 0u);
+    put("theif2", std::string(1024 * 1024, '\x01'));
+    CHECK(w.send(w.cls("NSFileHandle"),
+                 "fileHandleForUpdatingAtPath:", {documents_path(w, "theif2")}) == 0u);
+    REQUIRE(heard.size() == 3u);
+    CHECK(heard[1].name == "quest2");
+    CHECK(heard[2].name == "theif2");
+    CHECK(heard[2].why.find("1048576 bytes") != std::string::npos);
+    CHECK_FALSE(fs::exists(docs / "quest2"));
+    CHECK_FALSE(fs::exists(docs / "theif2"));
+    CHECK(fs::exists(fs::path(heard[2].moved_to) / "theif2"));
+    // The game writes a new character over the empty slot.
+    game_write(w, "theif1", character(7));
+    CHECK(game_read(w, "theif1") == character(7));
+    CHECK(read_host(docs / "config") == std::string{3, 9, 0, 1, 1, 9});
+    mt_saves_set_refused_hook(nullptr, nullptr);
     std::error_code ec;
     fs::remove_all(w.data_dir, ec);
 }

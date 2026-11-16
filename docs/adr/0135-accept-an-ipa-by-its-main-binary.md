@@ -51,3 +51,7 @@ Issue #85 asks for one command from a fresh clone and a copy of the game anywher
 - `just` splits arguments on spaces (ADR 0133): a path with a space needs quotes inside the quotes through `just`, or the scripts directly.
 - The Windows half of the issue's acceptance criterion is a `needs-human` check on #85.
 - **How we'd know this was wrong:** a copy the game can't run passing the check, a real IPA refused for a reason it doesn't have, or a message that leads someone to ask how to obtain a file.
+
+## Addendum (#413): extraction is capped like the player import
+
+ADR 0154 (g) found that `extract_ipa` wrote whatever a repacked IPA held, with no bound. It now has the player import's caps, as module constants of `tools/mtport/bootstrap.py`: at most 4,096 entries (`MAX_ENTRIES`, `kMaxZipEntries`), 64 MiB an entry (`MAX_ENTRY_BYTES`, `kMaxIpaEntryBytes`) and 1 GiB in total (`MAX_TOTAL_BYTES`). The count and the declared sizes are checked with the entry names (`safe_members`), so `check_ipa_file` refuses such a copy before anything is copied; while extracting, the bytes themselves are counted again, because a zip's sizes can lie. A refusal removes the half-written folder and leaves `work/ipa/` as it was. The known IPA is far inside every cap.

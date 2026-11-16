@@ -80,6 +80,7 @@ TEST_CASE("thread priority: a real raise, on a thread of its own") {
     std::thread([&] {
         kept = fe::raise_main_thread_priority("a fixed-step run");
         raised = fe::raise_main_thread_priority("");
+        SDL_CleanupTLS(); // not an SDL thread: SDL keeps its error text in thread storage
     }).join();
 
     // Not asked: only read, and nothing changes.
