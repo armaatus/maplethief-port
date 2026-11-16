@@ -6,8 +6,8 @@
 #include <cstdint>
 #include <string>
 
-#include "fuzz_check.h"
 #include "foundation/plist.h"
+#include "fuzz_check.h"
 
 namespace {
 

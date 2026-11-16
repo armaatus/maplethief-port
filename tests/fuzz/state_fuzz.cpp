@@ -30,11 +30,11 @@
 #include <utility>
 #include <vector>
 
-#include "fuzz_check.h"
 #include "cf/cf_hle.h"
 #include "cf/cf_objects.h"
 #include "cg/cg_objects.h"
 #include "foundation/foundation.h"
+#include "fuzz_check.h"
 #include "maplethief/cf.h"
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
