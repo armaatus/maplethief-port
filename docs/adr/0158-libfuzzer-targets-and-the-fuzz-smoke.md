@@ -31,6 +31,11 @@ For the seeds: committed binary files (the usual way, but opaque in review and e
 ## Consequences
 
 - Each parser of ADR 0154's first group has a fuzz target and a corpus; a pull request that breaks one of them, or adds a crash any seed reaches within 30 s, fails CI.
+- The first runs found eight, each now a regression test in `tests/cpp/` and fixed:
+  - **stb_image** (`png`, `border`): a chunk length past the file's end made it allocate 2 GiB, and an empty first IDAT reached a null `memcpy`. `mt_cg_png_check` (`runtime/src/cg/codec.cpp`) walks the chunks first, for the CG decoder and the border alike (`CG: a chunk past the file's end or an empty first IDAT is refused before stb_image`, `border: a chunk past the file's end or an empty first IDAT is refused (#322)`).
+  - **dr_flac 0.13.3** (`flac`), four: after a seek or a decode that failed partway it could be left inside a frame with more channels than the stream, no samples, or stale sample pointers (UBSan null-pointer offsets, an ASan heap overflow), and a side channel with as many wasted bits as the stream's bits per sample is shifted by 32. `Mp3Stream`'s FLAC decoder now decodes each frame itself and checks it is what a successful decode leaves before reading from it; any other frame ends the stream (`audio.pack: a FLAC frame dr_flac did not decode whole ends the stream, never read`). Upstream's next version rewrites the decoder and is not released; the pin stays.
+  - **settings.ini** (`settings`): a last line ending in a lone CR was rewritten with `\r\r\n` before appended keys, so the value gained a CR (`settings: a last line ending in a lone CR round trips through a rewrite`).
+  - **bindings.ini** (`bindings`, also twice in the CI smoke): SDL decodes invalid UTF-8 key names to codes past U+10FFFF whose names read back as another key; a name that does not read back as its own key is now unknown (`bindings: a key name that does not read back as its own key is unknown`).
 - The `asan` job builds the runtime and the frontend a second time, with coverage counters; the step adds about seven minutes.
 - #323 adds the structured formats' targets (NIBArchive, binary plist, JSON, saves, the state file) through the same function and README.
 - A Mac needs Docker (OrbStack or Docker Desktop) to fuzz; the container's first build takes a few minutes.
