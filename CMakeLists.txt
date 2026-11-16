@@ -199,6 +199,17 @@ else()
     set(MAPLETHIEF_TEST_TIMEOUT_SCALE 1)
 endif()
 
+# libFuzzer targets (#322, ADR 0158): the linux-fuzz preset. Our own code gets libFuzzer's
+# coverage instrumentation on top of the sanitizers, and tests/ builds only tests/fuzz/. clang
+# only (Apple's clang ships no libFuzzer: scripts/fuzz runs the Linux container on a Mac).
+option(MAPLETHIEF_FUZZ "Build the libFuzzer targets of tests/fuzz/ (ADR 0158)" OFF)
+if(MAPLETHIEF_FUZZ)
+    if(NOT MAPLETHIEF_SANITIZE OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "MAPLETHIEF_FUZZ needs clang and MAPLETHIEF_SANITIZE (ADR 0158)")
+    endif()
+    add_compile_options(-fsanitize=fuzzer-no-link)
+endif()
+
 enable_testing()
 
 add_subdirectory(runtime)

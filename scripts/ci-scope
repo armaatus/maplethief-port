@@ -57,6 +57,8 @@ while IFS= read -r path || [ -n "$path" ]; do
         scripts/*.ps1) ;;
         scripts/test-linux) ;;
         scripts/linux-game) ;;
+        tests/fuzz/*) ;;               # libFuzzer targets: the asan job's linux-fuzz (ADR 0158)
+        scripts/fuzz) ;;
         *) switch=true ;;
     esac
 done
