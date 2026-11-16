@@ -1,7 +1,8 @@
 // A small JSON reader and writer for the stubs' files (gamecenter.json), in the plain C++ of
 // stubs_internal.h. The reader builds a tree of malloc'd values; the writer appends to a
 // growing buffer. RFC 8259 syntax; numbers keep a 64-bit integer when they have no fraction or
-// exponent; strings are UTF-8 (\u escapes, surrogate pairs included, are decoded).
+// exponent; strings are UTF-8 (\u escapes, surrogate pairs included, are decoded; a lone
+// surrogate is refused, #323).
 #ifndef MAPLETHIEF_RUNTIME_STUBS_JSON_H
 #define MAPLETHIEF_RUNTIME_STUBS_JSON_H
 

@@ -28,6 +28,7 @@ struct Reader {
     std::uint64_t count, offsets;
     std::vector<bool> active; // objects on the current path (cycle check)
     std::uint64_t parsed;     // objects parsed so far, shared references counted each time
+    std::uint64_t copied;     // bytes of data and strings copied so far, likewise
     std::string error;
 
     bool fail(const char *what) {
@@ -86,6 +87,15 @@ struct Reader {
 
     bool span(std::size_t body, std::uint64_t bytes) {
         return body <= n && bytes <= n - body ? true : fail("object runs past the end");
+    }
+
+    // Each expanded copy of a data or string object costs its bytes: bound them as the objects
+    // are, so that many references to one large object cannot take memory without end (#323).
+    bool copy(std::uint64_t bytes) {
+        copied += bytes;
+        return copied <= static_cast<std::uint64_t>(n) * 16u + 4096u
+                   ? true
+                   : fail("shared references copy too many bytes");
     }
 
     bool object(std::uint64_t ref, PlistValue *out, unsigned depth) {
@@ -161,14 +171,14 @@ struct Reader {
             return true;
         }
         case 0x4:
-            if (!length(at, &len, &body) || !span(body, len)) {
+            if (!length(at, &len, &body) || !span(body, len) || !copy(len)) {
                 return false;
             }
             out->kind = PlistValue::data;
             out->bytes.assign(p + body, p + body + len);
             return true;
         case 0x5:
-            if (!length(at, &len, &body) || !span(body, len)) {
+            if (!length(at, &len, &body) || !span(body, len) || !copy(len * 2)) {
                 return false;
             }
             out->kind = PlistValue::string;
@@ -183,6 +193,9 @@ struct Reader {
         case 0x6:
             if (!length(at, &len, &body) || len > (n / 2) || !span(body, len * 2)) {
                 return fail("UTF-16 string out of bounds");
+            }
+            if (!copy(len * 2)) {
+                return false;
             }
             out->kind = PlistValue::string;
             out->s.clear();
@@ -251,7 +264,7 @@ const PlistValue *PlistValue::find(const std::u16string &key) const {
 }
 
 bool plist_parse(const std::uint8_t *bytes, std::size_t n, PlistValue *out, std::string *error) {
-    Reader r{bytes, n, 0, 0, 0, 0, {}, 0, {}};
+    Reader r{bytes, n, 0, 0, 0, 0, {}, 0, 0, {}};
     std::uint64_t top = 0;
     bool ok = n >= 8 + k_trailer && std::memcmp(bytes, "bplist00", 8) == 0;
     if (!ok) {

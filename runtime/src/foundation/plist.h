@@ -1,7 +1,8 @@
 // A reader for binary property lists ("bplist00", Apple's CFBinaryPList.c format): the bundle's
 // Info.plist and its *.lproj/*.strings tables are binary plists (#49, ADR 0035). The bytes come
 // from the extracted IPA and are untrusted: every offset, count and reference is checked, and
-// a reference cycle or a nesting deeper than 64 fails the parse.
+// a reference cycle or a nesting deeper than 64 fails the parse. Shared references are expanded,
+// bounded in objects (count x 16 + 4,096) and in bytes copied (the file's size x 16 + 4,096).
 //
 // Supported objects: null, booleans, integers (1-8 bytes; 16-byte ones keep their low 64 bits),
 // reals (4 or 8 bytes), dates (as their double), data, ASCII and UTF-16 strings, UIDs (as
