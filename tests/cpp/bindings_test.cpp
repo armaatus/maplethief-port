@@ -180,6 +180,28 @@ TEST_CASE("bindings: a good file overrides rows of the defaults, the rest stay")
     CHECK(a.action_for(button(SDL_GAMEPAD_BUTTON_WEST), Context::kMenu) == MT_ACTION_REVIVE);
 }
 
+// fuzz_bindings' finding (#322): SDL decodes invalid UTF-8 such as "\xFF[22" to a key code past
+// U+10FFFF whose own name ("\xEF\xBF\xBD") reads back as another key, so the file written from
+// the bindings read back different bindings. Such a name is an unknown key now.
+TEST_CASE("bindings: a key name that does not read back as its own key is unknown") {
+    fe::BindingSet s;
+    const std::vector<std::string> p =
+        fe::parse_bindings("[menu]\nok=key \xFF[22\n", "bindings.ini", &s);
+    REQUIRE_FALSE(p.empty());
+    CHECK_MESSAGE(p.front().find("unknown key") != std::string::npos, p.front());
+    fe::BindingSet back;
+    (void)fe::parse_bindings(fe::serialise_bindings(s), "bindings.ini", &back);
+    CHECK(fe::same_bindings(back.table, s.table));
+    fe::KeyChord chord;
+    std::string why;
+    CHECK_FALSE(fe::parse_chord("Ctrl+\xFF[22", &chord, &why));
+    // Names that do read back keep working: a letter, a symbol, a named key, a non-ASCII one.
+    for (const char *name : {"Z", "Comma", "Keypad Enter", "\xC3\xA9"}) {
+        fe::Control c;
+        CHECK_MESSAGE(fe::parse_control(std::string("key ") + name, &c, &why), name);
+    }
+}
+
 TEST_CASE("bindings: bad lines are reported by file and line and skipped, never fatal") {
     fe::BindingSet s;
     const std::string text = "attack = key K\n"                       // 1: before a section
