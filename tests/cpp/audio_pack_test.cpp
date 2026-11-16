@@ -656,11 +656,12 @@ void play_like_fuzz_flac(const std::vector<u8> &bytes) {
             done += n == 0 ? 1024 : n;
         }
     }
-    std::vector<i16> samples;
-    u32 rate = 0, channels = 0;
-    if (mt_audio::decode_file(bytes, mt_audio::Mp3Stream::Codec::kFlac, 20, &samples, &rate,
-                              &channels)) {
-        CHECK(samples.size() % channels == 0);
+    if (const auto e = mt_audio::Mp3Stream::open_pack(bytes, mt_audio::Mp3Stream::Codec::kFlac,
+                                                      nullptr, false, 20)) {
+        std::vector<i16> samples;
+        if (mt_audio::decode_whole(*e, &samples)) {
+            CHECK(samples.size() % e->channels() == 0);
+        }
     }
 }
 

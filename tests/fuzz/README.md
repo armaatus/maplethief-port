@@ -41,8 +41,8 @@ A run that finds something stops and leaves the input in `build/test-output/linu
 | `texpack` | `runtime/src/texpack/texpack.cpp` | a texture pack's PNG, through `mt_texpack_open` and an upload |
 | `border` | `platform/src/border.cpp` | `decode_border_image` |
 | `wav` | `runtime/src/audio/wav.cpp` | `wav::parse`, `wav::to_s16` |
-| `mp3` | `runtime/src/audio/mp3_stream.cpp` (dr_mp3) | `Mp3Stream::open` and `read`, `decode_file` |
-| `flac` | `runtime/src/audio/mp3_stream.cpp` (dr_flac) | `Mp3Stream::open_pack`, `decode_file` |
+| `mp3` | `runtime/src/audio/mp3_stream.cpp` (dr_mp3) | `Mp3Stream::open` and `read`, `open_pack` and `decode_whole` |
+| `flac` | `runtime/src/audio/mp3_stream.cpp` (dr_flac) | `Mp3Stream::open_pack`, `read` and `decode_whole` |
 | `strings` | `runtime/src/textpack/strings_file.cpp` | `parse_strings` |
 | `settings` | `platform/src/settings.cpp` | `parse_settings`, and the `serialise_settings` round trip |
 | `bindings` | `platform/src/bindings.cpp` | `parse_bindings`, and the `serialise_bindings` round trip |

@@ -1,6 +1,6 @@
 // An MP3 through dr_mp3 (runtime/src/audio/mp3_stream.cpp, #63, #188): the game's music path
 // (Mp3Stream::open, then read as the mixer pulls it, gapless or not) and an audio pack's
-// (decode_file, its length checked first).
+// (open_pack, its length checked first, then decode_whole).
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -41,12 +41,14 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
         }
         pull(*s);
     }
-    std::vector<std::int16_t> samples;
-    std::uint32_t rate = 0, channels = 0;
-    if (mt_audio::decode_file(bytes, mt_audio::Mp3Stream::Codec::kMp3, kMaxSeconds, &samples, &rate,
-                              &channels) &&
-        (channels < 1 || channels > 2 || samples.size() % channels != 0)) {
-        FUZZ_FAIL();
+    // An effect: the stream opened without a loop, then decoded whole (decode_whole, #413).
+    if (const std::shared_ptr<mt_audio::Mp3Stream> e = mt_audio::Mp3Stream::open_pack(
+            bytes, mt_audio::Mp3Stream::Codec::kMp3, nullptr, false, kMaxSeconds)) {
+        std::vector<std::int16_t> samples;
+        if (mt_audio::decode_whole(*e, &samples) &&
+            (e->channels() < 1 || e->channels() > 2 || samples.size() % e->channels() != 0)) {
+            FUZZ_FAIL();
+        }
     }
     return 0;
 }
