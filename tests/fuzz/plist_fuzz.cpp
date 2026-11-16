@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 
+#include "fuzz_check.h"
 #include "foundation/plist.h"
 
 namespace {
@@ -27,7 +28,7 @@ void walk(const mt_ns::PlistValue &v, Tally *t) {
     }
     if (v.kind == mt_ns::PlistValue::dict && !v.entries.empty() &&
         v.find(v.entries.back().first) == nullptr) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
 }
 
@@ -38,7 +39,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     std::string why;
     if (!mt_ns::plist_parse(data, size, &v, &why)) {
         if (why.empty()) {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
         return 0;
     }
@@ -46,7 +47,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     walk(v, &t);
     const std::uint64_t bound = static_cast<std::uint64_t>(size) * 16u + 4096u;
     if (t.objects > bound || t.bytes > bound) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     return 0;
 }

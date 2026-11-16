@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 
+#include "fuzz_check.h"
 #include "uikit/nib.h"
 
 namespace nib = mt_ui::nib;
@@ -15,14 +16,14 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     std::string why;
     if (!nib::parse(data, size, &a, &why)) {
         if (why.empty()) {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
         return 0;
     }
     for (const nib::Value &v : a.values) {
         if (v.key >= a.keys.size() || (v.type == nib::k_object && v.object >= a.objects.size()) ||
             (v.type == nib::k_data && v.data_offset + std::uint64_t{v.data_length} > size)) {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
         double d;
         float f[4];
@@ -41,7 +42,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
         (void)a.find(i, "UIBounds");
         for (const std::uint32_t e : a.elements(i)) {
             if (e >= n) {
-                __builtin_trap();
+                FUZZ_FAIL();
             }
         }
     }

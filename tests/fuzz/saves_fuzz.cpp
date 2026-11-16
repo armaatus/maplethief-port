@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "fuzz_check.h"
 #include "maplethief/cashshop.h"
 #include "maplethief/saves.h"
 
@@ -56,35 +57,35 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     const mt_saves_verdict v = mt_saves_check(name, file.data(), file.size(),
                                               why_size > 0 ? why.data() : nullptr, why_size);
     if (std::strcmp(mt_saves_verdict_name(v), "?") == 0) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     if (why_size > 0) {
         const void *nul = std::memchr(why.data(), '\0', why_size);
         if (nul == nullptr) {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
         if (why[why_size] != '\x7F') {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
         if (v != MT_SAVES_OK && why_size > 1 && why[0] == '\0') {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
     }
     if ((v == MT_SAVES_OK) !=
         (mt_saves_check(name, file.data(), file.size(), nullptr, 0) == MT_SAVES_OK)) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
 
     Bytes copy = file;
     const std::uint32_t changed = mt_saves_sanitise(name, copy.data(), copy.size());
     if (changed > 2 || (changed > 0 && std::strcmp(name, "config") != 0)) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     if (mt_saves_sanitise(name, copy.data(), copy.size()) != 0) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     if (std::strcmp(name, "config") == 0 && v == MT_SAVES_OK && changed != 0) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
 
     if (std::strncmp(name, MT_SAVES_COUNTERS_PREFIX, std::strlen(MT_SAVES_COUNTERS_PREFIX)) == 0) {

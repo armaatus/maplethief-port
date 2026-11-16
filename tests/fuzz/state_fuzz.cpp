@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "fuzz_check.h"
 #include "cf/cf_hle.h"
 #include "cf/cf_objects.h"
 #include "cg/cg_objects.h"
@@ -271,12 +272,12 @@ void restore(Guest &g, const Bytes &file) {
     if (mt_snapshot_restore(&g.cpu, file.data(), file.size(), nullptr, &h, why, sizeof why) == 0) {
         if (mt_snapshot_restore(&g.cpu, g.baseline.data(), g.baseline.size(), nullptr, nullptr, why,
                                 sizeof why) != 0) {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
         return;
     }
     if (why[0] == '\0' || !same_as_baseline(g)) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
 }
 
@@ -321,7 +322,7 @@ void whole_file(Guest &g, const Bytes &file) {
     std::string why;
     if (!mt_snap::read_state_file(file.data(), file.size(), nullptr, &h, nullptr, &why) &&
         why.empty()) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     (void)mt_snap::read_state_file(file.data(), file.size(), nullptr, &h, &sections, &why);
     char text[160] = {};

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "fuzz_check.h"
 #include "stubs/json.h"
 
 namespace {
@@ -135,12 +136,12 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     const char *text = reinterpret_cast<const char *>(data);
     if (!json_parse(text, size, &v, &error)) {
         if (error == nullptr || *error == '\0') {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
         return 0;
     }
     if (valid_utf8(data, size) && !strings_valid(v)) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     (void)json_get(&v, "scores");
     JsonOut o{};
@@ -148,10 +149,10 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     if (!o.failed) {
         JsonValue again{};
         if (!json_parse(o.data, o.size, &again, &error)) {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
         if (!same_shape(v, again)) {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
         json_free(&again);
     }
