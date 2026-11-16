@@ -77,7 +77,7 @@ Each parser of a file a player can supply ([ADR 0154](../adr/0154-threat-model-f
 ```sh
 scripts/fuzz --list                 # the targets
 scripts/fuzz png --hours 1          # one target for an hour of CPU time
-scripts/fuzz all --hours 1          # every target at once, one process each
+scripts/fuzz all --hours 1 --jobs 4 # every target, one process each, four at a time
 cmake --workflow --preset linux-fuzz    # on Linux: the CI smoke, 30 s per target
 ```
 
