@@ -357,8 +357,8 @@ void one_state(Guest &g, const mt_snap::StateOps *ops, const std::uint8_t *p, st
     // As read_states does: a failed load may hold host memory, which drop frees.
     mt_snap::Reader r(bytes.data(), bytes.size(), ops->name);
     (void)(ops->load(&g.cpu, 0x1000u, block, r) && r.done());
-    if (ops->drop != nullptr) {
-        ops->drop(block);
+    if (ops->type->drop != nullptr) {
+        ops->type->drop(block);
     }
     std::free(block);
 }
