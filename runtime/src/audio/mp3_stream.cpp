@@ -52,9 +52,56 @@ struct Mp3Stream::FlacDecoder final : Mp3Stream::Decoder {
             drflac_close(flac);
         }
     }
-    bool seek(u64 frame) override { return drflac_seek_to_pcm_frame(flac, frame) != 0; }
+    bool seek(u64 frame) override {
+        return drflac_seek_to_pcm_frame(flac, frame) != 0 && consistent();
+    }
+    // One frame at a time: the next is decoded here and checked before any of it is read.
     u32 read(std::int16_t *out, u32 frames) override {
-        return static_cast<u32>(drflac_read_pcm_frames_s16(flac, frames, out));
+        u32 done = 0;
+        while (done < frames) {
+            drflac_frame &f = flac->currentFLACFrame;
+            if (f.pcmFramesRemaining == 0 && !drflac__read_and_decode_next_flac_frame(flac)) {
+                break;
+            }
+            if (!consistent()) {
+                break;
+            }
+            const u32 n = std::min(frames - done, f.pcmFramesRemaining);
+            const auto got = static_cast<u32>(
+                drflac_read_pcm_frames_s16(flac, n, out + std::size_t{done} * flac->channels));
+            done += got;
+            if (got < n) {
+                break;
+            }
+        }
+        return done;
+    }
+    // In a damaged file, dr_flac 0.13.3 can be left inside a frame it has not decoded, or not
+    // whole (fuzz_flac's findings, #322): one whose header has more channels or a bigger block
+    // than the stream, one a seek skipped over, one whose decode failed partway. Its next read
+    // would take the samples from a null or stale pointer, past the end of the buffer. So the
+    // frame must be the one a successful decode leaves: each channel's samples at their place
+    // in the buffer, the block within the stream's largest. And a side channel's wasted bits
+    // may be as many as the stream's bits per sample, which dr_flac's 16-bit conversion
+    // shifts by 32 or more. Any other frame ends the stream.
+    bool consistent() const {
+        const drflac_frame &f = flac->currentFLACFrame;
+        if (f.pcmFramesRemaining == 0) {
+            return true;
+        }
+        const u32 block = f.header.blockSizeInPCMFrames;
+        const u32 n = drflac__get_channel_count_from_channel_assignment(f.header.channelAssignment);
+        if (n != flac->channels || block > flac->maxBlockSizeInPCMFrames ||
+            f.pcmFramesRemaining > block) {
+            return false;
+        }
+        for (u32 c = 0; c < n; c++) {
+            if (f.subframes[c].pSamplesS32 != flac->pDecodedSamples + std::size_t{block} * c ||
+                f.subframes[c].wastedBitsPerSample >= flac->bitsPerSample) {
+                return false;
+            }
+        }
+        return true;
     }
 };
 
