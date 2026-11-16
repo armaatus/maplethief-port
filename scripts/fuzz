@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Long local runs of the libFuzzer targets of tests/fuzz/ (#322, ADR 0158).
 #
-# Usage: scripts/fuzz TARGET...|all [--hours H] [--arch amd64|arm64] [--build-only]
+# Usage: scripts/fuzz TARGET...|all [--hours H] [--jobs N] [--arch amd64|arm64] [--build-only]
 #        scripts/fuzz --list
 # (the options are described in usage() below, printed by scripts/fuzz --help)
 #
 # Builds the linux-fuzz preset's targets and runs each named target until it has used H hours
-# of CPU time (default 1), all of them at once, one process each. libFuzzer needs clang's
+# of CPU time (default 1), one process each, at most N at a time (default: half the CPUs; each
+# sanitized target takes a few hundred MB). libFuzzer needs clang's
 # runtime, which Apple's clang does not ship: on a Mac this runs itself in the pinned Linux
 # container of tools/containers/linux/ (scripts/test-linux's image, arm64 by default: native on
 # Apple silicon), with the working tree mounted. On Linux it runs here, with clang.
@@ -23,11 +24,12 @@ cd "$REPO"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: scripts/fuzz TARGET...|all [--hours H] [--arch amd64|arm64] [--build-only]
+Usage: scripts/fuzz TARGET...|all [--hours H] [--jobs N] [--arch amd64|arm64] [--build-only]
        scripts/fuzz --list
 
   TARGET        a target of tests/fuzz/ (scripts/fuzz --list), or all of them
   --hours H     CPU hours per target (default 1; 0.05 is three minutes)
+  --jobs N      targets running at once (default: half the CPUs, at least 1)
   --arch ARCH   the container's architecture on a Mac: arm64 (default, native on Apple
                 silicon) or amd64 (what CI runs, under Rosetta)
   --build-only  build the targets and their seeds, run nothing
@@ -37,6 +39,7 @@ EOF
 }
 
 hours=1
+jobs=""
 arch=arm64
 build_only=0
 targets=()
@@ -46,6 +49,11 @@ while [ "$#" -gt 0 ]; do
         --hours)
             [ "$#" -ge 2 ] || usage
             hours="$2"
+            shift 2
+            ;;
+        --jobs)
+            [ "$#" -ge 2 ] || usage
+            jobs="$2"
             shift 2
             ;;
         --arch)
@@ -84,6 +92,7 @@ if [ "$(uname -s)" != Linux ]; then
     mkdir -p build/_downloads
     downloads="$(cd "${MAPLETHIEF_DOWNLOAD_DIR:-build/_downloads}" && pwd -P)"
     args=(--hours "$hours")
+    [ -z "$jobs" ] || args+=(--jobs "$jobs")
     [ "$build_only" -eq 0 ] || args+=(--build-only)
     echo "== scripts/fuzz in $image: ${targets[*]+"${targets[*]}"}" >&2
     # The working tree at its own path (so that the build's paths are the host's) with its git
@@ -113,24 +122,39 @@ fi
 cmake --build "$build" --target maplethief_fuzz
 [ "$build_only" -eq 0 ] || exit 0
 
-pids=()
+[ -n "$jobs" ] || jobs=$(($(nproc) / 2))
+[ "$jobs" -ge 1 ] || jobs=1
+# One target: its runner's last line, or its last lines and a failure.
+report() {
+    if [ "$2" -eq 0 ]; then
+        tail -n 1 "build/fuzz/$1/fuzz_run.out"
+    else
+        echo "== fuzz_$1: FINDING or failure, see build/fuzz/$1/" >&2
+        tail -n 5 "build/fuzz/$1/fuzz_run.out" >&2
+    fi
+}
+declare -A running=()
+status=0
+reap() {
+    local pid code=0
+    wait -n -p pid "${!running[@]}" || code=$?
+    report "${running[$pid]}" "$code"
+    [ "$code" -eq 0 ] || status=1
+    unset "running[$pid]"
+}
 for t in "${targets[@]}"; do
+    while [ "${#running[@]}" -ge "$jobs" ]; do
+        reap
+    done
     out="build/fuzz/$t"
     mkdir -p "$out"
     python3 -I -B tests/fuzz/fuzz_run.py run "$t" --binary "$build/tests/fuzz/fuzz_$t" \
         --seeds "$build/tests/fuzz/seeds/$t" --corpus "$out/corpus" --out "$out" \
         --cpu-hours "$hours" >"$out/fuzz_run.out" 2>&1 &
-    pids+=($!)
+    running[$!]="$t"
     echo "== fuzz_$t: $hours CPU h, output in $out/" >&2
 done
-status=0
-for i in "${!pids[@]}"; do
-    if wait "${pids[$i]}"; then
-        tail -n 1 "build/fuzz/${targets[$i]}/fuzz_run.out"
-    else
-        status=1
-        echo "== fuzz_${targets[$i]}: FINDING or failure, see build/fuzz/${targets[$i]}/" >&2
-        tail -n 5 "build/fuzz/${targets[$i]}/fuzz_run.out" >&2
-    fi
+while [ "${#running[@]}" -gt 0 ]; do
+    reap
 done
 exit "$status"

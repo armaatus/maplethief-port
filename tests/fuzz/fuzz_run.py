@@ -33,12 +33,14 @@ import make_corpus  # noqa: E402
 # within one input, which the parsers must not have.
 SANITIZER_ENV = {
     "ASAN_OPTIONS": "abort_on_error=1:halt_on_error=1:detect_leaks=1:"
-    "detect_stack_use_after_return=1:strict_string_checks=1:check_initialization_order=1",
+    "detect_stack_use_after_return=1:strict_string_checks=1:check_initialization_order=1:"
+    # A smaller quarantine than ASan's 256 MiB, so that several targets fit in one machine.
+    "quarantine_size_mb=64",
     "UBSAN_OPTIONS": "halt_on_error=1:abort_on_error=1:print_stacktrace=1:report_error_type=1",
 }
 # Per input: a parser that takes this long on one input hangs (libFuzzer's -timeout, seconds).
 INPUT_TIMEOUT = 25
-RSS_LIMIT_MB = 2048
+RSS_LIMIT_MB = 1536
 
 
 def fuzzer_args(name: str, out: Path) -> list[str]:
@@ -87,9 +89,7 @@ def stat(text: str, key: str) -> int:
 
 
 def report_finding(binary: str, out: Path) -> None:
-    found = sorted(
-        p for p in out.iterdir() if re.match(r"(crash|leak|timeout|oom|slow-unit)-", p.name)
-    )
+    found = sorted(p for p in out.iterdir() if re.match(r"(crash|leak|timeout|oom)-", p.name))
     for p in found:
         print(f"fuzz_run: finding {p}\n  reproduce: {binary} {p}", file=sys.stderr)
     print(
