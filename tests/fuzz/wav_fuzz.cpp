@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "audio/wav.h"
+#include "fuzz_check.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size) {
     const std::vector<std::uint8_t> bytes(data, data + size);
@@ -13,11 +14,11 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
         return 0;
     }
     if (info.has_loop && (info.loop_start >= info.loop_end || info.loop_end > info.frames)) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     const std::vector<std::int16_t> samples = mt_audio::wav::to_s16(bytes, info);
     if (samples.size() != info.frames * info.channels) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     return 0;
 }

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "audio/mp3_stream.h"
+#include "fuzz_check.h"
 
 namespace {
 
@@ -21,7 +22,7 @@ void pull(mt_audio::Mp3Stream &s) {
     for (std::uint32_t done = 0; done < kReadFrames && !s.ended();) {
         const std::uint32_t n = s.read(out.data(), kBlock);
         if (n > kBlock) {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
         done += n == 0 ? kBlock : n;
     }
@@ -36,7 +37,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     const bool gapless = size % 2 == 1;
     if (const std::shared_ptr<mt_audio::Mp3Stream> s = mt_audio::Mp3Stream::open(bytes, gapless)) {
         if (s->channels() < 1 || s->channels() > 2) {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
         pull(*s);
     }
@@ -45,7 +46,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     if (mt_audio::decode_file(bytes, mt_audio::Mp3Stream::Codec::kMp3, kMaxSeconds, &samples, &rate,
                               &channels) &&
         (channels < 1 || channels > 2 || samples.size() % channels != 0)) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     return 0;
 }

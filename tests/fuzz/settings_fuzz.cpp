@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 
+#include "fuzz_check.h"
 #include "settings.h"
 
 namespace mf = maplethief::frontend;
@@ -18,7 +19,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
         mf::Settings back;
         (void)mf::parse_settings(out, &back);
         if (!(back == s)) {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
     }
     return 0;

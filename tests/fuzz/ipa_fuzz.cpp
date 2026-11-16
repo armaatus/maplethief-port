@@ -13,6 +13,7 @@
 #include <system_error>
 #include <vector>
 
+#include "fuzz_check.h"
 #include "ipa_import.h"
 #include "save_zip.h"
 
@@ -69,7 +70,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     const mf::IpaResult r = mf::import_ipa_bytes(ipa, scratch().string(), expected, progress);
     for (fs::directory_iterator it(scratch(), ec), end; !ec && it != end; it.increment(ec)) {
         if (!r.ok() || it->path().filename() != "game") {
-            __builtin_trap(); // a leftover staging folder, or a file outside game/
+            FUZZ_FAIL(); // a leftover staging folder, or a file outside game/
         }
     }
     fs::remove_all(scratch(), ec);

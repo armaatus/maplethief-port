@@ -6,6 +6,7 @@
 #include <string>
 
 #include "cg/cg_objects.h"
+#include "fuzz_check.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size) {
     std::uint32_t w = 0, h = 0;
@@ -16,7 +17,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
         if (!d.pixels || d.pixels->size() != static_cast<std::size_t>(d.width) * d.height * 4u ||
             d.width > mt_cg::k_png_max_side || d.height > mt_cg::k_png_max_side ||
             (info && (d.width != w || d.height != h))) {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
     }
     return 0;

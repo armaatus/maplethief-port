@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "fuzz_check.h"
 #include "ipa_import.h"
 
 namespace mf = maplethief::frontend;
@@ -41,7 +42,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
             for (const std::string &p : parts) {
                 if (p.empty() || p == "." || p == ".." || p.find('/') != std::string::npos ||
                     p.find('\\') != std::string::npos) {
-                    __builtin_trap();
+                    FUZZ_FAIL();
                 }
             }
         }

@@ -20,7 +20,7 @@ That builds `fuzz_NAME`, writes its seeds to `build/linux-fuzz/tests/fuzz/seeds/
 
 Rules for a harness:
 
-- **Drive the real entry point**, the one the untrusted bytes reach (`zip_read`, `parse_settings`, `Mp3Stream::open`, …), with the limits the caller passes. Where the parser has a round trip (serialise and parse again, store and read again), check it and `__builtin_trap()` on a mismatch: a wrong answer is a finding too.
+- **Drive the real entry point**, the one the untrusted bytes reach (`zip_read`, `parse_settings`, `Mp3Stream::open`, …), with the limits the caller passes. Where the parser has a round trip (serialise and parse again, store and read again), check it and call `FUZZ_FAIL()` (`fuzz_check.h`: it aborts, which libFuzzer catches; `__builtin_trap` is a SIGTRAP on arm64, which it does not) on a mismatch: a wrong answer is a finding too.
 - **One input, no state carried over.** Reset anything global the parser keeps. Files the code under test writes go in a scratch folder of the harness's own, emptied every input.
 - **No output.** No logging per input (configure `mt_diag` to drop lines); libFuzzer runs it millions of times.
 - **Several entry points** of one parser can share a target: the first byte picks which (`ipa_parts_fuzz.cpp`).

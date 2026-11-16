@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "fuzz_check.h"
 #include "save_zip.h"
 
 namespace {
@@ -29,11 +30,11 @@ void round_trip(const std::vector<mf::ZipEntry> &entries) {
     std::vector<mf::ZipEntry> back;
     std::string why;
     if (!mf::zip_read(again, kMaxEntry, &back, &why) || back.size() != entries.size()) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     for (std::size_t i = 0; i < back.size(); ++i) {
         if (back[i].name != entries[i].name || back[i].bytes != entries[i].bytes) {
-            __builtin_trap();
+            FUZZ_FAIL();
         }
     }
 }
@@ -59,7 +60,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
         std::vector<std::uint8_t> bytes;
         for (const mf::ZipItem &item : items) {
             if (mf::zip_extract(zip, item, kMaxEntry, &bytes, &why) && bytes.size() != item.size) {
-                __builtin_trap();
+                FUZZ_FAIL();
             }
         }
     }

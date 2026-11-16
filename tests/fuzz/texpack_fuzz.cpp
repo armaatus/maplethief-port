@@ -13,6 +13,7 @@
 #include <system_error>
 #include <vector>
 
+#include "fuzz_check.h"
 #include "maplethief/diag.h"
 #include "maplethief/gfx.h"
 #include "maplethief/texpack.h"
@@ -62,18 +63,18 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
 
     mt_gfx_reset();
     if (mt_texpack_open(dir.string().c_str()) != 1) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     const std::uint32_t tex = mt_gfx_texture_create();
     if (mt_gfx_texture_image(tex, w, h, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, texels.data()) != 0) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     std::uint32_t tw = 0, th = 0;
     const std::uint8_t *p = mt_gfx_texture_texels(tex, &tw, &th);
     const mt_texpack_stats stats = mt_texpack_get_stats();
     if (p == nullptr || tw % w != 0 || th % h != 0 || tw / w != th / h ||
         (stats.replaced == 0 && (tw != w || th != h))) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     mt_gfx_texture_destroy(tex);
     mt_texpack_close();

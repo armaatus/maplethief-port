@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "bindings.h"
+#include "fuzz_check.h"
 
 namespace mf = maplethief::frontend;
 
@@ -17,7 +18,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     mf::BindingSet back;
     (void)mf::parse_bindings(mf::serialise_bindings(set), "bindings.ini", &back);
     if (!mf::same_bindings(back.table, set.table) || back.face != set.face) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     return 0;
 }

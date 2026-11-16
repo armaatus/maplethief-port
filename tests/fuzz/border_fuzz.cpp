@@ -5,6 +5,7 @@
 #include <string>
 
 #include "border.h"
+#include "fuzz_check.h"
 
 namespace mf = maplethief::frontend;
 
@@ -13,7 +14,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     std::string why;
     if (mf::decode_border_image(data, size, &image, &why) &&
         image.rgba.size() != static_cast<std::size_t>(image.width) * image.height * 4u) {
-        __builtin_trap();
+        FUZZ_FAIL();
     }
     return 0;
 }
