@@ -140,6 +140,25 @@ bool tracing() { return trace_file() != nullptr || mt_trace_enabled("gl") != 0; 
 
 // --- the state ------------------------------------------------------------------------------
 
+// The last runtime's renderbuffer targets: no runtime switch comes after it to free them, so
+// they go at exit (#414). Registered after mt_gfx made its first target, so it runs before
+// mt_gfx's registry of targets is destroyed.
+void free_targets_at_exit() {
+    for (auto &[name, rb] : g.renderbuffers) {
+        mt_gfx_target_destroy(rb.target);
+        rb.target = nullptr;
+    }
+}
+
+mt_gfx_target *create_target(u32 width, u32 height, u32 scale) {
+    mt_gfx_target *t = mt_gfx_target_create(width, height, scale);
+    static bool registered = false;
+    if (t != nullptr && !registered) {
+        registered = std::atexit(free_targets_at_exit) == 0;
+    }
+    return t;
+}
+
 // Frees the state's mt_gfx objects and starts from scratch (the same process binding).
 void reset_state() {
     for (auto &[name, t] : g.textures) {
@@ -666,7 +685,7 @@ void format_call(const mt_gles_cmd &c, char *text, std::size_t size) {
         const std::size_t left = size - static_cast<std::size_t>(n);
         const char *sep = i != 0 ? ", " : "";
         const u32 v = c.args[i];
-        const char kind = kinds[i] != 0 ? kinds[i] : 'u';
+        const char kind = *kinds != 0 ? *kinds++ : 'u'; // past the end of the kinds: 'u'
         const char *name = nullptr;
         if (kind == 'e' || kind == 't') {
             name = find_name(k_enums, sizeof k_enums / sizeof k_enums[0], v);
@@ -932,7 +951,7 @@ bool renderbuffer_storage(u32 target, u32 width, u32 height, u32 format, bool re
     }
     Renderbuffer &r = rb->second;
     mt_gfx_target_destroy(r.target);
-    r.target = mt_gfx_target_create(width, height, scale);
+    r.target = create_target(width, height, scale);
     if (r.target == nullptr) {
         log("renderbuffer %u: no mt_gfx target of %ux%u at scale %u: nothing will be drawn",
             static_cast<unsigned>(s.renderbuffer), static_cast<unsigned>(width),
@@ -1024,7 +1043,7 @@ uint32_t mt_gles_set_render_scale(uint32_t scale) noexcept {
         if (old == nullptr || mt_gfx_target_scale(old) == scale) {
             continue;
         }
-        mt_gfx_target *next = mt_gfx_target_create(r.width, r.height, scale);
+        mt_gfx_target *next = create_target(r.width, r.height, scale);
         if (next == nullptr) {
             log("renderbuffer %u: no mt_gfx target of %ux%u at scale %u: it keeps scale %u",
                 static_cast<unsigned>(name), static_cast<unsigned>(r.width),

@@ -23,7 +23,11 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang
     target_link_options(MapleThief PRIVATE -static-libstdc++ -static-libgcc)
 endif()
 
-if(CMAKE_READELF)
+if(MAPLETHIEF_SANITIZE)
+    # The sanitizer runtimes need libresolv and newer symbols: a sanitized build is never shipped
+    # (ADR 0157).
+    message(STATUS "Sanitized build: platform.linux_portable is not registered")
+elseif(CMAKE_READELF)
     add_test(
         NAME platform.linux_portable
         COMMAND

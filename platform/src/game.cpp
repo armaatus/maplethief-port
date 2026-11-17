@@ -1854,7 +1854,7 @@ void smooth_frame(Game &g) {
     g.smooth_between = !g.smooth_first;
     if (mt_trace_enabled("interp") != 0) {
         mt_tracef("interp", "window frame %llu: GL frame %u at %.3f of its tick",
-                  static_cast<unsigned long long>(g.presents + 1), f.index, alpha);
+                  static_cast<unsigned long long>(g.presents) + 1, f.index, alpha);
     }
     g.stats.add(Phase::kTake, SDL_GetTicksNS() - t0);
 }
@@ -2755,6 +2755,16 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         g.data_notice = wrap_notice(*m, kDataNoticeColumns);
         g.data_notice_until = 0; // shown from the next frame, for kDataNoticeSeconds
     }
+    // Notices queued during play (a save refused as the game read it, #413): shown the same way.
+    for (const std::string &n : take_data_notices()) {
+        if (!g.data_notice.empty()) {
+            g.data_notice.emplace_back();
+        }
+        for (std::string &line : wrap_notice(n, kDataNoticeColumns)) {
+            g.data_notice.push_back(std::move(line));
+        }
+        g.data_notice_until = 0;
+    }
     // save_states (#204): a quick-save or quick-load asked for, at this safe turn.
     run_quick_state(g, cpu, now);
     // stick_mode and direction_priority (#138, ADR 0128), as in effect now; the clock a menu's
@@ -3015,6 +3025,8 @@ void start_menu(Game &g, const GameOptions &options) {
     const auto switch_inputs = [] {
         DataSwitchInputs in;
         in.user_dir = [] { return user_data_dir(false); };
+        // Returned by value, and its lambda captures nothing: no stack address escapes.
+        // NOLINTNEXTLINE(clang-analyzer-core.StackAddressEscape)
         return in;
     };
     g.menu.set_action_question("data_location", [switch_inputs] {

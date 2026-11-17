@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# Long local runs of the libFuzzer targets of tests/fuzz/ (#322, ADR 0158).
+#
+# Usage: scripts/fuzz TARGET...|all [--hours H] [--jobs N] [--arch amd64|arm64] [--build-only]
+#        scripts/fuzz --list
+# (the options are described in usage() below, printed by scripts/fuzz --help)
+#
+# Builds the linux-fuzz preset's targets and runs each named target until it has used H hours
+# of CPU time (default 1), one process each, at most N at a time (default: half the CPUs; each
+# sanitized target takes a few hundred MB). libFuzzer needs clang's
+# runtime, which Apple's clang does not ship: on a Mac this runs itself in the pinned Linux
+# container of tools/containers/linux/ (scripts/test-linux's image, arm64 by default: native on
+# Apple silicon), with the working tree mounted. On Linux it runs here, with clang.
+#
+# Outputs, all below build/:
+#   build/fuzz/TARGET/corpus/      the corpus, kept and grown from run to run
+#   build/fuzz/TARGET/runs.jsonl   one line per run: CPU and wall seconds, inputs, exit code
+#   build/fuzz/TARGET/run-*.log    libFuzzer's output
+#   build/fuzz/TARGET/crash-*      a finding (also leak-, timeout-, oom-): see tests/fuzz/README.md
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: scripts/fuzz TARGET...|all [--hours H] [--jobs N] [--arch amd64|arm64] [--build-only]
+       scripts/fuzz --list
+
+  TARGET        a target of tests/fuzz/ (scripts/fuzz --list), or all of them
+  --hours H     CPU hours per target (default 1; 0.05 is three minutes)
+  --jobs N      targets running at once (default: half the CPUs, at least 1)
+  --arch ARCH   the container's architecture on a Mac: arm64 (default, native on Apple
+                silicon) or amd64 (what CI runs, under Rosetta)
+  --build-only  build the targets and their seeds, run nothing
+  --list        print the targets
+EOF
+    exit "${1:-2}"
+}
+
+hours=1
+jobs=""
+arch=arm64
+build_only=0
+targets=()
+in_container="${MAPLETHIEF_FUZZ_IN_CONTAINER:-0}"
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --hours)
+            [ "$#" -ge 2 ] || usage
+            hours="$2"
+            shift 2
+            ;;
+        --jobs)
+            [ "$#" -ge 2 ] || usage
+            jobs="$2"
+            shift 2
+            ;;
+        --arch)
+            [ "$#" -ge 2 ] || usage
+            arch="$2"
+            shift 2
+            ;;
+        --build-only) build_only=1; shift ;;
+        --list) exec python3 -I -B tests/fuzz/fuzz_run.py list ;;
+        -h | --help) usage 0 ;;
+        -*) echo "scripts/fuzz: unknown option: $1" >&2; usage ;;
+        *) targets+=("$1"); shift ;;
+    esac
+done
+[ "${#targets[@]}" -gt 0 ] || [ "$build_only" -eq 1 ] || usage
+case "$arch" in
+    amd64 | arm64) ;;
+    *) echo "scripts/fuzz: --arch must be amd64 or arm64, not $arch" >&2; exit 2 ;;
+esac
+known="$(python3 -I -B tests/fuzz/fuzz_run.py list)"
+if [ "${#targets[@]}" -eq 1 ] && [ "${targets[0]}" = all ]; then
+    # shellcheck disable=SC2206 # one target per line, no spaces
+    targets=($known)
+fi
+for t in ${targets[@]+"${targets[@]}"}; do
+    grep -qx "$t" <<<"$known" || { echo "scripts/fuzz: no target $t (scripts/fuzz --list)" >&2; exit 2; }
+done
+
+# --- On a Mac: the same command in the Linux container --------------------------------------
+if [ "$(uname -s)" != Linux ]; then
+    command -v docker >/dev/null 2>&1 || {
+        echo "scripts/fuzz: docker not found (on a Mac: OrbStack or Docker Desktop)" >&2
+        exit 2
+    }
+    image="$(scripts/test-linux --image-name --arch "$arch")"
+    mkdir -p build/_downloads
+    downloads="$(cd "${MAPLETHIEF_DOWNLOAD_DIR:-build/_downloads}" && pwd -P)"
+    args=(--hours "$hours")
+    [ -z "$jobs" ] || args+=(--jobs "$jobs")
+    [ "$build_only" -eq 0 ] || args+=(--build-only)
+    echo "== scripts/fuzz in $image: ${targets[*]+"${targets[*]}"}" >&2
+    # The working tree at its own path (so that the build's paths are the host's) with its git
+    # directory (a worktree's is elsewhere) read-only, the shared download cache, and a scratch
+    # tmpfs for the targets that write files.
+    git_dir="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
+    exec docker run --rm --platform "linux/$arch" \
+        -v "$REPO:$REPO" -w "$REPO" -v "$git_dir:$git_dir:ro" \
+        -v "$downloads:/cache/downloads" \
+        --tmpfs /fuzztmp:size=1g -e TMPDIR=/fuzztmp \
+        -e MAPLETHIEF_FUZZ_IN_CONTAINER=1 -e MAPLETHIEF_FUZZ_BUILD="build/linux-fuzz-$arch" \
+        -e MAPLETHIEF_DOWNLOAD_DIR=/cache/downloads \
+        "$image" scripts/fuzz ${targets[@]+"${targets[@]}"} "${args[@]}"
+fi
+
+# --- Here: build, then run every target at once ---------------------------------------------
+build="${MAPLETHIEF_FUZZ_BUILD:-build/linux-fuzz}"
+configure=(cmake --preset linux-fuzz -B "$build")
+if [ -n "${MAPLETHIEF_DOWNLOAD_DIR:-}" ]; then
+    configure+=("-DMAPLETHIEF_DOWNLOAD_DIR=$MAPLETHIEF_DOWNLOAD_DIR")
+fi
+if [ "$in_container" = 1 ]; then
+    # The working tree belongs to the host's user; let git (CMake's version lookup) read it.
+    git config --global --add safe.directory '*'
+fi
+"${configure[@]}" >/dev/null
+cmake --build "$build" --target maplethief_fuzz
+[ "$build_only" -eq 0 ] || exit 0
+
+[ -n "$jobs" ] || jobs=$(($(nproc) / 2))
+[ "$jobs" -ge 1 ] || jobs=1
+# One target: its runner's last line, or its last lines and a failure.
+report() {
+    if [ "$2" -eq 0 ]; then
+        tail -n 1 "build/fuzz/$1/fuzz_run.out"
+    else
+        echo "== fuzz_$1: FINDING or failure, see build/fuzz/$1/" >&2
+        tail -n 5 "build/fuzz/$1/fuzz_run.out" >&2
+    fi
+}
+declare -A running=()
+status=0
+reap() {
+    local pid code=0
+    wait -n -p pid "${!running[@]}" || code=$?
+    report "${running[$pid]}" "$code"
+    [ "$code" -eq 0 ] || status=1
+    unset "running[$pid]"
+}
+for t in "${targets[@]}"; do
+    while [ "${#running[@]}" -ge "$jobs" ]; do
+        reap
+    done
+    out="build/fuzz/$t"
+    mkdir -p "$out"
+    python3 -I -B tests/fuzz/fuzz_run.py run "$t" --binary "$build/tests/fuzz/fuzz_$t" \
+        --seeds "$build/tests/fuzz/seeds/$t" --corpus "$out/corpus" --out "$out" \
+        --cpu-hours "$hours" >"$out/fuzz_run.out" 2>&1 &
+    running[$!]="$t"
+    echo "== fuzz_$t: $hours CPU h, output in $out/" >&2
+done
+while [ "${#running[@]}" -gt 0 ]; do
+    reap
+done
+exit "$status"

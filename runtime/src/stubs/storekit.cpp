@@ -97,13 +97,15 @@ void release_transaction(mt_cpu *cpu, u32, void *s) {
 }
 
 const mt_objc_state_type k_request_state = {"SKProductsRequest", sizeof(RequestState),
-                                            release_request};
+                                            release_request, nullptr};
 const mt_objc_state_type k_response_state = {"SKProductsResponse", sizeof(ResponseState),
-                                             release_response};
-const mt_objc_state_type k_product_state = {"SKProduct", sizeof(ProductState), release_product};
-const mt_objc_state_type k_payment_state = {"SKPayment", sizeof(PaymentState), release_payment};
+                                             release_response, nullptr};
+const mt_objc_state_type k_product_state = {"SKProduct", sizeof(ProductState), release_product,
+                                            nullptr};
+const mt_objc_state_type k_payment_state = {"SKPayment", sizeof(PaymentState), release_payment,
+                                            nullptr};
 const mt_objc_state_type k_transaction_state = {"SKPaymentTransaction", sizeof(TransactionState),
-                                                release_transaction};
+                                                release_transaction, nullptr};
 
 template <typename T> T *find(u32 obj, const mt_objc_state_type *type) {
     return static_cast<T *>(mt_objc_find_state(runtime(), obj, type));
@@ -490,20 +492,16 @@ bool load_sk_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> 
 extern const mt_snap::StateOps k_snap_sk_request, k_snap_sk_response, k_snap_sk_product,
     k_snap_sk_payment, k_snap_sk_transaction;
 extern const mt_snap::Module k_snap_storekit;
-const mt_snap::StateOps k_snap_sk_request = {
-    &k_request_state, "SKProductsRequest", save_request, load_request, nullptr, nullptr};
-const mt_snap::StateOps k_snap_sk_response = {
-    &k_response_state, "SKProductsResponse", save_response, load_response, nullptr, nullptr};
+const mt_snap::StateOps k_snap_sk_request = {&k_request_state, "SKProductsRequest", save_request,
+                                             load_request, nullptr};
+const mt_snap::StateOps k_snap_sk_response = {&k_response_state, "SKProductsResponse",
+                                              save_response, load_response, nullptr};
 const mt_snap::StateOps k_snap_sk_product = {&k_product_state, "SKProduct", save_product,
-                                             load_product,     nullptr,     nullptr};
+                                             load_product, nullptr};
 const mt_snap::StateOps k_snap_sk_payment = {&k_payment_state, "SKPayment", save_payment,
-                                             load_payment,     nullptr,     nullptr};
-const mt_snap::StateOps k_snap_sk_transaction = {&k_transaction_state,
-                                                 "SKPaymentTransaction",
-                                                 save_transaction,
-                                                 load_transaction,
-                                                 nullptr,
-                                                 nullptr};
+                                             load_payment, nullptr};
+const mt_snap::StateOps k_snap_sk_transaction = {&k_transaction_state, "SKPaymentTransaction",
+                                                 save_transaction, load_transaction, nullptr};
 const mt_snap::Module k_snap_storekit = {"storekit", save_sk_module, load_sk_module};
 #endif // !MT_HLE_CORE_ONLY
 

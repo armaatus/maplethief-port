@@ -18,6 +18,7 @@
 #include <initializer_list>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "cf/cf_objects.h"
@@ -31,6 +32,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
+#include "maplethief/snapshot.h" // mt_crc32
 #include "maplethief/texpack.h"
 
 namespace {
@@ -1062,6 +1064,93 @@ TEST_CASE("CG: CgBI PNGs decode to straight RGBA like ImageIO; PNG representatio
     CHECK(w.call(mt_hle_UIImagePNGRepresentation, {0}) == 0u);
 }
 
+// fuzz_png's findings (#322): stb_image grew its buffer to an IDAT's stated length before
+// reading it (a 2 GiB allocation from a 60-byte file), and copied an empty first IDAT through a
+// null pointer (UBSan: invalid-null-argument). mt_cg_png_check refuses both first.
+TEST_CASE("CG: a chunk past the file's end or an empty first IDAT is refused before stb_image") {
+    std::vector<u8> small;
+    const std::vector<u8> pixel(4, 0x80);
+    REQUIRE(mt_cg::png_encode(pixel.data(), 1, 1, 4, small));
+    REQUIRE(small.size() > 45);
+    REQUIRE(std::memcmp(small.data() + 37, "IDAT", 4) == 0); // after the signature and IHDR
+    CHECK(mt_cg_png_check(small.data(), small.size()) == nullptr);
+    const auto decode = [](const std::vector<u8> &png) {
+        mt_cg::Decoded d;
+        std::string why;
+        CHECK_FALSE(mt_cg::png_decode(png.data(), png.size(), &d, &why));
+        return why;
+    };
+    // The IDAT claims 2^30 bytes (stb_image's own cap) in a file of a few dozen.
+    std::vector<u8> claiming = small;
+    claiming[33] = 0x40;
+    claiming[34] = claiming[35] = claiming[36] = 0;
+    CHECK(decode(claiming) == "a chunk runs past the end of the file");
+    // Cut inside a chunk: the same.
+    CHECK(decode(std::vector<u8>(small.begin(), small.end() - 5)) ==
+          "a chunk runs past the end of the file");
+    // An empty IDAT before the one with the data: refused.
+    const u8 empty_idat[12] = {0, 0, 0, 0, 'I', 'D', 'A', 'T', 0x35, 0xAF, 0x06, 0x1E};
+    std::vector<u8> empty_first = small;
+    empty_first.insert(empty_first.begin() + 33, empty_idat, empty_idat + 12);
+    CHECK(decode(empty_first) == "an empty IDAT chunk before the image data");
+    // After it: still a good PNG (only the first is a problem).
+    std::vector<u8> empty_after = small;
+    empty_after.insert(empty_after.end() - 12, empty_idat, empty_idat + 12);
+    CHECK(mt_cg_png_check(empty_after.data(), empty_after.size()) == nullptr);
+    mt_cg::Decoded d;
+    CHECK(mt_cg::png_decode(empty_after.data(), empty_after.size(), &d, nullptr));
+    // Not a PNG at all, and bytes after IEND (ignored, as stb_image does).
+    CHECK(mt_cg_png_check(pixel.data(), pixel.size()) != nullptr);
+    std::vector<u8> trailing = small;
+    trailing.push_back(0xFF);
+    CHECK(mt_cg_png_check(trailing.data(), trailing.size()) == nullptr);
+}
+
+TEST_CASE("CG: a PNG over 8,192 pixels a side or 2^24 pixels is refused before decoding (#324)") {
+    const auto decode = [](const std::vector<u8> &png, std::string *why) {
+        mt_cg::Decoded d;
+        why->clear();
+        return mt_cg::png_decode(png.data(), png.size(), &d, why);
+    };
+    // A small PNG whose header then claims another size (its CRC fixed): what a decoder would
+    // allocate for comes from the header alone.
+    std::vector<u8> small;
+    const std::vector<u8> pixel(4, 0x80);
+    REQUIRE(mt_cg::png_encode(pixel.data(), 1, 1, 4, small));
+    const auto claiming = [&](u32 width, u32 height) {
+        std::vector<u8> png = small;
+        for (int i = 0; i < 4; i++) {
+            png[16 + i] = static_cast<u8>(width >> (24 - 8 * i));
+            png[20 + i] = static_cast<u8>(height >> (24 - 8 * i));
+        }
+        const u32 crc = mt_crc32(0, png.data() + 12, 17);
+        for (int i = 0; i < 4; i++) {
+            png[29 + i] = static_cast<u8>(crc >> (24 - 8 * i));
+        }
+        return png;
+    };
+    std::string why;
+    for (const auto &[width, height] : std::vector<std::pair<u32, u32>>{
+             {8193, 1}, {1, 8193}, {8192, 2049}, {4097, 4097}, {8192, 8192}}) {
+        CAPTURE(width);
+        CAPTURE(height);
+        CHECK_FALSE(decode(claiming(width, height), &why));
+        CHECK(why == "image too large");
+    }
+    // A whole, valid PNG of 8,193 x 1: refused as well.
+    std::vector<u8> wide;
+    const std::vector<u8> row(8193u * 4u, 0x40);
+    REQUIRE(mt_cg::png_encode(row.data(), 8193, 1, 4, wide));
+    CHECK_FALSE(decode(wide, &why));
+    CHECK(why == "image too large");
+    // At the limits: decoded.
+    std::vector<u8> edge;
+    const std::vector<u8> line(8192u * 4u, 0x40);
+    REQUIRE(mt_cg::png_encode(line.data(), 8192, 1, 4, edge));
+    CHECK(decode(edge, &why));
+    CHECK(decode(small, &why));
+}
+
 TEST_CASE("CG: the map tile cutter: provider bytes, CGImageCreate, initWithCGImage:, PNG") {
     Cg w;
     golden::Image pattern;
@@ -1105,6 +1194,20 @@ TEST_CASE("CG: the map tile cutter: provider bytes, CGImageCreate, initWithCGIma
     CHECK(logged("CGImageCreate: 16x16 image, 64 bytes per row: no provider or too few bytes"));
     w.call(mt_hle_CGDataProviderRelease, {small});
     w.call(mt_hle_CGImageRelease, {0});
+
+    // Mutable data that shrinks after CGImageCreate checked it (#325): the image has no pixels
+    // to read any more, so it is not read past the data's end.
+    const u32 data = mt_cf::data_create(&w.cpu, tile.data(), static_cast<u32>(tile.size()), true);
+    const u32 shrinking = w.call(mt_hle_CGDataProviderCreateWithCFData, {data});
+    const u32 shrunk_cg =
+        w.call(mt_hle_CGImageCreate, {16, 16, 8, 32, 64, space, info, shrinking, 0, 1, 0});
+    REQUIRE(shrunk_cg != 0u);
+    std::vector<u8> rgba;
+    CHECK(mt_cg::image_rgba(&w.cpu, shrunk_cg, rgba));
+    REQUIRE(mt_cf::data_set_length(&w.cpu, data, 4));
+    CHECK_FALSE(mt_cg::image_rgba(&w.cpu, shrunk_cg, rgba));
+    w.call(mt_hle_CGImageRelease, {shrunk_cg});
+    w.call(mt_hle_CGDataProviderRelease, {shrinking});
 }
 
 TEST_CASE("CG: colorAtPixel:onImage: reads one pixel through a 1x1 copy context") {

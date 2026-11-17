@@ -575,6 +575,7 @@ mt_saves_verdict check_equip(const char *name, const std::uint8_t *p, const char
 }
 
 mt_saves_verdict check_character(const char *name, const std::uint8_t *b, const Why &w) {
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference): mt_saves_check checked the size
     if (b[0] > MT_SAVES_MAX_BRANCH) {
         return MT_BROKEN(w, MT_SAVES_BAD_JOB, "%s: job branch %u; the game has 0-%u", name, b[0],
                          MT_SAVES_MAX_BRANCH);
@@ -736,6 +737,7 @@ mt_saves_verdict check_quest(const char *name, const std::uint8_t *b, const Why 
 
 // config: the two bytes the game uses as table indexes (byte 0, sound, is bits: any value).
 mt_saves_verdict check_config(const std::uint8_t *b, const Why &w) {
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference): mt_saves_check checked the size
     if (b[1] > 2) {
         return MT_BROKEN(w, MT_SAVES_BAD_CONFIG,
                          "config: game speed is %u; the game has speeds 0-2 (3 or more reads past "
@@ -937,6 +939,8 @@ extern "C" const char *mt_saves_verdict_name(mt_saves_verdict verdict) noexcept 
         return "bad_receipts";
     case MT_SAVES_BAD_COUNTERS:
         return "bad_counters";
+    case MT_SAVES_VERDICT_RANGE_:
+        break;
     }
     return "?";
 }

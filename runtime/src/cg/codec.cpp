@@ -7,23 +7,35 @@
 // helper (tests/golden/) can be linked into one program. Inputs are the files of a hash-checked
 // IPA and images the game makes itself; they are parsed, never executed.
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string>
 #include <vector>
 
 #include "cg/cg_objects.h"
 #include "cg/zlib.h"
+#include "maplethief/cg.h"
 
 #define STBI_ONLY_PNG
 #define STBI_NO_STDIO
 #define STB_IMAGE_STATIC
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
 #define STBI_WRITE_NO_STDIO
 #define STB_IMAGE_WRITE_STATIC
+// clang-tidy sees the declarations only: the third-party bodies are not ours to check.
+#if !defined(__clang_analyzer__)
+#define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#endif
+#include <stb_image.h>
 #include <stb_image_write.h>
+#if defined(__clang_analyzer__)
+// The writer's compressor, which the save states use (zlib_deflate), as the implementation has it.
+STBIWDEF unsigned char *stbi_zlib_compress(unsigned char *data, int data_len, int *out_len,
+                                           int quality);
+#define STBIW_FREE(p) std::free(p)
+#endif
 
 namespace mt_cg {
 
@@ -38,6 +50,21 @@ bool png_decode(const u8 *data, std::size_t size, Decoded *out, std::string *err
     stbi_convert_iphone_png_to_rgb_thread(1);
     stbi_set_unpremultiply_on_load_thread(1);
     int w = 0, h = 0, comp = 0;
+    // The header's size first: what the decoder would allocate for (bundle and guest images).
+    if (stbi_info_from_memory(data, static_cast<int>(size), &w, &h, &comp) != 0 &&
+        (static_cast<u32>(w) > k_png_max_side || static_cast<u32>(h) > k_png_max_side ||
+         static_cast<std::uint64_t>(w) * static_cast<std::uint64_t>(h) > k_png_max_pixels)) {
+        if (error != nullptr) {
+            *error = "image too large";
+        }
+        return false;
+    }
+    if (const char *problem = mt_cg_png_check(data, size); problem != nullptr) {
+        if (error != nullptr) {
+            *error = problem;
+        }
+        return false;
+    }
     stbi_uc *pixels = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
     if (pixels == nullptr) {
         if (error != nullptr) {
@@ -55,6 +82,42 @@ bool png_decode(const u8 *data, std::size_t size, Decoded *out, std::string *err
     out->pixels = std::move(bytes);
     return true;
 }
+
+} // namespace mt_cg
+
+extern "C" const char *mt_cg_png_check(const std::uint8_t *data, std::size_t size) noexcept {
+    static constexpr std::uint8_t k_signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+    if (data == nullptr || size < sizeof k_signature ||
+        std::memcmp(data, k_signature, sizeof k_signature) != 0) {
+        return "not a PNG";
+    }
+    const auto be32 = [data](std::size_t at) {
+        return static_cast<std::uint32_t>(data[at]) << 24 |
+               static_cast<std::uint32_t>(data[at + 1]) << 16 |
+               static_cast<std::uint32_t>(data[at + 2]) << 8 | data[at + 3];
+    };
+    bool image_data = false;
+    for (std::size_t at = sizeof k_signature; at < size;) {
+        // Length, type, data, CRC: the 12 bytes around the data, then the data's own.
+        if (size - at < 12 || be32(at) > size - at - 12) {
+            return "a chunk runs past the end of the file";
+        }
+        const std::uint32_t length = be32(at);
+        const char *type = reinterpret_cast<const char *>(data + at + 4);
+        if (std::memcmp(type, "IDAT", 4) == 0) {
+            if (length == 0 && !image_data) {
+                return "an empty IDAT chunk before the image data";
+            }
+            image_data = true;
+        } else if (std::memcmp(type, "IEND", 4) == 0) {
+            break;
+        }
+        at += 12u + length;
+    }
+    return nullptr;
+}
+
+namespace mt_cg {
 
 bool png_info(const u8 *data, std::size_t size, u32 *width, u32 *height) {
     static constexpr u8 k_signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
@@ -119,10 +182,19 @@ bool zlib_deflate(const u8 *data, std::size_t size, std::vector<u8> &out) {
     return true;
 }
 
+namespace {
+bool g_inflate_fail_alloc = false; // zlib_inflate_fail_alloc_for_test
+} // namespace
+
+void zlib_inflate_fail_alloc_for_test(bool on) { g_inflate_fail_alloc = on; }
+
 bool zlib_inflate(const u8 *data, std::size_t size, std::size_t expected, std::vector<u8> &out) {
     out.clear();
     if (size > 0x7FFFFFFFu || expected > 0x7FFFFFFFu) {
         return false;
+    }
+    if (g_inflate_fail_alloc) {
+        throw std::bad_alloc();
     }
     out.resize(expected != 0 ? expected : 1u);
     const int got =

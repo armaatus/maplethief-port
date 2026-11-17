@@ -19,6 +19,7 @@
 #include "cf/cf_hle.h"
 #include "cf/cf_objects.h"
 #include "cg/cg_objects.h"
+#include "cg/zlib.h"
 #include "foundation/foundation.h"
 #include "maplethief/cf.h"
 #include "maplethief/gfx.h"
@@ -364,6 +365,106 @@ TEST_CASE("snapshot: a reader refuses a damaged or foreign state file with its r
     }
 }
 
+TEST_CASE("snapshot: the sections' inflated total is capped before any is inflated (#324)") {
+    // Two sections each under k_max_section, together over k_max_total: the CRCs hold, the
+    // stated lengths are lies. Refused from the lengths alone, so nothing is allocated for them.
+    Bytes b = synthetic_file(false);
+    const SectionAt alpha = first_section(b);
+    const std::size_t beta_name = alpha.data + get_u32(b, alpha.stored);
+    REQUIRE(b[beta_name] == 8u); // "beta.two"
+    const std::size_t beta_raw = beta_name + 1 + 8 + 4;
+    const u32 each = mt_snap::k_max_total / 2u + 1u;
+    REQUIRE(each <= mt_snap::k_max_section);
+    put_u32(b, alpha.raw, each);
+    put_u32(b, beta_raw, each);
+    CHECK(header_why(b).find("section beta.two: the sections come to more than") !=
+          std::string::npos);
+    mt_snapshot_header h{};
+    std::vector<mt_snap::Section> sections;
+    std::string why;
+    CHECK_FALSE(mt_snap::read_state_file(b.data(), b.size(), nullptr, &h, &sections, &why));
+    CHECK(why.find("the sections come to more than") != std::string::npos);
+    CHECK(sections.empty());
+}
+
+TEST_CASE("snapshot: a section named twice or with a bad name is refused (#413)") {
+    const auto read_why = [](const Bytes &b) {
+        mt_snapshot_header h{};
+        std::vector<mt_snap::Section> sections;
+        std::string why;
+        CHECK_FALSE(mt_snap::read_state_file(b.data(), b.size(), nullptr, &h, &sections, &why));
+        CHECK(sections.empty());
+        return why;
+    };
+    {
+        mt_snapshot_header h{};
+        h.format = MT_SNAPSHOT_FORMAT;
+        std::vector<mt_snap::Section> twice;
+        twice.push_back(mt_snap::Section{"alpha", Bytes(10, 1)});
+        twice.push_back(mt_snap::Section{"alpha", Bytes(10, 2)});
+        Bytes b;
+        std::string why;
+        REQUIRE(mt_snap::write_state_file(h, twice, true, &b, &why));
+        CHECK(read_why(b) == "section alpha appears twice");
+    }
+    const Bytes good = synthetic_file(true);
+    REQUIRE(good[104] == 5u); // "alpha"
+    for (const u8 c : {u8(' '), u8(0x7F), u8(0), u8(0xC3)}) {
+        CAPTURE(int(c));
+        Bytes b = good;
+        b[106] = c; // "a?pha": the name is outside every CRC
+        CHECK(read_why(b) == "section 0: malformed name");
+        CHECK(header_why(b) == "section 0: malformed name");
+    }
+    for (const u8 len : {u8(0), u8(mt_snap::k_max_name + 1)}) {
+        CAPTURE(int(len));
+        Bytes b = good;
+        b[104] = len;
+        CHECK(read_why(b) == "section 0: truncated or malformed name");
+    }
+    // A name of k_max_name printable bytes is read.
+    mt_snapshot_header h{};
+    h.format = MT_SNAPSHOT_FORMAT;
+    const std::string longest(mt_snap::k_max_name, '~');
+    std::vector<mt_snap::Section> one;
+    one.push_back(mt_snap::Section{longest, Bytes(4, 7)});
+    Bytes b;
+    std::string why;
+    REQUIRE(mt_snap::write_state_file(h, one, true, &b, &why));
+    std::vector<mt_snap::Section> got;
+    REQUIRE(mt_snap::read_state_file(b.data(), b.size(), nullptr, &h, &got, &why));
+    CHECK(got.at(0).name == longest);
+}
+
+TEST_CASE("snapshot: an allocation that fails while reading a state is a refusal, and nothing "
+          "changes (#413)") {
+    // The inflate's output cannot be allocated: the restore says so and leaves the game as it
+    // was, as for any other refusal. Without the catch, std::bad_alloc left the noexcept
+    // mt_snapshot_restore and terminated the process.
+    World w;
+    mt_cpu &cpu = w.cpu;
+    const u32 str = mt_cf::string_create(&cpu, u"before", true);
+    const Bytes file = save(w);
+    mt_cf::string_mutable_chars(&cpu, str)->assign(u"after");
+    mt_heap_stats now{};
+    mt_heap_get_stats(w.mem, &now);
+    mt_cg::zlib_inflate_fail_alloc_for_test(true);
+    std::string why;
+    CHECK_NOTHROW(why = restore_why(w, file));
+    // The header alone inflates nothing: it still reads.
+    CHECK(header_why(file).empty());
+    mt_cg::zlib_inflate_fail_alloc_for_test(false);
+    CHECK(why == "out of memory while reading the state: nothing changed");
+    mt_heap_stats after{};
+    mt_heap_get_stats(w.mem, &after);
+    CHECK(after.top == now.top);
+    CHECK(after.live_blocks == now.live_blocks);
+    CHECK(w.text(str) == u"after");
+    // With the memory there, the same file restores.
+    CHECK(restore_why(w, file).empty());
+    CHECK(w.text(str) == u"before");
+}
+
 TEST_CASE("snapshot: the safe point refuses outside the field, with a touch, a key or work "
           "pending") {
     World w;
@@ -454,7 +555,7 @@ TEST_CASE("snapshot: the census names every live host state type without a seria
     mt_cf::string_create(&w.cpu, u"a value", false);
     CHECK(mt_snapshot_missing(w.rt, missing, 4) == 0u);
     // A host state type nobody wrote a serializer for: named, and a save refuses.
-    static const mt_objc_state_type k_widget = {"TestWidget", 8, nullptr};
+    static const mt_objc_state_type k_widget = {"TestWidget", 8, nullptr, nullptr};
     const u32 obj = mt_objc_create_instance(w.rt, mt_objc_class_named(w.rt, "NSObject"));
     REQUIRE(mt_objc_state(w.rt, obj, &k_widget) != nullptr);
     REQUIRE(mt_snapshot_missing(w.rt, missing, 4) == 1u);
@@ -673,6 +774,72 @@ TEST_CASE("snapshot: a restore brings back guest memory, the heap, the ObjC tabl
         CHECK(again[i].name == saved[i].name);
         CHECK(again[i].bytes == saved[i].bytes);
     }
+}
+
+TEST_CASE("snapshot: a CFURL whose bundle path leaves the bundle is refused, and nothing "
+          "changes (#324)") {
+    for (const char *rel : {"../../etc/passwd", "/etc/passwd", "Data/../../x", "Data\\..\\..\\x",
+                            "C:/Windows/win.ini", "Data//Map.img", ""}) {
+        CAPTURE(rel);
+        World w;
+        mt_cpu &cpu = w.cpu;
+        const u32 str = mt_cf::string_create(&cpu, u"before", true);
+        const u32 url = mt_cf::url_create(&cpu, rel);
+        REQUIRE(url != 0u);
+        const Bytes file = save(w);
+        mt_cf::string_mutable_chars(&cpu, str)->assign(u"after");
+        mt_heap_stats now{};
+        mt_heap_get_stats(w.mem, &now);
+        CHECK(restore_why(w, file).find("is not a path in the bundle") != std::string::npos);
+        mt_heap_stats after{};
+        mt_heap_get_stats(w.mem, &after);
+        CHECK(after.top == now.top);
+        CHECK(after.live_blocks == now.live_blocks);
+        CHECK(w.text(str) == u"after");
+    }
+    // A path in the bundle comes back.
+    World w;
+    const u32 url = mt_cf::url_create(&w.cpu, "Data/Map.img");
+    const Bytes file = save(w);
+    CHECK(restore_why(w, file).empty());
+    std::string rel;
+    CHECK(mt_cf::url_bundle_path(&w.cpu, url, &rel));
+    CHECK(rel == "Data/Map.img");
+}
+
+TEST_CASE("snapshot: an objc section with autoreleased objects is refused, and nothing changes "
+          "(#323)") {
+    World w;
+    mt_cpu &cpu = w.cpu;
+    const u32 str = mt_cf::string_create(&cpu, u"before", true);
+    const Bytes good = save(w, MT_SNAPSHOT_STORE);
+    mt_snapshot_header h{};
+    std::vector<mt_snap::Section> sections;
+    std::string why;
+    REQUIRE(mt_snap::read_state_file(good.data(), good.size(), nullptr, &h, &sections, &why));
+    auto objc = std::find_if(sections.begin(), sections.end(),
+                             [](const mt_snap::Section &s) { return s.name == "objc"; });
+    REQUIRE(objc != sections.end());
+    // The retains and @synchronized maps (a count, then pairs), then the pool's objects.
+    std::size_t at = 0;
+    for (int map = 0; map < 2; map++) {
+        at += 4 + 8 * std::size_t{get_u32(objc->bytes, at)};
+    }
+    REQUIRE(get_u32(objc->bytes, at) == 0u);
+    put_u32(objc->bytes, at, 1);
+    const u8 object[4] = {static_cast<u8>(str), static_cast<u8>(str >> 8),
+                          static_cast<u8>(str >> 16), static_cast<u8>(str >> 24)};
+    objc->bytes.insert(objc->bytes.begin() + static_cast<std::ptrdiff_t>(at + 4), object,
+                       object + 4);
+    Bytes bad;
+    REQUIRE(mt_snap::write_state_file(h, sections, true, &bad, &why));
+    mt_cf::string_mutable_chars(&cpu, str)->assign(u"after");
+    CHECK(restore_why(w, bad).find("autoreleased objects in a saved state") != std::string::npos);
+    CHECK(w.text(str) == u"after");
+    char safe[160] = {};
+    CHECK(mt_snapshot_safe(&cpu, safe, sizeof safe) == 1);
+    CHECK(restore_why(w, good).empty());
+    CHECK(w.text(str) == u"before");
 }
 
 TEST_CASE("snapshot: a state round-trips through a second restore unchanged") {

@@ -851,8 +851,10 @@ void Focus::refresh(mt_cpu *cpu) {
     if (now_at < 0 && focus_.object != 0) {
         remember(focus_); // a screen opened over it: it gets the focus back when it returns
     }
-    if (reappeared && (best_new < 0 || targets_[static_cast<std::size_t>(back_again)].order >=
-                                           targets_[static_cast<std::size_t>(best_new)].order)) {
+    const bool back_first =
+        reappeared && (best_new < 0 || targets_[static_cast<std::size_t>(back_again)].order >=
+                                           targets_[static_cast<std::size_t>(best_new)].order);
+    if (back_first) { // NOLINT(bugprone-branch-clone): back_again wins here and further down
         now_at = back_again;
     } else if (best_new >= 0) {
         if (now_at >= 0) {

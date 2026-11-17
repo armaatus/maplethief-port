@@ -296,11 +296,17 @@ def decode_indexed(png: bytes, name: str = "<png>") -> Indexed:
     if not plte or len(plte) % 3:
         raise FormatError(f"{name}: missing or bad PLTE ({len(plte)} bytes)")
     stride = (info.width * depth + 7) // 8
+    need = info.height * (stride + 1)
+    # Bounded (#324): at most one byte past what the rows need is ever inflated.
+    inflater = zlib.decompressobj()
     try:
-        raw = zlib.decompress(bytes(idat))
+        raw = inflater.decompress(bytes(idat), need + 1)
     except zlib.error as exc:
         raise FormatError(f"{name}: IDAT does not inflate: {exc}") from None
-    need = info.height * (stride + 1)
+    if len(raw) > need:
+        raise FormatError(f"{name}: IDAT holds more than the {need} bytes {info.height} rows need")
+    if not inflater.eof:
+        raise FormatError(f"{name}: IDAT does not inflate: the stream is cut short")
     if len(raw) != need:
         raise FormatError(f"{name}: IDAT holds {len(raw)} bytes, {info.height} rows need {need}")
     colours = len(plte) // 3

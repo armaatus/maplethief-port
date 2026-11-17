@@ -300,7 +300,11 @@ void counter_destroy(mt_cpu *cpu, u32 obj, void *state) {
     g_destroyed = obj;
     mt_objc_release(cpu, s->delegate);
 }
-const mt_objc_state_type k_counter_state = {"Counter", sizeof(CounterState), counter_destroy};
+// The runtime is going: no message, only the host side (#414).
+std::vector<std::int32_t> g_dropped;
+void counter_drop(void *state) { g_dropped.push_back(static_cast<CounterState *>(state)->total); }
+const mt_objc_state_type k_counter_state = {"Counter", sizeof(CounterState), counter_destroy,
+                                            counter_drop};
 
 // -addValue:(int)v times:(int)n -> int
 void counter_add(mt_cpu *cpu) {
@@ -791,10 +795,13 @@ TEST_CASE("the example host class: arguments, stret, host state, sending from ho
     mt_objc_ref_counts(w.rt, &retained, &autoreleased);
     CHECK(retained >= 1u);
     CHECK(autoreleased == 0u);
-    // dealloc destroys the state (which releases the delegate) and frees the object.
+    // dealloc destroys the state (which releases the delegate) and frees the object; drop is
+    // only for the runtime's teardown.
     g_destroyed = 0;
+    g_dropped.clear();
     w.send(c, "release");
     CHECK(g_destroyed == c);
+    CHECK(g_dropped.empty());
     CHECK(mt_objc_find_state(w.rt, c, &k_counter_state) == nullptr);
     seen = Seen{};
     mt_objc_each_state(w.rt, census, &seen); // a freed state is not listed
@@ -802,6 +809,31 @@ TEST_CASE("the example host class: arguments, stret, host state, sending from ho
     CHECK(mt_objc_retain_count(w.rt, delegate) == 1u);
     CHECK(w.live_size(c) == 0u);
     CHECK(g_log.empty());
+}
+
+TEST_CASE("the runtime's teardown drops the host state of objects still alive (#414)") {
+    g_destroyed = 0;
+    g_dropped.clear();
+    {
+        World w;
+        g_world = &w;
+        REQUIRE(mt_objc_add_host_class(w.rt, &k_counter_class, 0, 0) == 0);
+        const u32 counter_cls = mt_objc_class_named(w.rt, "Counter");
+        const auto thing = w.klass("Thing", w.root(), 8);
+        REQUIRE(w.load() == 0u);
+        const u32 kept = w.send(counter_cls, "new");
+        const u32 gone = w.send(counter_cls, "new");
+        CHECK(w.send(kept, "addValue:times:", {5u, 1u}) == 5u);
+        CHECK(w.send(gone, "addValue:times:", {7u, 1u}) == 7u);
+        w.send(kept, "setDelegate:", {w.send(thing.first, "new")});
+        w.send(gone, "release");
+        CHECK(g_destroyed == gone);
+        g_destroyed = 0;
+        g_world = nullptr;
+    }
+    // The live one's state is dropped once, without -dealloc's destroy (no message to send).
+    CHECK(g_dropped == std::vector<std::int32_t>{5});
+    CHECK(g_destroyed == 0u);
 }
 
 TEST_CASE("undeliverable messages are recorded per (class, selector) and reported to a hook") {

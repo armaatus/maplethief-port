@@ -104,6 +104,7 @@ extern "C" int mt_symbols_load_text(const char *text, std::size_t len,
         const char *eol = static_cast<const char *>(std::memchr(p, '\n', text_end - p));
         const char *end = eol != nullptr ? eol : text_end;
         const char *next = eol != nullptr ? eol + 1 : text_end;
+        // NOLINTNEXTLINE(clang-analyzer-security.ArrayBound): end > p, so end[-1] is in the text
         while (end > p && (end[-1] == '\r' || end[-1] == ' ' || end[-1] == '\t')) {
             end--;
         }
@@ -129,6 +130,7 @@ extern "C" int mt_symbols_load_text(const char *text, std::size_t len,
         s.name = static_cast<std::uint32_t>(pool_len);
         std::memcpy(t.pool + pool_len, p, static_cast<std::size_t>(end - p));
         pool_len += static_cast<std::size_t>(end - p);
+        // NOLINTNEXTLINE(clang-analyzer-security.ArrayBound): names and NULs fit in len + 1 bytes
         t.pool[pool_len++] = '\0';
         p = next;
     }
@@ -172,10 +174,10 @@ extern "C" int mt_symbols_load(const char *path) noexcept {
             cap *= 2u;
         }
         const std::size_t n = std::fread(buf + len, 1, cap - len, f);
-        if (n == 0) {
+        len += n;
+        if (n == 0 || std::feof(f) != 0 || std::ferror(f) != 0) {
             break;
         }
-        len += n;
     }
     const bool failed = std::ferror(f) != 0;
     std::fclose(f);

@@ -58,7 +58,7 @@ static long file_offset(const uint8_t *file, size_t size, uint32_t addr, uint32_
             uint32_t filesize = rd32(file + off + 36);
             if (addr >= vmaddr && (uint64_t)addr - vmaddr + len <= filesize &&
                 (uint64_t)fileoff + filesize <= size) {
-                return (long)(fileoff + (addr - vmaddr));
+                return (long)fileoff + (long)(addr - vmaddr);
             }
         }
         off += cmdsize;

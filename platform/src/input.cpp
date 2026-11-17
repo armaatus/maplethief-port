@@ -276,10 +276,8 @@ bool Input::finger(const SDL_Event &e) {
     std::uint32_t phase = MT_UIKIT_TOUCH_MOVED;
     if (down) {
         phase = MT_UIKIT_TOUCH_BEGAN;
-    } else if (e.type == SDL_EVENT_FINGER_UP) {
-        phase = MT_UIKIT_TOUCH_ENDED;
-    } else if (e.type == SDL_EVENT_FINGER_CANCELED) {
-        phase = MT_UIKIT_TOUCH_ENDED; // an interruption: lifted, not cancelled (input.h)
+    } else if (e.type == SDL_EVENT_FINGER_UP || e.type == SDL_EVENT_FINGER_CANCELED) {
+        phase = MT_UIKIT_TOUCH_ENDED; // an interruption too: lifted, not cancelled (input.h)
     }
     // Normalised to the window (0..1) -> window points.
     int w = 0, h = 0;

@@ -52,14 +52,51 @@ With the generated code, `platform.title_60s` runs `MapleThief --fixed-step 16.6
 
 Step-by-step runs for checking the game by hand are in [docs/testing/](../testing/). The Nintendo Switch's hardware sign-off is [switch-checklist.md](../testing/switch-checklist.md).
 
+## Sanitizers: ASan and UBSan
+
+The `mac-asan` and `linux-asan` presets build our own C and C++ (the runtime, the frontend, the generated code when it is there, and every test) with AddressSanitizer and UndefinedBehaviorSanitizer, and run CTest on it. Any finding aborts its test: there is no recovery ([ADR 0157](../adr/0157-asan-and-ubsan-preset-and-ci-job.md)).
+
+```sh
+cmake --workflow --preset mac-asan       # macOS: configure, build, test
+scripts/test --preset mac-asan --cpp-only
+scripts/test-linux --arch arm64 -- --preset linux-asan --cpp-only   # Linux, in the container
+```
+
+- **The guest memory model is checked** (`MAPLETHIEF_MEM_MODEL=checked`, [ADR 0025](../adr/0025-guest-memory-and-address-space.md)): every guest access is bounds-checked against the arena before it becomes a host pointer, so a bad guest address traps with its PC instead of reaching ASan's signal handler. The arena itself is one mapping, so ASan does not see an overflow from one guest object into the next; that is the game's memory, not ours.
+- **SDL keeps its own flags.** Only targets added after it are instrumented. ASan's allocator still covers every `malloc` and `new`, SDL's included.
+- **Timeouts** are four times the usual (`MAPLETHIEF_TEST_TIMEOUT_SCALE`): a sanitized test runs a few times slower.
+- **Options** come from the test presets (`asan-base` in `CMakePresets.json`): `halt_on_error`, `abort_on_error`, `detect_stack_use_after_return`, `strict_string_checks`, `check_initialization_order` for ASan, and `print_stacktrace` for UBSan. LeakSanitizer is on (Linux's default; macOS has none): a test that leaks fails. Host state owned by objects still alive when a runtime is destroyed is freed by its type's `drop` ([#414](https://github.com/armaatus/maplethief-port/issues/414)). The Linux portability check, `platform.linux_portable`, is not registered in a sanitized build.
+- **Suppressions.** None are needed today. If one ever is, it goes in `tests/sanitizers/<tool>.supp` with a comment above each entry giving its reason, and the preset points `ASAN_OPTIONS` or `LSAN_OPTIONS` at it; `tests/test_sanitizer_suppressions.py` fails on an entry without one. UBSan cannot suppress a check that does not recover, so its findings are always fixed.
+- **The SjLj unwinder** ([ADR 0020](../adr/0020-sjlj-exceptions.md)) uses the host's `setjmp` and `longjmp`. ASan's `longjmp` interceptor clears the shadow of the frames it skips, so the unwinder needs nothing extra.
+- **With the generated code** (your own `work/gen/`, local only) the presets also build `play_real_test`, so the real-asset runs work under ASan: `ctest --preset mac-asan -R '^play\.regress$'`. On an Apple M4, `play.regress` took 80.5 s and `play.chapter_1_a` 360.9 s (2026-11-13), both clean.
+
+## Fuzzing
+
+Each parser of a file a player can supply ([ADR 0154](../adr/0154-threat-model-for-player-supplied-files.md)) has a [libFuzzer](https://llvm.org/docs/LibFuzzer.html) target in `tests/fuzz/`, built with clang, ASan and UBSan by the `linux-fuzz` preset ([ADR 0158](../adr/0158-libfuzzer-targets-and-the-fuzz-smoke.md)). The targets, and how to add one, are in [tests/fuzz/README.md](../../tests/fuzz/README.md).
+
+```sh
+scripts/fuzz --list                 # the targets
+scripts/fuzz png --hours 1          # one target for an hour of CPU time
+scripts/fuzz all --hours 1 --jobs 4 # every target, one process each, four at a time
+cmake --workflow --preset linux-fuzz    # on Linux: the CI smoke, 30 s per target
+```
+
+- **On a Mac** Apple's clang has no libFuzzer, so `scripts/fuzz` runs itself in the pinned Linux container ([below](#the-linux-container)), arm64 by default (`--arch amd64` for CI's architecture under Rosetta). It needs OrbStack or Docker Desktop. On Linux it runs here, with clang and `libclang-rt-dev` (or your distribution's clang runtime package).
+- **Hours are CPU hours**: a run goes on until its process has used them, however busy the machine is. Each run appends its CPU and wall time, the inputs it tried and its exit code to `build/fuzz/NAME/runs.jsonl`; those are the times a pull request quotes.
+- **The corpus** grows in `build/fuzz/NAME/corpus/` from run to run. The seeds come from `tests/fuzz/seeds/NAME.py`: synthetic, never a game file, and nothing from a corpus is committed.
+- **A finding** stops the run and leaves its input in `build/fuzz/NAME/` (`crash-…`, `leak-…`, `timeout-…`, `oom-…`). Reproduce it with `build/linux-fuzz-arm64/tests/fuzz/fuzz_NAME build/fuzz/NAME/crash-…` in the container, then turn it into a regression test in `tests/cpp/` before fixing the parser.
+- **LeakSanitizer is on** while fuzzing, as in the test presets: a parser must not leak per input.
+
 ## Before you push
 
 Run the quick local check ([ADR 0126](../adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md)):
 
 ```sh
-scripts/lint                            # formatters and linters, on tracked files
+scripts/lint                            # formatters and linters, on tracked files, and clang-tidy
 cmake --workflow --preset mac-debug     # or scripts/test, which adds the Python tests
 ```
+
+`scripts/lint` runs clang-tidy over `runtime/` and `platform/` ([ADR 0002](../adr/0002-language-and-toolchain.md)'s addendum): it configures the host's Debug preset into `build/tidy` for the compile database (the first time takes about a minute) and checks every translation unit in parallel, a minute and a half to three minutes on a 10-core Mac. `scripts/lint --no-tidy` skips it for a quick pass. Check one file with `uvx clang-tidy@23.1.3 -p build/tidy <file>` (on macOS add `--extra-arg=-isysroot$(xcrun --show-sdk-path)`). A finding is fixed, or marked on its line with `// NOLINT(check-name): the reason`; a check that is wrong for this code is disabled in `.clang-tidy` with its reason.
 
 Add the real-asset tests your change touches, since CI can't run them. The Mac build has clang warnings that match MSVC's (`-Wshadow` and the int and float conversions), so a clean Mac build is the best local stand-in for Windows.
 
@@ -97,8 +134,8 @@ Windows has no container: run `scripts\test.ps1` (Debug and pytest) and `scripts
 
 | Pull request into | Runs |
 |---|---|
-| `dev` | lint and Python 3.10 and latest (Linux), the Linux Debug build with the C/C++ tests, and the Switch NRO |
-| `main` | lint and Python, and Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux |
+| `dev` | lint and Python 3.10 and latest (Linux), the Linux Debug build with the C/C++ tests, the same tests under ASan and UBSan with the fuzz smoke, and the Switch NRO |
+| `main` | lint and Python, Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux, and the ASan and UBSan tests |
 | manual run | the full set, Release unless its `release` input is off |
 
 GitHub's hosted runners are free for this public repository, so use them. To run all three OSes on any branch:
@@ -111,7 +148,9 @@ gh run watch
 A pull request is merged only when its checks are green (`gh pr checks --watch`).
 
 - **The `build` jobs** run the same `scripts/test` and `scripts/test.ps1` as above: the Debug build, CTest (including the headless `platform.smoke`) and pytest, with warnings as errors. The Release jobs run the release workflows and package the kits; the universal binary must contain both `arm64` and `x86_64`.
-- **The `lint + Python min/latest` job** (Linux) runs `scripts/lint`, then `scripts/test --python-only` on Python 3.10 and the latest Python, and the guard that no compendium output is tracked ([ADR 0121](../adr/0121-public-compendium-site.md)).
+- **The `asan` job** (Linux, on every pull request and manual run that builds) runs the `linux-asan` workflow: the C/C++ tests built with clang under ASan and UBSan, no recovery, the guest memory model checked ([Sanitizers](#sanitizers-asan-and-ubsan)). Then the fuzz smoke: the `linux-fuzz` workflow runs every target of `tests/fuzz/` for 30 s from its seeds ([Fuzzing](#fuzzing)); a finding fails the job, and its input is in the uploaded `build/test-output/linux-fuzz/fuzz/NAME/`.
+- **The `lint (clang-tidy)` job** (Linux, on every pull request and manual run that builds) runs `scripts/lint` in full, clang-tidy included, after installing the SDL3 build dependencies and clang for the compile database. It runs beside the build jobs and takes about 6 minutes, most of it clang-tidy.
+- **The `lint + Python min/latest` job** (Linux) runs `scripts/lint --no-tidy`, then `scripts/test --python-only` on Python 3.10 and the latest Python, and the guard that no compendium output is tracked ([ADR 0121](../adr/0121-public-compendium-site.md)).
 - **The `ios` job** (macOS, on the runs that build every OS: the release pull request and manual runs) runs the `ios-ci` workflow: our own code for iOS arm64, Debug and Release, no IPA and no signing. It links the frontend and runtime into the placeholder shell and checks the app is arm64 ([ADR 0136](../adr/0136-ios-app-through-xcode.md)). The game itself and a device are local.
 - **The `switch` job** (Linux, on every pull request and manual run) runs `scripts/build-switch HEAD --preset switch-release --arch amd64`: `MapleThief.nro` from our own code in the devkitA64 image pinned by digest, no IPA. Its CTest checks read the NRO's NACP and icon (`platform.switch_nro`) and run the release guard on it (`platform.switch_guard`). It also builds every test NRO, `MapleThiefTests.nro` among them. A console is never involved: hardware runs are local, with `scripts/switch-run` and `scripts/switch-test` ([ADR 0138](../adr/0138-nintendo-switch-homebrew-target.md)).
 - **Docs-only changes.** A pull request that touches only documentation or compendium work skips the build jobs, and one whose native changes only touch another platform's own files (`platform/macos/`, `scripts/*.ps1`, the Linux containers, …) skips the `switch` job. `scripts/ci-scope` decides, from an allow-list ([ADR 0006](../adr/0006-continuous-integration.md)'s addendum).

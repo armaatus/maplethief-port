@@ -40,8 +40,11 @@ bool write_state_file(const mt_snapshot_header &header, const std::vector<Sectio
     w.u32(static_cast<u32>(sections.size()));
     w.u32(mt_crc32(0, w.bytes().data(), w.bytes().size()));
     std::vector<std::uint8_t> packed;
+    std::uint64_t total = 0; // a reader refuses more than k_max_total
     for (const Section &s : sections) {
-        if (s.name.empty() || s.name.size() > k_max_name || s.bytes.size() > k_max_section) {
+        total += s.bytes.size();
+        if (s.name.empty() || s.name.size() > k_max_name || s.bytes.size() > k_max_section ||
+            total > k_max_total) {
             *why = "section " + s.name + " cannot be written (" + std::to_string(s.bytes.size()) +
                    " bytes)";
             return false;
@@ -121,7 +124,15 @@ bool read_state_file(const std::uint8_t *bytes, std::size_t size, const mt_snaps
         *why = "a partial state (host states left out): it cannot be restored";
         return false;
     }
-    std::vector<Section> out;
+    // Every section's header, CRC and length first, and their total: only then is any inflated
+    // (#324).
+    struct Stored {
+        std::string name;
+        u32 flags, raw_len, stored_len;
+        const std::uint8_t *bytes;
+    };
+    std::vector<Stored> stored_sections;
+    std::uint64_t total = 0; // the payloads' lengths so far
     for (u32 i = 0; i < h.sections; i++) {
         std::uint8_t name_len = 0;
         u32 flags = 0, raw_len = 0, stored_len = 0, sum = 0;
@@ -147,6 +158,12 @@ bool read_state_file(const std::uint8_t *bytes, std::size_t size, const mt_snaps
             *why = "section " + name + ": oversized (" + std::to_string(raw_len) + " bytes)";
             return false;
         }
+        total += raw_len;
+        if (total > k_max_total) {
+            *why = "section " + name + ": the sections come to more than " +
+                   std::to_string(k_max_total) + " bytes";
+            return false;
+        }
         if ((flags & ~k_section_deflated) != 0 ||
             ((flags & k_section_deflated) == 0 && stored_len != raw_len)) {
             *why = "section " + name + ": malformed lengths or flags";
@@ -165,27 +182,31 @@ bool read_state_file(const std::uint8_t *bytes, std::size_t size, const mt_snaps
         if (sections == nullptr) {
             continue;
         }
-        Section s;
-        s.name = std::move(name);
-        if ((flags & k_section_deflated) != 0) {
-            if (!mt_cg::zlib_inflate(stored, stored_len, raw_len, s.bytes)) {
-                *why = "section " + s.name + ": does not inflate to its length";
-                return false;
-            }
-        } else {
-            s.bytes.assign(stored, stored + stored_len);
-        }
-        for (const Section &e : out) {
-            if (e.name == s.name) {
-                *why = "section " + s.name + " appears twice";
+        for (const Stored &e : stored_sections) {
+            if (e.name == name) {
+                *why = "section " + name + " appears twice";
                 return false;
             }
         }
-        out.push_back(std::move(s));
+        stored_sections.push_back(Stored{std::move(name), flags, raw_len, stored_len, stored});
     }
     if (r.left() != 0) {
         *why = std::to_string(r.left()) + " bytes after the last section";
         return false;
+    }
+    std::vector<Section> out;
+    for (Stored &e : stored_sections) {
+        Section s;
+        s.name = std::move(e.name);
+        if ((e.flags & k_section_deflated) != 0) {
+            if (!mt_cg::zlib_inflate(e.bytes, e.stored_len, e.raw_len, s.bytes)) {
+                *why = "section " + s.name + ": does not inflate to its length";
+                return false;
+            }
+        } else {
+            s.bytes.assign(e.bytes, e.bytes + e.stored_len);
+        }
+        out.push_back(std::move(s));
     }
     *header = h;
     if (sections != nullptr) {

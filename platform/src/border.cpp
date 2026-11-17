@@ -5,7 +5,10 @@
 
 #include <algorithm>
 #include <cstring>
+#include <new>
 #include <utility>
+
+#include "maplethief/cg.h"
 
 // The pinned stb_image (ADR 0003), a private copy (static linkage) for the player's border art:
 // PNG only, from memory, no larger than the limits allow.
@@ -15,7 +18,10 @@
 #define STBI_NO_LINEAR
 #define STBI_MAX_DIMENSIONS 8192
 #define STB_IMAGE_STATIC
+// clang-tidy sees the declarations only: the third-party bodies are not ours to check.
+#if !defined(__clang_analyzer__)
 #define STB_IMAGE_IMPLEMENTATION
+#endif
 #include <stb_image.h>
 
 namespace maplethief::frontend {
@@ -76,15 +82,23 @@ bool decode_border_image(const std::uint8_t *data, std::size_t size, BorderImage
         return fail(std::to_string(w) + "x" + std::to_string(h) + " is larger than " +
                     std::to_string(kMaxBorderImageSide) + " a side or 7680x4320 in all");
     }
+    if (const char *problem = mt_cg_png_check(data, size); problem != nullptr) {
+        return fail(std::string("the PNG is broken (") + problem + ")");
+    }
     stbi_uc *pixels = stbi_load_from_memory(data, len, &w, &h, &comp, 4);
     if (pixels == nullptr) {
         return fail(std::string("the PNG is broken (") + stbi_failure_reason() + ")");
     }
+    const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4;
+    try {
+        out->rgba.assign(pixels, pixels + n);
+    } catch (const std::bad_alloc &) {
+        stbi_image_free(pixels);
+        return fail("out of memory");
+    }
+    stbi_image_free(pixels);
     out->width = static_cast<std::uint32_t>(w);
     out->height = static_cast<std::uint32_t>(h);
-    const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4;
-    out->rgba.assign(pixels, pixels + n);
-    stbi_image_free(pixels);
     return true;
 }
 
@@ -109,13 +123,23 @@ bool load_border_image(const std::string &path, BorderImage *out, std::string *w
                              : "the file is over " + std::to_string(kMaxBorderImageBytes >> 20) +
                                    " MiB");
     }
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
-    const std::size_t got = bytes.empty() ? 0 : SDL_ReadIO(io, bytes.data(), bytes.size());
-    SDL_CloseIO(io);
-    if (got != bytes.size()) {
-        return fail("cannot read it");
+    // The art is untrusted (ADR 0154): an allocation that fails is a refusal, not an exception
+    // out of the frame (#413).
+    try {
+        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+        const std::size_t got = bytes.empty() ? 0 : SDL_ReadIO(io, bytes.data(), bytes.size());
+        SDL_CloseIO(io);
+        io = nullptr;
+        if (got != bytes.size()) {
+            return fail("cannot read it");
+        }
+        return decode_border_image(bytes.data(), bytes.size(), out, why);
+    } catch (const std::bad_alloc &) {
+        if (io != nullptr) {
+            SDL_CloseIO(io);
+        }
+        return fail("out of memory");
     }
-    return decode_border_image(bytes.data(), bytes.size(), out, why);
 }
 
 // --- Border -----------------------------------------------------------------------------------
@@ -305,9 +329,20 @@ bool Border::draw(SDL_Renderer *renderer, SDL_Texture *screen, int screen_w, int
     if (!ensure_art(renderer)) {
         return true; // the border colour (logged)
     }
+    // Only the part of the art that covers the output, drawn over the output: a long, thin
+    // image's cover rectangle can be a million pixels long, which SDL's software renderer
+    // cannot blit (#413).
     const Rect c = cover_rect(output_w, output_h, art_w_, art_h_);
-    const SDL_FRect dst{c.x, c.y, c.w, c.h};
-    if (!SDL_RenderTexture(renderer, art_, nullptr, &dst)) {
+    if (c.w <= 0 || c.h <= 0) {
+        drawn_ = BorderMode::kImage; // no output: nothing to cover
+        return true;
+    }
+    const float sx = static_cast<float>(art_w_) / c.w;
+    const float sy = static_cast<float>(art_h_) / c.h;
+    const SDL_FRect src{-c.x * sx, -c.y * sy, static_cast<float>(output_w) * sx,
+                        static_cast<float>(output_h) * sy};
+    const SDL_FRect dst{0, 0, static_cast<float>(output_w), static_cast<float>(output_h)};
+    if (!SDL_RenderTexture(renderer, art_, &src, &dst)) {
         SDL_Log("present: border image failed: %s", SDL_GetError());
         return false;
     }

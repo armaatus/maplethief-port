@@ -1,0 +1,8 @@
+# RIFF/WAVE chunk ids (runtime/src/audio/wav.cpp)
+"RIFF"
+"WAVE"
+"fmt "
+"data"
+"smpl"
+"LIST"
+"\x01\x00"

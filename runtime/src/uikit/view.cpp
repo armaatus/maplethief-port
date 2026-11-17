@@ -26,7 +26,11 @@ namespace {
 // --- host state ----------------------------------------------------------------------------------
 
 void view_destroy(mt_cpu *cpu, u32 obj, void *block);
-const mt_objc_state_type k_view_state = {"UIView", sizeof(View *), view_destroy};
+void drop_view(void *state) {
+    delete *static_cast<View **>(state);
+    *static_cast<View **>(state) = nullptr;
+}
+const mt_objc_state_type k_view_state = {"UIView", sizeof(View *), view_destroy, drop_view};
 
 void release_all(mt_cpu *cpu, View *v) {
     mt_objc_release(cpu, v->background);
@@ -756,7 +760,7 @@ struct LayerState {
 void layer_destroy(mt_cpu *cpu, u32, void *block) {
     mt_objc_release(cpu, static_cast<LayerState *>(block)->drawable_properties);
 }
-const mt_objc_state_type k_layer_state = {"CALayer", sizeof(LayerState), layer_destroy};
+const mt_objc_state_type k_layer_state = {"CALayer", sizeof(LayerState), layer_destroy, nullptr};
 
 LayerState *layer_state(mt_cpu *cpu, u32 layer) {
     return layer != 0
@@ -1408,11 +1412,6 @@ bool load_view(mt_cpu *, u32 obj, void *state, mt_snap::Reader &r) {
     return true;
 }
 
-void drop_view(void *state) {
-    delete *static_cast<View **>(state);
-    *static_cast<View **>(state) = nullptr;
-}
-
 bool save_layer(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
     const auto *s = static_cast<const LayerState *>(state);
     w.u32(s->view);
@@ -1428,10 +1427,8 @@ bool load_layer(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
 } // namespace
 
 extern const mt_snap::StateOps k_snap_view, k_snap_layer;
-const mt_snap::StateOps k_snap_view = {&k_view_state, "UIView",  save_view,
-                                       load_view,     drop_view, nullptr};
-const mt_snap::StateOps k_snap_layer = {&k_layer_state, "CALayer", save_layer,
-                                        load_layer,     nullptr,   nullptr};
+const mt_snap::StateOps k_snap_view = {&k_view_state, "UIView", save_view, load_view, nullptr};
+const mt_snap::StateOps k_snap_layer = {&k_layer_state, "CALayer", save_layer, load_layer, nullptr};
 
 } // namespace mt_ui
 

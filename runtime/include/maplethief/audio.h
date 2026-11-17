@@ -81,6 +81,10 @@ typedef enum mt_audio_bus {
     MT_AUDIO_BUS_MASTER = 0,
     MT_AUDIO_BUS_MUSIC = 1,
     MT_AUDIO_BUS_EFFECTS = 2,
+    /* Not a bus: widens the enum to every int, so that the runtime's C++ may read any value a C
+     * caller passes and reject it (C++ leaves a value past the enumerators undefined; UBSan's
+     * invalid-enum-load, #321). */
+    MT_AUDIO_BUS_RANGE_ = 0x7FFFFFFF
 } mt_audio_bus;
 #define MT_AUDIO_BUS_COUNT 3u
 
@@ -162,6 +166,7 @@ bool mt_audio_get_gapless_music(void) MT_NOEXCEPT;
 #define MT_AUDIO_PACK_MAX_RATE 192000u        /* Hz */
 #define MT_AUDIO_PACK_MAX_EFFECT_SECONDS 60u  /* an effect's length */
 #define MT_AUDIO_PACK_MAX_MUSIC_SECONDS 1800u /* a track's length (30 minutes) */
+#define MT_AUDIO_PACK_MAX_FILES 65536u        /* files indexed (#413); the rest skipped, logged */
 
 typedef struct mt_audio_pack_stats {
     uint32_t files;            /* sound files indexed (.wav, .mp3 and .flac) */

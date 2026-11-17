@@ -38,7 +38,10 @@
 #include "textpack/textpack_internal.h"
 
 #define STBTT_STATIC
+// clang-tidy sees the declarations only: the third-party bodies are not ours to check.
+#if !defined(__clang_analyzer__)
 #define STB_TRUETYPE_IMPLEMENTATION
+#endif
 #include <stb_truetype.h>
 
 // The font files' bytes, generated from the pinned downloads (cmake/Dependencies.cmake).
@@ -75,6 +78,8 @@ const FontFile *font_file() { return load(g_font, mt_cg_font_data, mt_cg_font_si
 
 // The font that draws `cp`: NanumGothic if it has a glyph for it, else the fallback if that
 // has one, else NanumGothic (its missing glyph: nothing is drawn, the advance is its own).
+// Fonts are loaded once and live as long as the process, so the reference never dangles.
+// NOLINTBEGIN(bugprone-return-const-ref-from-parameter)
 const FontFile &face_for(const FontFile &primary, int cp) {
     if (stbtt_FindGlyphIndex(&primary.info, cp) != 0) {
         return primary;
@@ -82,6 +87,7 @@ const FontFile &face_for(const FontFile &primary, int cp) {
     const FontFile *fb = load(g_fallback, mt_cg_fallback_font_data, mt_cg_fallback_font_size);
     return fb != nullptr && stbtt_FindGlyphIndex(&fb->info, cp) != 0 ? *fb : primary;
 }
+// NOLINTEND(bugprone-return-const-ref-from-parameter)
 
 // Font units -> points at size `size`.
 float units_to_points(const FontFile &f, float size) {
@@ -135,7 +141,7 @@ std::vector<float> advances(const FontFile &f, const std::vector<int> &cps, floa
 struct FontState {
     Font font;
 };
-const mt_objc_state_type k_font_state = {"UIFont", sizeof(FontState), nullptr};
+const mt_objc_state_type k_font_state = {"UIFont", sizeof(FontState), nullptr, nullptr};
 
 // The iOS 4 font names the port knows (the game's three, the system fonts, Hangul's
 // AppleGothic, and close relatives); `bold` faces are synthesized. +fontWithName:size: returns
@@ -413,7 +419,6 @@ bool load_font(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
 } // namespace
 
 extern const mt_snap::StateOps k_snap_font;
-const mt_snap::StateOps k_snap_font = {&k_font_state, "UIFont", save_font,
-                                       load_font,     nullptr,  nullptr};
+const mt_snap::StateOps k_snap_font = {&k_font_state, "UIFont", save_font, load_font, nullptr};
 
 } // namespace mt_cg

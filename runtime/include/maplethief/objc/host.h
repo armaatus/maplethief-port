@@ -141,7 +141,9 @@ uint32_t mt_objc_retain_count(const mt_objc *rt, uint32_t obj) MT_NOEXCEPT;
  * (object, type), zeroed when created, freed after `destroy` when the object is deallocated
  * (-[NSObject dealloc], i.e. after the subclasses' -dealloc ran). Each class of a host
  * hierarchy can have its own type (UIView's state and UILabel's state of one object are two
- * entries). Host pointers to state stay valid until the object is deallocated. */
+ * entries). Host pointers to state stay valid until the object is deallocated. The states of
+ * objects still alive when the runtime is destroyed get `drop` instead, as do those a save
+ * state's restore replaces (#414, ADR 0157). */
 
 typedef struct mt_objc_state_type {
     const char *name; /* for logs */
@@ -149,6 +151,11 @@ typedef struct mt_objc_state_type {
     /* Runs at dealloc with the state, before its memory is freed; may send messages (e.g.
      * release the guest objects the state holds). NULL: nothing to do. */
     void (*destroy)(mt_cpu *cpu, uint32_t obj, void *state);
+    /* Frees the host memory the state owns without calling into the guest: no messages, no
+     * guest memory (it is being torn down or replaced wholesale). Runs instead of `destroy`
+     * when the runtime is destroyed (mt_objc_destroy) and when a restore replaces the state,
+     * never after `destroy`. NULL when the block owns no host memory. */
+    void (*drop)(void *state);
 } mt_objc_state_type;
 
 /* The state of `type` for `obj`, created (zeroed) on first use; NULL if out of memory. */

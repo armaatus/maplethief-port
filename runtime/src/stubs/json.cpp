@@ -11,11 +11,13 @@ namespace mt_stubs_impl {
 namespace {
 
 constexpr int k_max_depth = 64;
+static_assert(k_json_max_elements == 4096, "the error message names the limit");
 
 struct Parser {
     const char *p;
     const char *end;
     const char *error;
+    std::uint32_t elements; // array items and object members so far (k_json_max_elements)
 };
 
 void skip_space(Parser &ps) {
@@ -150,17 +152,32 @@ bool parse_string(Parser &ps, char **out) {
                     std::free(b.data);
                     return false;
                 }
-                if (cp >= 0xD800 && cp < 0xDC00 && ps.end - ps.p >= 6 && ps.p[0] == '\\' &&
-                    ps.p[1] == 'u') {
-                    const char *save = ps.p;
-                    ps.p += 2;
+                // A surrogate only as a high one followed by a low one: alone, it has no UTF-8
+                // form, and encoding it anyway gave invalid UTF-8 (#323).
+                if (cp >= 0xD800 && cp < 0xDC00) {
                     std::uint32_t lo = 0;
-                    if (hex4(ps, &lo) && lo >= 0xDC00 && lo < 0xE000) {
-                        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
-                    } else {
-                        ps.p = save;
-                        ps.error = nullptr;
+                    if (ps.end - ps.p < 6 || ps.p[0] != '\\' || ps.p[1] != 'u') {
+                        std::free(b.data);
+                        return fail(ps, "lone surrogate");
                     }
+                    ps.p += 2;
+                    if (!hex4(ps, &lo)) {
+                        std::free(b.data);
+                        return false;
+                    }
+                    if (lo < 0xDC00 || lo >= 0xE000) {
+                        std::free(b.data);
+                        return fail(ps, "lone surrogate");
+                    }
+                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                } else if (cp >= 0xDC00 && cp < 0xE000) {
+                    std::free(b.data);
+                    return fail(ps, "lone surrogate");
+                }
+                if (cp == 0) {
+                    // It would cut the C string every reader of the value sees (#413).
+                    std::free(b.data);
+                    return fail(ps, "\\u0000 in string");
                 }
                 ok = put_utf8(b, cp);
                 break;
@@ -277,6 +294,10 @@ bool parse_container(Parser &ps, JsonValue *v, int depth, bool object) {
             }
             ps.p++;
         }
+        if (++ps.elements > k_json_max_elements) {
+            std::free(key);
+            return fail(ps, "more than 4096 elements");
+        }
         JsonValue *item = add_item(v, key);
         if (item == nullptr) {
             std::free(key);
@@ -359,7 +380,7 @@ void append(JsonOut *o, const char *text, std::size_t n) {
 
 bool json_parse(const char *text, std::size_t size, JsonValue *out, const char **error) {
     std::memset(out, 0, sizeof *out);
-    Parser ps{text, text + size, nullptr};
+    Parser ps{text, text + size, nullptr, 0};
     bool ok = parse_value(ps, out, 0);
     if (ok) {
         skip_space(ps);

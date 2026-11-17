@@ -22,6 +22,7 @@
 #include "border.h"
 #include "present.h"
 #include "scaling.h"
+#include "sdl_log_capture.h"
 #include "settings.h"
 
 namespace {
@@ -311,6 +312,27 @@ TEST_CASE("border: a PNG within the limits decodes; hostile and oversized ones a
     CHECK(why.find("cannot open") != std::string::npos);
     CHECK_FALSE(fe::load_border_image("", &from_file, &why));
     SDL_Quit();
+}
+
+// fuzz_border's finding (#322): an empty first IDAT reached stb_image's copy through a null
+// pointer (UBSan: invalid-null-argument), and an IDAT may claim more bytes than the file has.
+TEST_CASE("border: a chunk past the file's end or an empty first IDAT is refused (#322)") {
+    std::vector<std::uint8_t> rgba(4 * 4 * 4, 0x60);
+    const std::vector<std::uint8_t> png = encode_png(4, 4, rgba);
+    REQUIRE(std::memcmp(png.data() + 37, "IDAT", 4) == 0);
+    const auto refused = [](const std::vector<std::uint8_t> &bytes, const char *reason) {
+        fe::BorderImage out;
+        std::string why;
+        CHECK_FALSE(fe::decode_border_image(bytes.data(), bytes.size(), &out, &why));
+        CHECK_MESSAGE(why.find(reason) != std::string::npos, why);
+    };
+    std::vector<std::uint8_t> claiming = png;
+    claiming[33] = 0x3F;
+    refused(claiming, "a chunk runs past the end of the file");
+    const std::uint8_t empty_idat[12] = {0, 0, 0, 0, 'I', 'D', 'A', 'T', 0x35, 0xAF, 0x06, 0x1E};
+    std::vector<std::uint8_t> empty_first = png;
+    empty_first.insert(empty_first.begin() + 33, empty_idat, empty_idat + 12);
+    refused(empty_first, "an empty IDAT chunk before the image data");
 }
 
 TEST_CASE("settings: border is color (the default), blur or image; border_image a file (#157)") {
@@ -673,6 +695,58 @@ TEST_CASE("border: a new render scale keeps the art (not read again), a new rend
     REQUIRE(p.draw());
     CHECK(p.border().drawn() == BorderMode::kColor);
     p.stop();
+}
+
+TEST_CASE("border: art larger than the renderer's largest texture is refused, either side; long "
+          "thin art is drawn (#413)") {
+    const fs::path dir = fs::path(output_dir()) / "border_test";
+    fs::create_directories(dir);
+    // A largest texture of 4,096 (the Presenter's own textures fit), and art 4,096 and 4,097
+    // texels long, 8 across. The 8 x 4,096 one covers 1920 x 1080 with a rectangle 983,040
+    // pixels tall, which crashed SDL's software renderer until only its visible part was drawn.
+    constexpr int kMax = 4096;
+    const fs::path wide = dir / "border_art_wide.png";
+    const fs::path tall = dir / "border_art_tall.png";
+    const fs::path wider = dir / "border_art_wider.png";
+    const fs::path taller = dir / "border_art_taller.png";
+    {
+        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+        REQUIRE(SDL_Init(0));
+        const std::vector<std::uint8_t> art(static_cast<std::size_t>(kMax + 1) * 8 * 4, 200);
+        write_file(wide, encode_png(kMax, 8, art));
+        write_file(tall, encode_png(8, kMax, art));
+        write_file(wider, encode_png(kMax + 1, 8, art));
+        write_file(taller, encode_png(8, kMax + 1, art));
+        SDL_Quit();
+    }
+    Window w(1920, 1080);
+    // The software renderer states no largest texture; a GPU renderer does (SDL's
+    // SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, 16,384 on Direct3D and Vulkan), so the test
+    // states one for it.
+    const SDL_PropertiesID props = SDL_GetRendererProperties(w.renderer);
+    REQUIRE(SDL_SetNumberProperty(props, SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, kMax));
+    const std::vector<std::uint8_t> image = unique_image(480, 320);
+    const auto drawn = [&](const fs::path &png) {
+        fe::Presenter p; // a new one: the art is read again
+        REQUIRE(p.start(w.renderer, 480, 320));
+        p.set_border(BorderMode::kImage, png.string());
+        REQUIRE(p.upload(image.data(), 480 * 4));
+        REQUIRE(p.draw());
+        const BorderMode mode = p.border().drawn();
+        p.stop();
+        return mode;
+    };
+    CHECK(drawn(wide) == BorderMode::kImage); // the long side at the largest
+    CHECK(drawn(tall) == BorderMode::kImage);
+    for (const fs::path &png : {wider, taller}) { // one texel over
+        const std::string name = png.filename().string();
+        CAPTURE(name);
+        const SdlLogCapture log;
+        CHECK(drawn(png) == BorderMode::kColor);
+        CHECK(log.has("is larger than the software renderer's largest texture (4096): the bars "
+                      "are the border colour"));
+    }
+    REQUIRE(SDL_SetNumberProperty(props, SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, 0));
 }
 
 // Widescreen (#86, ADR 0090) in #157's step list: the clear, the border, then the picture, of

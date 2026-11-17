@@ -17,13 +17,19 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <map>
+#include <memory>
+#include <string>
 #include <vector>
 
 #include "audio/audio_internal.h"
 #include "audio/mixer.h"
 #include "audio/mp3_stream.h"
+#include "foundation/foundation.h"
 #include "gles/gles_internal.h" // the fixture's GL calls
 #include "maplethief/audio.h"
+#include "snapshot/snapshot_internal.h"
 
 #include <dr_mp3.h> // the reference decode: the runtime's own dr_mp3 (mp3_stream.cpp)
 
@@ -475,6 +481,47 @@ TEST_CASE("mp3: AVAudioPlayer opens MP3s only") {
     CHECK(mt_audio_get_stats().players == 1);
     CHECK((e.send(p, "isPlaying") & 0xFFu) == 0);
     mt_objc_release(&e.cpu, p);
+}
+
+TEST_CASE("mp3: a save state's player path outside the home directory and the bundle is refused "
+          "before it is opened (#324)") {
+    Env e;
+    put_fixtures();
+    // The "audio" section's players, as players_save writes them: one player of `path`.
+    const auto load = [](const std::string &path, std::string *why) {
+        mt_snap::Writer w;
+        w.u32(1);
+        w.u32(0x1234u);
+        w.str(path);
+        w.boolean(false);
+        w.u64(0);
+        w.u32(0);
+        w.boolean(false);
+        w.u32(0);
+        mt_snap::Reader r(w.bytes().data(), w.bytes().size(), "audio");
+        std::map<u32, std::shared_ptr<mt_audio::mix::MusicStream>> streams;
+        std::function<void()> apply;
+        const bool ok = mt_audio::snapshot::players_load(r, &streams, &apply);
+        *why = r.error();
+        CHECK(ok == static_cast<bool>(apply));
+        CHECK(ok == !streams.empty());
+        return ok;
+    };
+    const std::string inside =
+        mt_ns::host_path(mt_ns::home_guest_path() + "/Documents/tone44.mp3", false);
+    REQUIRE_FALSE(inside.empty());
+    std::string why;
+    CHECK(load(inside, &why));
+    // A real MP3, outside the data folder: never opened.
+    const std::string data = test_dir().string();
+    for (const std::string &path :
+         {(k_data / "tone44.mp3").string(), data + "/Documents/../../tone44.mp3",
+          data + "/Documents/./tone44.mp3", data + "/Documents\\..\\tone44.mp3",
+          data + "x/Documents/tone44.mp3", std::string("tone44.mp3")}) {
+        CAPTURE(path);
+        CHECK_FALSE(load(path, &why));
+        CHECK(why.find("is not a file the game can open") != std::string::npos);
+    }
 }
 
 TEST_CASE("mp3: the game's music calls, sample for sample through the mixer") {

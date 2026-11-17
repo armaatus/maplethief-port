@@ -1,7 +1,8 @@
 // A small JSON reader and writer for the stubs' files (gamecenter.json), in the plain C++ of
 // stubs_internal.h. The reader builds a tree of malloc'd values; the writer appends to a
 // growing buffer. RFC 8259 syntax; numbers keep a 64-bit integer when they have no fraction or
-// exponent; strings are UTF-8 (\u escapes, surrogate pairs included, are decoded).
+// exponent; strings are UTF-8 (\u escapes, surrogate pairs included, are decoded; a lone
+// surrogate is refused, #323).
 #ifndef MAPLETHIEF_RUNTIME_STUBS_JSON_H
 #define MAPLETHIEF_RUNTIME_STUBS_JSON_H
 
@@ -11,6 +12,10 @@
 namespace mt_stubs_impl {
 
 enum class JsonType { null = 0, boolean, number, string, array, object };
+
+// The most elements (array items and object members, of every container together) a document
+// may hold (#413, ADR 0154): each lookup is a linear scan, so more would cost quadratic time.
+inline constexpr std::uint32_t k_json_max_elements = 4096;
 
 // Zero-initialize (`JsonValue v{}`): the reader memsets and reallocs these, so they have no
 // default member initializers.
@@ -27,8 +32,9 @@ struct JsonValue {
 };
 
 // Parses `text` (`size` bytes) into *out. Returns false, with `error` set to a short reason
-// and *out freed, if it is not exactly one JSON value (whitespace around it allowed) or nests
-// deeper than 64 levels.
+// and *out freed, if it is not exactly one JSON value (whitespace around it allowed), nests
+// deeper than 64 levels, holds more than k_json_max_elements elements or a string with \u0000
+// (#413).
 bool json_parse(const char *text, std::size_t size, JsonValue *out, const char **error);
 void json_free(JsonValue *v);
 

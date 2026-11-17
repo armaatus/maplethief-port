@@ -47,7 +47,8 @@ struct UrlState {
 };
 
 void url_destroy(mt_cpu *, u32, void *p) { delete static_cast<UrlState *>(p)->text; }
-const mt_objc_state_type k_url_state = {"NSURL", sizeof(UrlState), url_destroy};
+void drop_url(void *state) { delete static_cast<UrlState *>(state)->text; }
+const mt_objc_state_type k_url_state = {"NSURL", sizeof(UrlState), url_destroy, drop_url};
 
 bool url_set(mt_cpu *cpu, u32 url, std::string text, bool is_file) {
     auto *s = static_cast<UrlState *>(mt_objc_state(runtime(cpu), url, &k_url_state));
@@ -116,7 +117,7 @@ void error_destroy(mt_cpu *cpu, u32, void *p) {
     mt_objc_release(cpu, s->domain);
     mt_objc_release(cpu, s->user_info);
 }
-const mt_objc_state_type k_error_state = {"NSError", sizeof(ErrorState), error_destroy};
+const mt_objc_state_type k_error_state = {"NSError", sizeof(ErrorState), error_destroy, nullptr};
 
 // +errorWithDomain:code:userInfo:: what -[NSFileManager removeItemAtPath:error:] reports a
 // failure with (files.cpp). The game's own send is in -[InAppPurchaseManager makePurchase:],
@@ -268,8 +269,6 @@ bool load_url(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
     return true;
 }
 
-void drop_url(void *state) { delete static_cast<UrlState *>(state)->text; }
-
 bool save_error(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
     const auto *s = static_cast<const ErrorState *>(state);
     w.u32(s->domain);
@@ -319,11 +318,9 @@ bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *ap
 } // namespace
 
 extern const mt_snap::StateOps k_snap_nsurl;
-const mt_snap::StateOps k_snap_nsurl = {&k_url_state, "NSURL",  save_url,
-                                        load_url,     drop_url, nullptr};
+const mt_snap::StateOps k_snap_nsurl = {&k_url_state, "NSURL", save_url, load_url, nullptr};
 extern const mt_snap::StateOps k_snap_error;
-const mt_snap::StateOps k_snap_error = {&k_error_state, "NSError", save_error,
-                                        load_error,     nullptr,   nullptr};
+const mt_snap::StateOps k_snap_error = {&k_error_state, "NSError", save_error, load_error, nullptr};
 extern const mt_snap::Module k_snap_ns;
 const mt_snap::Module k_snap_ns = {"ns", save_module, load_module};
 

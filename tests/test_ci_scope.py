@@ -50,7 +50,6 @@ def test_compendium_and_docs_only_skip_the_build():
             "tests/fixtures/compendium/kb/monster.json",
             "scripts/compendium",
             "scripts/local-ci",
-            "scripts/lint",
             ".github/workflows/compendium.yml",
         )
         == NONE
@@ -65,6 +64,8 @@ def test_compendium_and_docs_only_skip_the_build():
         "tools/mtport/datatables.py",
         "tests/test_datatables.py",
         "scripts/test",
+        "scripts/lint",
+        ".clang-tidy",
         ".github/workflows/ci.yml",
         "uv.lock",
         "tools/mtport/compendium_extra.py",
@@ -91,6 +92,9 @@ def test_any_other_path_runs_the_build_and_the_switch_job(path):
         "tools/containers/linux/Dockerfile",
         "scripts/test.ps1",
         "scripts/test-linux",
+        "tests/fuzz/zip_fuzz.cpp",
+        "tests/fuzz/seeds/zip.py",
+        "scripts/fuzz",
     ],
 )
 def test_another_platforms_own_files_skip_the_switch_job(path):

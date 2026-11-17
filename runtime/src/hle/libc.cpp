@@ -374,14 +374,14 @@ std::int32_t parse_long(const char *s) {
     std::int64_t v = 0;
     for (; *s >= '0' && *s <= '9'; s++) {
         v = v * 10 + (*s - '0');
-        if (v > 0x80000000ll) {
-            v = 0x80000000ll; // saturated; keep scanning
+        if (v > 0x80000000LL) {
+            v = 0x80000000LL; // saturated; keep scanning
         }
     }
     if (neg) {
         return static_cast<std::int32_t>(-v);
     }
-    return v > 0x7FFFFFFFll ? INT32_MAX : static_cast<std::int32_t>(v);
+    return v > 0x7FFFFFFFLL ? INT32_MAX : static_cast<std::int32_t>(v);
 }
 
 } // namespace
@@ -537,20 +537,23 @@ void mt_hle_assert_rtn(mt_cpu *cpu, std::uint32_t) noexcept {
     const std::uint32_t expr = mt_arg_u32(&a);
     const char *e = expr != 0u ? mt_g2h_str(cpu, expr) : "(null)";
     const char *fl = file != 0u ? mt_g2h_str(cpu, file) : "(null)";
-    char head[64];
-    std::string text = "Assertion failed: (";
-    text += e;
-    text += "), ";
-    if (func != 0u) {
-        text += "function ";
-        text += mt_g2h_str(cpu, func);
-        text += ", ";
+    {
+        // Its own scope: the text is freed before guest_abort, which does not return (#414).
+        char head[64];
+        std::string text = "Assertion failed: (";
+        text += e;
+        text += "), ";
+        if (func != 0u) {
+            text += "function ";
+            text += mt_g2h_str(cpu, func);
+            text += ", ";
+        }
+        std::snprintf(head, sizeof head, ", line %d.\n", static_cast<int>(line));
+        text += "file ";
+        text += fl;
+        text += head;
+        write_text(2, text);
     }
-    std::snprintf(head, sizeof head, ", line %d.\n", static_cast<int>(line));
-    text += "file ";
-    text += fl;
-    text += head;
-    write_text(2, text);
     mt_libc_log("__assert_rtn called from 0x%08X", static_cast<unsigned>(cpu->r[MT_LR]));
     guest_abort(cpu, 0u);
 }

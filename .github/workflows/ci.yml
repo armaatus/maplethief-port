@@ -1,7 +1,7 @@
 # CI (issue #3, ADR 0006, ADR 0126). The target branch decides what runs:
 #
-#   pull request into dev    the cheap profile: lint + Python min/latest, and a Linux Debug
-#                            build with the C/C++ tests. Feature and epic branches merge here.
+#   pull request into dev    the cheap profile: lint + Python min/latest, clang-tidy, and a Linux
+#                            Debug build with the C/C++ tests. Feature and epic branches merge here.
 #   pull request into main   the full profile: the release pull request from dev (ADR 0126,
 #                            titled "Release vX.Y.Z"). Debug and Release builds with the C/C++
 #                            tests and the packaged kits on macOS, Windows and Linux, plus lint
@@ -22,6 +22,10 @@
 #
 # The `ios` job compiles our own code for iOS arm64 on the runs that build every OS (ADR 0136):
 # no IPA and no signing, so a build with the generated code and a device stay local.
+#
+# The `asan` job (Linux) builds our own C/C++ with clang under ASan and UBSan and runs its tests
+# (preset linux-asan, ADR 0157) on every pull request and manual run that builds, then runs each
+# libFuzzer target of tests/fuzz/ for 30 s (preset linux-fuzz, ADR 0158).
 #
 # The `switch` job builds the Nintendo Switch homebrew (ADR 0138) on every pull request and manual
 # run: scripts/build-switch, the switch-release workflow in the pinned devkitA64 container, without
@@ -187,7 +191,8 @@ jobs:
           path: build/_downloads
           key: downloads-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
 
-      - name: Install SDL3 build dependencies (Linux)
+      - &linux-deps
+        name: Install SDL3 build dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           # docs/build/README.md's list (written for Ubuntu 24.04; ubuntu-latest is 26.04 as of 2026-10).
@@ -259,6 +264,65 @@ jobs:
           path: |
             build/test-output/
             build/*/Testing/Temporary/LastTest*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ASan + UBSan (#321, ADR 0157): the linux-asan workflow, every C/C++ test of our own code built
+  # with clang, -fsanitize=address,undefined and no recovery, the guest memory model checked. Any
+  # finding aborts its test. Suppressions, each with its reason, are in tests/sanitizers/. Runs
+  # on every pull request and manual run that the build matrix runs on (scripts/ci-scope).
+  # The fuzz targets' smoke runs (#322, #323, ADR 0158) are a step of this job, after the tests.
+  asan:
+    name: linux asan+ubsan
+    needs: scope
+    if: needs.scope.outputs.native == 'true'
+    runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && '["self-hosted","Linux","X64"]' || '"ubuntu-latest"') }}
+    timeout-minutes: 45
+    steps:
+      - name: Check out (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - *ipa-guard
+
+      - name: Cache third-party downloads (build/_downloads)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/_downloads
+          key: downloads-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - *linux-deps
+
+      - name: Install clang's sanitizer runtimes and llvm-symbolizer
+        run: sudo apt-get install -y clang libclang-rt-dev llvm
+
+      - name: Show toolchain versions
+        run: |
+          cmake --version | head -n 1
+          echo "ninja $(ninja --version)"
+          clang --version | head -n 1
+          python3 --version
+
+      - name: Build and run the C/C++ tests under ASan + UBSan (preset linux-asan)
+        run: cmake --workflow --preset linux-asan
+
+      # The fuzz smoke (#322, #323, ADR 0158): every libFuzzer target of tests/fuzz/ for 30 s
+      # from its synthetic seeds, four at a time. A finding fails the step and its input is in
+      # the uploaded build/test-output/linux-fuzz/fuzz/<target>/.
+      - name: Fuzz smoke, 30 s per target (preset linux-fuzz)
+        run: cmake --workflow --preset linux-fuzz
+
+      - name: Upload test logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-logs-asan
+          path: |
+            build/test-output/
+            build/linux-asan/Testing/Temporary/LastTest*.log
+            build/linux-fuzz/Testing/Temporary/LastTest*.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -373,6 +437,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # The linters but clang-tidy, which has a job of its own below.
   lint-python:
     name: lint + Python min/latest
     runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && '["self-hosted","Linux","X64"]' || '"ubuntu-latest"') }}
@@ -418,8 +483,8 @@ jobs:
             uv.lock
             scripts/lint
 
-      - name: Lint (scripts/lint)
-        run: scripts/lint
+      - name: Lint (scripts/lint --no-tidy)
+        run: scripts/lint --no-tidy
 
       - name: Python tests on Python ${{ steps.python-min.outputs.python-version }}
         run: scripts/test --python-only
@@ -430,3 +495,50 @@ jobs:
         run: scripts/test --python-only
         env:
           UV_PYTHON: ${{ steps.python-latest.outputs.python-path }}
+
+  # clang-tidy (ADR 0002's addendum, #325): scripts/lint in full. It needs the native build
+  # configured for its compile database, and takes about 6 minutes on the hosted runner, so it
+  # runs beside the build jobs, and like them only when the scope job finds a native change.
+  clang-tidy:
+    name: lint (clang-tidy)
+    needs: scope
+    if: needs.scope.outputs.native == 'true'
+    runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && '["self-hosted","Linux","X64"]' || '"ubuntu-latest"') }}
+    timeout-minutes: 20
+    steps:
+      - name: Check out (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - *ipa-guard
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          # scripts/lint pins the linters that uvx installs into the same cache.
+          cache-dependency-glob: |
+            uv.lock
+            scripts/lint
+
+      - name: Cache third-party downloads (build/_downloads)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/_downloads
+          key: downloads-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - name: Install SDL3 build dependencies and clang (for clang-tidy's compile database)
+        run: |
+          # The build job's list (&linux-deps, docs/build/README.md), plus clang.
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libasound2-dev libpulse-dev libpipewire-0.3-dev libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl1-mesa-dev \
+            libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev libdbus-1-dev libudev-dev
+
+      - name: Lint (scripts/lint, with clang-tidy)
+        run: scripts/lint

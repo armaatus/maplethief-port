@@ -59,8 +59,8 @@ struct SessionState {
 void session_destroy(mt_cpu *cpu, u32, void *block) {
     mt_objc_release(cpu, static_cast<SessionState *>(block)->category);
 }
-const mt_objc_state_type k_session_state = {"AVAudioSession", sizeof(SessionState),
-                                            session_destroy};
+const mt_objc_state_type k_session_state = {"AVAudioSession", sizeof(SessionState), session_destroy,
+                                            nullptr};
 
 // +[AVAudioSession sharedInstance]
 void session_shared(mt_cpu *cpu) {
@@ -144,7 +144,8 @@ void player_destroy(mt_cpu *cpu, u32 self, void *block) {
     g_players.sources.erase(self);
     mt_objc_release(cpu, s->url);
 }
-const mt_objc_state_type k_player_state = {"AVAudioPlayer", sizeof(PlayerState), player_destroy};
+const mt_objc_state_type k_player_state = {"AVAudioPlayer", sizeof(PlayerState), player_destroy,
+                                           nullptr};
 
 bool read_file(const std::string &path, std::vector<std::uint8_t> *out) {
     std::ifstream in(path, std::ios::binary);
@@ -192,7 +193,9 @@ void player_init(mt_cpu *cpu) {
     if (!path.empty()) {
         stream = pack::music(path, gapless, &from_pack);
     }
+    bool read = false; // the file was there (bytes is moved into the stream)
     if (!stream && !path.empty() && read_file(path, &bytes)) {
+        read = !bytes.empty();
         stream = Mp3Stream::open(std::move(bytes), gapless);
     }
     auto *s =
@@ -200,7 +203,7 @@ void player_init(mt_cpu *cpu) {
                : nullptr;
     if (s == nullptr) {
         mt_tracef("audio", "-[AVAudioPlayer initWithContentsOfURL:%s error:]: %s: nil",
-                  path.c_str(), path.empty() || bytes.empty() ? "no such file" : "not an MP3");
+                  path.c_str(), !read ? "no such file" : "not an MP3");
         mt_objc_release(cpu, self);
         mt_ret_u32(cpu, 0);
         return;
@@ -411,9 +414,9 @@ std::shared_ptr<Mp3Stream> reopen(const std::string &path, bool gapless) {
 
 extern const mt_snap::StateOps k_snap_session, k_snap_player;
 const mt_snap::StateOps k_snap_session = {&k_session_state, "AVAudioSession", save_session,
-                                          load_session,     nullptr,          nullptr};
-const mt_snap::StateOps k_snap_player = {&k_player_state, "AVAudioPlayer", save_player,
-                                         load_player,     nullptr,         nullptr};
+                                          load_session, nullptr};
+const mt_snap::StateOps k_snap_player = {&k_player_state, "AVAudioPlayer", save_player, load_player,
+                                         nullptr};
 
 namespace snapshot {
 
@@ -452,6 +455,10 @@ bool players_load(mt_snap::Reader &r, std::map<u32, std::shared_ptr<mix::MusicSt
         if (!r.u32(&key) || !r.str(&path) || !r.boolean(&gapless) || !r.u64(&position) ||
             !r.u32(&repeated) || !r.boolean(&ended) || !r.u32(&loops)) {
             return false;
+        }
+        // A path host_path could have given the player, or none is opened (#324).
+        if (!path.empty() && !mt_ns::is_guest_host_path(path)) {
+            return r.fail("the music " + path + " is not a file the game can open");
         }
         std::shared_ptr<Mp3Stream> stream = path.empty() ? nullptr : reopen(path, gapless);
         if (!stream) {

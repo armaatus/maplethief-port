@@ -333,6 +333,10 @@ struct Decoded {
     bool has_alpha = false;
     std::shared_ptr<const std::vector<u8>> pixels;
 };
+// An image wider or taller than k_png_max_side, or of more than k_png_max_pixels, is refused
+// from its header, before anything is decoded ("image too large", #324).
+inline constexpr u32 k_png_max_side = 8192;
+inline constexpr u32 k_png_max_pixels = 1u << 24;
 bool png_decode(const u8 *data, std::size_t size, Decoded *out, std::string *error);
 // The size in the header of a file that starts with the PNG signature, without decoding it;
 // false for anything else (untrusted data: texture packs, #153).

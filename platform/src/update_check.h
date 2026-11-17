@@ -37,6 +37,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "settings.h"
@@ -105,8 +106,33 @@ class UpdateFetcher {
 using UpdateFetcherFactory = std::function<std::unique_ptr<UpdateFetcher>()>;
 // The system's HTTP, or nullptr where there is none (Linux without libcurl). Makes no request.
 std::unique_ptr<UpdateFetcher> make_platform_update_fetcher();
+// The integer options libcurl's fetcher (Linux) sets on each handle besides the URL, the agent
+// and the writer, as (option number, value): testable on every system.
+std::vector<std::pair<int, long>> curl_long_options();
 // "MapleThief/<version>": every fetcher's User-Agent (GitHub's API requires one).
 std::string update_user_agent();
+
+// Whether a fetcher follows a redirect to `url`: an https:// address with a host only (#413),
+// the rule libcurl's options set on Linux and the Apple fetcher's delegate applies.
+bool update_redirect_allowed(std::string_view url);
+
+// A response's body as it streams in (#413): each piece goes through append, so a fetcher never
+// keeps more than kUpdateMaxResponseBytes, whatever length the server states or sends.
+class UpdateBody {
+  public:
+    // Whether a stated length (Content-Length; negative: none stated) is already over the cap.
+    static bool stated_too_long(std::int64_t stated);
+    // Appends `n` bytes; false, keeping nothing more from then on, once the body would pass the
+    // cap.
+    bool append(const void *data, std::size_t n);
+    bool too_long() const { return too_long_; }
+    std::size_t size() const { return body_.size(); }
+    std::string take() { return std::move(body_); }
+
+  private:
+    std::string body_;
+    bool too_long_ = false;
+};
 
 struct UpdateCheckConfig {
     bool wanted = false;               // update_check_wanted

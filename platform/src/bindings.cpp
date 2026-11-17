@@ -41,6 +41,24 @@ std::string lower(std::string_view s) {
     return out;
 }
 
+// The key a file names: "Comma", or SDL's name for it; a letter's name is its capital ("Z")
+// and its keycode the small letter. SDLK_UNKNOWN for a name SDL does not know, and for one it
+// decodes to a key whose own name reads back as another (invalid UTF-8 can decode past U+10FFFF:
+// fuzz_bindings' finding, #322), so that every key read is one the file can write back.
+SDL_Keycode key_from_name(std::string_view name) {
+    if (lower(name) == "comma") {
+        return SDLK_COMMA;
+    }
+    SDL_Keycode k = SDL_GetKeyFromName(std::string(name).c_str());
+    if (k >= 'A' && k <= 'Z') {
+        k = k - 'A' + 'a';
+    }
+    if (k != SDLK_UNKNOWN && SDL_GetKeyFromName(SDL_GetKeyName(k)) != k) {
+        return SDLK_UNKNOWN;
+    }
+    return k;
+}
+
 const char *action_name(std::uint32_t action) {
     const mt_input_action_info *info = mt_input_action_get_info(action);
     return info != nullptr ? info->name : "?";
@@ -90,16 +108,7 @@ bool parse_control(std::string_view text, Control *out, std::string *why) {
         return fail("'" + printable(text) + "' needs a name after '" + kind + "'");
     }
     if (kind == "key") {
-        SDL_Keycode k = SDLK_UNKNOWN;
-        if (lname == "comma") {
-            k = SDLK_COMMA;
-        } else {
-            k = SDL_GetKeyFromName(std::string(name).c_str());
-        }
-        // A letter's name is its capital ("Z"); its keycode is the small letter.
-        if (k >= 'A' && k <= 'Z') {
-            k = k - 'A' + 'a';
-        }
+        const SDL_Keycode k = key_from_name(name);
         if (k == SDLK_UNKNOWN) {
             return fail("unknown key '" + printable(name) + "'");
         }
@@ -239,11 +248,7 @@ bool parse_chord(std::string_view text, KeyChord *out, std::string *why) {
     if (rest.empty()) {
         return fail("'" + printable(whole) + "' needs a key");
     }
-    SDL_Keycode k =
-        lower(rest) == "comma" ? SDLK_COMMA : SDL_GetKeyFromName(std::string(rest).c_str());
-    if (k >= 'A' && k <= 'Z') {
-        k = k - 'A' + 'a';
-    }
+    const SDL_Keycode k = key_from_name(rest);
     if (k == SDLK_UNKNOWN) {
         return fail("unknown key '" + printable(rest) + "'");
     }

@@ -56,7 +56,7 @@ void KeypadHapticsTracker::set_active(bool active) {
 // The sink is prepared exactly while presses may tap, at the level in effect.
 void KeypadHapticsTracker::sync() {
     const bool want = sink_ != nullptr && active_ && level_ != KeypadHaptics::kOff;
-    if (prepared_ && (!want || prepared_level_ != level_)) {
+    if (prepared_ && sink_ != nullptr && (!want || prepared_level_ != level_)) {
         sink_->release();
         stats_.releases++;
         prepared_ = false;

@@ -114,7 +114,10 @@ typedef enum mt_saves_verdict {
     MT_SAVES_BAD_QUEST = 8,     /* quest: a key that is not text, a requirement or reward kind */
     MT_SAVES_BAD_CONFIG = 9,    /* config: a value past the game's tables */
     MT_SAVES_BAD_RECEIPTS = 10, /* a receipt list whose entries run past its end */
-    MT_SAVES_BAD_COUNTERS = 11  /* maplethief-cashshop<n>: not "key = number" text */
+    MT_SAVES_BAD_COUNTERS = 11, /* maplethief-cashshop<n>: not "key = number" text */
+    /* Not a verdict: widens the enum to every int, so that mt_saves_verdict_name may read any
+     * value a C caller passes (UBSan's invalid-enum-load in C++, #321). */
+    MT_SAVES_VERDICT_RANGE_ = 0x7FFFFFFF
 } mt_saves_verdict;
 
 /* The limits the checks use: facts of the shipped 1.5 data (docs/formats/data-tables.md,
@@ -146,6 +149,27 @@ mt_saves_verdict mt_saves_check(const char *name, const uint8_t *bytes, size_t s
  * "bad_skill", "bad_map", "bad_quest", "bad_config", "bad_receipts", "bad_counters" ("?" for
  * anything else). */
 const char *mt_saves_verdict_name(mt_saves_verdict verdict) MT_NOEXCEPT;
+
+/* --- refusing a save the game would read (#413, ADR 0154 (a)) ------------------------------ */
+
+/* A theif<N> or quest<N> that the guest finds directly in Documents/ (by fileExistsAtPath: or
+ * an NSFileHandle) is checked with mt_saves_check first: a file copied in by hand, by a sync or
+ * through the iOS Files app reaches the game without the import's checks. One that fails is
+ * moved to MT_SAVES_REFUSED_DIR/<time>/ under the data directory (mt_stubs_data_dir), with
+ * MT_SAVES_REFUSED_REASON beside it ("<name>: <verdict>: <why>"), logged, and the guest sees no
+ * file (moved, not hidden: the game writes a new save over a missing slot). The game's own
+ * writes always pass. foundation/files.cpp does this; the hook below hears of each refusal. */
+#define MT_SAVES_REFUSED_DIR "backups/refused"
+#define MT_SAVES_REFUSED_REASON "reason.txt"
+
+/* Called once per refused file, on the guest's thread: the file's name, why (mt_saves_check's
+ * words) and the folder it was moved to ("" if it could not be moved: the guest still sees no
+ * file this time). */
+typedef void (*mt_saves_refused_fn)(const char *name, const char *why, const char *moved_to,
+                                    void *user);
+
+/* Sets the hook (NULL: none, the default). The frontend shows each refusal once. */
+void mt_saves_set_refused_hook(mt_saves_refused_fn fn, void *user) MT_NOEXCEPT;
 
 /* --- tests ---------------------------------------------------------------------------------- */
 

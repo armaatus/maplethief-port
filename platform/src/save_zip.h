@@ -17,6 +17,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <string>
 #include <vector>
@@ -49,6 +50,12 @@ std::vector<std::uint8_t> zip_store(std::span<const ZipEntry> entries, DosTime w
 // `max_entry_bytes` is refused before it is inflated. zip_list + zip_extract underneath.
 bool zip_read(std::span<const std::uint8_t> zip, std::size_t max_entry_bytes,
               std::vector<ZipEntry> *entries, std::string *why);
+// The same, of only the files `keep` takes by name ('\' made '/'): every name is checked
+// first, then the kept files are inflated, and more than `max_total_bytes` in them together is
+// refused before any is (#324).
+bool zip_read(std::span<const std::uint8_t> zip, std::size_t max_entry_bytes,
+              std::size_t max_total_bytes, const std::function<bool(const std::string &)> &keep,
+              std::vector<ZipEntry> *entries, std::string *why);
 
 // One entry of the central directory as stored, for a caller that checks the entries itself
 // before it reads any (the IPA import, #182, ipa_import.h): every entry, folders included.
@@ -77,6 +84,10 @@ bool zip_list(std::span<const std::uint8_t> zip, std::vector<ZipItem> *items, st
 // CRC-32 does not match.
 bool zip_extract(std::span<const std::uint8_t> zip, const ZipItem &item,
                  std::size_t max_entry_bytes, std::vector<std::uint8_t> *bytes, std::string *why);
+
+// Test seam (#413): while on, zip_extract's allocation for an entry's bytes throws
+// std::bad_alloc, as one the host cannot satisfy would. Off by default; tests only.
+void zip_fail_alloc_for_test(bool on);
 
 } // namespace maplethief::frontend
 

@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
+#include <new>
 #include <set>
 #include <utility>
 
@@ -11,7 +13,10 @@
 #define STBI_ONLY_PNG
 #define STBI_NO_STDIO
 #define STB_IMAGE_STATIC
+// clang-tidy sees the declarations only: the third-party bodies are not ours to check.
+#if !defined(__clang_analyzer__)
 #define STB_IMAGE_IMPLEMENTATION
+#endif
 #include <stb_image.h>
 
 namespace maplethief::frontend {
@@ -145,6 +150,7 @@ bool zip_list(std::span<const std::uint8_t> zip, std::vector<ZipItem> *items, st
     }
     // The end record: the last one whose comment reaches the end of the file exactly.
     std::size_t end = n;
+    // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions): at-- > 0 is the whole countdown, read once
     for (std::size_t at = n - kEndSize + 1; at-- > 0 && n - at <= kEndSize + 0xFFFF;) {
         if (get32(z + at) == kEndSig && at + kEndSize + get16(z + at + 20) == n) {
             end = at;
@@ -204,6 +210,12 @@ bool zip_list(std::span<const std::uint8_t> zip, std::vector<ZipItem> *items, st
     return true;
 }
 
+namespace {
+bool g_fail_alloc = false; // zip_fail_alloc_for_test
+} // namespace
+
+void zip_fail_alloc_for_test(bool on) { g_fail_alloc = on; }
+
 bool zip_extract(std::span<const std::uint8_t> zip, const ZipItem &item,
                  std::size_t max_entry_bytes, std::vector<std::uint8_t> *bytes, std::string *why) {
     bytes->clear();
@@ -233,6 +245,9 @@ bool zip_extract(std::span<const std::uint8_t> zip, const ZipItem &item,
     if (data_at > n || item.packed > n - data_at) {
         return fail(why, name + "'s data runs past the end of the file");
     }
+    if (g_fail_alloc) {
+        throw std::bad_alloc();
+    }
     if (item.method == 0) {
         bytes->assign(z + data_at, z + data_at + item.size);
     } else if (item.size > 0 || item.packed > 0) {
@@ -256,30 +271,49 @@ bool zip_extract(std::span<const std::uint8_t> zip, const ZipItem &item,
 
 bool zip_read(std::span<const std::uint8_t> zip, std::size_t max_entry_bytes,
               std::vector<ZipEntry> *entries, std::string *why) {
+    return zip_read(
+        zip, max_entry_bytes, SIZE_MAX, [](const std::string &) { return true; }, entries, why);
+}
+
+bool zip_read(std::span<const std::uint8_t> zip, std::size_t max_entry_bytes,
+              std::size_t max_total_bytes, const std::function<bool(const std::string &)> &keep,
+              std::vector<ZipEntry> *entries, std::string *why) {
     entries->clear();
     std::vector<ZipItem> items;
     if (!zip_list(zip, &items, why)) {
         return false;
     }
+    // Every name first; only the files kept are inflated, within the total.
     std::set<std::string> names;
+    std::vector<const ZipItem *> kept;
+    std::uint64_t total = 0;
     for (std::size_t i = 0; i < items.size(); i++) {
         ZipItem &item = items[i];
         for (char &ch : item.name) {
             ch = ch == '\\' ? '/' : ch;
         }
         if (item.name.empty() || item.name.find('\0') != std::string::npos) {
-            entries->clear();
             return fail(why, "entry " + std::to_string(i) + " has no name");
         }
         if (item.is_dir()) {
             continue; // a folder
         }
         if (!names.insert(item.name).second) {
-            entries->clear();
             return fail(why, item.name + " is in it twice");
         }
-        ZipEntry out{item.name, {}};
-        if (!zip_extract(zip, item, max_entry_bytes, &out.bytes, why)) {
+        if (!keep(item.name)) {
+            continue;
+        }
+        total += item.size;
+        if (total > max_total_bytes) {
+            return fail(why, "its files come to more than " + std::to_string(max_total_bytes) +
+                                 " bytes in all");
+        }
+        kept.push_back(&item);
+    }
+    for (const ZipItem *item : kept) {
+        ZipEntry out{item->name, {}};
+        if (!zip_extract(zip, *item, max_entry_bytes, &out.bytes, why)) {
             entries->clear();
             return false;
         }

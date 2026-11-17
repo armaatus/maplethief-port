@@ -3,10 +3,13 @@
 // DR_FLAC_IMPLEMENTATION (ADR 0003); compiled without floating-point contraction
 // (maplethief_strict_fp), with dr_mp3's scalar float path, so the decode is the same on every
 // host (FLAC is integer arithmetic; its SIMD paths are off too, and so is Ogg-FLAC).
+// clang-tidy sees the declarations only: the third-party bodies are not ours to check.
+#if !defined(__clang_analyzer__)
 #define DR_MP3_IMPLEMENTATION
+#define DR_FLAC_IMPLEMENTATION
+#endif
 #define DR_MP3_NO_SIMD
 #define DR_MP3_NO_STDIO
-#define DR_FLAC_IMPLEMENTATION
 #define DR_FLAC_NO_SIMD
 #define DR_FLAC_NO_STDIO
 #define DR_FLAC_NO_OGG
@@ -18,6 +21,13 @@
 
 #include <dr_flac.h> // SYSTEM include directories: their warnings are not ours
 #include <dr_mp3.h>
+
+#if defined(__clang_analyzer__)
+// Defined with dr_flac's implementation, which clang-tidy does not see (FlacDecoder::read).
+#pragma clang diagnostic ignored "-Wundefined-internal"
+// NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp): dr_flac's own name
+static drflac_bool32 drflac__read_and_decode_next_flac_frame(drflac *pFlac);
+#endif
 
 namespace mt_audio {
 
@@ -52,9 +62,59 @@ struct Mp3Stream::FlacDecoder final : Mp3Stream::Decoder {
             drflac_close(flac);
         }
     }
-    bool seek(u64 frame) override { return drflac_seek_to_pcm_frame(flac, frame) != 0; }
+    bool seek(u64 frame) override {
+        return drflac_seek_to_pcm_frame(flac, frame) != 0 && consistent();
+    }
+    // One frame at a time: the next is decoded here and checked before any of it is read.
     u32 read(std::int16_t *out, u32 frames) override {
-        return static_cast<u32>(drflac_read_pcm_frames_s16(flac, frames, out));
+        u32 done = 0;
+        while (done < frames) {
+            drflac_frame &f = flac->currentFLACFrame;
+            if (f.pcmFramesRemaining == 0 && !drflac__read_and_decode_next_flac_frame(flac)) {
+                break;
+            }
+            if (!consistent()) {
+                break;
+            }
+            const u32 n = std::min(frames - done, f.pcmFramesRemaining);
+            const auto got = static_cast<u32>(
+                drflac_read_pcm_frames_s16(flac, n, out + std::size_t{done} * flac->channels));
+            done += got;
+            if (got < n) {
+                break;
+            }
+        }
+        return done;
+    }
+    // In a damaged file, dr_flac 0.13.3 can be left inside a frame it has not decoded, or not
+    // whole (fuzz_flac's findings, #322): one whose header has more channels or a bigger block
+    // than the stream, one a seek skipped over, one whose decode failed partway. Its next read
+    // would take the samples from a null or stale pointer, past the end of the buffer. So the
+    // frame must be the one a successful decode leaves: each channel's samples at their place
+    // in the buffer, the block within the stream's largest. And a side channel's wasted bits
+    // may be as many as the stream's bits per sample, which dr_flac's 16-bit conversion
+    // shifts by 32 or more. Any other frame ends the stream.
+    bool consistent() const {
+        const drflac_frame &f = flac->currentFLACFrame;
+        if (f.pcmFramesRemaining == 0) {
+            return true;
+        }
+        const u32 block = f.header.blockSizeInPCMFrames;
+        // A frame's channel assignment: 0-7 are 1-8 independent channels, 8-10 stereo, the rest
+        // reserved.
+        const u32 a = f.header.channelAssignment;
+        const u32 n = a <= 7 ? a + 1 : a <= 10 ? 2 : 0;
+        if (n != flac->channels || block > flac->maxBlockSizeInPCMFrames ||
+            f.pcmFramesRemaining > block) {
+            return false;
+        }
+        for (u32 c = 0; c < n; c++) {
+            if (f.subframes[c].pSamplesS32 != flac->pDecodedSamples + std::size_t{block} * c ||
+                f.subframes[c].wastedBitsPerSample >= flac->bitsPerSample) {
+                return false;
+            }
+        }
+        return true;
     }
 };
 
@@ -208,26 +268,26 @@ void Mp3Stream::set_loop(const Loop *loop) {
     audible_ = std::min(audible_, length_);
 }
 
-bool decode_file(std::vector<std::uint8_t> bytes, Mp3Stream::Codec codec, u32 max_seconds,
-                 std::vector<std::int16_t> *samples, u32 *rate, u32 *channels) {
+namespace {
+std::atomic<u64> g_whole_decodes{0};
+} // namespace
+
+std::uint64_t whole_decodes() { return g_whole_decodes.load(); }
+
+bool decode_whole(Mp3Stream &s, std::vector<std::int16_t> *samples) {
     // The pack's stream, read whole: the same decode, limits and timeline.
-    const auto s = Mp3Stream::open_pack(std::move(bytes), codec, nullptr, false, max_seconds);
-    if (!s) {
-        return false;
-    }
-    samples->assign(static_cast<std::size_t>(s->length()) * s->channels(), 0);
+    g_whole_decodes.fetch_add(1);
+    samples->assign(static_cast<std::size_t>(s.length()) * s.channels(), 0);
     u64 done = 0;
-    while (done < s->length()) {
-        const u32 n = static_cast<u32>(std::min<u64>(mix::kMusicBlock, s->length() - done));
-        const u32 got = s->read(samples->data() + done * s->channels(), n);
+    while (done < s.length()) {
+        const u32 n = static_cast<u32>(std::min<u64>(mix::kMusicBlock, s.length() - done));
+        const u32 got = s.read(samples->data() + done * s.channels(), n);
         done += got;
         if (got < n) {
             break;
         }
     }
-    samples->resize(static_cast<std::size_t>(done) * s->channels());
-    *rate = s->rate();
-    *channels = s->channels();
+    samples->resize(static_cast<std::size_t>(done) * s.channels());
     return done != 0;
 }
 

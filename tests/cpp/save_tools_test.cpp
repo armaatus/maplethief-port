@@ -8,6 +8,7 @@
 // saves.cli_round_trip (tools/mtport/savecheck.py).
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -32,6 +33,7 @@
 #include "save_tools.h"
 #include "save_zip.h"
 #include "settings.h"
+#include "zip_fixtures.h"
 
 namespace {
 
@@ -91,6 +93,7 @@ using save_fixtures::kConfig;
 using save_fixtures::new_character;
 using save_fixtures::new_quests;
 using save_fixtures::valid_set;
+using zip_fixtures::zip_of_zeros;
 
 void write_tree(const fs::path &dir, const Tree &t) {
     for (const auto &[name, bytes] : t) {
@@ -595,6 +598,214 @@ TEST_CASE("save tools: reading folders and zips of saves") {
     const std::vector<fe::SaveProblem> p = fe::check_save_set({{"quest1", new_quests()}});
     REQUIRE(p.size() == 1);
     CHECK(p[0].line() == "set: bad_pair: quest1 comes without theif1; a character is both files");
+}
+
+TEST_CASE("save tools: a zip's names are filtered before anything is inflated, and a set is "
+          "capped in total (#324)") {
+    const TempDir tmp("caps");
+    const fs::path &root = tmp.path;
+    fe::SaveSet files;
+    std::vector<std::string> ignored;
+    std::string why;
+    // Five saves of 16 MiB each, a few kilobytes deflated: each within its cap, over the set's.
+    const std::vector<std::string> names = {"theif0", "quest0", "theif1", "quest1", "theif2"};
+    const Bytes big = zip_of_zeros(names, static_cast<std::uint32_t>(fe::kMaxSaveSourceFileBytes));
+    REQUIRE(big.size() < 1u << 20);
+    std::vector<fe::ZipEntry> entries;
+    REQUIRE_MESSAGE(fe::zip_read(zip_of_zeros({"theif0"}, 1000), 1000, &entries, &why), why);
+    CHECK(entries.at(0).bytes == Bytes(1000, 0));
+    write_bytes(root / "big.zip", big);
+    files.clear();
+    CHECK_FALSE(fe::read_save_source((root / "big.zip").string(), &files, &ignored, &why));
+    CHECK(why.find("more than 67108864 bytes in all") != std::string::npos);
+    CHECK(files.empty());
+    // An entry that is no save is never inflated: its damaged data does not refuse the zip.
+    Bytes junk = fe::zip_store(std::vector<fe::ZipEntry>{
+        {"config", kConfig}, {"notes/junk.bin", Bytes{'J', 'U', 'N', 'K', 'J', 'U', 'N', 'K'}}});
+    const Bytes marker = {'J', 'U', 'N', 'K', 'J', 'U', 'N', 'K'};
+    const auto at = std::search(junk.begin(), junk.end(), marker.begin(), marker.end());
+    REQUIRE(at != junk.end());
+    *at ^= 1; // its CRC fails
+    write_bytes(root / "junk.zip", junk);
+    REQUIRE_MESSAGE(fe::read_save_source((root / "junk.zip").string(), &files, &ignored, &why),
+                    why);
+    REQUIRE(files.size() == 1);
+    CHECK(files[0].name == "config");
+    CHECK(ignored == std::vector<std::string>{"notes/junk.bin"});
+}
+
+TEST_CASE("save tools: a symbolic link in a folder of saves is not followed (#413)") {
+    const TempDir tmp("links");
+    const fs::path &root = tmp.path;
+    write_tree(root / "outside", {{"config", kConfig}, {"theif0", new_character()}});
+    write_tree(root / "set", {{"quest0", new_quests()}});
+    std::error_code ec;
+    fs::create_symlink(root / "outside" / "config", root / "set" / "config", ec);
+    if (ec) {
+        MESSAGE("no symbolic link here (" << ec.message() << "): skipped");
+        return;
+    }
+    fe::SaveSet files;
+    std::vector<std::string> ignored;
+    std::string why;
+    REQUIRE_MESSAGE(fe::read_save_source((root / "set").string(), &files, &ignored, &why), why);
+    REQUIRE(files.size() == 1);
+    CHECK(files[0].name == "quest0");
+    CHECK(ignored == std::vector<std::string>{"config (a symbolic link: not followed)"});
+    // A Documents folder that is a link is not looked into either.
+    fs::create_directories(root / "copy");
+    fs::create_directory_symlink(root / "outside", root / "copy" / "Documents", ec);
+    REQUIRE(!ec);
+    REQUIRE_MESSAGE(fe::read_save_source((root / "copy").string(), &files, &ignored, &why), why);
+    CHECK(files.empty());
+}
+
+TEST_CASE("save tools: an allocation that fails while reading a set is a refusal, and nothing "
+          "is written (#413)") {
+    // The inflate's output cannot be allocated: the import, the restore and --check-saves's
+    // read refuse the set with a reason. Without the catch, std::bad_alloc left the save tools
+    // and ended the game.
+    const TempDir tmp("alloc");
+    const fs::path &root = tmp.path;
+    const fe::SaveLocation loc = location(root);
+    const Tree before = {{"theif0", new_character(9)}, {"quest0", new_quests()}};
+    write_tree(loc.documents_dir, before);
+    std::vector<fe::ZipEntry> entries;
+    for (const auto &[name, bytes] : valid_set()) {
+        entries.push_back({"Documents/" + name, bytes});
+    }
+    write_bytes(root / "set.zip", fe::zip_store(entries));
+    fe::SaveSet files;
+    std::vector<std::string> ignored;
+    std::string why;
+    fe::zip_fail_alloc_for_test(true);
+    bool read = true;
+    CHECK_NOTHROW(read = fe::read_save_source((root / "set.zip").string(), &files, &ignored, &why));
+    CHECK_FALSE(read);
+    CHECK(why.find("out of memory") != std::string::npos);
+    CHECK(files.empty());
+    fe::ImportResult result;
+    bool imported = true;
+    CHECK_NOTHROW(imported =
+                      fe::import_saves(loc, (root / "set.zip").string(), stamp(2), &result, &why));
+    fe::zip_fail_alloc_for_test(false);
+    CHECK_FALSE(imported);
+    CHECK(why.find("out of memory") != std::string::npos);
+    CHECK(result.imported.empty());
+    CHECK(tree(loc.documents_dir) == before);
+    CHECK_FALSE(fs::exists(loc.backups_dir));
+    // With the memory there, the same zip imports.
+    CHECK(fe::import_saves(loc, (root / "set.zip").string(), stamp(3), &result, &why));
+}
+
+TEST_CASE("save_zip: the zip's size, entry count and entry size caps, NUL names, stored sizes, "
+          "split archives and ../ names (#413)") {
+    const TempDir tmp("limits");
+    const fs::path &root = tmp.path;
+    fe::SaveSet files;
+    std::vector<std::string> ignored;
+    std::string why;
+    const auto read = [&](const fs::path &p) {
+        why.clear();
+        return fe::read_save_source(p.string(), &files, &ignored, &why);
+    };
+
+    // kMaxZipBytes (64 MiB): a sparse file of exactly 64 MiB is read (and is no zip); one byte
+    // more is refused before it is read.
+    const std::uintmax_t max_zip = 64u * 1024u * 1024u;
+    const fs::path sparse = root / "sparse.zip";
+    std::ofstream(sparse).close();
+    fs::resize_file(sparse, max_zip);
+    CHECK_FALSE(read(sparse));
+    CHECK(why.find("no end of central directory") != std::string::npos);
+    fs::resize_file(sparse, max_zip + 1);
+    CHECK_FALSE(read(sparse));
+    CHECK(why.find("larger than 67108864 bytes") != std::string::npos);
+    fs::remove(sparse);
+
+    // kMaxZipEntries: 4,096 empty entries are read, 4,097 refused from the central directory.
+    std::vector<fe::ZipEntry> many;
+    for (std::size_t i = 0; i < fe::kMaxZipEntries; i++) {
+        many.push_back({"f" + std::to_string(i), {}});
+    }
+    std::vector<fe::ZipEntry> out;
+    REQUIRE_MESSAGE(fe::zip_read(fe::zip_store(many), 1u << 20, &out, &why), why);
+    CHECK(out.size() == fe::kMaxZipEntries);
+    many.push_back({"one more", {}});
+    CHECK_FALSE(fe::zip_read(fe::zip_store(many), 1u << 20, &out, &why));
+    CHECK(why == "it has 4097 entries, more than 4096");
+    CHECK(out.empty());
+
+    // kMaxSaveSourceFileBytes (16 MiB) an entry, by its declared size: a save at the cap is
+    // read, one byte more is refused before it is inflated.
+    const auto max_entry = static_cast<std::uint32_t>(fe::kMaxSaveSourceFileBytes);
+    write_bytes(root / "at-cap.zip", zip_of_zeros({"theif0"}, max_entry));
+    REQUIRE_MESSAGE(read(root / "at-cap.zip"), why);
+    REQUIRE(files.size() == 1);
+    CHECK(files[0].bytes.size() == max_entry);
+    // Declared one byte larger, with the same few kilobytes of data: inflating it would fail,
+    // so the refusal by size shows nothing was inflated.
+    Bytes over = zip_of_zeros({"theif0"}, max_entry);
+    const std::size_t end = over.size() - 22;
+    const std::size_t central = end - (46 + 6);
+    over[central + 24] = 1; // the central entry's size: 0x01000001
+    over[22] = 1;           // and the local header's
+    write_bytes(root / "over-cap.zip", over);
+    CHECK_FALSE(read(root / "over-cap.zip"));
+    CHECK(why.find("theif0 has 16777217 bytes, more than 16777216") != std::string::npos);
+    CHECK(files.empty());
+
+    // A NUL in a name, stored or found in the central directory, is refused.
+    const Bytes nul = fe::zip_store(std::vector<fe::ZipEntry>{
+        {"config", kConfig}, {std::string("theif0\0.txt", 11), new_character()}});
+    CHECK_FALSE(fe::zip_read(nul, 1u << 20, &out, &why));
+    CHECK(why == "entry 1 has no name");
+    write_bytes(root / "nul.zip", nul);
+    CHECK_FALSE(read(root / "nul.zip"));
+    CHECK(why.find("has no name") != std::string::npos);
+
+    // A stored entry whose two sizes disagree.
+    const Bytes good = fe::zip_store(std::vector<fe::ZipEntry>{{"config", kConfig}});
+    const std::size_t good_central = good.size() - 22 - (46 + 6);
+    Bytes sizes = good;
+    sizes[good_central + 20] = static_cast<std::uint8_t>(sizes[good_central + 20] + 1);
+    CHECK_FALSE(fe::zip_read(sizes, 1u << 20, &out, &why));
+    CHECK(why == "config is stored with two different sizes");
+
+    // A split or spanned archive: this disk's number, the central directory's disk, or this
+    // disk's entry count other than the total.
+    for (const std::size_t field : {4u, 6u}) {
+        Bytes split = good;
+        split[good.size() - 22 + field] = 1;
+        CHECK_FALSE(fe::zip_read(split, 1u << 20, &out, &why));
+        CHECK(why == "it is a zip split over several files");
+    }
+    Bytes spanned = good;
+    spanned[good.size() - 22 + 8] = 0; // 0 entries on this disk, 1 in all
+    CHECK_FALSE(fe::zip_read(spanned, 1u << 20, &out, &why));
+    CHECK(why == "it is a zip split over several files");
+
+    // ../ in a name never reaches a path: only the basename of a game file is written, into
+    // Documents/, and nothing lands above it.
+    const fe::SaveLocation loc = location(root / "data");
+    std::vector<fe::ZipEntry> climb;
+    for (const auto &[name, bytes] : valid_set()) {
+        climb.push_back({"../../" + name, bytes});
+    }
+    climb.push_back({"../../../escape.txt", {'x'}});
+    climb.push_back({"..\\..\\notes.txt", {'x'}});
+    write_bytes(root / "climb.zip", fe::zip_store(climb));
+    fe::ImportResult result;
+    REQUIRE_MESSAGE(fe::import_saves(loc, (root / "climb.zip").string(), stamp(3), &result, &why),
+                    why);
+    CHECK(tree(loc.documents_dir) == valid_set());
+    CHECK(result.ignored == std::vector<std::string>{"../../../escape.txt", "../../notes.txt"});
+    for (const auto &[path, bytes] : tree(root)) {
+        CAPTURE(path);
+        CHECK((path.rfind("data/Documents/", 0) == 0 || path.find(".zip") != std::string::npos));
+    }
+    CHECK_FALSE(fs::exists(root.parent_path() / "escape.txt"));
+    CHECK_FALSE(fs::exists(root.parent_path() / "theif0"));
 }
 
 TEST_CASE("save tools: the base folder around the executable or the app (ADR 0127)") {
