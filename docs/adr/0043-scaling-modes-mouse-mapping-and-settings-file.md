@@ -74,6 +74,7 @@ What has to be decided:
   - The placement to pass is `Presenter::placement()`, the one the last frame was drawn with.
   - `--tap` now goes screen point → window point → `window_point_to_screen` → `mt_uikit_touch`, so every scripted run exercises the mapping in the mode it runs in.
 - **`settings.ini` (option 3)**, in the data directory (`MAPLETHIEF_DATA_DIR`, else `SDL_GetPrefPath("", "MapleThief")`), parsed by `platform/src/settings.{h,cpp}`. The format in full:
+  > **Later (2026-11-26):** [ADR 0127](0127-data-folder-next-to-the-game.md) moved the data directory next to the game by default; the per-user folder is an option.
   - UTF-8; a leading byte order mark is skipped. Lines end in LF or CR LF.
   - Blank lines and lines whose first non-blank character is `#` are comments. There are no comments after a value (`#` starts a colour), no sections, no quoting and no escapes.
   - Every other line is `key = value`, blanks around both dropped. Keys are ASCII letters, digits and `_`, matched case-insensitively, as are the mode names.

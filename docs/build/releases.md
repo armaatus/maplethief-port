@@ -4,7 +4,7 @@ How a release is cut. The step-by-step version, with what each step checks and w
 
 ## What a release holds
 
-A release is a GitHub Release with, for each desktop platform, a **player build** and a **port kit**, plus a `.sha256` for each, one `SHA256SUMS` over all of them, and generated release notes ([ADR 0024](../adr/0024-release-contents-and-flow.md), [ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md)).
+A release is a GitHub Release with, for each desktop platform, a **player build** and a **port kit**, and for the Nintendo Switch a player build only (no kit), plus a `.sha256` for each, one `SHA256SUMS` over all of them, and generated release notes ([ADR 0024](../adr/0024-release-contents-and-flow.md), [ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md)).
 
 - A **player build** is what people download to play: the game with its code recompiled, and none of the game's art, music, maps or text. On first launch the player imports their own `MapleThief-1.5.ipa`, and the game copies the game's files into `game/` next to itself. Saves and settings go in `data/` beside it ([ADR 0127](../adr/0127-data-folder-next-to-the-game.md), [Playing MapleThief](../play/README.md)).
 - A **kit** holds only our own code, built from the tag: the platform shell without the game, the runtime and SDL3 libraries and headers, the recompiler, the Python tools and scripts, the docs and the licences. It never holds a game build. Each user builds that from their own IPA.
@@ -14,6 +14,7 @@ A release is a GitHub Release with, for each desktop platform, a **player build*
 | `MapleThief-<version>-macos-universal.zip` | the Mac | `scripts/release build TAG --players-only` |
 | `MapleThief-<version>-linux-x86_64.tar.gz` | the Mac, in the glibc 2.39 container | `scripts/release build TAG --players-only` |
 | `MapleThief-<version>-windows-x64.zip` | the Windows PC | `scripts\release.ps1 build TAG -PlayersOnly` |
+| `MapleThief-<version>-switch.zip` | the Mac, in the devkitA64 container | `scripts/release build TAG --players-only` |
 | `MapleThief-kit-<version>-macos-universal.zip` | hosted CI | `.github/workflows/release.yml` |
 | `MapleThief-kit-<version>-linux-x86_64.tar.gz` | hosted CI, in the Linux container | `.github/workflows/release.yml` |
 | `MapleThief-kit-<version>-windows-x64.zip` | hosted CI | `.github/workflows/release.yml` |
@@ -37,12 +38,12 @@ The merge starts `release.yml`, which creates the annotated tag on the merge com
 Then build the player builds on the two machines that have `work/gen` (`scripts/bootstrap`, then `python3 -m recomp all`), and publish:
 
 ```sh
-scripts/release build TAG --players-only     # Mac: macOS universal and Linux x86_64
+scripts/release build TAG --players-only     # Mac: macOS universal, Linux x86_64 and the Switch zip
 scripts\release.ps1 build TAG -PlayersOnly   # Windows PC, from the x64 developer environment
 scripts/release publish TAG                  # Mac: every file present, SHA256SUMS, publish
 ```
 
-Each `build` works from a clean checkout of the tag, with `MAPLETHIEF_VERSION` taken from the tag, and unpacks every file to check it (`--version` prints the tag's version; `lipo` and `codesign` on the Mac; on Windows no MSVC runtime DLL in the player build). `publish` checks that `docs/KNOWN_ISSUES.md` at the tag cites no closed issue (`python3 -m mtport.release known-issues`, #309), that all six files and their `.sha256` are on the draft, downloads and verifies them, guards each again, writes `SHA256SUMS` and publishes.
+Each `build` works from a clean checkout of the tag, with `MAPLETHIEF_VERSION` taken from the tag, and unpacks every file to check it (`--version` prints the tag's version; `lipo` and `codesign` on the Mac; on Windows no MSVC runtime DLL in the player build). `publish` checks that `docs/KNOWN_ISSUES.md` at the tag cites no closed issue (`python3 -m mtport.release known-issues`, #309), that all seven files (three kits, four player builds) and their `.sha256` are on the draft, downloads and verifies them, guards each again, writes `SHA256SUMS` and publishes.
 
 Options: `--dry-run` runs every local step and prints the GitHub commands instead, so the flow can be rehearsed on a local tag. `--replace` (`-Replace`) replaces a file already on the draft. `--platforms` narrows what `build` makes and what `publish` requires. Everything also stays in `build/release/TAG/`.
 

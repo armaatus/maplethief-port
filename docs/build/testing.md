@@ -134,9 +134,11 @@ Windows has no container: run `scripts\test.ps1` (Debug and pytest) and `scripts
 
 | Pull request into | Runs |
 |---|---|
-| `dev` | lint and Python 3.10 and latest (Linux), the Linux Debug build with the C/C++ tests, the same tests under ASan and UBSan with the fuzz smoke, and the Switch NRO |
-| `main` | lint and Python, Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux, and the ASan and UBSan tests |
+| `dev` | lint and Python 3.10 and latest (Linux), clang-tidy, the Linux Debug build with the C/C++ tests, the same tests under ASan and UBSan with the fuzz smoke, the Switch NRO and the Android APK |
+| `main` | lint and Python, clang-tidy, Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux, the ASan and UBSan tests, the iOS compile, the Switch NRO and the Android APK |
 | manual run | the full set, Release unless its `release` input is off |
+
+`scripts/ci-scope` skips the native jobs when a pull request touches only docs or compendium work, and the Switch or Android job when the native paths touch only another platform's own files.
 
 GitHub's hosted runners are free for this public repository, so use them. To run all three OSes on any branch:
 

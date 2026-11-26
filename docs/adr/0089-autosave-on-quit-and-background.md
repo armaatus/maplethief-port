@@ -11,6 +11,8 @@ The game saves only when the player picks Save in the popup menu, plus a few fix
 
 "Save anywhere" was rejected in #90. The game refuses to save on 16 maps (the tutorial, the five boss maps, three climbs, the Monster Carnival rooms), because boss state is not saved. An autosave has to respect that list and every other condition under which the game would not save. [docs/re/autosave.md](../re/autosave.md) has the conditions with their evidence.
 
+> **Later (2026-11-26):** [ADR 0105](0105-save-states-in-process-snapshot-at-safe-points.md) later added save states, an in-process snapshot at safe points that sits beside the game's own save rules.
+
 ## Options considered
 
 1. **Press the menu's keys for the player** (open the popup menu, tab 5, item 0, Yes). This uses the game's exact path, but it takes several ticks, draws popups, and changes the game's state (the menu stops the hero). A quit would have to wait for the guest to run those ticks. It would also leave the "Successfully saved!" popup open on a background.

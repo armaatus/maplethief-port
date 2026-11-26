@@ -133,7 +133,11 @@ On a Mac with Xcode, `just build ios` builds `dist/ios/MapleThief.app` and the X
 
 ## Nintendo Switch
 
-On a Mac or Linux with Docker, `just build switch` builds `dist/switch/MapleThief.nro` in a container: the game when your IPA is in `original/`, else a small app that only shows its version. Copy it to `sdmc:/switch/maplethief/` on the SD card and start it from the Homebrew Menu ([Playing on the Nintendo Switch](play/switch.md)). The deep reference has the rest: [Nintendo Switch](build/README.md#nintendo-switch).
+On a Mac or Linux machine with Docker, `just build switch` builds `dist/switch/MapleThief.nro`, a homebrew app for a console running custom firmware ([ADR 0138](adr/0138-nintendo-switch-homebrew-target.md)). With your game file in `original/` it holds the game; without it, it only shows its version. [Playing on the Nintendo Switch](play/switch.md) says what to copy to the SD card, and [Nintendo Switch](build/README.md#nintendo-switch) in the build reference has the rest.
+
+## Android
+
+On a Mac or Linux machine, `just build android` builds `dist/android/MapleThief.apk` ([ADR 0150](adr/0150-android-target.md)). For now it is a placeholder app with our own code only: the game doesn't run on Android yet ([#358](https://github.com/armaatus/maplethief-port/issues/358)). [Android](build/README.md#android) in the build reference has the tools and the emulator.
 
 ## When doctor complains
 
