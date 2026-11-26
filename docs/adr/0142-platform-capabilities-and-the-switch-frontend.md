@@ -62,6 +62,7 @@ For the folders the issue named `sdmc:/switch/maplethief/exports/` and `.../text
 - Every new registry row or action row must be decided for the Switch in the test, and must state its `needs` when it depends on something a platform may lack.
 - #239 and #240 build on the table. A row that only works with a capability names it in `needs`, and frontend code asks `platform_has(...)`, not `__SWITCH__`.
 - On the Switch, `gfx_backend = gpu` and `filter` stay shown. They need #242's deko3d backend, and until then they fall back as on any machine without SDL's GPU renderer. If #242 is dropped, they get a capability bit and are hidden.
+  > **Later (2026-11-26):** #242 landed as [ADR 0143](0143-gpu-backend-on-deko3d.md) (SDL_GPU on deko3d), and [ADR 0145](0145-switch-performance-session-and-defaults.md) made `gfx_backend = gpu` the Switch's default.
 - `audio_pack`, `text_pack`, `texture_pack` and `border_image` gain an `offer` hook (empty unless set). The desktop menu, file and flags are as before.
 
 **How we'd know this was wrong:**

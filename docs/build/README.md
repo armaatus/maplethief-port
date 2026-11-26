@@ -201,7 +201,7 @@ Warnings in our own code are errors when `CI` is set in the environment, or with
 
 ### 5. Package a kit (optional)
 
-The three release workflows also **package** a kit with CPack ([ADR 0023](../adr/0023-local-ci-and-packaging.md)): `cmake --workflow --preset <preset>` configures, builds, runs CTest and writes the package into `build/<preset>/`. `cpack --preset <preset>` repackages an existing build.
+These five workflow presets also **package** a kit with CPack ([ADR 0023](../adr/0023-local-ci-and-packaging.md)): `cmake --workflow --preset <preset>` configures, builds, runs CTest and writes the package into `build/<preset>/`. `cpack --preset <preset>` repackages an existing build. A release carries only the first three, which `release.yml` builds ([Releases](releases.md)); the Switch and Android kits are built and tested in CI but never uploaded, and the Switch ships as a player zip instead.
 
 | Workflow preset | Package |
 |---|---|

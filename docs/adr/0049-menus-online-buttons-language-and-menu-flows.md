@@ -25,6 +25,8 @@ For `openURL:`:
 
 For the language: a `settings.ini` key, or the environment variable the runtime already defines. The environment variable is chosen for now, because a language setting belongs to the options work, and the tests need only a switch.
 
+> **Later (2026-11-26):** [ADR 0077](0077-desktop-conveniences.md) made the language a setting; the environment variable still works.
+
 ## Decision
 
 - **`openURL:` is refused.** The platform sets no `open_url` hook. The banner, More Games and the About links log `uikit: -[UIApplication openURL:] <url>: not opened (no handler)` and leave the screen as it was. A later setting can add a hook if anyone wants the links.

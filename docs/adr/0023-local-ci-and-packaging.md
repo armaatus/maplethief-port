@@ -58,6 +58,7 @@ Issue #113 asks that every check CI runs, packaging included, can run locally th
 - x86_64 under Rosetta is several times slower than native arm64. `--arch arm64` is there for quick iterations, but only amd64 counts as "the Linux job".
 - A clean checkout costs a full build of SDL3 per run (about a minute on the Mac); the download cache avoids the network.
 - The macOS kit's bundle is ad-hoc signed; signing with an identity, notarisation and the Gatekeeper guidance stay with #114 and #81 ([ADR 0024](0024-release-contents-and-flow.md) keeps releases ad-hoc signed). The Windows kit uses the dynamic MSVC runtime until #82 decides between a static CRT and bundled redistributables.
+  > **Later (2026-11-26):** [ADR 0125](0125-player-builds-icon-guard-modes-and-release-flow.md) settled #82 for the player build (static CRT; the kit keeps the dynamic one), and [ADR 0148](0148-downloads-stay-unsigned.md) keeps the downloads unsigned.
 - AppImage needs CMake 4.2+ or an External script; it is left to #114 ([ADR 0024](0024-release-contents-and-flow.md) defers it: TGZ only).
 
 ## Addendum: local-ci is optional (ADR 0126, 2026-11-07)

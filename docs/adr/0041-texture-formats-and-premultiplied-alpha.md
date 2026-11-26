@@ -92,6 +92,7 @@ For clipping, which the check below found to matter:
 - A "clean edges" option (un-premultiplying for display) would be a deliberate deviation for M10, behind a setting, not a default.
 - Replacement packs (M10) are hashed over the game's own premultiplied bytes. A replacement should be premultiplied as the game's loader does it, or it will look brighter at its edges.
 - **Found on the way, #121:** the game draws `GL_LINES` (`FUN_000082ac`, a Cohen–Sutherland line drawer; 2,544 lines in 40 s, at an NPC dialogue). `mt_gfx` counts lines but does not draw them yet.
+  > **Later (2026-11-26):** #121 then made `mt_gfx` draw lines: see the amendments in [ADR 0039](0039-rendering-backend-software-rasterizer.md) and [ADR 0040](0040-gles-fixed-function-pipeline.md).
 - **How we'd know this was wrong:**
   - Device screenshots (#60) show brighter edges than the port. Then the device's GL did not blend as asked, or iOS premultiplied differently, and the model changes in one place.
   - A later game state uploads another format. The trace file names its call site, and the conversion already exists.

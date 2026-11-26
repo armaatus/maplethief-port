@@ -9,6 +9,8 @@
 
 #90 asks for small comfort options that cannot break game logic, each behind a toggle and off by default. [docs/re/qol.md](../re/qol.md) gives every candidate's hook point, risk, effort and verdict. Three are cheap and safe: turbo attack, auto-potion and faster menu animations. The others become follow-up issues; save anywhere stays rejected (ADR 0089).
 
+> **Later (2026-11-26):** Save anywhere is still rejected as a change to the game's saves; [ADR 0105](0105-save-states-in-process-snapshot-at-safe-points.md) later added save states, a snapshot at safe points outside the game's save file.
+
 The game fires attack, skills and jump once per press and treats only walking as a held action (docs/ANALYSIS.md, Input). A fresh character's HP potion is on quick slot 1, and the quick slots are `CHero +0xE0 + 8n` `{kind, id}`, as `CHero::KeyAttack` `0x66DD9` reads them. The title menu and the character select animate with `+[UIView beginAnimations:]` blocks, and nothing in the game waits on them.
 
 ## Options considered

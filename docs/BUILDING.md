@@ -13,6 +13,8 @@ For every step by hand, the presets and all the options, see the deep reference:
 | Linux x86_64 | builds a folder and a tarball, in Docker |
 | Steam Deck | [built on another computer](#steam-deck), then copied over |
 | iOS 16 or later | [built on a Mac with Xcode](#ios), then installed from Xcode |
+| Nintendo Switch (homebrew) | [built in Docker on a Mac or Linux](#nintendo-switch), then copied to the SD card |
+| Android 8.0 or later, arm64 | [built on a Mac or Linux](#android): for now a placeholder, not the game yet |
 
 ## 1. Install the tools
 
@@ -129,6 +131,14 @@ Build on another computer with `just build linux` (it needs Docker), then copy t
 ## iOS
 
 On a Mac with Xcode, `just build ios` builds `dist/ios/MapleThief.app` and the Xcode project you install it from ([ADR 0136](adr/0136-ios-app-through-xcode.md)). [Playing on your iPhone](play/iphone.md) has the steps: the signing team, the build, and installing it on the phone.
+
+## Nintendo Switch
+
+On a Mac or Linux machine with Docker, `just build switch` builds `dist/switch/MapleThief.nro`, a homebrew app for a console running custom firmware ([ADR 0138](adr/0138-nintendo-switch-homebrew-target.md)). With your game file in `original/` it holds the game; without it, it only shows its version. [Playing on the Nintendo Switch](play/switch.md) says what to copy to the SD card, and [Nintendo Switch](build/README.md#nintendo-switch) in the build reference has the rest.
+
+## Android
+
+On a Mac or Linux machine, `just build android` builds `dist/android/MapleThief.apk` ([ADR 0150](adr/0150-android-target.md)). For now it is a placeholder app with our own code only: the game doesn't run on Android yet ([#358](https://github.com/armaatus/maplethief-port/issues/358)). [Android](build/README.md#android) in the build reference has the tools and the emulator.
 
 ## When doctor complains
 
