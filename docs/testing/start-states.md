@@ -12,6 +12,9 @@ MT_FROM_SAVE=OUT_DIR SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy MAPLETHIEF_LA
     build/mac-debug/tests/play_real_test <part> <output dir>
 ```
 
+Part M of the chapter-1 chain passes from `tests/starts/chapter_2.json` built this way, with
+no other file in `saves/` (2026-11-26).
+
 `build` refuses a description the port's own save checks refuse (an item, skill or map past the
 game's tables, a quest key that is not text). `--app` lets a description name skills by id and
 the slot's caption by its strings key.
