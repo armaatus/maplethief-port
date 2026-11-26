@@ -84,3 +84,8 @@ Joris asked that CI spend no minutes on builds a pull request cannot affect. A `
 ## Addendum: CI by target branch (ADR 0126, 2026-11-07)
 
 The repository is public, so hosted runners cost no minutes, and the local-first rule above left Windows untested until an epic's pull request. [ADR 0126](0126-dev-branch-release-pull-requests-and-ci-by-target.md) replaces the triggers: pull requests into `dev` (the integration branch) run lint + Python and the Linux Debug job only; pull requests into `main` (release pull requests from `dev`) run Debug and Release on macOS, Windows and Linux; manual runs as before. `.github/workflows/release.yml` tags and drafts the release and builds the kits after a release pull request merges. The scope check of the previous addendum applies to both targets.
+
+## Addendum: a weekly full run on `dev` (#339, 2026-11-26)
+
+Pull requests into `dev` build only on Linux and the runner images are `*-latest`, so a toolchain update could break macOS, Windows or iOS unseen until the next release pull request. `ci.yml` also runs on a weekly schedule (Monday 04:17 UTC), which GitHub runs on the default branch, `dev`, with the manual run's full profile and the Release jobs. A last job, `weekly report`, needs every other job and runs even when they fail: `tools/mtport/cireport.py` lists the run's jobs through the API and checks each expected job ran and passed (a run has ended as a failure with jobs missing and no log, so the jobs are counted, not only the conclusion), then opens one issue labelled `ci-weekly` or comments on the open one, and closes it on a green run. A manual run with the `report` input runs the job too. The schedule only adds a trigger: pull request runs are unchanged. Accepted (delegated by Joris, 2026-11-13).
+

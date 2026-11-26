@@ -39,6 +39,8 @@ while IFS= read -r path || [ -n "$path" ]; do
         tests/test_play_coverage.py) continue ;;
         tools/mtport/handoffs.py) continue ;;
         tests/test_handoff_checklists.py) continue ;;
+        tools/mtport/cireport.py) continue ;;   # the weekly report job (#339)
+        tests/test_ci_report.py) continue ;;
         tests/test_ci_scope.py) continue ;;
         tests/fixtures/compendium/*) continue ;;
         scripts/compendium) continue ;;
