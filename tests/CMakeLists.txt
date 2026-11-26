@@ -1178,6 +1178,24 @@ foreach(_mode IN ITEMS on off)
                    ENVIRONMENT
                    "${_autosave_env};MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save;MT_AUTOSAVE_MODE=${_mode}")
 endforeach()
+# The death popup's exit to the main menu (#336): a fall, B ("Go to main menu", popup 0x6D) and
+# Yes. The hook checks the guards and the dead hero refuses: nothing is saved, as the game
+# (play.autosave_death_exit); with autosave = off nothing is checked (play.autosave_death_exit_off).
+foreach(_mode IN ITEMS on off)
+    set(_name play.autosave_death_exit)
+    if(_mode STREQUAL "off")
+        set(_name play.autosave_death_exit_off)
+    endif()
+    add_test(NAME ${_name}
+             COMMAND play_real_test autosave_death_exit
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_autosave_death_exit_${_mode}" 1)
+    set_tests_properties(
+        ${_name}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+                   FIXTURES_REQUIRED play_save
+                   ENVIRONMENT
+                   "${_autosave_env};MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save;MT_AUTOSAVE_MODE=${_mode}")
+endforeach()
 # The reload is a relaunch on play.autosave_quit's data directory: no MT_FROM_SAVE.
 set_tests_properties(play.autosave_reload PROPERTIES FIXTURES_REQUIRED play_autosave ENVIRONMENT
                                                                                "${_autosave_env}")
