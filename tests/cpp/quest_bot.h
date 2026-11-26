@@ -65,6 +65,12 @@ inline bool standing(const Hero &h) { return h.addr != 0 && (h.flags & 0x17) == 
 inline bool on_ladder(const Hero &h) { return (h.flags & 0x04) != 0; }
 
 inline bool trace_on() { return std::getenv("MT_NAV_TRACE") != nullptr; }
+// The item on quick slot n (kind 1, hero +0xE0 + 8 n / +0xE4 + 8 n), -1 for none: slot 1 (Y) holds
+// the HP potion, slot 2 (B) the MP potion (Red and Blue Potions for a new character).
+inline i32 quick_slot_item(const mt_cpu *cpu, const Hero &h, u32 n) {
+    return h.addr != 0 && rdi(cpu, h.addr + 0xE0 + 8 * n) == 1 ? rdi(cpu, h.addr + 0xE4 + 8 * n)
+                                                               : -1;
+}
 
 // --- going places ------------------------------------------------------------------------------
 
@@ -79,7 +85,9 @@ struct Nav {
     wm::Edge edge{};
     int from = -1, from_y = 0, map_key = -1;
     double start = 0;
-    bool left = false; // the hero left the ground during the move
+    bool left = false;   // the hero left the ground during the move
+    bool hopped = false; // a rope jump's hop off the ladder is under way (since `hop`)
+    double hop = 0;
     int last_x = INT32_MIN, last_y = INT32_MIN;
     double still = 0, drink = -10;
     double moved = 0, jumped = -10, settled = -1, stuck_since = -1;
@@ -226,6 +234,51 @@ inline void act(Run &r, Nav &n, const wm::Map &m, const Hero &h, double el, int 
         }
         break;
     }
+    case wm::Move::rope_jump: {
+        // Onto the ladder (up from its foot, a jump for a rope hanging above it; down from its
+        // top), along it until the feet are a little above the platform beside it, then the
+        // direction and jump: the side jump hops off onto it.
+        const int want = m.platforms[static_cast<std::size_t>(n.edge.to)].y();
+        if (n.hopped) {
+            // The direction and jump together are the game's diagonal jump key ('1' / '3'):
+            // held for a few ticks, as a switch of keys takes two (keypad.md, SkyCanvas::Tick).
+            const bool pressing = el - n.hop < 0.25;
+            hold(r, UP, false);
+            hold(r, DOWN, false);
+            hold(r, A, pressing);
+            hold(r, LEFT, (pressing || !stand) && n.edge.dir < 0);
+            hold(r, RIGHT, (pressing || !stand) && n.edge.dir > 0);
+            if ((stand && !on_ladder(h)) || t > 15) {
+                end_move(r, n, m, h, key);
+            }
+            break;
+        }
+        if (h.y != n.last_y) {
+            n.last_y = h.y;
+            n.still = el;
+        }
+        if (on_ladder(h) && h.y <= want - 1 && h.y >= want - 12) {
+            n.hopped = true;
+            n.hop = el;
+            release_all(r);
+            hold(r, LEFT, n.edge.dir < 0);
+            hold(r, RIGHT, n.edge.dir > 0);
+            hold(r, A, true);
+            break;
+        }
+        const bool up = on_ladder(h) ? h.y > want - 1 : h.y > want;
+        const bool again = on_ladder(h) && el - n.still > 0.3 && std::fmod(el - n.still, 0.6) < 0.1;
+        hold(r, LEFT, false);
+        hold(r, RIGHT, false);
+        hold(r, UP, up && !again);
+        hold(r, DOWN, !up && !again);
+        hold(r, A,
+             up && !on_ladder(h) && stand && std::fmod(t, 1.5) >= 0.1 && std::fmod(t, 1.5) < 0.2);
+        if (t > 15) {
+            end_move(r, n, m, h, key);
+        }
+        break;
+    }
     case wm::Move::walk: // up a stair step: on in the edge's direction
         hold(r, LEFT, n.edge.dir < 0);
         hold(r, RIGHT, n.edge.dir > 0);
@@ -308,8 +361,10 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
         act(r, n, m, h, el, key);
         return false;
     }
-    // A Red Potion (Y, quick slot 1) under 40 % of HP, standing, the d-pad let go.
-    if (el - n.drink > 1.5 && h.hp * 5 < h.max_hp * 2 && standing(h) && item_count(cpu, h, 3) > 0) {
+    // The HP potion (Y, quick slot 1) under 40 % of HP, standing, the d-pad let go.
+    const i32 potion = quick_slot_item(cpu, h, 1);
+    if (el - n.drink > 1.5 && h.hp * 5 < h.max_hp * 2 && standing(h) && potion >= 0 &&
+        item_count(cpu, h, potion) > 0) {
         n.drink = el;
     }
     if (el - n.drink < 0.3) {
@@ -377,7 +432,8 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
         walk_toward(r, n, h, el, e.x + e.dir * 16 > h.x ? 1 : -1);
         return false;
     }
-    const bool ladder = e.move == wm::Move::climb_up || e.move == wm::Move::climb_down;
+    const bool ladder = e.move == wm::Move::climb_up || e.move == wm::Move::climb_down ||
+                        e.move == wm::Move::rope_jump;
     const int step_tol = ladder ? 2 : 4;
     const int d = e.x - h.x;
     if (trace_on()) {
@@ -418,6 +474,7 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     n.from_y = h.y;
     n.start = el;
     n.left = false;
+    n.hopped = false;
     n.last_y = h.y;
     n.still = el;
     return false;

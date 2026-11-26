@@ -63,7 +63,7 @@ struct Ladder {
 };
 
 // A move from one platform to another: how and from where.
-enum class Move { walk, jump, fall, climb_up, climb_down };
+enum class Move { walk, jump, fall, climb_up, climb_down, rope_jump };
 inline const char *move_name(Move m) {
     switch (m) {
     case Move::walk:
@@ -76,6 +76,8 @@ inline const char *move_name(Move m) {
         return "climb up";
     case Move::climb_down:
         return "climb down";
+    case Move::rope_jump:
+        return "rope jump";
     }
     return "?";
 }
@@ -163,6 +165,12 @@ constexpr int k_fall_reach = 24; // px a walk off an edge drifts sideways before
 // 0x61474), so a jump reaches a ladder's foot hanging up to about 52 px above the floor (1.4's
 // ladder to portal140 hangs 48 px up).
 constexpr int k_ladder_reach = 52;
+// Off a ladder with a direction and jump the hero leaves sideways in a small hop (the side jump,
+// 12 px high, 7 px a tick: mechanics.md, Movement) and comes down about 28 px out at the height
+// it left. A platform whose near end is that close to a ladder, at a height the ladder spans, is
+// reached by climbing to it and hopping off (4.3: the ropes hang beside the platforms, not onto
+// them).
+constexpr int k_rope_hop = 24;
 
 inline void build(Map &m) {
     // Platforms: runs of foothold cells per row (one-way floors; a wall corner counts).
@@ -224,6 +232,38 @@ inline void build(Map &m) {
         const int cost = (l.r1 - l.r0) * 3 + 20;
         add(foot, {top, Move::climb_up, l.x(), 0, static_cast<int>(li), cost});
         add(top, {foot, Move::climb_down, l.x(), 0, static_cast<int>(li), cost});
+    }
+    // Rope jumps: onto a platform beside a ladder, from the ladder's foot or top.
+    for (std::size_t li = 0; li < m.ladders.size(); li++) {
+        const Ladder &l = m.ladders[li];
+        const int foot = m.platform_below(l.x(), l.bottom() - 2);
+        const bool grab =
+            foot >= 0 &&
+            m.platforms[static_cast<std::size_t>(foot)].y() - l.bottom() <= k_ladder_reach;
+        const int top = (m.at(l.c, l.r0) & k_foothold) != 0
+                            ? m.platform_at(l.x(), l.r0 * k_cell - 1, 0)
+                            : m.platform_at(l.x(), l.r0 * k_cell - 1, 3 * k_cell);
+        for (std::size_t qi = 0; qi < m.platforms.size(); qi++) {
+            const Platform &q = m.platforms[qi];
+            const int to = static_cast<int>(qi);
+            // The hero's feet at q's height while on the ladder, a cell clear of both ends.
+            if (to == foot || to == top || q.y() - k_cell < l.top() || q.y() > l.bottom()) {
+                continue;
+            }
+            for (const int dir : {-1, 1}) {
+                const int gap = dir < 0 ? l.x() - 6 - q.x1() : q.x0() - (l.x() + 6);
+                if (gap < 0 || gap > k_rope_hop) {
+                    continue;
+                }
+                const int cost = std::abs(q.y() - l.bottom()) / 6 + 40;
+                if (grab) {
+                    add(foot, {to, Move::rope_jump, l.x(), dir, static_cast<int>(li), cost});
+                }
+                if (top >= 0) {
+                    add(top, {to, Move::rope_jump, l.x(), dir, static_cast<int>(li), cost});
+                }
+            }
+        }
     }
     for (int i = 0; i < n; i++) {
         const Platform &p = m.platforms[static_cast<std::size_t>(i)];
@@ -412,6 +452,8 @@ inline std::vector<Step> route(const Map &m, int from, int from_x, int to) {
                 int land = e.x;
                 if (e.move == Move::climb_up || e.move == Move::climb_down) {
                     land = e.x;
+                } else if (e.move == Move::rope_jump) {
+                    land = e.x + e.dir * (k_rope_hop + 6);
                 } else if (e.move == Move::fall) {
                     land = e.x + e.dir * k_fall_reach;
                 } else if (e.move == Move::jump) {

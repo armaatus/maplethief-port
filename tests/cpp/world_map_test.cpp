@@ -103,3 +103,37 @@ TEST_CASE("a term the format does not know is unknown") {
     CHECK(t.op == "<");
     CHECK(t.value == 2);
 }
+
+// A synthetic grid like 4.3's: a floor, a rope hanging 24 px above it, and a ledge whose end is
+// 16 px from the rope, 60 px above the floor. The ledge is reached by a rope jump: up the rope,
+// then hop off sideways.
+TEST_CASE("a ledge beside a rope is reached by a rope jump") {
+    namespace wm = world_map;
+    wm::Map m;
+    m.w = 30;
+    m.h = 20;
+    m.att.assign(static_cast<std::size_t>(m.w * m.h), wm::k_air);
+    auto set = [&m](int c, int r, wm::u8 v) { m.att[static_cast<std::size_t>(r * m.w + c)] = v; };
+    for (int c = 0; c < m.w; c++) {
+        set(c, 18, wm::k_foothold); // the floor: y 143
+    }
+    for (int c = 2; c <= 10; c++) {
+        set(c, 10, wm::k_foothold); // the ledge: y 79, x 16..87
+    }
+    for (int r = 6; r <= 14; r++) { // the rope: x 104, y 48..119
+        set(12, r, wm::k_ladder);
+        set(13, r, wm::k_ladder);
+    }
+    wm::build(m);
+    REQUIRE(m.platforms.size() == 2);
+    REQUIRE(m.ladders.size() == 1);
+    const int ledge = m.platforms[0].row == 10 ? 0 : 1, floor = 1 - ledge;
+    bool hop = false;
+    for (const wm::Edge &e : m.edges[static_cast<std::size_t>(floor)]) {
+        hop = hop || (e.move == wm::Move::rope_jump && e.to == ledge && e.dir < 0 && e.x == 104);
+    }
+    CHECK(hop);
+    const std::vector<wm::Step> path = wm::route(m, floor, 200, ledge);
+    REQUIRE(path.size() == 1);
+    CHECK(path[0].edge.move == wm::Move::rope_jump);
+}
