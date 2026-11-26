@@ -15,7 +15,10 @@
 #     about every millisecond, a slack of 0.5-0.8 ms a tick on the wall clock, 2-3.3 % of 25 ms;
 #     the run's exit line measured -3.18 % with the boot's loads in it). Each run's start-up log
 #     names the main thread's priority (#206, ADR 0120), and every deviation is reported with
-#     the machine's load average, so a failure on a busy machine reads as such.
+#     the machine's load average, so a failure on a busy machine reads as such. CTest runs the
+#     test RUN_SERIAL; another process's load can still slow a run's ticks for a while (#344),
+#     so a run whose tick rate is outside the tolerance is run again, up to `attempts` times. A
+#     real error in the rate is outside it in every attempt.
 
 # skip_intros is pinned off (#174, ADR 0096): it runs the guest clock x8 through scenes, and this
 # test times or counts the guest's ticks; a suite run with MAPLETHIEF_SETTINGS="skip_intros = on"
@@ -66,8 +69,11 @@ function(load_average out)
     endif()
 endfunction()
 
-# The deviation in the exit clock line ("(-0.60 %)") within `percent`.
-function(check_deviation name percent)
+set(attempts 3)
+
+# The deviation in the exit clock line ("(-0.60 %)") within `percent`: sets deviation_ok. Outside
+# it, the run is to be made again (a message), or at the last attempt the test fails.
+function(check_deviation name percent attempt)
     load_average(load)
     if(NOT log MATCHES "game: clock: [^\n]*\\(([-+][0-9]+\\.[0-9]+) %\\)")
         message(FATAL_ERROR "${name}: no game: clock: line with a deviation:\n${log}")
@@ -75,10 +81,17 @@ function(check_deviation name percent)
     set(dev "${CMAKE_MATCH_1}")
     string(REGEX REPLACE "^\\+" "" dev "${dev}")
     if(dev LESS -${percent} OR dev GREATER ${percent})
+        if(attempt LESS attempts)
+            message(STATUS "${name}: the tick rate is ${dev} % from the option's (${percent} % "
+                           "allowed${load}), attempt ${attempt} of ${attempts}: running again")
+            set(deviation_ok FALSE PARENT_SCOPE)
+            return()
+        endif()
         message(FATAL_ERROR "${name}: the tick rate is ${dev} % from the option's (${percent} % "
-                            "allowed${load}):\n${log}")
+                            "allowed${load}) in all ${attempts} attempts:\n${log}")
     endif()
     message(STATUS "${name}: the tick rate is ${dev} % from the option's${load}")
+    set(deviation_ok TRUE PARENT_SCOPE)
 endfunction()
 
 if(MODE STREQUAL "usage")
@@ -108,27 +121,42 @@ elseif(MODE STREQUAL "game")
     set(ENV{SDL_VIDEO_DRIVER} dummy)
     set(ENV{SDL_AUDIO_DRIVER} dummy)
     foreach(rate 2 3)
-        run_game(ff_x${rate} --seconds 24 --fast-forward x${rate} --hold-fast-forward 4,100)
-        if(NOT log MATCHES "game: fast-forward x${rate} at 4\\.0[0-9]+ s"
-           OR NOT log MATCHES "pacing: the wall clock x${rate} \\(fast-forward\\)"
-           OR NOT log MATCHES "fast-forward [0-9.]+ s, [0-9.]+ s of game time gained")
-            message(FATAL_ERROR "ff_x${rate}: the fast-forward did not start at 4 s:\n${log}")
-        endif()
-        check_deviation(ff_x${rate} 3)
+        foreach(attempt RANGE 1 ${attempts})
+            run_game(ff_x${rate} --seconds 24 --fast-forward x${rate} --hold-fast-forward 4,100)
+            if(NOT log MATCHES "game: fast-forward x${rate} at 4\\.0[0-9]+ s"
+               OR NOT log MATCHES "pacing: the wall clock x${rate} \\(fast-forward\\)"
+               OR NOT log MATCHES "fast-forward [0-9.]+ s, [0-9.]+ s of game time gained")
+                message(FATAL_ERROR "ff_x${rate}: the fast-forward did not start at 4 s:\n${log}")
+            endif()
+            check_deviation(ff_x${rate} 3 ${attempt})
+            if(deviation_ok)
+                break()
+            endif()
+        endforeach()
     endforeach()
     # pacing = wall: the launch clock's rate (clock.h).
-    run_game(ff_wall --seconds 24 --pacing wall --fast-forward x2 --hold-fast-forward 4,100)
-    if(NOT log MATCHES "game: fast-forward x2 at 4\\.0[0-9]+ s"
-       OR NOT log MATCHES "game: clock: pacing = wall[^\n]*fast-forward [0-9.]+ s")
-        message(FATAL_ERROR "ff_wall: the fast-forward did not start at 4 s:\n${log}")
-    endif()
-    check_deviation(ff_wall 3)
-    run_game(speed_25 --seconds 24 --game-speed 25)
-    if(NOT log MATCHES "game: game_speed 25: every Speed option of the game ticks at it"
-       OR NOT log MATCHES "against the game's 25 ms tick's 40\\.000")
-        message(FATAL_ERROR "speed_25: the table was not patched to 25 ms:\n${log}")
-    endif()
-    check_deviation(speed_25 5)
+    foreach(attempt RANGE 1 ${attempts})
+        run_game(ff_wall --seconds 24 --pacing wall --fast-forward x2 --hold-fast-forward 4,100)
+        if(NOT log MATCHES "game: fast-forward x2 at 4\\.0[0-9]+ s"
+           OR NOT log MATCHES "game: clock: pacing = wall[^\n]*fast-forward [0-9.]+ s")
+            message(FATAL_ERROR "ff_wall: the fast-forward did not start at 4 s:\n${log}")
+        endif()
+        check_deviation(ff_wall 3 ${attempt})
+        if(deviation_ok)
+            break()
+        endif()
+    endforeach()
+    foreach(attempt RANGE 1 ${attempts})
+        run_game(speed_25 --seconds 24 --game-speed 25)
+        if(NOT log MATCHES "game: game_speed 25: every Speed option of the game ticks at it"
+           OR NOT log MATCHES "against the game's 25 ms tick's 40\\.000")
+            message(FATAL_ERROR "speed_25: the table was not patched to 25 ms:\n${log}")
+        endif()
+        check_deviation(speed_25 5 ${attempt})
+        if(deviation_ok)
+            break()
+        endif()
+    endforeach()
 else()
     message(FATAL_ERROR "MODE must be usage or game")
 endif()
