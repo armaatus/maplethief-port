@@ -275,6 +275,54 @@ def test_build_switch_debug_with_the_ipa_stops_before_any_work(tmp_path, monkeyp
     assert runs == []
 
 
+# --- Android (#356) ---------------------------------------------------------------------------
+
+
+def _fake_android_build(tmp_path, monkeypatch, native):
+    """`build android` on a synthetic checkout: the pinned SDK there (native) or not (the
+    container), the build stubbed."""
+    runs = []
+
+    def run(repo, cmd, env=None):
+        runs.append([str(c) for c in (cmd if cmd[0] == "cmake" else cmd[1:])])
+        preset = cmd[cmd.index("--preset") + 1]
+        (repo / "build" / preset).mkdir(parents=True, exist_ok=True)
+        (repo / "build" / preset / "MapleThief.apk").write_bytes(b"PK")
+
+    pins = tmp_path / "tools/containers/android/pins.env"
+    pins.parent.mkdir(parents=True)
+    pins.write_text("ANDROID_NDK_PATH=ndk/1.2.3\n", encoding="utf-8")
+    if native:
+        ndk = tmp_path / "build/_android-sdk/ndk/1.2.3"
+        ndk.mkdir(parents=True)
+        (ndk / "source.properties").write_text("Pkg.Revision = 1.2.3\n", encoding="utf-8")
+    monkeypatch.delenv("MAPLETHIEF_ANDROID_SDK", raising=False)
+    monkeypatch.setattr(bd, "host_platform", lambda: "mac")
+    monkeypatch.setattr(bd, "check_tools", lambda repo, platform: None)
+    monkeypatch.setattr(bd, "run", run)
+    return runs
+
+
+@pytest.mark.parametrize(("native", "config"), [(True, "release"), (False, "debug")])
+def test_build_android_builds_the_placeholder_apk(tmp_path, monkeypatch, capsys, native, config):
+    runs = _fake_android_build(tmp_path, monkeypatch, native)
+    assert bd.cmd_build(tmp_path, bd.parse_args(["android", config])) == 0
+    preset = f"android-{config}"
+    if native:
+        assert runs == [["cmake", "--workflow", "--preset", preset]]
+    else:
+        assert runs == [["scripts/build-android", "--preset", preset]]
+    dist = tmp_path / "dist/android" / ("debug" if config == "debug" else "")
+    assert (dist / "MapleThief.apk").read_bytes() == b"PK"
+    assert "the placeholder shell" in capsys.readouterr().out
+
+
+def test_build_android_refuses_windows(monkeypatch):
+    monkeypatch.setattr(bd, "host_platform", lambda: "win")
+    with pytest.raises(bd.BuildError, match="Mac or Linux"):
+        bd.check_target("android")
+
+
 def test_switch_preset():
     assert bd.switch_preset(debug=False, game=True) == "switch-player"
     assert bd.switch_preset(debug=False, game=False) == "switch-release"

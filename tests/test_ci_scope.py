@@ -1,7 +1,7 @@
 """scripts/ci-scope (ADR 0006, addendum of 2026-11-06): a pull request that only touches
 documentation or compendium work skips CI's build matrix; anything else, or an empty list,
-runs it. The Nintendo Switch job (ADR 0138) runs for every native change except one that only
-touches another platform's own files."""
+runs it. The Nintendo Switch job (ADR 0138) and the Android job (ADR 0150) run for every native
+change except one that only touches another platform's own files."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ from repo_paths import REPO
 pytestmark = pytest.mark.skipif(os.name == "nt" or not shutil.which("bash"), reason="needs bash")
 
 
-NONE = "native=false\nswitch=false"
-BOTH = "native=true\nswitch=true"
+NONE = "native=false\nswitch=false\nandroid=false"
+BOTH = "native=true\nswitch=true\nandroid=true"
 
 
 def scope(*paths: str) -> str:
@@ -69,9 +69,6 @@ def test_compendium_and_docs_only_skip_the_build():
         ".github/workflows/ci.yml",
         "uv.lock",
         "tools/mtport/compendium_extra.py",
-        "platform/switch/switch.cmake",
-        "tools/containers/switch/Dockerfile",
-        "scripts/build-switch",
     ],
 )
 def test_any_other_path_runs_the_build_and_the_switch_job(path):
@@ -98,8 +95,37 @@ def test_any_other_path_runs_the_build_and_the_switch_job(path):
     ],
 )
 def test_another_platforms_own_files_skip_the_switch_job(path):
-    assert scope("docs/a.md", path) == "native=true\nswitch=false"
+    assert scope("docs/a.md", path) == "native=true\nswitch=false\nandroid=false"
     assert scope(path, "platform/src/main.cpp") == BOTH
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "platform/switch/switch.cmake",
+        "tools/containers/switch/Dockerfile",
+        "scripts/build-switch",
+        "scripts/switch-run",
+    ],
+)
+def test_the_switchs_own_files_skip_the_android_job(path):
+    assert scope("docs/a.md", path) == "native=true\nswitch=true\nandroid=false"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "platform/android/android.cmake",
+        "platform/android/src/io/github/armaatus/maplethief/MapleThiefActivity.java",
+        "cmake/AndroidToolchain.cmake",
+        "tools/containers/android/pins.env",
+        "scripts/build-android",
+        "scripts/android-run",
+        "tools/mtport/apk.py",
+    ],
+)
+def test_androids_own_files_skip_the_switch_job(path):
+    assert scope("docs/a.md", path) == "native=true\nswitch=false\nandroid=true"
 
 
 def test_an_empty_list_runs_the_build():

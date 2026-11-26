@@ -92,6 +92,7 @@ jobs:
     outputs:
       native: ${{ steps.scope.outputs.native }}
       switch: ${{ steps.scope.outputs.switch }}
+      android: ${{ steps.scope.outputs.android }}
     steps:
       - name: Check out (without Git LFS objects)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -101,13 +102,13 @@ jobs:
           sparse-checkout: scripts/ci-scope
           sparse-checkout-cone-mode: false
 
-      - name: Decide whether the build matrix and the Switch job are needed (scripts/ci-scope)
+      - name: Decide whether the build matrix, the Switch and the Android jobs are needed (scripts/ci-scope)
         id: scope
         shell: bash
         run: |
           set -euo pipefail
           if [ "$EVENT" != pull_request ]; then
-            printf 'native=true\nswitch=true\n' | tee -a "$GITHUB_OUTPUT"
+            printf 'native=true\nswitch=true\nandroid=true\n' | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
           gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' > changed.txt
@@ -115,7 +116,7 @@ jobs:
           echo "$count changed file(s)"
           # The files API lists at most 3,000 files; past that the list is cut, so build.
           if [ "$count" -ge 3000 ]; then
-            printf 'native=true\nswitch=true\n' | tee -a "$GITHUB_OUTPUT"
+            printf 'native=true\nswitch=true\nandroid=true\n' | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
           scripts/ci-scope < changed.txt | tee -a "$GITHUB_OUTPUT"
@@ -434,6 +435,45 @@ jobs:
         with:
           name: test-logs-switch
           path: build/switch-release/logs/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  android:
+    name: android (APK, pinned SDK and NDK container, no IPA)
+    needs: scope
+    if: needs.scope.outputs.android == 'true' && inputs.runners != 'self-hosted'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - *ipa-guard
+
+      - name: Cache third-party downloads (build/_downloads, Gradle's in android-gradle-home/)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/_downloads
+          key: downloads-android-${{ hashFiles('cmake/Dependencies.cmake', 'tools/containers/android/pins.env', 'platform/android/*.gradle') }}
+
+      - name: Build MapleThief.apk and check it (scripts/build-android, android-release)
+        run: scripts/build-android HEAD --preset android-release
+
+      - name: Show the APK
+        run: |
+          set -euo pipefail
+          ls -l build/android-release/MapleThief.apk build/android-release/MapleThief-kit-*-android-arm64.zip
+          cd tools && python3 -B -m mtport.apk info ../build/android-release/MapleThief.apk
+
+      - name: Upload the checks' log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-logs-android
+          path: build/android-release/logs/
           if-no-files-found: ignore
           retention-days: 7
 

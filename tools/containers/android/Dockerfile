@@ -47,23 +47,36 @@ RUN if [ -n "$UBUNTU_SNAPSHOT" ]; then \
     && echo "apt source: ${UBUNTU_SNAPSHOT:-live archive}" > /etc/maplethief-ci-image \
     && dpkg-query -W -f '${Package} ${Version}\n' >> /etc/maplethief-ci-image
 
-# CMake. GNU tar fails to create directories under Rosetta (tools/containers/linux/Dockerfile),
-# so the archive is unpacked with Python's tarfile, as install-sdk.sh does.
-RUN set -eu; \
-    curl -fsSL -o /tmp/cmake.tar.gz \
-        "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz"; \
-    echo "${CMAKE_SHA256}  /tmp/cmake.tar.gz" | sha256sum -c -; \
-    python3 -c 'import sys, tarfile; tarfile.open(sys.argv[1]).extractall(sys.argv[2], filter="tar")' \
-        /tmp/cmake.tar.gz /opt; \
-    mv "/opt/cmake-${CMAKE_VERSION}-linux-x86_64" /opt/cmake; \
-    ln -s /opt/cmake/bin/cmake /opt/cmake/bin/ctest /opt/cmake/bin/cpack /usr/local/bin/; \
-    rm /tmp/cmake.tar.gz
-
 # The SDK packages the build needs (no emulator, no images, no platform-tools: the container
 # builds and runs nothing on a device).
 COPY pins.env install-sdk.sh /opt/android-sdk-pins/
 RUN /opt/android-sdk-pins/install-sdk.sh /opt/android-sdk linux \
         ndk platform build-tools jdk gradle
+
+# GNU tar fails to create directories under Rosetta's x86_64 emulation ("Cannot mkdir: Function
+# not implemented"), so archives (CMake's, the source export of scripts/build-android) are
+# unpacked with Python's tarfile, as in tools/containers/linux/Dockerfile and install-sdk.sh.
+COPY --chmod=755 <<'PY' /usr/local/bin/untar
+#!/usr/bin/python3
+"""untar ARCHIVE DIR: unpack a tar archive (any compression) into DIR; '-' reads stdin."""
+import sys
+import tarfile
+
+src, dest = sys.argv[1:3]
+tar = tarfile.open(fileobj=sys.stdin.buffer, mode="r|*") if src == "-" else tarfile.open(src)
+with tar:
+    tar.extractall(dest, filter="tar")
+PY
+
+# CMake.
+RUN set -eu; \
+    curl -fsSL -o /tmp/cmake.tar.gz \
+        "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz"; \
+    echo "${CMAKE_SHA256}  /tmp/cmake.tar.gz" | sha256sum -c -; \
+    untar /tmp/cmake.tar.gz /opt; \
+    mv "/opt/cmake-${CMAKE_VERSION}-linux-x86_64" /opt/cmake; \
+    ln -s /opt/cmake/bin/cmake /opt/cmake/bin/ctest /opt/cmake/bin/cpack /usr/local/bin/; \
+    rm /tmp/cmake.tar.gz
 
 # Like CI: warnings are errors (CMakeLists.txt), and the build runs as a user without root.
 # cmake/AndroidToolchain.cmake finds the SDK through MAPLETHIEF_ANDROID_SDK.

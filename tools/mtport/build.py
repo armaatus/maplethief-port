@@ -6,7 +6,7 @@ arguments are parsed in one place, and every OS gets the same behaviour.
 
 Usage: ``scripts/build [COMMAND] [PLATFORM] [debug|release] [--ipa PATH]``
 
-    build [mac|win|linux|ios|switch] [debug|release]   (default command, this OS, release)
+    build [mac|win|linux|ios|switch|android] [debug|release]   (default command: this OS, release)
     --ipa PATH                              with build or bootstrap: your own copy of the game
     run [debug] [-- GAME ARGS]              start this OS's build from dist/
     bootstrap | assets | recomp | shaders   one step, skipped when it is up to date
@@ -30,6 +30,12 @@ in ``original/`` (or ``--ipa``) it holds the recompiled game (``work/gen``, #238
 ``sdmc:/switch/maplethief/game/MapleThief.app``; without one it is the hello NRO
 (``switch-release``, or ``switch-debug``): our own code only, showing its version on the
 console. ``scripts/switch-run`` sends it to a console over nxlink.
+
+``android`` builds ``dist/android/MapleThief.apk`` (ADR 0150, #356): natively on a Mac with the
+pinned SDK of ``scripts/android-sdk install`` (``build/_android-sdk/``), otherwise in the pinned
+container with Docker (scripts/build-android). Until the game runs on Android (#358) it is the
+placeholder shell whether or not your IPA is there. ``scripts/android-run`` installs and starts it
+on the emulator; ``adb install`` puts it on a phone.
 
 Results land in ``dist/<platform>/`` (``dist/<platform>/debug/`` for a Debug build), which is
 git-ignored. They hold the game, so they stay on your own machines (ADR 0024).
@@ -80,6 +86,7 @@ PLATFORMS = {
     "linux": "linux",
     "ios": "ios",
     "switch": "switch",
+    "android": "android",
 }
 CONFIGS = ("debug", "release")
 COMMANDS = (
@@ -127,6 +134,8 @@ BUILD_DIRS = (
     "switch-release",
     "switch-debug",
     "switch-player",
+    "android-release",
+    "android-debug",
 )
 BUNDLE = bs.APP_DIR
 
@@ -249,6 +258,11 @@ def check_target(platform: str) -> None:
     if platform == "switch" and host == "win":
         raise BuildError(
             "the Switch NRO builds on a Mac or Linux machine with Docker (scripts/build-switch)"
+        )
+    if platform == "android" and host == "win":
+        raise BuildError(
+            "the Android APK builds on a Mac or Linux machine (scripts/android-sdk, "
+            "scripts/build-android)"
         )
 
 
@@ -786,6 +800,45 @@ def build_switch(repo: Path, opts: Options, gen: Path | None) -> str:
     )
 
 
+def android_sdk_ready(repo: Path) -> bool:
+    """Whether the Mac's native SDK (scripts/android-sdk install) holds the pinned NDK."""
+    pins = (repo / "tools/containers/android/pins.env").read_text(encoding="utf-8")
+    match = re.search(r"^ANDROID_NDK_PATH=(.*)$", pins, re.M)
+    sdk = Path(os.environ.get("MAPLETHIEF_ANDROID_SDK") or repo / "build" / "_android-sdk")
+    return match is not None and (sdk / match.group(1) / "source.properties").is_file()
+
+
+def build_android(repo: Path, opts: Options) -> str:
+    """The APK (ADR 0150): natively with the Mac's pinned SDK, else in the container from HEAD.
+    The placeholder shell until the game runs on Android (#358)."""
+    debug = opts.config == "debug"
+    preset = "android-debug" if debug else "android-release"
+    out = repo / DIST / "android" / ("debug" if debug else "")
+    if host_platform() == "mac" and android_sdk_ready(repo):
+        log("== build (Android, the pinned SDK in build/_android-sdk)")
+        run(repo, ["cmake", "--workflow", "--preset", preset])
+    else:
+        dirty = subprocess.run(
+            ["git", "diff", "--quiet", "HEAD"], cwd=repo, capture_output=True, check=False
+        ).returncode
+        if dirty:
+            log("note: uncommitted changes are not in this build: the container exports HEAD")
+        log("== build (Android, in Docker; on a Mac, scripts/android-sdk install is faster)")
+        run(repo, [find_bash(), "scripts/build-android", "--preset", preset])
+    apk = repo / "build" / preset / "MapleThief.apk"
+    if not apk.is_file():
+        raise BuildError(f"the build finished but there is no {relative(repo, apk)}")
+    out.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(apk, out / apk.name)
+    rel = relative(repo, out / apk.name)
+    kind = "Debug" if debug else "Release"
+    return (
+        f"Built: {rel} (Android arm64, {kind}): the placeholder shell, our own code only, signed "
+        f"with this build's debug key. Start it on the emulator: scripts/android-run {rel}; on a "
+        f"phone: adb install {rel}."
+    )
+
+
 # --- The commands ----------------------------------------------------------------------------
 
 
@@ -804,6 +857,13 @@ def cmd_build(repo: Path, opts: Options) -> int:
             ensure_recomp(repo)
             gen = repo / "work" / "gen"
         line = build_switch(repo, opts, gen)
+        write_summary(repo / DIST / platform / ("debug" if opts.config == "debug" else ""), line)
+        log(f"Done in {time.monotonic() - started:.1f} s.")
+        return 0
+    if platform == "android":
+        if not (host_platform() == "mac" and android_sdk_ready(repo)):
+            check_tools(repo, platform)  # Docker
+        line = build_android(repo, opts)
         write_summary(repo / DIST / platform / ("debug" if opts.config == "debug" else ""), line)
         log(f"Done in {time.monotonic() - started:.1f} s.")
         return 0
@@ -981,7 +1041,7 @@ def _vs_install() -> str | None:
 
 # What each `build` platform compiles with: the Linux build is in a container, so it needs only
 # Docker (and, like everything, Python and disk space).
-ALL_TARGETS = ("mac", "win", "linux", "ios", "switch")
+ALL_TARGETS = ("mac", "win", "linux", "ios", "switch", "android")
 NATIVE_TARGETS = ("mac", "win")
 XCODE_FIX = (
     "install Xcode from the App Store, open it once, then "
@@ -1135,12 +1195,12 @@ def doctor_checks(repo: Path) -> list[Check]:
     docker = shutil.which("docker")
     checks.append(
         Check(
-            "Docker (for `build linux`, `build switch` and `shaders`)",
+            "Docker (for `build linux`, `build switch`, `build android` and `shaders`)",
             docker is not None,
             docker or "not found",
             "OrbStack or Docker Desktop (Linux: your distribution's docker)",
             required=host == "linux",
-            needed_for=("linux", "switch"),
+            needed_for=("linux", "switch", "android"),
         )
     )
     # needed_for=(): `build --ipa` checks its own file, which is not in place yet at this point.

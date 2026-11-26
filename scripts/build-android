@@ -127,7 +127,7 @@ git -c filter.lfs.process= -c filter.lfs.smudge=cat -c filter.lfs.required=false
         bash -c '
 set -euo pipefail
 preset="$1" gen_arg="$2"
-tar -xf - -C /src
+untar - /src # not GNU tar, which fails under Rosetta (the Dockerfile)
 found=0
 while IFS= read -r -d "" f; do
     echo "IPA guard: $f is in the export; the repository must never contain an IPA" >&2
