@@ -426,6 +426,7 @@ maplethief_add_cpp_test(
             cpp/switch_applet_test.cpp
             cpp/data_copy_test.cpp
             cpp/crash_report_test.cpp
+            cpp/start_question_test.cpp
             cpp/switch_input_test.cpp
             cpp/gfx_dksh_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)

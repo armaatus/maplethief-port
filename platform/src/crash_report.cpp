@@ -396,18 +396,52 @@ Settings safe_start_settings(const Settings &settings) {
     return safe;
 }
 
-namespace {
+const char *start_choice_label(SafeStartChoice choice) {
+    return choice == SafeStartChoice::kDefaults ? "Start with default settings" : "Start normally";
+}
 
-SafeStartChoice ask_safe_start(const std::string &crash_file) {
+const char *start_choice_label(RecoveryChoice choice) {
+    switch (choice) {
+    case RecoveryChoice::kResume:
+        return "Resume";
+    case RecoveryChoice::kResumeDefaults:
+        return "Resume with default settings";
+    case RecoveryChoice::kStartDefaults:
+        return "Start with default settings";
+    case RecoveryChoice::kStartNormal:
+        break;
+    }
+    return "Start normally";
+}
+
+std::string safe_start_question_text(const std::string &crash_file) {
     std::string text = "MapleThief did not close cleanly last time.";
     if (!crash_file.empty()) {
         text += "\n\nThe report is at:\n" + crash_file;
     }
-    text += "\n\nStart with default settings (no texture or audio packs, software renderer)?\nYour "
-            "settings file is not changed.";
+    return text + "\n\nStart with default settings (no texture or audio packs, software "
+                  "renderer)?\nYour settings file is not changed.";
+}
+
+std::string recovery_question_text(const std::string &crash_file, const RecoveryOffer &offer) {
+    std::string text = "MapleThief did not close cleanly last time.";
+    if (!crash_file.empty()) {
+        text += "\n\nThe report is at:\n" + crash_file;
+    }
+    return text + "\n\n" + recovery_offer_text(offer) +
+           " Resume plays on from it once you load that character.\n\nDefault settings mean "
+           "no texture or audio packs and the software renderer; your settings file is not "
+           "changed.";
+}
+
+namespace {
+
+SafeStartChoice ask_safe_start(const std::string &crash_file) {
+    const std::string text = safe_start_question_text(crash_file);
     const SDL_MessageBoxButtonData buttons[] = {
-        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Start with default settings"},
-        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Start normally"},
+        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1,
+         start_choice_label(SafeStartChoice::kDefaults)},
+        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, start_choice_label(SafeStartChoice::kNormal)},
     };
     SDL_MessageBoxData box{};
     box.flags = SDL_MESSAGEBOX_WARNING;
@@ -424,19 +458,13 @@ SafeStartChoice ask_safe_start(const std::string &crash_file) {
 }
 
 RecoveryChoice ask_recovery(const std::string &crash_file, const RecoveryOffer &offer) {
-    std::string text = "MapleThief did not close cleanly last time.";
-    if (!crash_file.empty()) {
-        text += "\n\nThe report is at:\n" + crash_file;
-    }
-    text += "\n\n" + recovery_offer_text(offer) +
-            " Resume plays on from it once you load that character.\n\nDefault settings mean "
-            "no texture or audio packs and the software renderer; your settings file is not "
-            "changed.";
+    const std::string text = recovery_question_text(crash_file, offer);
     const SDL_MessageBoxButtonData buttons[] = {
-        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 0, "Resume"},
-        {0, 1, "Resume with default settings"},
-        {0, 2, "Start with default settings"},
-        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 3, "Start normally"},
+        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 0, start_choice_label(RecoveryChoice::kResume)},
+        {0, 1, start_choice_label(RecoveryChoice::kResumeDefaults)},
+        {0, 2, start_choice_label(RecoveryChoice::kStartDefaults)},
+        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 3,
+         start_choice_label(RecoveryChoice::kStartNormal)},
     };
     SDL_MessageBoxData box{};
     box.flags = SDL_MESSAGEBOX_WARNING;
@@ -480,10 +508,10 @@ std::string recovery_offer_text(const RecoveryOffer &offer) {
 }
 
 StartDecision decide_start(bool flag, const LastRun &last, bool interactive,
-                           const RecoveryOffer &offer) {
+                           const RecoveryOffer &offer, const StartPrompts &ask) {
     StartDecision d;
     if (flag || !last.crashed || !offer.offered) {
-        d.safe_start = decide_safe_start(flag, last, interactive);
+        d.safe_start = decide_safe_start(flag, last, interactive, ask.safe_start);
         return d;
     }
     if (!interactive && !g_recovery_prompt_for_test) {
@@ -491,26 +519,33 @@ StartDecision decide_start(bool flag, const LastRun &last, bool interactive,
     }
     const RecoveryChoice choice = g_recovery_prompt_for_test
                                       ? g_recovery_prompt_for_test(last.crash_file, offer)
-                                      : ask_recovery(last.crash_file, offer);
+                                  : ask.recovery ? ask.recovery(last.crash_file, offer)
+                                                 : ask_recovery(last.crash_file, offer);
     d.safe_start =
         choice == RecoveryChoice::kResumeDefaults || choice == RecoveryChoice::kStartDefaults;
     d.resume = choice == RecoveryChoice::kResume || choice == RecoveryChoice::kResumeDefaults;
     return d;
 }
 
+bool start_asks(bool flag, const LastRun &last, bool interactive) {
+    return !flag && last.crashed && interactive;
+}
+
 void set_safe_start_prompt_for_test(SafeStartPrompt prompt) {
     g_prompt_for_test = std::move(prompt);
 }
 
-bool decide_safe_start(bool flag, const LastRun &last, bool interactive) {
+bool decide_safe_start(bool flag, const LastRun &last, bool interactive,
+                       const SafeStartPrompt &ask) {
     if (flag) {
         return true;
     }
     if (!last.crashed || (!interactive && !g_prompt_for_test)) {
         return false;
     }
-    const SafeStartChoice choice =
-        g_prompt_for_test ? g_prompt_for_test(last.crash_file) : ask_safe_start(last.crash_file);
+    const SafeStartChoice choice = g_prompt_for_test ? g_prompt_for_test(last.crash_file)
+                                   : ask             ? ask(last.crash_file)
+                                                     : ask_safe_start(last.crash_file);
     return choice == SafeStartChoice::kDefaults;
 }
 
