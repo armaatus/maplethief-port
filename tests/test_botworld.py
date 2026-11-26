@@ -158,10 +158,10 @@ def test_no_portal_warps_is_an_error():
 def write_kb(path, ents):
     path.mkdir()
     index = {"schema": 1, "kinds": {k: len(v) for k, v in ents.items()}, "relations": []}
-    (path / "index.json").write_text(json.dumps(index))
+    (path / "index.json").write_text(json.dumps(index), encoding="utf-8")
     for kind, table in ents.items():
         doc = {"schema": 1, "kind": kind, "entities": list(table.values())}
-        (path / f"{kind}.json").write_text(json.dumps(doc))
+        (path / f"{kind}.json").write_text(json.dumps(doc), encoding="utf-8")
 
 
 def test_cli_from_a_kb(tmp_path, capsys):
@@ -169,7 +169,7 @@ def test_cli_from_a_kb(tmp_path, capsys):
     write_kb(kb, entities())
     out = tmp_path / "out" / "bot_world.txt"
     assert bw.main(["--kb", str(kb), "--out", str(out)]) == 0
-    assert out.read_text() == bw.generate(entities())
+    assert out.read_text(encoding="utf-8") == bw.generate(entities())
     assert "8 links, 3 shop items" in capsys.readouterr().out
 
 
@@ -186,7 +186,7 @@ def test_stale_follows_the_inputs(tmp_path):
     script.write_bytes(b"x")
     out = tmp_path / "bot_world.txt"
     assert bw.stale(out, app)
-    out.write_text("x")
+    out.write_text("x", encoding="utf-8")
     future = time.time() + 3600
     os.utime(out, (future, future))
     assert not bw.stale(out, app)

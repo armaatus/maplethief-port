@@ -506,15 +506,15 @@ def test_cli_build_and_describe(tmp_path, capsys):
     (tmp_path / "theif").write_bytes(sd.encode_character(character))
     (tmp_path / "quest").write_bytes(sd.encode_quest(quest))
     assert sd.main(["describe", str(tmp_path / "theif"), str(tmp_path / "quest")]) == 0
-    desc.write_text(capsys.readouterr().out)
+    desc.write_text(capsys.readouterr().out, encoding="utf-8")
     assert sd.main(["build", str(desc), str(tmp_path / "out"), "--slot", "1"]) == 0
     built = (tmp_path / "out" / "theif1").read_bytes()
     assert sd.written_diff("theif1", built, sd.encode_character(character)) == []
-    desc.write_text('{"hp": 1, "mp": 1, "level": 200}')
+    desc.write_text('{"hp": 1, "mp": 1, "level": 200}', encoding="utf-8")
     assert sd.main(["build", str(desc), str(tmp_path / "bad")]) == 1
     assert "bad_level" in capsys.readouterr().err
     assert not (tmp_path / "bad").exists()
-    desc.write_text("[1]")
+    desc.write_text("[1]", encoding="utf-8")
     assert sd.main(["build", str(desc), str(tmp_path / "bad")]) == 1
 
 
