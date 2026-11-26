@@ -102,8 +102,11 @@ def test_badging_problems():
 
 
 def test_icons_must_be_the_ports_own():
-    icons = {f"res/{d}.png": data for d, data in zip("abcde", appicon.android_icons().values())}
-    fields = {f"icon_{apk.ICON_DPI[d]}": f"res/{c}.png" for d, c in zip(apk.ICON_DPI, "abcde")}
+    # Shortened names, as AGP gives a release APK's resources.
+    icons, fields = {}, {}
+    for short, density in zip("abcde", appicon.ANDROID_ICON_SIZES, strict=True):
+        icons[f"res/{short}.png"] = appicon.android_icons()[f"mipmap-{density}/ic_launcher.png"]
+        fields[f"icon_{apk.ICON_DPI[density]}"] = f"res/{short}.png"
     data = apk.make_apk({**_entries(), **icons})
     assert apk.icon_problems(data, fields) == []
     swapped = {**fields, "icon_160": "res/b.png"}

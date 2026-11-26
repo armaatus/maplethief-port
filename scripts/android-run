@@ -90,6 +90,7 @@ EOF
         "$avd" "$name" "$api" >"$ANDROID_AVD_HOME/$name.ini"
 fi
 
+# shellcheck disable=SC2329 # run by the trap below
 stop() {
     [ "$keep" -eq 1 ] || "$adb" -s "$serial" emu kill >/dev/null 2>&1 || true
 }

@@ -35,7 +35,7 @@ CLI::
     python3 -m mtport.appicon write [--out DIR]   (default platform/icon/)
     python3 -m mtport.appicon check [--out DIR]   exit 1 if a committed file's pixels differ
     python3 -m mtport.appicon switch-icon FILE    writes the Switch's 256 px JPEG to FILE
-    python3 -m mtport.appicon android-icons DIR   writes Android's mipmap-*/ic_launcher.png below DIR
+    python3 -m mtport.appicon android-icons DIR   writes Android's launcher icons below DIR
 """
 
 from __future__ import annotations
