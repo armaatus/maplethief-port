@@ -76,6 +76,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdio>
+#include <sstream>
 #include <string>
 
 #if defined(MT_HAVE_GENERATED_CODE)
@@ -102,6 +103,7 @@
 #include "live_settings.h"
 #include "maplethief/audio.h"
 #include "maplethief/cashshop.h"
+#include "maplethief/cg.h"
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
@@ -2096,10 +2098,9 @@ Pred both(Pred a, Pred b) {
 
 // Part A: a new game through the tutorial, then Elder's Advice (main 7), Find the Dark Lord (8)
 // and the Job Advancement Evaluation (21), and the save.
-void chapter_1_a(Run &r, u64) {
+// Part a's play after the pad is attached (korean_chapter_1_a plays it too).
+void chapter_1_a_steps(Run &r) {
     using namespace quest_bot;
-    attach_pad(r);
-    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
     then_new_game(r);
     then_tutorial(r);
     then_stock(r, "Red Potions from Mr. Wang (Etc20, Henesys)", 2, 3, 20, 100);
@@ -2116,6 +2117,11 @@ void chapter_1_a(Run &r, u64) {
                  0, 0, "Darklord", 2, main_quests(21, 9));
     then_save(r);
     then_finish(r);
+}
+void chapter_1_a(Run &r, u64) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    chapter_1_a_steps(r);
 }
 void chapter_1_a_checks(Run &, u64) {}
 
@@ -9562,6 +9568,881 @@ void skills_bandit_checks(Run &, u64) {
     check(g_skills->stats[22].guard_ok > 0, "Meso Guard: blows paid in meso");
 }
 
+// --- Korean (#303, docs/testing/systems-sweep.md) ----------------------------------------------
+//
+// korean_*: MAPLETHIEF_LANGUAGE=ko. The terms are agreed by the pad (the data directory has no
+// CTerms), then a part of the game. Every text the game draws reaches the CG text observer
+// (mt_cg_set_text_observer, after the draw): a character no font has a glyph for (where the
+// device drew a box) or a single line running past its bitmap (cut) fails the run, and so does
+// a dialogue line that is not whole UTF-8 (Text_Wrap cut a character). Checkpoints: the screen
+// after the terms, the first field, each NPC chat's first and last page (a quest offer's Accept
+// is on its last), each shop; each goes to OUT_DIR/ko_<n>_<name>.png and its FNV-1a with the
+// texts drawn since the checkpoint before to OUT_DIR/checkpoints.txt. The screens are compared
+// with our own recorded renders: MT_KOREAN_BASE=<an earlier run's OUT_DIR> (CTest: a directory
+// kept beside the outputs, filled on the first run) makes every checkpoint's screen equal the
+// recorded one's, the run being deterministic on the virtual clock.
+
+void then_character_select(Run &r); // below, with the slots
+
+struct KoreanRun {
+    u64 draws = 0, hangul = 0, missing = 0, clipped = 0, box_lines = 0, broken = 0;
+    std::set<std::string> since; // texts drawn since the last checkpoint
+    std::string last_box;
+    std::string key; // a text a box must show (the English line of the key ko.lproj lacks)
+    u64 key_shown = 0, raw_key = 0;          // how often a box showed it, and the key itself
+    std::map<std::string, std::string> base; // the recorded checkpoints: name -> FNV-1a
+    fs::path base_dir;                       // MT_KOREAN_BASE
+    bool recording = false;
+    std::vector<std::string> names;
+    u64 compared = 0, differ = 0;
+    std::ofstream file;
+    // The automatic checkpoints' state.
+    i32 chat_page = -2, chat_pages = 0;
+    double chat_since = -1;
+    bool shop = false, field_seen = false;
+    double shop_since = -1;
+};
+KoreanRun g_ko;
+
+void korean_observe(void *, const mt_cg_drawn_text *t) {
+    KoreanRun &k = g_ko;
+    k.draws++;
+    const std::string s = t->utf8;
+    if (!k.since.insert(s).second) {
+        return;
+    }
+    whole_utf8(s, &k.hangul);
+    if (t->missing > 0) {
+        k.missing++;
+        std::printf("korean: FAIL: %u character(s) without a glyph in \"%s\"\n", t->missing,
+                    s.c_str());
+    }
+    if (t->newlines == 0 && t->right > t->limit + 0.5f) {
+        k.clipped++;
+        std::printf("korean: FAIL: \"%s\" ends at %.1f points, its bitmap is %.0f: cut\n",
+                    s.c_str(), static_cast<double>(t->right), static_cast<double>(t->limit));
+    }
+}
+
+int korean_setup(Run &r) {
+    g_ko = KoreanRun{};
+    const char *lang = std::getenv("MAPLETHIEF_LANGUAGE");
+    if (lang == nullptr || std::string(lang) != "ko") {
+        std::printf("FAIL: korean_* runs with MAPLETHIEF_LANGUAGE=ko\n");
+        return 1;
+    }
+    // The terms are part of the run: a save copied in (MT_FROM_SAVE) brings none.
+    fs::remove(r.data / "saves" / "CTerms");
+    if (const char *b = std::getenv("MT_KOREAN_BASE"); b != nullptr && *b != 0) {
+        g_ko.base_dir = b;
+        std::ifstream in(g_ko.base_dir / "checkpoints.txt");
+        for (std::string line; std::getline(in, line);) {
+            std::istringstream f(line); // "name hash count", then the texts indented
+            std::string name, hash;
+            if (!line.empty() && line[0] != ' ' && f >> name >> hash) {
+                g_ko.base[name] = hash;
+            }
+        }
+        g_ko.recording = g_ko.base.empty();
+        std::printf("korean: %zu recorded checkpoint(s) in %s%s\n", g_ko.base.size(), b,
+                    g_ko.recording ? ": this run records them" : "");
+    }
+    g_ko.file.open(r.out / "checkpoints.txt", std::ios::trunc);
+    mt_cg_set_text_observer(korean_observe, nullptr);
+    return 0;
+}
+
+void korean_checkpoint(Run &r, mt_cpu *cpu, const std::string &what) {
+    KoreanRun &k = g_ko;
+    const std::string name = std::to_string(k.names.size()) + "_" + what;
+    k.names.push_back(name);
+    u64 hash = 0;
+    const bool shot = save_shot(r, cpu, "ko_" + name, &hash);
+    check(shot, "korean: checkpoint " + name + " has a screen");
+    const std::string h = fe::hex64(hash);
+    k.file << name << ' ' << h << ' ' << k.since.size() << '\n';
+    for (const std::string &t : k.since) {
+        k.file << "  " << t << '\n';
+    }
+    k.file.flush();
+    std::printf("korean: checkpoint %s: %s, %zu text(s) drawn since the last\n", name.c_str(),
+                h.c_str(), k.since.size());
+    k.since.clear();
+    if (const auto it = k.base.find(name); it != k.base.end()) {
+        k.compared++;
+        if (it->second != h) {
+            k.differ++;
+            std::printf("korean: FAIL: checkpoint %s's screen %s, recorded %s\n", name.c_str(),
+                        h.c_str(), it->second.c_str());
+        }
+    } else if (!k.base.empty()) {
+        k.differ++;
+        std::printf("korean: FAIL: checkpoint %s was not recorded\n", name.c_str());
+    }
+}
+
+// Every turn: the box lines, and the automatic checkpoints (a chat's first and last page once
+// shown for 0.5 s, a shop once shown for 1 s, the first field).
+void korean_turn(Run &r, mt_cpu *cpu) {
+    KoreanRun &k = g_ko;
+    const ChatBoxView v = chat_box_view(cpu);
+    if (!v.kind.empty() && v.text != k.last_box) {
+        k.last_box = v.text;
+        if (!k.key.empty() && v.text.find(k.key) != std::string::npos) {
+            k.key_shown++;
+            std::printf("korean: the box shows the English line (%s ...)\n", k.key.c_str());
+        }
+        k.raw_key += v.text.find("Chapter3_Quest_Zenumist_Chief") != std::string::npos ? 1 : 0;
+        for (std::size_t a = 0, b = 0; (b = v.text.find('|', a)) != std::string::npos; a = b + 1) {
+            k.box_lines++;
+            if (!whole_utf8(v.text.substr(a, b - a))) {
+                k.broken++;
+                std::printf("korean: FAIL: a %s box line is not whole UTF-8\n", v.kind.c_str());
+            }
+        }
+    }
+    if (!k.field_seen && field(cpu)) {
+        k.field_seen = true;
+        korean_checkpoint(r, cpu, "field");
+    }
+    const quest_bot::Chat c = quest_bot::chatting(cpu) ? quest_bot::chat(cpu) : quest_bot::Chat{};
+    if (c.addr == 0) {
+        k.chat_page = -2;
+    } else if (c.page != k.chat_page) {
+        k.chat_page = c.page;
+        k.chat_pages = c.pages;
+        k.chat_since = r.t;
+    } else if (k.chat_since >= 0 && r.t - k.chat_since >= 0.5) {
+        k.chat_since = -1;
+        if (c.page == 0 || c.last_page()) {
+            korean_checkpoint(r, cpu, c.page == 0 ? "chat" : "chat_end");
+        }
+    }
+    const bool shop = quest_bot::in_shop(cpu);
+    if (shop && !k.shop) {
+        k.shop_since = r.t;
+    } else if (shop && k.shop_since >= 0 && r.t - k.shop_since >= 1.0) {
+        k.shop_since = -1;
+        korean_checkpoint(r, cpu, "shop");
+    }
+    k.shop = shop;
+}
+
+// The terms by the pad: the focus starts on the agreement, A agrees (CTerms is written).
+void then_korean_terms(Run &r) {
+    then_wait_for(
+        r, "the Korean terms, the focus on the agreement", 20,
+        [&r](mt_cpu *) { return focused(r, "releaseAgreementButton:"); }, 1.0);
+    then_do(r, "the terms, a checkpoint",
+            [&r](mt_cpu *cpu) { korean_checkpoint(r, cpu, "terms"); });
+    then_press(r, A);
+    then_wait_for(r, "CTerms written", 5, [&r](mt_cpu *) {
+        std::error_code ec;
+        return fs::file_size(r.data / "saves" / "CTerms", ec) == 2;
+    });
+}
+
+void korean_attach(Run &r) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        korean_turn(r, cpu);
+    };
+    then_korean_terms(r);
+}
+
+void korean_checks(Run &r, u64) {
+    mt_cg_set_text_observer(nullptr, nullptr);
+    g_ko.file.close();
+    const KoreanRun &k = g_ko;
+    std::printf("korean: %llu draws, %llu Hangul syllables in distinct texts, %llu box lines, %zu "
+                "checkpoints (%llu compared with the recorded ones)\n",
+                static_cast<unsigned long long>(k.draws), static_cast<unsigned long long>(k.hangul),
+                static_cast<unsigned long long>(k.box_lines), k.names.size(),
+                static_cast<unsigned long long>(k.compared));
+    check(k.draws > 0 && k.hangul > 0, "the game drew Korean text");
+    check(k.missing == 0, "no drawn character lacks a glyph (no box)");
+    check(k.clipped == 0, "no drawn line runs past its bitmap");
+    check(k.broken == 0, "every box line is whole UTF-8");
+    check(k.box_lines > 0, "boxes were read");
+    check(k.differ == 0, "every checkpoint's screen equals the recorded one");
+    if (!k.key.empty()) {
+        check(k.key_shown > 0, "a box showed the English line of the key ko.lproj lacks");
+    }
+    // The first run with an empty base records it, if its own checks held.
+    if (k.recording && k.missing == 0 && k.clipped == 0 && k.broken == 0 && !k.names.empty()) {
+        std::error_code ec;
+        fs::create_directories(k.base_dir, ec);
+        fs::copy_file(r.out / "checkpoints.txt", k.base_dir / "checkpoints.txt",
+                      fs::copy_options::overwrite_existing, ec);
+        check(!ec, "korean: recorded " + std::to_string(k.names.size()) + " checkpoints in " +
+                       k.base_dir.string());
+    }
+}
+
+// A built save's slot 0 after the terms: the character select, A on the slot, Start.
+void then_korean_load(Run &r) {
+    g_play.anywhere = true; // the play starts in the save's field
+    then_character_select(r);
+    then_press(r, A); // the slot is chosen and the focus goes on to Start (ADR 0102)
+    then_wait_for(r, "the focus on Start", 5, [&r](mt_cpu *) { return focused(r, "clickStart:"); });
+    then_wait(r, 1.0);
+    then_press(r, A);
+    then_wait_for(r, "the game", 30, field, 1.0);
+}
+
+// Tutorial, chapter 1's part a (Mr. Wang's shop, Stan's and the Dark Lord's quests), in Korean.
+void korean_chapter_1_a(Run &r, u64) {
+    korean_attach(r);
+    chapter_1_a_steps(r);
+}
+
+// Chapter 2's first offer (tests/starts/chapter_2.json built in Korean: part L's end): Heracle
+// on 4.0 gives Fighting Monsters (main 0), accepted.
+void korean_offer_2(Run &r, u64) {
+    using namespace quest_bot;
+    korean_attach(r);
+    then_korean_load(r);
+    then_talk_to(r, "Heracle: Fighting Monsters (main 0) offered and taken", 4, 0, "Heracle", -1,
+                 main_quest(0, 1));
+    then_finish(r);
+}
+
+// Chapter 3's first offer (tests/starts/korean_ch3.json): the Zenumist President on 7.0 ends
+// main 40 and gives Join the Zenumist Association (main 0), accepted.
+void korean_offer_3(Run &r, u64) {
+    using namespace quest_bot;
+    korean_attach(r);
+    then_korean_load(r);
+    then_talk_to(r, "the Zenumist President: main 40 done, main 0 offered and taken", 7, 0,
+                 "ZenumistChief", -1, main_quests(40, 0));
+    then_finish(r);
+}
+
+// The key ko.lproj lacks (re/original-bugs.md #15; tests/starts/korean_ch3_key.json): with main
+// 0-3 and every side quest he gives done, the Zenumist President's only line is
+// Chapter3_Quest_Zenumist_Chief.dialog.1, shown as the field is entered. Without a Korean text
+// the box gets the key, one 38-character word wider than the box, and Text_Wrap reads past the
+// end of memory (the process dies). With fix_original_bugs (on here) the line is the English
+// table's: the box shows it whole, and never the key.
+void korean_missing_key(Run &r, u64) {
+    using namespace quest_bot;
+    r.settings.fix_original_bugs = true;
+    const std::vector<std::uint8_t> raw =
+        read_file((fs::path(MT_BUNDLE_DIR) / "en.lproj/Scripts.strings").string());
+    mt_ns::PlistValue table;
+    std::string why;
+    const mt_ns::PlistValue *line = nullptr;
+    if (mt_ns::plist_parse(raw.data(), raw.size(), &table, &why)) {
+        line = table.find(u"Chapter3_Quest_Zenumist_Chief.dialog.1");
+    }
+    check(line != nullptr && line->kind == mt_ns::PlistValue::string,
+          "en.lproj/Scripts.strings has the key ko.lproj lacks");
+    // The box's first line: the English text up to its first space.
+    const std::string english = line != nullptr ? utf8_of(line->s) : std::string();
+    g_ko.key = english.substr(0, english.find(' '));
+    korean_attach(r);
+    then_korean_load(r);
+    then_talk_to(r, "the Zenumist President: the line without a Korean text", 7, 0, "ZenumistChief",
+                 -1, [](mt_cpu *) { return g_ko.key_shown > 0; });
+    then_do(r, "the key never shown",
+            [](mt_cpu *) { check(g_ko.raw_key == 0, "no box showed the key itself"); });
+    then_finish(r);
+}
+
+// --- Slots 2 and 3 (#303, docs/testing/systems-sweep.md) ---------------------------------------
+//
+// slots_create, on a data directory holding only a built slot 0 (tests/starts/systems_slot0):
+// twice the character select's New (its popup's Yes), the intro and the tutorial (its maps
+// cannot be saved on) to Stan in Henesys, Red Potions drunk (one in the second slot, two in the
+// third, so the two saves differ), Save on the option tab, and the option tab's exit to the
+// main menu. Each slot's map, x and Red Potions go to OUT_DIR/slots.txt. slots_reload, a fresh
+// process on the same data directory: each new slot chosen and started, the hero where and as
+// it was saved; then both deleted (Delete, its alert's Yes): their files are gone, slot 0's are
+// as built.
+
+struct SlotState {
+    i32 area = -1, map = -1, x = 0, red = -1;
+};
+struct SlotsRun {
+    std::vector<std::uint8_t> slot0, quest0; // slot 0 as the run found it
+};
+SlotsRun g_slots;
+
+std::string slot_file(const char *kind, int slot) { return kind + std::to_string(slot); }
+
+// OUT_DIR/slots.txt: "slot area map x red" per saved slot.
+std::map<int, SlotState> saved_slots(const Run &r) {
+    std::map<int, SlotState> out;
+    std::ifstream in(r.out / "slots.txt");
+    int slot = 0;
+    SlotState s;
+    while (in >> slot >> s.area >> s.map >> s.x >> s.red) {
+        out[slot] = s;
+    }
+    return out;
+}
+
+int slots_setup(Run &r) {
+    g_slots = SlotsRun{};
+    g_slots.slot0 = read_save(r, "theif0");
+    g_slots.quest0 = read_save(r, "quest0");
+    if (g_slots.slot0.size() != 1124) {
+        std::printf("skipped: no slot 0 in %s (starts.systems_slot0 first)\n",
+                    r.data.string().c_str());
+        return 77;
+    }
+    return 0;
+}
+
+// The main menu's Play to the character select (B first on the promo banner, if it shows).
+void then_character_select(Run &r) {
+    then(r, "the main menu, the focus on Play", 30, [&r](mt_cpu *, double el) {
+        bool banner = false;
+        for (const fe::FocusTarget &f : r.focus.targets()) {
+            banner = banner || f.action == "clickADClose:";
+        }
+        hold(r, B, banner && std::fmod(el, 1.0) < 0.1);
+        return !banner && el > 1.0 && focused(r, "clickPlay:");
+    });
+    then_press(r, A);
+    then_wait_for(
+        r, "the character select", 10, [&r](mt_cpu *) { return focused(r, "chooseCharacterOne:"); },
+        0.5);
+}
+
+// The option tab's exit (item 3), popup 14's Yes: the main menu.
+void then_exit_to_menu(Run &r) {
+    then_wait_field(r);
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; });
+    then_press(r, LEFT);
+    then_wait_for(r, "the option tab", 5, [](mt_cpu *cpu) { return menu_tab(cpu) == 5; });
+    for (int i = 0; i < 3; i++) {
+        then_press(r, DOWN, 0.1, 0.6);
+    }
+    then_press(r, A);
+    then_wait_for(r, "exit? (popup 14)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 14; });
+    then_wait_for(r, "Yes picked", 3, exit_yes_picked);
+    then_press(r, A);
+    then_wait_for(
+        r, "the main menu (the game left)", 20, [&r](mt_cpu *) { return focused(r, "clickPlay:"); },
+        1.0);
+}
+
+void then_new_slot(Run &r, int slot) {
+    then_character_select(r);
+    then_focus(r, "clickNew:");
+    then_press(r, A);
+    then_wait_for(r, "New asks (the engine's popup on panel 7)", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 7 && popup_id(cpu) >= 0; });
+    then_press(r, A);
+    then_wait_for(r, "slot " + std::to_string(slot) + "'s files", 10, [&r, slot](mt_cpu *) {
+        return read_save(r, slot_file("theif", slot).c_str()).size() == 1124 &&
+               read_save(r, slot_file("quest", slot).c_str()).size() == 4781;
+    });
+    then_tutorial(r);
+    then_check(r, "the game plays slot " + std::to_string(slot),
+               [slot](mt_cpu *cpu) { return rdi(cpu, data_mgr(cpu) + 0x4E4) == slot; });
+    auto red = std::make_shared<i32>(0);
+    then_do(r, "the Red Potions", [red](mt_cpu *cpu) { *red = item_count(cpu, hero(cpu), 3); });
+    for (int i = 0; i < slot; i++) {
+        then_press(r, Y, 0.1, 1.0); // quick slot 1: a Red Potion
+    }
+    then_check(r, std::to_string(slot) + " Red Potion(s) drunk",
+               [red, slot](mt_cpu *cpu) { return item_count(cpu, hero(cpu), 3) == *red - slot; });
+    then_save(r, [&r, slot](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const i32 red_now = item_count(cpu, h, 3);
+        std::printf("slot %d saved: map %d.%d x %d, %d Red Potions\n", slot, h.area, h.map, h.x,
+                    red_now);
+        std::ofstream(r.out / "slots.txt", std::ios::app)
+            << slot << ' ' << h.area << ' ' << h.map << ' ' << h.x << ' ' << red_now << '\n';
+    });
+    then_exit_to_menu(r);
+}
+
+void slots_create(Run &r, u64) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    g_play.anywhere = true;
+    fs::remove(r.out / "slots.txt");
+    then_new_slot(r, 1);
+    then_new_slot(r, 2);
+    then_do(r, "slot 0 untouched", [&r](mt_cpu *) {
+        check(read_save(r, "theif0") == g_slots.slot0 && read_save(r, "quest0") == g_slots.quest0,
+              "slot 0's files are as built");
+        check(saved_slots(r).size() == 2, "two slots saved");
+    });
+    then_finish(r);
+}
+void slots_create_checks(Run &, u64) {}
+
+const char *const k_slot_actions[3] = {
+    "chooseCharacterOne:", "chooseCharacterTwo:", "chooseCharacterThree:"};
+
+void then_load_slot(Run &r, int slot) {
+    then_character_select(r);
+    then_focus(r, k_slot_actions[slot]);
+    then_press(r, A); // chosen: the focus goes on to Start (ADR 0102)
+    then_wait_for(r, "the focus on Start", 5, [&r](mt_cpu *) { return focused(r, "clickStart:"); });
+    then_wait(r, 1.0);
+    then_press(r, A);
+    then_wait_for(r, "the game", 30, field, 1.0);
+    then_check(
+        r, "slot " + std::to_string(slot) + " loads as it was saved", [&r, slot](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            const SlotState s = saved_slots(r)[slot];
+            std::printf("slot %d loaded: map %d.%d x %d, %d Red Potions; saved map %d.%d "
+                        "x %d, %d\n",
+                        slot, h.area, h.map, h.x, item_count(cpu, h, 3), s.area, s.map, s.x, s.red);
+            return rdi(cpu, data_mgr(cpu) + 0x4E4) == slot && h.on(s.area, s.map) &&
+                   std::abs(h.x - s.x) <= 8 && item_count(cpu, h, 3) == s.red;
+        });
+    then_exit_to_menu(r);
+}
+
+void then_delete_slot(Run &r, int slot) {
+    then_character_select(r);
+    then_focus(r, k_slot_actions[slot]);
+    then_press(r, A);
+    then_focus(r, "clickDelete:");
+    then_press(r, A);
+    then_wait_for(r, "Delete asks, the focus on No", 5,
+                  [&r](mt_cpu *) { return focused(r, "cancelAlert:"); });
+    then_focus(r, "okDeleteAlert:");
+    then_press(r, A);
+    then_wait_for(r, "slot " + std::to_string(slot) + "'s files deleted", 5, [&r, slot](mt_cpu *) {
+        std::error_code ec;
+        return !fs::exists(r.data / "saves" / slot_file("theif", slot), ec) &&
+               !fs::exists(r.data / "saves" / slot_file("quest", slot), ec);
+    });
+    then_press(r, B); // Back: the main menu
+    then_wait_for(r, "the main menu", 5, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
+}
+
+void slots_reload(Run &r, u64) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    g_play.anywhere = true;
+    then_load_slot(r, 1);
+    then_load_slot(r, 2);
+    then_delete_slot(r, 1);
+    then_delete_slot(r, 2);
+    then_do(r, "slot 0 untouched", [&r](mt_cpu *) {
+        check(read_save(r, "theif0") == g_slots.slot0 && read_save(r, "quest0") == g_slots.quest0,
+              "slot 0's files are as built");
+    });
+    then_finish(r);
+}
+void slots_reload_checks(Run &, u64) {}
+
+// --- A full inventory and the level cap (#303, docs/testing/systems-sweep.md) ------------------
+
+// The hero's bag: the etc items' (id, count) by slot and the equipment ids by slot (-1 empty).
+struct Bag {
+    std::vector<std::pair<i32, i32>> etc;
+    std::vector<i32> equip;
+    i32 etc_used() const {
+        return static_cast<i32>(
+            std::count_if(etc.begin(), etc.end(), [](const auto &e) { return e.first >= 0; }));
+    }
+    i32 equip_used() const {
+        return static_cast<i32>(
+            std::count_if(equip.begin(), equip.end(), [](i32 id) { return id >= 0; }));
+    }
+};
+Bag bag_of(mt_cpu *cpu) {
+    Bag b;
+    const Hero h = hero(cpu);
+    for (i32 i = 0; i < 48; i++) {
+        const EtcItem e = etc_item(cpu, h, i);
+        b.etc.emplace_back(e.id, e.count);
+    }
+    const u32 equips = h.addr != 0 ? rd(cpu, h.addr + 0xD4) : 0;
+    for (i32 i = 0; i < 48; i++) {
+        const u32 it = equips != 0 ? rd(cpu, equips + 4 * static_cast<u32>(i)) : 0;
+        b.equip.push_back(it != 0 ? rdi(cpu, it + 0x90) : -1);
+    }
+    return b;
+}
+
+// inventory_full_synthetic (tests/starts/systems_inventory_full.json): a Bandit on 2.3 with 48
+// equipment items and 48 etc stacks, none of them a Red Snail's drop. Hunting there, a drop the
+// hero touches is refused (the drop's +0x10C) and stays, and the bag is unchanged; meso still
+// comes in. Then Mr. Wang's Sell tab (Henesys): one stack sold, its price times its count paid,
+// and the bag's order afterwards.
+struct InventoryRun {
+    Bag before;
+    i32 sold_id = -1, sold_count = 0;
+    u64 refused = 0;
+};
+InventoryRun g_inv;
+
+// Sells the etc stack in bag slot `slot` at Mr. Wang's (Henesys): goes there, up opens the
+// shop, RB the Sell tab, down to the row, A through its popups, B closes the shop. Checks that
+// the stack left the bag, the meso it paid, and the order of the rest.
+void then_sell(Run &r, i32 slot) {
+    using namespace quest_bot;
+    struct S {
+        Nav nav;
+        double pressed = -10;
+        bool closing = false;
+        Bag before;
+        i32 meso = 0;
+        bool sold = false;
+    };
+    auto st = std::make_shared<S>();
+    const Goal g = shop_goal(2, 3);
+    then(r, "sell bag slot " + std::to_string(slot) + " at Mr. Wang's", 300,
+         [&r, st, g, slot](mt_cpu *cpu, double el) {
+             const auto press = [&](SDL_GamepadButton b) {
+                 if (el - st->pressed >= 0.5) {
+                     st->pressed = el;
+                 }
+                 hold(r, b, el - st->pressed < 0.1);
+             };
+             const Hero h = hero(cpu);
+             if (game_mode(cpu) == 2) {
+                 hold(r, UP, false);
+                 if (!in_shop(cpu)) {
+                     press(A); // a popup: how many, sell?, sold
+                     return false;
+                 }
+                 const Shop sh = shop(cpu);
+                 if (st->before.etc.empty()) {
+                     st->before = bag_of(cpu);
+                     st->meso = h.meso;
+                     const EtcItem e = etc_item(cpu, h, slot);
+                     g_inv.sold_id = e.id;
+                     g_inv.sold_count = e.count;
+                 }
+                 if (!st->closing && bag_of(cpu).etc_used() < st->before.etc_used()) {
+                     st->closing = true;
+                 }
+                 if (st->closing) {
+                     press(B);
+                 } else if (sh.tab != 1) {
+                     press(RB);
+                 } else if (sh.selected != slot) {
+                     press(sh.selected < slot ? DOWN : UP);
+                 } else {
+                     press(A);
+                 }
+                 return false;
+             }
+             if (interrupted(r, cpu, el)) {
+                 return false;
+             }
+             if (st->closing) {
+                 release_all(r);
+                 const Bag now = bag_of(cpu);
+                 const i32 paid = h.meso - st->meso;
+                 std::printf("sold: item %d x %d: %d meso paid; etc stacks %d -> %d\n",
+                             g_inv.sold_id, g_inv.sold_count, paid, st->before.etc_used(),
+                             now.etc_used());
+                 std::string order;
+                 for (const auto &[id, count] : now.etc) {
+                     order += " " + std::to_string(id);
+                 }
+                 std::printf("the bag after the sale:%s\n", order.c_str());
+                 // The rest in their order, the sold stack's slot taken by the next.
+                 std::vector<std::pair<i32, i32>> want = st->before.etc;
+                 want.erase(want.begin() + slot);
+                 want.emplace_back(-1, 0);
+                 check(item_count(cpu, h, g_inv.sold_id) == 0, "the sold stack left the bag");
+                 // Slot 10 holds item 45, one of it; item_etc lists its price as 7 meso.
+                 check(g_inv.sold_id == 45 && g_inv.sold_count == 1 && paid == 7,
+                       "the sale paid item_etc's price, 7 meso, for one item 45");
+                 check(now.etc == want, "the rest keep their order, the gap closed");
+                 check(now.equip == st->before.equip, "the equipment is unchanged");
+                 return true;
+             }
+             if (!drive(r, cpu, el, st->nav, g)) {
+                 return false;
+             }
+             press(UP);
+             return false;
+         });
+}
+
+void inventory_full(Run &r, u64) {
+    using namespace quest_bot;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        for (const Drop &d : drops(cpu)) {
+            g_inv.refused += d.refused ? 1 : 0;
+        }
+    };
+    g_play.anywhere = true;
+    then_load_slot0(r);
+    then_do(r, "the full bag", [](mt_cpu *cpu) {
+        g_inv.before = bag_of(cpu);
+        std::printf("bag: %d etc stacks, %d equipment items\n", g_inv.before.etc_used(),
+                    g_inv.before.equip_used());
+        check(g_inv.before.etc_used() == 48 && g_inv.before.equip_used() == 48,
+              "the bag is full: 48 etc stacks and 48 equipment items");
+    });
+    then_farm(
+        r, "Red Snails on 2.3 until a drop is refused", 2, 3, {2},
+        [](mt_cpu *) { return g_inv.refused > 0; }, 900);
+    then_wait(r, 2.0);
+    then_do(r, "the refused drop", [](mt_cpu *cpu) {
+        const Bag now = bag_of(cpu);
+        u64 lying = 0;
+        for (const Drop &d : drops(cpu)) {
+            lying += d.refused && d.state == 0 ? 1 : 0;
+        }
+        std::printf("refused drops: %llu turns seen, %llu lying refused\n",
+                    static_cast<unsigned long long>(g_inv.refused),
+                    static_cast<unsigned long long>(lying));
+        check(lying > 0, "a refused drop stays on the ground");
+        check(now.etc == g_inv.before.etc && now.equip == g_inv.before.equip,
+              "the bag is unchanged by the refused pick-up");
+    });
+    then_sell(r, 10);
+    then_finish(r);
+}
+void inventory_full_checks(Run &, u64) {}
+
+// level_cap_synthetic (tests/starts/systems_level_99.json): a level-99 Bandit with 71,735 EXP,
+// 5 short of level 99's need in hero.dat (71,740), kills Red Snails on 2.3. CHero::setExp
+// 0x6654D calls CHero::LevelUp 0x65089 when the need is reached, which returns at once above
+// level 98, and then sets EXP to 0: the level stays 99, EXP drops to 0 and counts up again.
+// Then the way to Henesys (2.0), a map change, reports the total ranking (99 x 999000 + EXP) /
+// 1000 (CMapleWorld::changeMap 0x81369), which gamecenter.json keeps.
+struct CapRun {
+    u64 kills0 = 0;
+    i32 last_exp = -1, resets = 0, reset_to = -1, level_max = 0;
+};
+CapRun g_cap;
+
+void level_cap(Run &r, u64) {
+    using namespace quest_bot;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        const Hero h = hero(cpu);
+        if (h.addr == 0) {
+            return;
+        }
+        CapRun &c = g_cap;
+        if (c.last_exp >= 0 && h.exp < c.last_exp) {
+            c.resets++;
+            c.reset_to = h.exp;
+            std::printf("level cap: EXP %d -> %d at level %d\n", c.last_exp, h.exp, h.level);
+        }
+        c.last_exp = h.exp;
+        c.level_max = std::max(c.level_max, h.level);
+    };
+    g_play.anywhere = true;
+    then_load_slot0(r);
+    then_do(r, "level 99", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        g_cap.kills0 = g_play.kills;
+        check(h.level == 99 && h.exp == 71735, "the hero is level 99 with 71,735 EXP");
+    });
+    then_farm(
+        r, "Red Snails on 2.3 at level 99", 2, 3, {2},
+        [](mt_cpu *cpu) { return g_cap.resets > 0 && hero(cpu).exp > 0; }, 900);
+    then_do(r, "EXP at the cap", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::printf("level cap: %llu kills, level %d (most %d), EXP %d, %d reset(s) to %d\n",
+                    static_cast<unsigned long long>(g_play.kills - g_cap.kills0), h.level,
+                    g_cap.level_max, h.exp, g_cap.resets, g_cap.reset_to);
+        check(h.level == 99 && g_cap.level_max == 99, "the level stays 99");
+        check(g_cap.resets == 1 && g_cap.reset_to == 0,
+              "reaching level 99's need sets EXP to 0, once");
+        check(h.exp > 0 && h.exp < 71740, "EXP counts up again from 0");
+    });
+    auto exp = std::make_shared<i32>(-1);
+    then_go(r, "Henesys (2.0)", at_object(2, 0, "Stan", 30), 300);
+    then_do(r, "the score", [exp](mt_cpu *cpu) {
+        static const char *const k_ranking = "com.nexonmobile.maplestory.thief.totalranking";
+        *exp = hero(cpu).exp;
+        const std::int64_t want = (99ll * 999000 + *exp) / 1000;
+        mt_gamekit_entry e[8];
+        const u32 n = mt_gamekit_entries(k_ranking, e, 8);
+        std::printf("gamecenter.json: %u entr%s", n, n == 1 ? "y" : "ies");
+        bool found = false;
+        for (u32 i = 0; i < n && i < 8; i++) {
+            std::printf("; %s best %lld last %lld (%lld reports)", e[i].player,
+                        static_cast<long long>(e[i].best), static_cast<long long>(e[i].last),
+                        static_cast<long long>(e[i].reports));
+            found = found || e[i].last == want;
+        }
+        std::printf("\n");
+        check(found, "gamecenter.json's last total ranking is " + std::to_string(want) +
+                         " (level 99, " + std::to_string(*exp) + " EXP) after the map change");
+    });
+    then_finish(r);
+}
+void level_cap_checks(Run &, u64) {}
+
+// --- Quick slots and the trash (#303, docs/testing/systems-sweep.md) ----------------------------
+//
+// quick_slots_trash_synthetic (tests/starts/systems_carry.json): a Bandit with Double Step
+// (skill 3) and Nimble Body (4) learned, by the pad only through the port's pick up and drop
+// (ADR 0129, #140): Double Step picked up on the skill tab and dropped on quick slot 3, then
+// used from it in the field (LB: MP paid); a stack of Snail Shells taken to the trash, the
+// game's popup 20 declined (B: the shells stay), then taken again and accepted (A: gone).
+
+constexpr i32 k_double_step = 3, k_shells = 32;
+
+// One press of `b` at a time (0.1 s down, 0.4 s up) until `done`.
+void then_press_until(Run &r, const std::string &what, double timeout,
+                      std::function<SDL_GamepadButton(mt_cpu *)> next, Pred done) {
+    auto at = std::make_shared<double>(-10);
+    then(r, what, timeout, [&r, next, done, at](mt_cpu *cpu, double el) {
+        if (el - *at < 0.5) {
+            if (el - *at >= 0.1) {
+                release_all(r);
+            }
+            return false;
+        }
+        if (done(cpu)) {
+            release_all(r);
+            return true;
+        }
+        *at = el;
+        hold(r, next(cpu), true);
+        return false;
+    });
+}
+
+// The carry's drop spot moved to quick slot n (up / down over the slot column), then A drops.
+void then_drop_on_slot(Run &r, i32 n) {
+    then_press_until(
+        r, "the carry on quick slot " + std::to_string(n), 10,
+        [&r, n](mt_cpu *) {
+            const fe::FocusTarget *t = r.focus.carry_target();
+            return t == nullptr || t->action != "slot" ? RIGHT
+                   : t->order < static_cast<u32>(n)    ? UP // the slot column: up to slot 4
+                                                       : DOWN;
+        },
+        [&r, n](mt_cpu *) {
+            const fe::FocusTarget *t = r.focus.carry_target();
+            return t != nullptr && t->action == "slot" && t->order == static_cast<u32>(n);
+        });
+    then_press(r, A);
+}
+
+// The index of etc item `id` in the hero's item list (the item grid's cell), or -1.
+i32 bag_cell(const mt_cpu *cpu, i32 id) {
+    const u32 items = rd(cpu, hero(cpu).addr + 0xD8);
+    for (u32 i = 0; items != 0 && i < 48; i++) {
+        const u32 it = rd(cpu, items + 4 * i);
+        if (it != 0 && rdi(cpu, it + 0x90) == id) {
+            return static_cast<i32>(i);
+        }
+    }
+    return -1;
+}
+// The item grid's cursor cell: CDataMgr +0xD8 plus 6 cells a scrolled row.
+i32 item_cursor(mt_cpu *cpu) {
+    const u32 mgr = data_mgr(cpu);
+    const u32 scroll = rd(cpu, mgr + 0x10C);
+    return rdi(cpu, mgr + 0xD8) + 6 * (scroll != 0 ? rdi(cpu, scroll + 4) : 0);
+}
+
+// The item grid open (the popup menu, right, A) with its cursor on etc item `id`, from the field.
+void then_item_cell(Run &r, i32 id) {
+    then_press(r, START, 0.1, 0.6);
+    then_wait_for(r, "the popup menu", 5, [](mt_cpu *cpu) { return game_mode(cpu) == 1; }, 0.3);
+    then_press(r, RIGHT);
+    then_press(r, A);
+    then_wait_for(r, "the item grid", 5, [](mt_cpu *cpu) { return menu_sub(cpu) == 1; }, 0.3);
+    then_press_until(
+        r, "the cursor on item " + std::to_string(id), 20,
+        [id](mt_cpu *cpu) { return item_cursor(cpu) < bag_cell(cpu, id) ? RIGHT : LEFT; },
+        [id](mt_cpu *cpu) {
+            return bag_cell(cpu, id) >= 0 && item_cursor(cpu) == bag_cell(cpu, id);
+        });
+}
+
+// The shells taken to the trash: pick up (X), left to the trash, A: the game's popup 20.
+void then_shells_to_trash(Run &r) {
+    then_item_cell(r, k_shells);
+    then_press(r, X);
+    then_check(r, "picked up: the carry is on", [&r](mt_cpu *) { return r.focus.carrying(); });
+    then_press_until(
+        r, "the carry on the trash", 10, [](mt_cpu *) { return LEFT; },
+        [&r](mt_cpu *) {
+            const fe::FocusTarget *t = r.focus.carry_target();
+            return t != nullptr && t->action == "trash";
+        });
+    then_press(r, A);
+    then_wait_for(r, "the trash popup (20)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 20; });
+}
+
+void quick_slots_trash(Run &r, u64) {
+    using namespace quest_bot;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    g_play.anywhere = true;
+    then_load_slot0(r);
+    // Double Step onto quick slot 3: the skill tab, its row, X picks it up, the drop on slot 3.
+    auto k = std::make_shared<MenuPad>();
+    then(r, "the skill tab on Double Step's row", 30, [&r, k](mt_cpu *cpu, double el) {
+        if (!k->ready(r, el)) {
+            return false;
+        }
+        if (!at_skill_tab(r, cpu, el, *k)) {
+            return false;
+        }
+        const u32 m = data_mgr(cpu);
+        const i32 row = skill_row(cpu, hero(cpu), k_double_step);
+        const i32 cur = rdi(cpu, m + 0xD4) + rdi(cpu, rd(cpu, m + 0x10C) + 4);
+        if (cur == row) {
+            return true;
+        }
+        k->press(r, el, cur < row ? DOWN : UP);
+        return false;
+    });
+    then_press(r, X);
+    then_check(r, "Double Step picked up", [&r](mt_cpu *) { return r.focus.carrying(); });
+    then_drop_on_slot(r, 3);
+    then_check(r, "quick slot 3 holds Double Step", [&r](mt_cpu *cpu) {
+        std::printf("quick slots: 3 holds skill %d; %llu picks, %llu drops\n",
+                    quick_slot_skill(cpu, hero(cpu), 3),
+                    static_cast<unsigned long long>(r.focus.stats().picks),
+                    static_cast<unsigned long long>(r.focus.stats().drops));
+        return !r.focus.carrying() && quick_slot_skill(cpu, hero(cpu), 3) == k_double_step;
+    });
+    then_back_to_field(r, "back to the field");
+    // Used from the slot: LB, the skill's MP paid.
+    auto mp = std::make_shared<i32>(0);
+    then_do(r, "MP before", [mp](mt_cpu *cpu) { *mp = hero(cpu).mp; });
+    then_press(r, LB, 0.1, 1.0);
+    then_check(r, "LB used Double Step from quick slot 3: MP paid", [mp](mt_cpu *cpu) {
+        std::printf("Double Step from slot 3: MP %d -> %d\n", *mp, hero(cpu).mp);
+        return hero(cpu).mp < *mp;
+    });
+    // The trash, declined: B on popup 20, the shells stay.
+    auto shells = std::make_shared<i32>(0);
+    then_do(r, "the shells", [shells](mt_cpu *cpu) {
+        *shells = item_count(cpu, hero(cpu), k_shells);
+        check(*shells > 0, "the bag has Snail Shells");
+    });
+    then_shells_to_trash(r);
+    then_press(r, B);
+    then_wait_for(r, "popup 20 closed", 5, [](mt_cpu *cpu) { return popup_id(cpu) != 20; });
+    then_check(r, "declined: the shells stay",
+               [shells](mt_cpu *cpu) { return item_count(cpu, hero(cpu), k_shells) == *shells; });
+    then_back_to_field(r, "back to the field");
+    // Accepted: A on popup 20, the shells are gone.
+    then_shells_to_trash(r);
+    then_press(r, A);
+    then_wait_for(r, "accepted: the shells are gone", 5, [](mt_cpu *cpu) {
+        return popup_id(cpu) != 20 && item_count(cpu, hero(cpu), k_shells) == 0;
+    });
+    then_back_to_field(r, "back to the field");
+    then_finish(r);
+}
+void quick_slots_trash_checks(Run &, u64) {}
+
 constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
     {"regress_record", regress_record, regress_record_checks, 1, false, regress_record_setup},
@@ -9650,6 +10531,15 @@ constexpr Mode k_modes[] = {
     {"jobs_3_4_bandit", jobs_3_4_bandit, jobs_checks, 1},
     {"skills_assassin", skills_assassin, skills_assassin_checks, 1},
     {"skills_bandit", skills_bandit, skills_bandit_checks, 1},
+    {"korean_chapter_1_a", korean_chapter_1_a, korean_checks, 1, false, korean_setup},
+    {"korean_offer_2", korean_offer_2, korean_checks, 1, false, korean_setup},
+    {"korean_offer_3", korean_offer_3, korean_checks, 1, false, korean_setup},
+    {"korean_missing_key", korean_missing_key, korean_checks, 1, false, korean_setup},
+    {"slots_create", slots_create, slots_create_checks, 1, false, slots_setup},
+    {"slots_reload", slots_reload, slots_reload_checks, 1, true, slots_setup},
+    {"inventory_full", inventory_full, inventory_full_checks, 1},
+    {"level_cap", level_cap, level_cap_checks, 1},
+    {"quick_slots_trash", quick_slots_trash, quick_slots_trash_checks, 1},
 };
 
 int usage() {

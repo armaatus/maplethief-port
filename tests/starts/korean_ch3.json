@@ -1,0 +1,28 @@
+{
+ "level": 60,
+ "branch": 1,
+ "job_tier": 2,
+ "hp": 1670,
+ "mp": 1670,
+ "meso": 20000,
+ "map": [7, 0],
+ "position": [-1, -1],
+ "equipped": [null, {"id": 40, "slots_left": 5, "attack": 15}, null, null, null],
+ "etc_inventory": [[11, 200], [3, 50], [6, 50]],
+ "shortcuts": [null, [1, 3], [1, 6], null, null],
+ "caption": {"key": "CDataMgr.m_strQuestTitle.15"},
+ "chapter": 3,
+ "main": {"40": 1},
+ "side": {},
+ "records": [
+  {
+   "kind": 0,
+   "number": 40,
+   "npc": 33,
+   "title": "Chapter2_Quest_Alchester.mainQuest72.1",
+   "description": "Chapter2_Quest_Alchester.mainQuest72.2",
+   "requirements": [],
+   "rewards": []
+  }
+ ]
+}
