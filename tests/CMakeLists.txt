@@ -420,6 +420,7 @@ maplethief_add_cpp_test(
             cpp/ipa_import_test.cpp
             cpp/save_state_input_test.cpp
             cpp/quick_state_test.cpp
+            cpp/recovery_test.cpp
             cpp/data_location_test.cpp
             cpp/data_switch_test.cpp
             cpp/switch_applet_test.cpp

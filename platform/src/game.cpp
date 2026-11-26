@@ -526,18 +526,20 @@ struct Game {
     // The key pad's haptics (keypad_haptics.h, #194): iOS's sink, nullptr elsewhere.
     std::unique_ptr<HapticsSink> haptics_sink;
     KeypadHapticsTracker haptics;
-    KeypadEditor keypad_editor;            // the key pad editor (keypad_editor.h, #159)
-    bool keypad_edit_pending = false;      // asked for: opens at a turn once the pad exists
-    std::uint64_t keypad_edit_version = 0; // the editor's layout installed
-    Lifecycle lifecycle;                   // the delegate's lifecycle (lifecycle.h, #128)
-    Autosaver autosaver;                   // autosave = on_quit before a resign or quit (#150)
-    AppletWatch applet;                    // the Switch's memory and CPU boost (#240)
-    std::uint64_t backgrounds = 0;         // lifecycle.backgrounds() at the last turn
-    Assists assists;                       // turbo_attack and auto_potion (#90, ADR 0092)
-    SceneSkip scene_skip;                  // skip_intros (#174, ADR 0096)
-    QuickStates quick;                     // save_states: quick-save, quick-load (#204)
-    double ui_animation_scale = 1;         // ui_animations (#90) as given to the runtime
-    MinimapLayer minimap;                  // the port's minimap (#176, minimap.h)
+    KeypadEditor keypad_editor;              // the key pad editor (keypad_editor.h, #159)
+    bool keypad_edit_pending = false;        // asked for: opens at a turn once the pad exists
+    std::uint64_t keypad_edit_version = 0;   // the editor's layout installed
+    Lifecycle lifecycle;                     // the delegate's lifecycle (lifecycle.h, #128)
+    Autosaver autosaver;                     // autosave = on_quit before a resign or quit (#150)
+    AppletWatch applet;                      // the Switch's memory and CPU boost (#240)
+    std::uint64_t backgrounds = 0;           // lifecycle.backgrounds() at the last turn
+    Assists assists;                         // turbo_attack and auto_potion (#90, ADR 0092)
+    SceneSkip scene_skip;                    // skip_intros (#174, ADR 0096)
+    QuickStates quick;                       // save_states: quick-save, quick-load (#204)
+    RecoveryPoints recovery;                 // crash_recovery: the recovery points (#335)
+    std::optional<RecoveryOps> recovery_ops; // made once: it hashes the binary
+    double ui_animation_scale = 1;           // ui_animations (#90) as given to the runtime
+    MinimapLayer minimap;                    // the port's minimap (#176, minimap.h)
     float compass_dx = 0;        // the minimap's corner: the compass's host move now, screen points
     ExpPercentLayer exp_percent; // the EXP percentage beside the HUD's bar (#191, ADR 0109)
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
@@ -2624,36 +2626,84 @@ void rebase_guest_clock(void *user, std::uint64_t unix_us) {
     }
 }
 
+// The frontend's layers let go before a restore (save_state_input.h): a quick-load's and a
+// recovery point's.
+void release_layers(Game &g, double t) {
+    RestoreInput layers;
+    layers.input = &g.input;
+    layers.actions = &g.actions;
+    layers.gamepads = &g.gamepads;
+    layers.pointer = &g.pointer;
+    layers.menu = &g.menu_input;
+    layers.assists = &g.assists;
+    layers.scene_skip = &g.scene_skip;
+    release_for_restore(layers, t);
+}
+
 // save_states (#204, quick_state.h): a quick_save or quick_load pressed since the last turn, here
 // in the turn hook. The port's overlays hold the turn while open (run_overlays), so none is open
 // here. The notice says what happened. After a load, the frontend's own per-tick state follows
 // the restored game: the interpolated frames start over, and game_speed (the player's setting,
 // not the state's) is written again into the restored guest memory.
-void run_quick_state(Game &g, mt_cpu *cpu, double now) {
+bool run_quick_state(Game &g, mt_cpu *cpu, double now) {
     const QuickRequest r = g.quick.take(g.actions, g.settings.save_states);
     if (r == QuickRequest::kNone) {
-        return;
+        return false;
     }
     const double t = now - g.first_turn;
-    const QuickOps ops = game_quick_ops(
-        cpu,
-        [&g, t] {
-            RestoreInput layers;
-            layers.input = &g.input;
-            layers.actions = &g.actions;
-            layers.gamepads = &g.gamepads;
-            layers.pointer = &g.pointer;
-            layers.menu = &g.menu_input;
-            layers.assists = &g.assists;
-            layers.scene_skip = &g.scene_skip;
-            release_for_restore(layers, t);
-        },
-        rebase_guest_clock, &g);
+    const QuickOps ops =
+        game_quick_ops(cpu, [&g, t] { release_layers(g, t); }, rebase_guest_clock, &g);
     const QuickResult res = g.quick.run(r, ops, data_dir());
     g.notice = res.notice;
     g.notice_until = SDL_GetTicksNS() + kStateNoticeNs;
     g.event_seen = true;
     if (res.done && r == QuickRequest::kLoad) {
+        g.interp.forget();
+        g.ff_presents.restart();
+        apply_game_speed(cpu, g.settings.game_speed);
+        g.game_speed = g.settings.game_speed;
+    }
+    return true;
+}
+
+// crash_recovery (#335, recovery.h): a recovery point at the first safe turn after a map load,
+// a game save or five minutes of play (the guest's clock: `now`), never in the turn of a
+// quick-save or quick-load; and an armed point restored once its character is in the field.
+// The Switch in applet mode takes a point only with room for it beside the margin (ADR 0141).
+void run_recovery(Game &g, mt_cpu *cpu, double now, bool quick_ran) {
+    if (!g.settings.crash_recovery && !g.recovery.armed()) {
+        g.recovery.turn(RecoveryOps{.where =
+                                        [cpu] {
+                                            const AutosaveCheck c = check_autosave(cpu);
+                                            return RecoveryWhere{c.mode, c.area, c.map, c.slot};
+                                        }},
+                        false, now, game_saves_seen());
+        return;
+    }
+    if (!g.recovery_ops) {
+        RecoveryOps ops = game_recovery_ops(
+            cpu, [&g] { release_layers(g, mt_cf_absolute_time() - g.first_turn); },
+            rebase_guest_clock, &g);
+        if (g.applet.applet_mode()) {
+            ops.heap_free = [&g]() -> std::optional<std::uint64_t> {
+                const std::optional<MemorySample> &s = g.applet.last();
+                if (!s) {
+                    return std::nullopt;
+                }
+                return s->heap_size > s->heap_used ? s->heap_size - s->heap_used : 0;
+            };
+            ops.heap_margin = kAppletMarginBytes;
+        }
+        g.recovery_ops = std::move(ops);
+    }
+    const RecoveryTurn res = g.recovery.turn(*g.recovery_ops, g.settings.crash_recovery, now,
+                                             game_saves_seen(), quick_ran);
+    if (!res.notice.empty()) {
+        g.notice = res.notice;
+        g.notice_until = SDL_GetTicksNS() + kStateNoticeNs;
+        g.event_seen = true;
+    }
+    if (res.resumed) { // as after a quick-load
         g.interp.forget();
         g.ff_presents.restart();
         apply_game_speed(cpu, g.settings.game_speed);
@@ -2765,8 +2815,10 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
         g.data_notice_until = 0;
     }
-    // save_states (#204): a quick-save or quick-load asked for, at this safe turn.
-    run_quick_state(g, cpu, now);
+    // save_states (#204): a quick-save or quick-load asked for, at this safe turn; then
+    // crash_recovery's point (#335).
+    const bool quick_ran = run_quick_state(g, cpu, now);
+    run_recovery(g, cpu, now, quick_ran);
     // stick_mode and direction_priority (#138, ADR 0128), as in effect now; the clock a menu's
     // diagonal is timed by.
     g.actions.set_clock([](void *) { return mt_cf_absolute_time(); }, nullptr);
@@ -3169,6 +3221,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // A fallback to the per-user folder (#263): its title notice, once per reason.
     post_data_fallback_notice(data_location());
     install_save_backups();
+    install_game_save_counter(); // crash_recovery's game-save trigger (#335)
 
     if (!options.capture_dir.empty()) {
         std::error_code ec;
@@ -3398,6 +3451,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     follow_frame_rate(g); // frame_rate = smooth (#87): records from the first tick
     g.lifecycle.watch();
     g.applet.configure(options.applet_mode, options.applet_memory, options.applet_boost);
+    g.recovery.set_data_dir(data_dir());
+    g.recovery.arm(options.recovery); // a resume chosen at the start (#335)
     g.script = lifecycle_script(options);
     g.rumble.configure(set.rumble, set.rumble_strength);
     // Frame telemetry (#137, ADR 0071): the overlay.
@@ -3702,6 +3757,13 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             SDL_Log("game: the window closed after %llu of %llu frames",
                     static_cast<unsigned long long>(g.presents),
                     static_cast<unsigned long long>(options.frames));
+        }
+        // The recovery points (#335): a write in progress finishes; a run without a crash
+        // report deletes them with #198's marker, a crashed one keeps them for the next start.
+        if (crash_reported()) {
+            g.recovery.wait();
+        } else {
+            g.recovery.clean_exit();
         }
         mt_process_destroy(p);
     }

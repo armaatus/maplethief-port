@@ -861,6 +861,20 @@ constexpr SettingInfo kRegistry[] = {
      .help = "Saves when you quit, leave or exit to the main menu, wherever the game's own Save "
              "would",
      .applies = Applies::kAtOnce},
+    // Gameplay: crash recovery points (#335, ADR 0151, recovery.h). Read live by the turn hook;
+    // a point stalls play for one to three ticks, so the Original columns keep the game's pace.
+    {.key = "crash_recovery",
+     .group = SettingGroup::kGameplay,
+     .comment = "# keep a recovery point of the game at map loads, saves and every five minutes, "
+                "offered\n# at the next start after a crash: on | off",
+     .value = on_off<&Settings::crash_recovery>(),
+     .presets = {"off", "off", "on"},
+     .flag = "--crash-recovery",
+     .game_only = true,
+     .label = "Crash recovery",
+     .help = "After a crash, the next start offers to resume from a few minutes before it. "
+             "Play pauses briefly at map loads, saves and every five minutes",
+     .applies = Applies::kAtOnce},
     // Video: the wider field (#86, ADR 0090). The GL layer's size is set at the start.
     {.key = "widescreen",
      .group = SettingGroup::kVideo,

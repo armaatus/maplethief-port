@@ -1452,7 +1452,20 @@ int main(int argc, char *argv[]) {
         const LastRun last = crash_marker_begin(run_end.crashes_dir);
         const bool interactive = is_interactive_run(options.game, SDL_getenv("SDL_VIDEO_DRIVER"));
         set_crash_ui(interactive);
-        safe_start = decide_safe_start(options.safe_start, last, interactive);
+        // A recovery point (#335, ADR 0151): offered on #198's box; armed for the game, or
+        // deleted.
+        const DataLocation &loc = data_location();
+        const RecoveryOffer offer = find_recovery_point(
+            data_dir(), settings.save_dir.empty() ? loc.saves : settings.save_dir, last.crashed,
+            last.crash_file);
+        const StartDecision start = decide_start(options.safe_start, last, interactive, offer);
+        safe_start = start.safe_start;
+        if (start.resume) {
+            options.game.recovery = offer;
+        } else if (offer.offered) {
+            SDL_Log("recovery: not offered (discarded at the start)");
+            delete_recovery_points(data_dir());
+        }
         if (safe_start) {
             settings = safe_start_settings(settings);
             set_settings_write_blocked(true);

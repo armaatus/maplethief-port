@@ -53,6 +53,7 @@
 #include "bindings.h"
 #include "data_location.h"
 #include "maplethief/boot.h"
+#include "recovery.h"
 #include "scaling.h"
 #include "settings.h"
 #include "switch_applet.h"
@@ -155,6 +156,9 @@ struct GameOptions {
     // The first-launch preset picker's "Show controls" (#193): the controls card opens once the
     // game is up (kCardAfterSeconds after the first run-loop turn). Never in a scripted run.
     bool show_controls_card = false;
+    // The recovery point the start chose to resume (#335, ADR 0151, recovery.h): armed at the
+    // start, restored once the player loads its character. Not offered: none.
+    RecoveryOffer recovery;
     PromptDevice controls_card_device{}; // the device it was answered with (none: touch)
     // --shot-gl: each --shot also writes the GL frame it shows, as <NAME>.gl.png (a test aid:
     // the game's own drawing without UIKit over it).

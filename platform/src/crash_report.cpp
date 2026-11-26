@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -69,6 +70,7 @@ char g_exe[kPathMax];
 bool g_show_ui = false;
 CrashDialogFn g_dialog_for_test;
 SafeStartPrompt g_prompt_for_test;
+RecoveryPrompt g_recovery_prompt_for_test;
 
 // --- the crash path: only what a signal handler may do ---------------------------------------
 
@@ -419,7 +421,80 @@ SafeStartChoice ask_safe_start(const std::string &crash_file) {
     return pressed == 1 ? SafeStartChoice::kDefaults : SafeStartChoice::kNormal;
 }
 
+RecoveryChoice ask_recovery(const std::string &crash_file, const RecoveryOffer &offer) {
+    std::string text = "MapleThief did not close cleanly last time.";
+    if (!crash_file.empty()) {
+        text += "\n\nThe report is at:\n" + crash_file;
+    }
+    text += "\n\n" + recovery_offer_text(offer) +
+            " Resume plays on from it once you load that character.\n\nDefault settings mean "
+            "no texture or audio packs and the software renderer; your settings file is not "
+            "changed.";
+    const SDL_MessageBoxButtonData buttons[] = {
+        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 0, "Resume"},
+        {0, 1, "Resume with default settings"},
+        {0, 2, "Start with default settings"},
+        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 3, "Start normally"},
+    };
+    SDL_MessageBoxData box{};
+    box.flags = SDL_MESSAGEBOX_WARNING;
+    box.title = "MapleThief";
+    box.message = text.c_str();
+    box.numbuttons = 4;
+    box.buttons = buttons;
+    int pressed = 3;
+    if (!SDL_ShowMessageBox(&box, &pressed)) {
+        SDL_Log("safe start: cannot ask: %s", SDL_GetError());
+        return RecoveryChoice::kStartNormal;
+    }
+    switch (pressed) {
+    case 0:
+        return RecoveryChoice::kResume;
+    case 1:
+        return RecoveryChoice::kResumeDefaults;
+    case 2:
+        return RecoveryChoice::kStartDefaults;
+    default:
+        return RecoveryChoice::kStartNormal;
+    }
+}
+
 } // namespace
+
+void set_recovery_prompt_for_test(RecoveryPrompt prompt) {
+    g_recovery_prompt_for_test = std::move(prompt);
+}
+
+std::string recovery_offer_text(const RecoveryOffer &offer) {
+    std::string text = "A recovery point of character " + std::to_string(offer.slot + 1);
+    if (offer.minutes_before >= 0) {
+        const long minutes = std::lround(offer.minutes_before);
+        text += ", taken " +
+                (minutes < 1 ? std::string("less than a minute")
+                             : std::to_string(minutes) + (minutes == 1 ? " minute" : " minutes")) +
+                " before the crash";
+    }
+    return text + ", is kept.";
+}
+
+StartDecision decide_start(bool flag, const LastRun &last, bool interactive,
+                           const RecoveryOffer &offer) {
+    StartDecision d;
+    if (flag || !last.crashed || !offer.offered) {
+        d.safe_start = decide_safe_start(flag, last, interactive);
+        return d;
+    }
+    if (!interactive && !g_recovery_prompt_for_test) {
+        return d;
+    }
+    const RecoveryChoice choice = g_recovery_prompt_for_test
+                                      ? g_recovery_prompt_for_test(last.crash_file, offer)
+                                      : ask_recovery(last.crash_file, offer);
+    d.safe_start =
+        choice == RecoveryChoice::kResumeDefaults || choice == RecoveryChoice::kStartDefaults;
+    d.resume = choice == RecoveryChoice::kResume || choice == RecoveryChoice::kResumeDefaults;
+    return d;
+}
 
 void set_safe_start_prompt_for_test(SafeStartPrompt prompt) {
     g_prompt_for_test = std::move(prompt);

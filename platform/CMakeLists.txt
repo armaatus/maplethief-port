@@ -90,6 +90,7 @@ add_library(
     src/save_menu.cpp
     src/save_state_input.cpp
     src/quick_state.cpp
+    src/recovery.cpp
     src/save_tools.cpp
     src/save_zip.cpp
     src/scaling.cpp

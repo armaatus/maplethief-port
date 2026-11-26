@@ -34,6 +34,7 @@
 #include <functional>
 #include <string>
 
+#include "recovery.h"
 #include "settings.h"
 
 struct SDL_Window;
@@ -92,6 +93,26 @@ void set_safe_start_prompt_for_test(SafeStartPrompt prompt); // null: the defaul
 // Whether this start is a safe one: `flag` (--safe-start), or the last run crashed, `interactive`
 // and the player chose it.
 bool decide_safe_start(bool flag, const LastRun &last, bool interactive);
+
+// With a recovery point (#335, ADR 0151): the box gains a paragraph on the point and four
+// buttons. Resume (the default; the player's settings, the point armed), Resume with default
+// settings (the safe start, armed), Start with default settings (the safe start, the point
+// deleted), Start normally (Escape; the player's settings, deleted).
+enum class RecoveryChoice { kResume, kResumeDefaults, kStartDefaults, kStartNormal };
+using RecoveryPrompt =
+    std::function<RecoveryChoice(const std::string &crash_file, const RecoveryOffer &offer)>;
+void set_recovery_prompt_for_test(RecoveryPrompt prompt); // null: the default
+// The paragraph on the point: "A recovery point of character N, taken M minutes before the
+// crash, is kept."
+std::string recovery_offer_text(const RecoveryOffer &offer);
+struct StartDecision {
+    bool safe_start = false;
+    bool resume = false; // arm the offer's point (else the caller deletes it)
+};
+// decide_safe_start, and with `offer` offered the four-button question. `flag` (--safe-start):
+// a safe start, no resume. A run that is not interactive (and no test prompt): neither.
+StartDecision decide_start(bool flag, const LastRun &last, bool interactive,
+                           const RecoveryOffer &offer);
 
 } // namespace maplethief::frontend
 
