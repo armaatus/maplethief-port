@@ -518,6 +518,16 @@ def test_cli_build_and_describe(tmp_path, capsys):
     assert sd.main(["build", str(desc), str(tmp_path / "bad")]) == 1
 
 
+def test_cli_build_skips_without_the_bundle(tmp_path, capsys):
+    # A start state's CTest fixture (#302) is skipped, not failed, without your own copy.
+    desc = tmp_path / "start.json"
+    desc.write_text('{"hp": 1, "mp": 1}', encoding="utf-8")
+    missing = tmp_path / "MapleThief.app"
+    assert sd.main(["build", str(desc), str(tmp_path / "out"), "--app", str(missing)]) == 77
+    assert "skipped" in capsys.readouterr().out
+    assert not (tmp_path / "out").exists()
+
+
 def test_build_turns_wrong_types_into_save_data_errors():
     for desc in ({"hp": 1, "mp": 1, "skills": {"x": 1}}, {"hp": 1, "mp": 1, "main": [1]}):
         with pytest.raises(sd.SaveDataError, match="description"):

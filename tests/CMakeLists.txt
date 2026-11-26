@@ -985,6 +985,9 @@ maplethief_target_defaults(play_real_test)
 # The play bot's reader of its world tables (#297, world_map.h) on a synthetic file; the
 # generator's side is tests/test_botworld.py.
 maplethief_add_cpp_test(world_map_test AREA bot SOURCES cpp/world_map_test.cpp)
+# The skill rules the skills_* play modes check (#302, skill_rules.h) on synthetic skill.dat rows
+# and docs/re/mechanics.md's worked examples.
+maplethief_add_cpp_test(skill_rules_test AREA bot SOURCES cpp/skill_rules_test.cpp)
 target_compile_definitions(
     world_map_test
     PRIVATE MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/tests/cpp/data/bot_world"
@@ -1343,6 +1346,65 @@ set_tests_properties(
     play.mechanics
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
+# Job advancements and skills from built start states (#302, docs/testing/skills-and-jobs.md).
+# starts.<name> builds tests/starts/<name>.json into the test output directory with
+# mtport.savedata (skipped, 77, without your own copy); each play test loads it (MT_FROM_SAVE).
+# The jobs_* modes talk to the Dark Lord by play at each of the knowledge base's advancement
+# points, the skills_* modes learn and use every skill of a branch with its rule checked. Their
+# starts equal no chained state yet, so the tests are named synthetic (start-states.md).
+set(_starts
+    jobs_ch1_beginner_10
+    jobs_ch1_rogue_30
+    jobs_ch2_rogue_30
+    jobs_ch2_assassin_60
+    jobs_ch2_bandit_60
+    jobs_ch3_beginner_10
+    jobs_ch3_rogue_30
+    jobs_ch3_assassin_60
+    jobs_ch3_bandit_60
+    skills_assassin
+    skills_bandit)
+foreach(start IN LISTS _starts)
+    add_test(NAME starts.${start}
+             COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                     "${PROJECT_SOURCE_DIR}/tests/starts/${start}.json"
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_${start}/data/saves" --app
+                     "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+    set_tests_properties(
+        starts.${start}
+        PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_SETUP
+                   start_${start} ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+endforeach()
+# mode:start
+set(_from_starts
+    jobs_1_1:jobs_ch1_beginner_10
+    jobs_1_2_assassin:jobs_ch1_rogue_30
+    jobs_1_2_bandit:jobs_ch1_rogue_30
+    jobs_2_2_assassin:jobs_ch2_rogue_30
+    jobs_2_2_bandit:jobs_ch2_rogue_30
+    jobs_2_3_assassin:jobs_ch2_assassin_60
+    jobs_2_3_bandit:jobs_ch2_bandit_60
+    jobs_3_1:jobs_ch3_beginner_10
+    jobs_3_2_assassin:jobs_ch3_rogue_30
+    jobs_3_2_bandit:jobs_ch3_rogue_30
+    jobs_3_4_assassin:jobs_ch3_assassin_60
+    jobs_3_4_bandit:jobs_ch3_bandit_60
+    skills_assassin:skills_assassin
+    skills_bandit:skills_bandit)
+foreach(pair IN LISTS _from_starts)
+    string(REPLACE ":" ";" pair "${pair}")
+    list(GET pair 0 mode)
+    list(GET pair 1 start)
+    add_test(NAME play.${mode}_synthetic COMMAND play_real_test ${mode}
+                                                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_${mode}")
+    set_tests_properties(
+        play.${mode}_synthetic
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+                   FIXTURES_REQUIRED start_${start}
+                   ENVIRONMENT
+                   "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_${start}")
+endforeach()
 
 # Text packs (#189, ADR 0108): a pack made at run time in the test output directory from your
 # own copy (Hénésys in the dialogue, Pötion in item_etc), through the intro and the item tab:

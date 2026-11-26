@@ -10,6 +10,7 @@ Runs that check the real game: some scripted, which run as tests on your machine
 | [Chapter 1's quests](chapter-1-quests.md) | The checks of chapter 1's NPCs, quests and scripts, played by a bot |
 | [The regression replay](regression-replay.md) | `scripts/regress`: recorded input replayed against recorded checkpoints |
 | [Built start states](start-states.md) | Play tests that start mid-game from a save built from a description, equal to the chained run's state |
+| [Skills and job advancements](skills-and-jobs.md) | Every job advancement path and all 24 skills, played from built start states and checked against the rules |
 
 ## By hand
 

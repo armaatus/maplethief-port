@@ -54,6 +54,7 @@ from mtport import ghidra_common as gc
 from mtport.bytereader import FormatError
 
 SLOTS = 3
+SKIPPED = 77  # the exit code of build and describe when --app names no bundle
 EMPTY = 0xFF  # item id / record kind of an empty slot
 
 CHARACTER_SIZE = 0x464
@@ -1154,6 +1155,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             for p in _write_new_character(Path(args.out_dir), args.slot, args.hp, args.mp):
                 print(f"wrote {p}")
         elif args.cmd in ("build", "describe"):
+            if args.app and not args.app.is_dir():
+                # As the real-asset tests do: a CTest fixture that builds a start state skips.
+                print(f"skipped: {args.app} absent (scripts/bootstrap)")
+                return SKIPPED
             skills, strings = bundle_inputs(args.app, args.language) if args.app else (None, None)
             if args.cmd == "describe":
                 c = parse_character(args.theif.read_bytes())

@@ -1,0 +1,26 @@
+{
+ "level": 60,
+ "branch": 2,
+ "job_tier": 2,
+ "hp": 1670,
+ "mp": 1670,
+ "meso": 20000,
+ "map": [0, 0],
+ "position": [-1, -1],
+ "equipped": [null, {"id": 28, "slots_left": 5, "attack": 25}, null, null, null],
+ "etc_inventory": [[11, 200], [3, 50], [119, 1]],
+ "chapter": 3,
+ "main": {"0": 2, "2": 2},
+ "side": {"25": 1},
+ "records": [
+  {
+   "kind": 1,
+   "number": 25,
+   "npc": 33,
+   "title": "Chapter3_Quest_Zenumist_Chief.subQuest25.1",
+   "description": "Chapter3_Quest_Zenumist_Chief.subQuest25.2",
+   "requirements": [{"item": [1, 119], "count": 1}],
+   "rewards": []
+  }
+ ]
+}
