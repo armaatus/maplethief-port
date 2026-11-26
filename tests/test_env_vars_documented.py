@@ -69,8 +69,8 @@ def test_the_scan_finds_the_known_variables():
 def test_every_variable_the_program_reads_is_in_the_table():
     missing = {v: files for v, files in read_by_code().items() if v not in documented()}
     assert not missing, (
-        f"add these to the table under '## Environment variables' in {DOC.relative_to(REPO)}: "
-        f"{missing}"
+        "add these to the table under '## Environment variables' in "
+        f"{DOC.relative_to(REPO).as_posix()}: {missing}"
     )
 
 

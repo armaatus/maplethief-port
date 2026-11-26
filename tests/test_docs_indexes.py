@@ -22,5 +22,5 @@ def test_the_index_links_every_page(folder):
     linked = {(root / m).resolve() for m in LINK.findall(index.read_text(encoding="utf-8"))}
     pages = {p.resolve() for p in root.glob("*.md") if p.name != "README.md"}
     pages |= {p.resolve() for p in root.glob("*/README.md")}
-    missing = sorted(str(p.relative_to(REPO)) for p in pages - linked)
+    missing = sorted(p.relative_to(REPO).as_posix() for p in pages - linked)
     assert not missing, f"add these to {folder}/README.md: {missing}"
