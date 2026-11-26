@@ -46,6 +46,10 @@ its test's name.**
 The synthetic starts of [skills-and-jobs.md](skills-and-jobs.md) (`tests/starts/jobs_*.json`,
 `tests/starts/skills_*.json`) are built by CTest itself: `starts.<name>` writes the save into
 the test output directory (skipped without the bundle) and `play.<mode>_synthetic` loads it.
+So are the systems sweep's ([systems-sweep.md](systems-sweep.md)): `korean_ch3.json` and
+`korean_ch3_key.json` (built with `--language ko`), `chapter_2.json` again as
+`starts.korean_chapter_2`, and `systems_slot0.json`, `systems_inventory_full.json`,
+`systems_level_99.json` and `systems_carry.json`.
 
 ## The bot's world
 
