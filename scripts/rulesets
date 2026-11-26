@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# The branch rulesets of dev and main (#329, ADR 0173), kept as JSON in .github/rulesets/.
+#
+# Usage: scripts/rulesets check|apply [--repo OWNER/NAME]
+#
+#   check   compares each committed ruleset with the one GitHub has (by name) and exits 1 on any
+#           difference or a missing ruleset
+#   apply   creates each ruleset GitHub lacks and updates the others to the committed JSON
+#
+# Needs gh, logged in as a repository admin, and jq. The required check names must be job names
+# that CI reports on every pull request into the branch (tests/test_rulesets.py checks them
+# against .github/workflows/).
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_DIR"
+
+usage() {
+    echo "Usage: scripts/rulesets check|apply [--repo OWNER/NAME]" >&2
+    exit 2
+}
+
+[ $# -ge 1 ] || usage
+cmd="$1"
+shift
+repo=armaatus/maplethief-port
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --repo) repo="$2"; shift 2 ;;
+        *) usage ;;
+    esac
+done
+
+# The fields of a ruleset that the JSON sets, in a stable order, for comparison.
+normalize='{name, target, enforcement, bypass_actors, conditions,
+    rules: (.rules | map(del(.parameters.required_reviewers?)) | sort_by(.type))} | walk(if type == "array" then sort_by(tostring) else . end)'
+
+status=0
+for file in .github/rulesets/*.json; do
+    name=$(jq -r .name "$file")
+    id=$(gh api "repos/$repo/rulesets" --jq ".[] | select(.name == \"$name\") | .id")
+    case "$cmd" in
+        check)
+            if [ -z "$id" ]; then
+                echo "missing: $name"
+                status=1
+                continue
+            fi
+            if diff <(jq -S "$normalize" "$file") \
+                <(gh api "repos/$repo/rulesets/$id" | jq -S "$normalize"); then
+                echo "ok: $name (id $id)"
+            else
+                echo "differs: $name (id $id)"
+                status=1
+            fi
+            ;;
+        apply)
+            if [ -z "$id" ]; then
+                gh api -X POST "repos/$repo/rulesets" --input "$file" --jq '"created: \(.name) (id \(.id))"'
+            else
+                gh api -X PUT "repos/$repo/rulesets/$id" --input "$file" --jq '"updated: \(.name) (id \(.id))"'
+            fi
+            ;;
+        *) usage ;;
+    esac
+done
+exit "$status"

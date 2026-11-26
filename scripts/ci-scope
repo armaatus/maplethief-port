@@ -43,6 +43,9 @@ while IFS= read -r path || [ -n "$path" ]; do
         tests/fixtures/compendium/*) continue ;;
         scripts/compendium) continue ;;
         scripts/ci-scope) continue ;;
+        scripts/rulesets) continue ;;
+        tests/test_rulesets.py) continue ;;
+        .github/rulesets/*) continue ;;
         scripts/local-ci) continue ;;   # never runs in CI
         .github/workflows/compendium.yml) continue ;;
         *) native=true ;;

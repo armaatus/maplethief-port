@@ -53,6 +53,9 @@ def test_compendium_and_docs_only_skip_the_build():
             "scripts/compendium",
             "scripts/local-ci",
             ".github/workflows/compendium.yml",
+            "scripts/rulesets",
+            "tests/test_rulesets.py",
+            ".github/rulesets/dev.json",
         )
         == NONE
     )
