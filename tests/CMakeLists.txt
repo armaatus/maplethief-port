@@ -990,7 +990,8 @@ add_test(
         "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_regress")
 set_tests_properties(
     play.regress PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
-                            ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+                            ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools"
+                            FIXTURES_SETUP play_regress)
 # Save states in process (#203, ADR 0105 and its addendum, docs/re/save-states.md): the replay
 # with a save at a safe point on the first map (2.8) and one on the hunting field (2.9, the
 # snail fight); 200 ticks on from each, then the restore in the same process and the same 200
@@ -1003,6 +1004,37 @@ set_tests_properties(
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
                ENVIRONMENT
                "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_REPLAY=${PROJECT_SOURCE_DIR}/tests/regress/title_to_combat.replay"
+)
+# Crash recovery points across two processes (#335, ADR 0151, recovery.h): play.recovery_crash
+# plays the replay with crash_recovery on, takes points at map loads and every 20 guest seconds,
+# runs 200 ticks after the one at or after step 46,000, then traps on purpose; the marker and
+# the points stay. play.recovery_resume, a new process on the same directory, finds the marker,
+# is offered the newest point, answers Resume, restores it once the character is in the field,
+# and its 200 ticks' checkpoints (frame and audio hashes, the state line) must equal the first
+# process's.
+add_test(NAME play.recovery_crash COMMAND play_real_test recovery_crash
+                                          "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_recovery")
+add_test(NAME play.recovery_resume COMMAND play_real_test recovery_resume
+                                           "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_recovery")
+set_tests_properties(
+    play.recovery_crash play.recovery_resume
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_REPLAY=${PROJECT_SOURCE_DIR}/tests/regress/title_to_combat.replay"
+)
+set_tests_properties(play.recovery_crash PROPERTIES FIXTURES_SETUP play_recovery)
+set_tests_properties(play.recovery_resume PROPERTIES FIXTURES_REQUIRED play_recovery)
+# With crash_recovery off (the default, both Original presets): the frontend's recovery points
+# run every turn of the whole replay, take nothing, write nothing, and the checkpoints equal
+# play.regress's first run.
+add_test(NAME play.recovery_off COMMAND play_real_test recovery_off
+                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_recovery_off")
+set_tests_properties(
+    play.recovery_off
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_regress
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_REPLAY=${PROJECT_SOURCE_DIR}/tests/regress/title_to_combat.replay;MT_RECOVERY_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_regress/run_01/checkpoints.txt"
 )
 # The save-state census (#202, ADR 0105): the same replay to the same safe point, where
 # mt_snapshot_safe holds and every live host state type has a serializer (#203: any without one

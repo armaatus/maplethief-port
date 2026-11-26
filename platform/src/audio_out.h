@@ -192,6 +192,12 @@ class AudioHash {
     void render_to(std::uint64_t elapsed_ns);
     std::uint64_t hash() const { return hash_; }
     std::uint64_t frames() const { return frames_; }
+    // Goes on from another run's hash and frames (a run continued in a new process from a
+    // recovery point, #335's real-asset test).
+    void resume(std::uint64_t hash, std::uint64_t frames) {
+        hash_ = hash;
+        frames_ = frames;
+    }
 
   private:
     std::uint64_t hash_ = kStart;
