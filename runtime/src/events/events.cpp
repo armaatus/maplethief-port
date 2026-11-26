@@ -2,7 +2,9 @@
 // docs/re/audio.md (Vibration) and the decompiler: CHero::TakeDamage 0x65B55 checks the hero's
 // flags +0x0C for 0x10 (dead) and the damage for > 0 before it vibrates and subtracts it from
 // HP +0x94; CHero::LevelUp 0x65089 raises the level +0x80 while it is below 99. Popup_Open
-// 0x3EAA1, the revive 0x6140D and CDataMgr::LoadSaveData 0x39989: docs/re/cash-shop.md.
+// 0x3EAA1, the revive 0x6140D and CDataMgr::LoadSaveData 0x39989: docs/re/cash-shop.md. The
+// run events (#403): clearAll 0x996ED and setClassUp 0x997E1 (docs/re/script-vm.md), CMob::Die
+// 0x73349 (docs/re/mechanics.md), CMapleWorld::changeMap 0x81369 (docs/re/audio.md, Map music).
 #include "maplethief/events.h"
 
 #include <cstdint>
@@ -62,6 +64,12 @@ bool rd32(const mt_cpu *cpu, u32 addr, i32 *out) {
     return true;
 }
 
+// A pointer field: 0 when it is not readable.
+u32 rdptr(const mt_cpu *cpu, u32 addr) {
+    i32 v = 0;
+    return rd32(cpu, addr, &v) ? static_cast<u32>(v) : 0u;
+}
+
 struct Listener {
     mt_game_event_fn fn = nullptr;
     void *user = nullptr;
@@ -69,8 +77,8 @@ struct Listener {
 Listener g_listeners[MT_GAME_EVENTS_MAX_LISTENERS];
 
 void emit(mt_game_event &e, const char *what) {
-    mt_tracef("events", "%s: hero 0x%08X value %d (HP %d / %d)", what,
-              static_cast<unsigned>(e.hero), e.value, e.hp, e.max_hp);
+    mt_tracef("events", "%s: hero 0x%08X value %d %d %d (HP %d / %d)", what,
+              static_cast<unsigned>(e.hero), e.value, e.more[0], e.more[1], e.hp, e.max_hp);
     if (g_hook != nullptr) {
         g_hook(g_user, &e);
     }
@@ -120,17 +128,107 @@ void load_save_data(const mt_cpu *cpu) {
     emit(e, cached ? "load character" : "new character");
 }
 
+// The game state (CStateGame, docs/re/script-vm.md): the hero +0x30, the quest manager +0x58
+// (its chapter +0x04), the pending warp's byte +0xB4. The script natives reach it at vm +0x04.
+constexpr u32 k_vm_world = 0x04;
+constexpr u32 k_world_hero = 0x30;
+constexpr u32 k_world_quests = 0x58;
+constexpr u32 k_quests_chapter = 0x04;
+constexpr u32 k_world_warp_pending = 0xB4;
+// CMob's id (+0xA0); the bosses, whose death queues a scene (docs/re/mechanics.md).
+constexpr u32 k_mob_id = 0xA0;
+
+bool boss(i32 id) { return id == 64 || (id >= 66 && id <= 69); }
+
+// clearAll(vm): the chapter that ends.
+void clear_all(const mt_cpu *cpu) {
+    const u32 world = rdptr(cpu, cpu->r[0] + k_vm_world);
+    const u32 quests = world != 0 ? rdptr(cpu, world + k_world_quests) : 0;
+    mt_game_event e{};
+    if (quests == 0 || !rd32(cpu, quests + k_quests_chapter, &e.value)) {
+        g_stats.ignored++;
+        return;
+    }
+    e.kind = MT_GAME_EVENT_CHAPTER_END;
+    e.hero = rdptr(cpu, world + k_world_hero);
+    g_stats.chapter_ends++;
+    emit(e, "chapter end");
+}
+
+// CHero::SetClassUp(hero, branch, tier).
+void set_class_up(const mt_cpu *cpu) {
+    i32 flags = 0;
+    if (!rd32(cpu, cpu->r[0] + k_hero_flags, &flags)) {
+        g_stats.ignored++;
+        return;
+    }
+    mt_game_event e{};
+    e.kind = MT_GAME_EVENT_JOB_ADVANCE;
+    e.hero = cpu->r[0];
+    e.value = static_cast<i32>(cpu->r[1]);
+    e.more[0] = static_cast<i32>(cpu->r[2]);
+    g_stats.job_advances++;
+    emit(e, "job advance");
+}
+
+// CMob::Die(mob, hero): bosses only.
+void mob_die(const mt_cpu *cpu) {
+    mt_game_event e{};
+    if (!rd32(cpu, cpu->r[0] + k_mob_id, &e.value) || !boss(e.value)) {
+        g_stats.ignored++;
+        return;
+    }
+    e.kind = MT_GAME_EVENT_BOSS_KILLED;
+    e.hero = cpu->r[1];
+    g_stats.boss_kills++;
+    emit(e, "boss killed");
+}
+
+// CMapleWorld::changeMap(world, area, map, portal, ...): not while a warp is pending.
+void change_map(const mt_cpu *cpu) {
+    const u32 world = cpu->r[0];
+    i32 pending = 0;
+    // The byte +0xB4 (little-endian: the low byte of the word read at it).
+    if (!rd32(cpu, world + k_world_warp_pending, &pending) ||
+        (static_cast<u32>(pending) & 0xFFu) != 0) {
+        g_stats.ignored++;
+        return;
+    }
+    mt_game_event e{};
+    e.kind = MT_GAME_EVENT_MAP_CHANGE;
+    e.hero = rdptr(cpu, world + k_world_hero);
+    e.value = static_cast<i32>(cpu->r[1]);
+    e.more[0] = static_cast<i32>(cpu->r[2]);
+    e.more[1] = static_cast<i32>(cpu->r[3]);
+    g_stats.map_changes++;
+    emit(e, "map change");
+}
+
 } // namespace
 
 void mt_observe_entry(mt_cpu *cpu, std::uint32_t fn) noexcept {
     g_stats.entries++;
-    if (fn == MT_EVENTS_FN_POPUP_OPEN) {
+    switch (fn) {
+    case MT_EVENTS_FN_POPUP_OPEN:
         popup_open(cpu);
         return;
-    }
-    if (fn == MT_EVENTS_FN_LOAD_SAVE_DATA) {
+    case MT_EVENTS_FN_LOAD_SAVE_DATA:
         load_save_data(cpu);
         return;
+    case MT_EVENTS_FN_CLEAR_ALL:
+        clear_all(cpu);
+        return;
+    case MT_EVENTS_FN_SET_CLASS_UP:
+        set_class_up(cpu);
+        return;
+    case MT_EVENTS_FN_MOB_DIE:
+        mob_die(cpu);
+        return;
+    case MT_EVENTS_FN_CHANGE_MAP:
+        change_map(cpu);
+        return;
+    default:
+        break;
     }
     const u32 hero = cpu->r[0];
     mt_game_event e{};

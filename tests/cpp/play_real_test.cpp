@@ -2117,9 +2117,41 @@ void chapter_1_a(Run &r, u64) {
 }
 void chapter_1_a_checks(Run &, u64) {}
 
+// The run events (#403, ADR 0156) a part sees: a listener beside the frontend's, installed by
+// from_save, keeps the speedrun kinds and prints each one as it comes.
+std::vector<mt_game_event> g_run_events;
+void hear_run_event(void *, const mt_game_event *e) {
+    if (e->kind < MT_GAME_EVENT_CHAPTER_END || e->kind > MT_GAME_EVENT_MAP_CHANGE) {
+        return;
+    }
+    static const char *const names[] = {"chapter end", "job advance", "boss killed", "map change"};
+    std::printf("run event: %s %d %d %d\n", names[e->kind - MT_GAME_EVENT_CHAPTER_END], e->value,
+                e->more[0], e->more[1]);
+    g_run_events.push_back(*e);
+}
+
+// A run event of `kind` with `value` (and `more`, when given) was heard in this part: once, or
+// for a map change at least once.
+void then_run_event(Run &r, const std::string &what, mt_game_event_kind kind, i32 value,
+                    std::vector<i32> more = {}) {
+    then_do(r, "run event: " + what, [what, kind, value, more](mt_cpu *) {
+        int n = 0;
+        for (const mt_game_event &e : g_run_events) {
+            const bool same_more =
+                more.empty() || (e.more[0] == more[0] && (more.size() < 2 || e.more[1] == more[1]));
+            n += e.kind == static_cast<u32>(kind) && e.value == value && same_more ? 1 : 0;
+        }
+        // A map may be entered more than once on the way; a chapter, a job, a boss only once.
+        const bool ok = kind == MT_GAME_EVENT_MAP_CHANGE ? n >= 1 : n == 1;
+        check(ok, "run event " + what + ": heard " + std::to_string(n) + " time(s)");
+    });
+}
+
 // The start of a part that goes on from an earlier part's save (MT_FROM_SAVE): the main menu,
 // slot 0, the field.
 void from_save(Run &r) {
+    g_run_events.clear();
+    mt_game_events_add_listener(hear_run_event, nullptr);
     // MT_MAP_DUMP="1.0 2.6": the route planner's platforms and moves of those maps, printed.
     if (const char *dump = std::getenv("MT_MAP_DUMP")) {
         int area = 0, map = 0, n = 0;
@@ -2445,6 +2477,8 @@ void chapter_1_g(Run &r, u64) {
     then_farm(r, "level 30 on 1.1 (Green Mushrooms)", 1, 1, {10}, level_at_least(30), 3600, fight);
     then_talk_to(r, "Dark Lord: Job Advance (side 16), the Bandit", 0, 0, "Darklord", 7,
                  quest_is(1, 16, 2));
+    then_run_event(r, "the 2nd job (the Bandit: branch 2, tier 2)", MT_GAME_EVENT_JOB_ADVANCE, 2,
+                   {2});
     then_equip(r, "the Reef Claw (the Job Advance's reward)", 28, 1);
     then_check(r, "the hero wields the Reef Claw", [](mt_cpu *cpu) { return worn(cpu, 1) == 28; });
     then_spend_sp(r, "the Bandit: Critical Stab, HP Mastery", build);
@@ -2616,6 +2650,8 @@ void chapter_1_k(Run &r, u64) {
     boss.reach_up = 100;
     boss.hp_pct = 50;
     then_farm(r, "Malady on 3.8 (Defeat Malady)", 3, 8, {64, 65}, ready(0, 18), 3600, boss);
+    then_run_event(r, "portal371 to the boss's map 3.8", MT_GAME_EVENT_MAP_CHANGE, 3, {8});
+    then_run_event(r, "Malady (mob 64) killed", MT_GAME_EVENT_BOSS_KILLED, 64);
     // Malady's closing scene (4) moves Sabitrama (Sabi2) from where the map file puts him:
     // then_talk_to follows the live object.
     then(r, "Malady's closing scene (A through it)", 600, [&r](mt_cpu *cpu, double el) {
@@ -2677,6 +2713,8 @@ void chapter_1_l(Run &r, u64) {
                      const Hero h = hero(cpu);
                      return h.chapter == 2 && h.on(4, 1);
                  });
+    then_run_event(r, "chapter 1 ends (the trip to Orbis)", MT_GAME_EVENT_CHAPTER_END, 1);
+    then_run_event(r, "the trip to Orbis (4.1)", MT_GAME_EVENT_MAP_CHANGE, 4, {1});
     then_do(r, "chapter 2 on Orbis (4.1) in guest memory", [](mt_cpu *cpu) {
         const Hero h = hero(cpu);
         std::string q;
