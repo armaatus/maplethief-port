@@ -88,6 +88,12 @@ test copies `<dir>/data` into its own data directory, then loads slot 0 from the
   20 active, of part L a level-34 Bandit in chapter 2 on 4.1 (Orbis), and of part M the same
   hero in Kerning City with the Lappy Boots.
 
+- **A built save** can stand in for a part's output: `python3 -m mtport.savedata build` writes
+  the pair a description names, and [start-states.md](start-states.md) has the rule that keeps
+  such a start honest. `tests/starts/chapter_2.json` equals part L's save.
+- The bot's portal links, quest gates and shops are not written by hand: CTest `play.bot_world`
+  generates them from the knowledge base into the build tree before the parts run
+  ([start-states.md](start-states.md#the-bots-world)).
 - `MT_NAV_TRACE=1` prints each move the bot takes between platforms and each failed move.
   `MT_ACT_TRACE=1` prints the hero's state on every tick of a move. `MT_MAP_DUMP="1.0 3.6"`
   (with `MT_FROM_SAVE`) prints the route planner's view of each named map after the save loads:
