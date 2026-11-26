@@ -7,9 +7,9 @@ from __future__ import annotations
 import re
 
 import pytest
+
 import test_doc_links as doc_links
 import test_platform_docs as platform_docs
-
 from repo_paths import REPO
 
 README = REPO / "docs" / "play" / "README.md"
@@ -46,7 +46,9 @@ def cell_links(cell: str) -> list[str]:
 
 
 def test_table_reads_rows_and_skips_other_tables():
-    text = "| System | x |\n|---|---|\n| A | 1 |\n\n| Platform | y |\n|---|---|\n| B | [b](b.md) |\n"
+    text = (
+        "| System | x |\n|---|---|\n| A | 1 |\n\n| Platform | y |\n|---|---|\n| B | [b](b.md) |\n"
+    )
     assert table(text) == [["Platform", "y"], ["B", "[b](b.md)"]]
 
 
