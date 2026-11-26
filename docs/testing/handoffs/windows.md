@@ -1,6 +1,6 @@
 # Windows PC hand-offs
 
-The hand-offs that need the Windows PC. The order builds each tree once: the test builds first (`win-debug`, `win-release`), then the game folder from `scripts\build.ps1 win`, then the player zip, then the clean-machine and fresh-clone checks. [How to report](README.md#how-to-report) says what to post.
+The hand-offs that need the Windows PC. The order builds each tree once: the test builds first (`win-debug`, `win-release`), then the game folder from `scripts\build.ps1 win`, then the player zip, then the clean-machine and fresh-clone checks, and last the check from closed #145 ([Checks from closed issues](README.md#checks-from-closed-issues)). [How to report](README.md#how-to-report) says what to post.
 
 Older comments name branches that are merged and gone (`epic-201`, `epic-259-data-folder`, `epic-269-builds-docs`, `113-demo-msvc-only-warning`) or `main`: use `dev` (or the epic branch `epic-106-itch-handoffs` until it is merged). The v0.1.0 release (2026-11-07) predates the data folder and crash report work, so its Windows zip is only used to make older saves for #264.
 
@@ -127,3 +127,16 @@ Closes [#85](https://github.com/armaatus/maplethief-port/issues/85) (the macOS h
 2. Unzip the Windows kit and run `bin\MapleThief.exe --version | Out-String`: `MapleThief 0.1.0`.
 
 **Post back:** the release URL and both results; then close it.
+
+## #145: Window behaviour (Windows part)
+
+From closed [#145](https://github.com/armaatus/maplethief-port/issues/145) (PR #178's hand-offs); the [Mac section](mac.md#145-window-behaviour-mac-part) has the full list. In the `dist\win\MapleThief-game-<version>-windows-x64` folder from #141, `MapleThief.exe`:
+
+1. F11 and Alt+Enter toggle fullscreen; quit in fullscreen and start: fullscreen again.
+2. Windowed, move and resize, quit, start: the same place and size (`data\window.ini`). Maximise, quit, start: maximised.
+3. The mouse pointer hides on a key or pad press and comes back when the mouse moves; the mouse wheel moves one row in a shop list and nothing on the field.
+4. F12 writes `data\screenshots\MapleThief_<date>_<time>.png`. Look at it, don't post it.
+5. Settings > Gameplay > **Pause in the background** on: Alt+Tab away and the game holds; off: it runs on.
+6. Settings > Video > **Vsync** off, then on: the picture keeps going, without tearing when on.
+
+**Post back:** pass or fail per step, and the Windows build number.

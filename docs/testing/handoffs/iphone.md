@@ -1,6 +1,6 @@
 # iPhone hand-offs
 
-The hand-offs that need an iPhone: the port on a modern iPhone (#73, #128, #194, #197), and the original 2010 game on an old 32-bit device (#149, #60, #118). One iOS build covers the first group; every setting they switch is in the settings menu, so nothing is rebuilt in between. [How to report](README.md#how-to-report) says what to post.
+The hand-offs that need an iPhone: the port on a modern iPhone (#73, #128, #194, #197, and the checks from closed issues #83, #144, #89, #159 and #168), and the original 2010 game on an old 32-bit device (#149, #60, #118, and closed #76, the feel side by side). One iOS build covers the first group; every setting they switch is in the settings menu, so nothing is rebuilt in between. [How to report](README.md#how-to-report) says what to post.
 
 The baseline is done: #83 (closed 2026-11-10) built the app with Xcode and reached the first map by touch on an iPhone 12 with iOS 26.6.1. That build already held the code of #128, #194 and #197.
 
@@ -26,7 +26,7 @@ open build/ios-app/MapleThief.xcodeproj
 
 In Xcode: the MapleThief scheme, your iPhone as the destination, Signing & Capabilities with *Automatically manage signing* and your team, then Run. Keep Xcode's console open for the whole session: #128, #194 and #197 read its lines.
 
-While the phone is new to this build, also note the three checks #83 left out: the icon and launch screen, both landscape orientations with no status bar, and a console with no guest memory fault and no Metal or GPU error.
+While the phone is new to this build, do [#83](#83-icon-orientations-the-files-app-and-the-suspend-autosave) first: the checks its device result left out.
 
 ## #194: Key pad haptics
 
@@ -78,6 +78,59 @@ Closes [#73](https://github.com/armaatus/maplethief-port/issues/73). An iPhone 1
 
 **Post back:** yes or no per step, with the iPhone model and iOS version on any no. No screenshots.
 
+## #83: Icon, orientations, the Files app and the suspend autosave
+
+From closed [#83](https://github.com/armaatus/maplethief-port/issues/83) (its device result, and PR #178's hand-offs for #78 and #150). The build reached the first map by touch; these were never reported. Since #150 `autosave = on_quit` saves when the app goes to the background too, where the game's own Save would (not on a boss map, in a scene or with a popup open); Enhanced has it on, or Settings > Gameplay > **Autosave**.
+
+1. The home screen shows the port's icon, and a launch screen shows before the game, not a white flash.
+2. Both landscape orientations; it never turns to portrait, and there is no status bar.
+3. Xcode's console over the session: no guest memory fault, no `Metal` or GPU error.
+4. Files app > On My iPhone > MapleThief lists the saves (`theif0`, `quest0` and so on). Copy the folder to iCloud Drive or the Mac, play and save, copy it back over, start: the older save is loaded.
+5. With Autosave on, walk on a field, then the home gesture: the console says `autosave: slot N saved at ...`. Kill the app from the switcher and start it: the hero is where you left. The same on a boss map: `autosave: not saved at ...` with the reason.
+
+**Post back:** yes or no per step, with the console lines of step 5.
+
+## #144: The first-start preset picker (iPhone part)
+
+From closed [#144](https://github.com/armaatus/maplethief-port/issues/144) (PR #178's hand-offs); the Mac part is on the [Mac page](mac.md#144-the-first-start-preset-picker-mac-part). The picker shows only on a first start, so this reinstalls: keep the saves from #83 step 4 first.
+
+1. Copy On My iPhone > MapleThief out with the Files app. Delete the app (touch and hold > Remove App > Delete App), then Run again from Xcode.
+2. The picker shows with the four presets. Tap Enhanced: the game starts with it (the gear's menu shows Preset Enhanced).
+3. Copy the saves back and start again: no picker, the hero is there.
+
+**Post back:** whether the picker reads well and is easy to hit with a finger.
+
+## #89: The settings menu with each input (iPhone part)
+
+From closed [#89](https://github.com/armaatus/maplethief-port/issues/89) (PR #178's hand-offs); keyboard, pad and mouse are on the [Mac page](mac.md#89-the-settings-menu-with-each-input-mac-part).
+
+1. The gear beside the picture, in the safe-area margin, opens the menu and pauses the game.
+2. Tap a tab, then a row's values: Video > **Scale mode** changes the picture at once. The close box closes the menu.
+3. With a paired controller, the Guide button opens it too.
+
+**Post back:** pass or fail per step, and any row too small to hit.
+
+## #159: The key pad editor with fingers
+
+From closed [#159](https://github.com/armaatus/maplethief-port/issues/159) (PR #178's hand-offs). The editor is driven by synthetic touches in CI; [iPhone controls](../../play/iphone-controls.md#moving-the-key-pad) is the player's page.
+
+1. Settings (the gear) > Controls > **Edit the touch key pad**. Drag the d-pad with one finger; pinch the action keys smaller and larger (50 to 200 %).
+2. The bar's size and opacity buttons on the quick slots. Push a group against an edge: it stays clear of the notch and the home indicator.
+3. Save, play on the first map: each key works exactly where it is drawn, and Map, Bag and Cash where they were.
+4. Back in the editor: **Reset all**, Save: the game's own layout (`keypad_layout = original`).
+
+**Post back:** how the drag and pinch feel, any key that misses where it is drawn, and how close to the edges a group gets.
+
+## #168: The key pad at the 16:9 edges
+
+From closed [#168](https://github.com/armaatus/maplethief-port/issues/168) (PR #178's hand-offs). With widescreen the field is 568 x 320 and the key pad sits at the wide view's edges.
+
+1. Settings > Video > **Widescreen** `auto` (Enhanced has it). On the first hunting field the view is wider and the pad is at the edges, clear of the notch and the home indicator, in both orientations.
+2. Play a few minutes: are the keys easy to reach, or too far out?
+3. Settings > Video > **Widescreen HUD** `narrow`: the HUD and the pad stay at their 3:2 places in the middle. Which do you prefer?
+
+**Post back:** pass or fail of step 1, the finger feel, and edges or narrow.
+
 ## #149: Import saves from a device backup
 
 Closes [#149](https://github.com/armaatus/maplethief-port/issues/149). Needs the old device with the game and its saves; do it before #60, whose fresh install deletes them. [iPhone saves](../../play/iphone-saves.md) is the player page for the same steps (the issue's old docs path is now that page).
@@ -111,3 +164,16 @@ Closes [#118](https://github.com/armaatus/maplethief-port/issues/118) once the a
 3. Later, when the agent has compared the bundled font against them: judge the look in the port and sign off, or say what to change.
 
 **Post back:** that the references exist, the device and iOS version, and which screens are missing. No images in git or in the issue.
+
+## #76: Physics and feel against the original
+
+From closed [#76](https://github.com/armaatus/maplethief-port/issues/76). The port plays map 2.3 for 15 game-minutes in `play.first_map` with no fault, but nobody has held it next to the original. Side by side: the old device with 1.5, and the port on the Mac (`dist/mac/MapleThief.app`, `--preset original`) or this iPhone. Go to map 2.3: Play, New game, the tutorial, Henesys, walk left down the steps to the portal and press up.
+
+1. Walk speed, how quickly the hero stops, the jump's height and arc.
+2. Knockback when a snail touches the hero; attack timing and reach; the damage numbers.
+3. Drops falling and picked up on contact; a potion from the quick slots.
+4. A level-up: the port draws one full-screen white frame, then one black frame. Does the device flash the same way?
+5. Death, then "Return to town": the hero in Henesys with full HP and MP and about 10 % less meso.
+6. The HUD, the mini map and the world map; the "EXP obtained (+N)" text (its font is #118's).
+
+**Post back:** a short note per point, "same" or what differs. No video of the game.

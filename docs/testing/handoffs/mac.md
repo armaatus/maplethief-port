@@ -1,6 +1,6 @@
 # Mac hand-offs
 
-The hand-offs that need the Mac. Two builds cover all of them: the game app (`scripts/build mac`) for the first sections, then the player kit (`mac-player`) for the data folder sections at the end. [How to report](README.md#how-to-report) says what to post.
+The hand-offs that need the Mac, then the checks from closed issues (#59 to #204, [Checks from closed issues](README.md#checks-from-closed-issues)). Two builds cover all of them: the game app (`scripts/build mac`) for the first sections, then the player kit (`mac-player`) for the data folder sections at the end. [How to report](README.md#how-to-report) says what to post.
 
 Every issue's older comments name branches that are merged now (`192-saves-menu`, `196-window-size-display`, `epic-201`, `epic-259`) or `main`: build from the epic branch `epic-106-itch-handoffs`, or `dev` once it is merged.
 
@@ -9,7 +9,7 @@ Every issue's older comments name branches that are merged now (`192-saves-menu`
 1. Your copy of the game at `original/MapleThief-1.5.ipa`, then `just doctor` and `scripts/bootstrap`.
 2. **Back up the per-user folder first**, since #263 and #264 write to it: `cp -a ~/Library/Application\ Support/MapleThief ~/mt-userfolder-backup`.
 3. Rosetta, for #142: `softwareupdate --install-rosetta --agree-to-license`.
-4. A second display for #196, a 144 Hz monitor for #272 if there is one, and a gamepad (optional, #192).
+4. A second display for #196, a 144 Hz monitor for #272 if there is one, and a gamepad (optional, #192). For the checks from closed issues: the 120 Hz MacBook display, a 16:9 or 21:9 external one, a picture of your own for #157, and an Intel Mac for #81 if one is around.
 5. **Build 1, the game app:** `scripts/build mac`. It makes `dist/mac/MapleThief.app` (universal, Release, the game inside) with its data folder at `dist/mac/data/`. Below, `G` stands for `dist/mac/MapleThief.app/Contents/MacOS/MapleThief`.
 6. **Build 2, the player kit** (for the last two sections): `cmake --workflow --preset mac-player`. It makes `build/mac-player/MapleThief-<version>-macos-universal.zip`, with no game inside, so the first start shows the import screen. Don't use `scripts/release build TAG --players-only` for this: it needs a release tag.
 
@@ -94,6 +94,158 @@ Closes [#272](https://github.com/armaatus/maplethief-port/issues/272). Needs a r
 2. Read `game: clock: pacing = display, a 1 ms grid (...), a <L> ms tick ...` and `game: ticks: ... a second`.
 
 **Post back:** each L's ticks a second against its rate (15.385, 20, 25, 30.303, 40), all within 0.5 %, and the clock line.
+
+## #59: Integer scaling on a Retina display
+
+From closed [#59](https://github.com/armaatus/maplethief-port/issues/59) (PR #123's hand-offs). The HiDPI path was checked only by arithmetic tests and a headless 2880 x 1800 drawable, since the agent's display is 1x. On the Mac's own Retina display, windowed:
+
+1. `$G --window 1440x900 --scale-mode integer 2>&1 | grep "game: drawable"`: the line reads `game: drawable 2880x1800 pixels (density 2x2), integer` with 5x (a smaller drawable if the window didn't fit; then say which).
+2. The picture is crisp, not blurred, centred, with bars round it.
+
+**Post back:** the `game: drawable` line, crisp yes or no, and the Mac model.
+
+## #64: Mute when the window loses focus
+
+From closed [#64](https://github.com/armaatus/maplethief-port/issues/64) (PR #126's hand-offs). `mute_unfocused` is on in every preset.
+
+1. `$G 2>&1 | grep "audio: "`, on the main menu with its music. Click another app: the game goes silent and the log says `audio: muted (the window lost focus)`. Click back: `audio: unmuted (the window gained focus)` and the music again.
+2. The same in fullscreen with Cmd+Tab away and back.
+3. F1 > Audio > **Mute in the background** off, then click another app: the music goes on.
+
+**Post back:** pass or fail per step with the log lines.
+
+## #145: Window behaviour (Mac part)
+
+From closed [#145](https://github.com/armaatus/maplethief-port/issues/145) (PR #178's hand-offs); [Windows](windows.md#145-window-behaviour-windows-part) and [Linux](linux.md#145-window-behaviour-linux-part) have the same steps. Fullscreen and its modes are #179's and #196's sections above, so this is the rest. Since #259 `window.ini` and `screenshots/` are in the data folder, `dist/mac/data/`.
+
+1. Windowed, move and resize the window, quit, start `$G` again: the same place and size. Zoom it (maximised), quit, start: maximised. With `--window 960x640` it starts at that size and `window.ini` isn't touched.
+2. The mouse pointer hides on a key or pad press and comes back when the mouse moves.
+3. Mouse wheel: in a shop list or the popup menu, one notch moves one row; on the field it does nothing.
+4. F12 (and a pad's Share or Capture button) writes `dist/mac/data/screenshots/MapleThief_<date>_<time>.png`: the game's picture without the port's overlays. Look at it, don't post it.
+5. F1 > Gameplay > **Pause in the background** on (it is in Original + controller and Enhanced): walk, click another app, and the game holds; click back and it goes on. Off: it keeps running behind.
+6. F1 > Video > **Vsync** off, then on: the picture keeps going both times, without tearing when on.
+
+**Post back:** pass or fail per step, and the macOS version.
+
+## #144: The first-start preset picker (Mac part)
+
+From closed [#144](https://github.com/armaatus/maplethief-port/issues/144) (PR #178's hand-offs); the touch half is on the [iPhone page](iphone.md#144-the-first-start-preset-picker-iphone-part). The picker shows when the data folder has no `settings.ini`. #179's step 1 sees it once; this tries every input.
+
+1. `export MAPLETHIEF_DATA_DIR=$HOME/mt-picker; rm -rf "$MAPLETHIEF_DATA_DIR"`, then `$G`: the picker lists Original, Original + controller, Enhanced and Custom.
+2. Mouse: hover and click Enhanced. The game starts with it (F1 shows Preset Enhanced). Quit, `rm -rf "$MAPLETHIEF_DATA_DIR"`.
+3. Keyboard: arrows and Return pick Original. Again with a pad: d-pad and A pick Original + controller.
+4. Start once more without deleting: no picker. Then delete the `preset = ...` line from `$MAPLETHIEF_DATA_DIR/settings.ini` (an older settings file) and start: the picker offers **Keep my settings** first, and choosing it keeps the file's values.
+5. `rm -rf ~/mt-picker` and `unset MAPLETHIEF_DATA_DIR`.
+
+**Post back:** pass or fail per input, and anything unclear in the picker's text.
+
+## #89: The settings menu with each input (Mac part)
+
+From closed [#89](https://github.com/armaatus/maplethief-port/issues/89) (PR #178's hand-offs); touch and the gear are on the [iPhone page](iphone.md#89-the-settings-menu-with-each-input-iphone-part). The menu's Gameplay > Game options is checked by `play.game_options`.
+
+1. Keyboard: F1 opens the menu over the game, which pauses. The arrows change Video > **Scale mode** and the picture changes at once. Esc closes it; `dist/mac/data/settings.ini` has the new `scale_mode`.
+2. Pad: the Guide button (and L3 + R3 together) opens it. LB and RB switch tabs, the d-pad changes Controls > **Hide the key pad**, B closes it.
+3. Mouse: in fullscreen or a wide window, click the gear in the bars. Click a tab, then `<` and `>` on Audio > **Volume**: the sound changes at once.
+4. Controls > **Bindings** opens the remap overlay; Save or Cancel goes back to the menu. Controls > **Edit the touch key pad** opens the editor, Cancel goes back.
+5. Move through a few rows of each tab: each has a help line that says what it does.
+
+**Post back:** pass or fail per input, and any row whose label or help is unclear.
+
+## #88: How the filters and the HD text look
+
+From closed [#88](https://github.com/armaatus/maplethief-port/issues/88) (PR #135's hand-offs). The filters are tested on synthetic images, timed under 1 ms and read back exact; only the look is left. Fullscreen on the Mac's display (and on an external one if you have it), in the first map and in a dialogue:
+
+1. `$G --filter xbr`, then `--filter crt`, then `--filter lcd` (F1 > Video > **Filter** does the same live).
+2. `$G --render-scale 3 --hd-text on`, then `--hd-text off`: in the first dialogue the name and the lines are sharp with `on`, and the layout is the same.
+
+**Post back:** per filter, what looks off (a halo, a moiré, too dark, a seam at the picture's edge) or "fine"; and whether HD text should be on by default (Enhanced has it on).
+
+## #170: Filtered widescreen wings
+
+From closed [#170](https://github.com/armaatus/maplethief-port/issues/170) (PR #178's hand-offs). The wings, the picture and the pad strips are now one wide picture under the filter (no seam, checked byte for byte); only the look on a real display is left.
+
+1. Fullscreen on a 16:9 display, go to the first hunting field (2.3): `$G --widescreen auto --filter crt`. The field fills the width.
+2. The same with `--filter xbr`, `--filter lcd` and `--filter none`, and once with `--colorblind-filter protanopia`.
+
+**Post back:** whether the wings read as one picture with the middle under each filter, or where they don't.
+
+## #157: Blur and image borders
+
+From closed [#157](https://github.com/armaatus/maplethief-port/issues/157) (PR #178's hand-offs). Read back exact and timed; the D3D12 and Vulkan half is [#131's run](windows.md#131-the-gpu-backend-on-d3d12-and-vulkan). Fullscreen on a 16:9 display, and on a 21:9 one if you have it (or a window dragged wide):
+
+1. `$G --border blur`: the game blurred behind the picture, dimmed to 150 of 255. Too bright, too dark, or distracting while things move?
+2. `$G --border image --border-image ~/border.png` with a picture of your own (not the game's art): it fills the bars, not stretched out of shape.
+3. `$G --border color --border-color '#204060'` (or a colour of your choice): plain bars of that colour.
+
+**Post back:** the look of each, and whether 150 of 255 should change.
+
+## #87: Smooth frames on 60, 120 and 144 Hz
+
+From closed [#87](https://github.com/armaatus/maplethief-port/issues/87) (PR #178's hand-offs). Smooth frames need the GPU renderer in real time; on software the log says `present: frame_rate = smooth needs gfx_backend = gpu in real time` and keeps the game's frames. The D3D12 and Vulkan half is [#131's run](windows.md#131-the-gpu-backend-on-d3d12-and-vulkan).
+
+1. On each display you have (60 Hz, the MacBook's 120 Hz ProMotion, a 144 Hz one): `$G --gfx-backend gpu --frame-rate smooth 2>&1 | tee ~/mt-smooth-<Hz>.log`, walk and jump on the first map for a few minutes, quit.
+2. Then `--frame-rate original` on the same display, for comparison.
+3. Read the exit lines `game: frame_rate = smooth: ...`: ticks, interpolated frames and the latency after the tick's present.
+
+**Post back:** per display, the two `game: frame_rate = smooth` lines, whether smooth looks smoother, and whether the extra latency is felt in a jump or an attack.
+
+## #151: Game speeds and fast-forward at 60, 120 and 144 Hz
+
+From closed [#151](https://github.com/armaatus/maplethief-port/issues/151) (PR #178's hand-offs). Each speed is exact in fixed-step; this measures it in real time on each display. The 144 Hz runs at every tick length are [#272](#272-1-ms-grid-pacing-on-a-144-hz-panel); here 60 and 120 Hz.
+
+1. Fullscreen on a 60 Hz display, idle on the main menu, for each `S` of 65, 50, 40, 33 and 25: `$G --no-audio --game-speed <S> --seconds 26 2>&1 | grep "game: ticks"`. The rate is 1000 / S ticks a second, within 1 %.
+2. The same on the 120 Hz display.
+3. Play with `$G --fast-forward x2`, holding Tab (or R3) on a field; then `x3`. The exit `game: clock:` line names the time fast-forwarded.
+
+**Post back:** the ticks lines per display and speed, and how fast-forward feels (music pitch is kept on purpose).
+
+## #153: Texture packs
+
+From closed [#153](https://github.com/armaatus/maplethief-port/issues/153) (PR #178's hand-offs). A pack replacing every upload is tested; the try is the player's path in [Settings, Texture packs](../../play/settings.md#texture-packs). Dumps and packs are the game's art: keep them in your home folder, never in the repository or a post.
+
+1. `$G --dump-textures ~/mt-dump`, play the tutorial and Henesys, quit.
+2. `PYTHONPATH=tools python3 -m mtport.texpack build ~/mt-dump ~/mt-pack --scale 2`.
+3. `$G --texture-pack ~/mt-pack --render-scale 2`, the same maps. The exit log counts the replaced textures. Then add `--texture-filter nearest`.
+4. Edit one PNG in `~/mt-pack` (paint it a colour), start again: that texture shows the edit.
+5. `rm -rf ~/mt-dump ~/mt-pack`
+
+**Post back:** the replace counts, how the 2x pack looks against the game, and whether the steps on the settings page were enough.
+
+## #81: The app on a real Intel Mac
+
+From closed [#81](https://github.com/armaatus/maplethief-port/issues/81) (PR #135's hand-offs). Rosetta is checked (#142 above); real Intel hardware isn't. Its other hand-off, Open Anyway on a quarantined copy, is [#263](#263-the-macos-kit-under-app-translocation). Skip this if there is no Intel Mac at hand.
+
+1. Copy `dist/mac/MapleThief.app` and `dist/mac/data/` (or the `mac-player` kit) to the Intel Mac; `lipo -archs` on the binary names `x86_64 arm64`.
+2. Open it, reach the first map, play a few minutes, quit.
+3. `MapleThief.app/Contents/MacOS/MapleThief --perf-session 2>&1 | tail -5`: the `game: ticks:` line, 19.5 or more a second.
+
+**Post back:** the Mac model, the macOS version, pass or fail, and the `game: ticks:` line.
+
+## #174: How the scene skip feels (optional)
+
+From closed [#174](https://github.com/armaatus/maplethief-port/issues/174), optional. The skip runs a scene at x8 and taps OK, keeping the state.
+
+1. A new game with `$G --skip-intros on`: the intro and the tutorial's scenes run fast and end where watching them does.
+2. Balrog's entrance, if a save near it is at hand.
+
+**Post back:** too fast, too slow, or fine; anything that looked wrong while skipping.
+
+## #175: How the auto-loot reach feels (optional)
+
+From closed [#175](https://github.com/armaatus/maplethief-port/issues/175), optional. With it on, a drop within 160 x 32 points of the hero is picked up through the game's own pick-up.
+
+1. `$G --auto-loot on`, hunt on the first field for a few minutes.
+
+**Post back:** whether the reach feels too short, too long or right.
+
+## #204: Quick-save and quick-load in real time (optional)
+
+From closed [#204](https://github.com/armaatus/maplethief-port/issues/204) (PR #229's hand-offs), optional. The save and load are tested on the virtual clock only; the notice on screen and the clock after a load are not.
+
+1. `$G --save-states on`, on a field: F5 shows a notice and writes `dist/mac/data/states/slot<N>.state`. Walk away, F9: back where F5 was, the music and the mobs going on smoothly.
+2. F5 in a scene or with a popup open: the notice refuses it and says why.
+
+**Post back:** pass or fail per step, and anything odd right after a load.
 
 ## #264: Data folder sign-off (Mac part)
 
