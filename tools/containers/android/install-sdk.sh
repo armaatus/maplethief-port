@@ -82,7 +82,9 @@ install_one() {
     mkdir -p "$tmp/x"
     case "$file" in
         *.zip) unzip -q "$zip" -d "$tmp/x" ;;
-        *.tar.gz) tar -xzf "$zip" -C "$tmp/x" --no-same-owner ;;
+        # Python's tarfile: GNU tar fails to create directories under Rosetta's emulation
+        # (tools/containers/linux/Dockerfile).
+        *.tar.gz) python3 -c 'import sys, tarfile; tarfile.open(sys.argv[1]).extractall(sys.argv[2], filter="tar")' "$zip" "$tmp/x" ;;
         *) die "$file: unknown archive type" ;;
     esac
     # Every archive holds one top-level folder (android-ndk-r28c/, arm64-v8a/, jdk-17.../, ...).
