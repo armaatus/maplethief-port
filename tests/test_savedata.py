@@ -363,3 +363,173 @@ def test_cli(tmp_path):
     bad.write_bytes(b"short")
     res = subprocess.run([*env_cmd, "dump", str(bad)], capture_output=True, text=True, env=env)
     assert res.returncode == 1 and "expected 1124 bytes" in res.stderr
+
+
+# -- building a save from a description (#297) ----------------------------------------------
+
+SKILL_ROWS = [
+    SimpleNamespace(id=2, branch=0, tier=1, type=3),
+    SimpleNamespace(id=4, branch=0, tier=1, type=1),
+    SimpleNamespace(id=15, branch=2, tier=2, type=1),
+]
+
+
+def valid_pair() -> tuple[sd.CharacterSave, sd.QuestSave]:
+    """The synthetic pair with quest states the game can hold (0 to 2)."""
+    quest = dataclasses.replace(synthetic_quest(), flags_b=bytes(i % 3 for i in range(100)))
+    return synthetic_character(), quest
+
+
+def test_build_defaults_are_the_new_character():
+    character, quest = sd.build({"hp": 10, "mp": 12})
+    assert character == sd.new_character(10, 12)
+    assert quest == sd.QuestSave()
+
+
+def test_describe_then_build_gives_every_written_byte():
+    character, quest = valid_pair()
+    desc = json.loads(json.dumps(sd.describe(character, quest)))  # through JSON, as on disk
+    built_c, built_q = sd.build(desc)
+    assert (
+        sd.written_diff("theif0", sd.encode_character(built_c), sd.encode_character(character))
+        == []
+    )
+    assert sd.written_diff("quest0", sd.encode_quest(built_q), sd.encode_quest(quest)) == []
+    assert desc["map"] == [5, 3] and desc["position"] == [-300, 700]
+    assert desc["caption"] == "Lith Harbor"
+    assert desc["records"][0]["requirements"][1] == {"mob": 7, "needed": 20, "progress": 3}
+    assert desc["records"][0]["rewards"][2] == {"exp": 150}
+
+
+def test_build_places_skills_by_id_and_captions_by_key():
+    strings = {"Other.key": "Crisis", "CDataMgr.m_strQuestTitle.7": "Crisis"}
+    desc = {
+        "hp": 50,
+        "mp": 20,
+        "branch": 2,
+        "job_tier": 2,
+        "skills": {"15": 3, "4": 1},
+        "caption": {"key": "CDataMgr.m_strQuestTitle.7"},
+        "chapter": 2,
+        "main": {"40": 1},
+        "side": {"7": 2},
+        "records": [{"kind": 0, "number": 40, "npc": 8, "title": "T", "rewards": [{"exp": 350}]}],
+    }
+    character, quest = sd.build(desc, SKILL_ROWS, strings)
+    assert character.skill_levels[:3] == (3, 0, 1)
+    assert character.caption_text == "Crisis"
+    assert quest.chapter == 2 and quest.flags_a[40] == 1 and quest.flags_b[7] == 2
+    assert quest.records[0].extra == 8 and quest.records[0].rewards[0] == sd.Reward(2, value_2=350)
+    back = sd.describe(character, quest, SKILL_ROWS, strings)
+    assert back["skills"] == {"15": 3, "4": 1}
+    assert back["caption"] == {"key": "CDataMgr.m_strQuestTitle.7"}
+    assert sd.build(back, SKILL_ROWS, strings) == sd.build(desc, SKILL_ROWS, strings)
+
+
+@pytest.mark.parametrize(
+    ("desc", "message"),
+    [
+        ({"hp": 1, "mp": 1, "levle": 3}, "unknown keys"),
+        ({"hp": 1}, "hp and mp are required"),
+        ({"hp": 1, "mp": 1, "level": 0}, "level 0"),
+        ({"hp": 1, "mp": 1, "main": {"9": 3}}, "main quest 9"),
+        ({"hp": 1, "mp": 1, "side": {"100": 1}}, "side quest 100"),
+        ({"hp": 1, "mp": 1, "skills": {"15": 1}}, "need skill.dat"),
+        ({"hp": 1, "mp": 1, "skills": {}, "skill_levels": []}, "both set"),
+        ({"hp": 1, "mp": 1, "etc_inventory": [None] * 49}, "at most 48"),
+        ({"hp": 1, "mp": 1, "equipped": [{"id": 1, "colour": 2}]}, "is not an item"),
+        ({"hp": 1, "mp": 1, "map": [2]}, "not a pair"),
+        ({"hp": 1, "mp": 1, "caption": {"key": "A.b"}}, "needs the game's strings"),
+        ({"hp": 1, "mp": 1, "records": [{"requirements": [{"gold": 1}]}]}, "no item, mob or meso"),
+        ({"hp": 1, "mp": 1, "records": [{}] * 11}, "at most 10"),
+    ],
+)
+def test_build_refuses_a_malformed_description(desc, message):
+    with pytest.raises(sd.SaveDataError, match=message):
+        sd.build(desc)
+
+
+def test_build_refuses_unknown_skills_and_caption_keys():
+    with pytest.raises(sd.SaveDataError, match="skill 15 has no slot"):
+        sd.build({"hp": 1, "mp": 1, "skills": {"15": 1}}, SKILL_ROWS)
+    with pytest.raises(sd.SaveDataError, match="not in the strings"):
+        sd.build({"hp": 1, "mp": 1, "caption": {"key": "A.b"}}, strings={})
+
+
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        ({"equipped": [None, {"id": 74}]}, "bad_item"),
+        ({"etc_inventory": [[138, 1]]}, "bad_item"),
+        ({"level": 101}, "bad_level"),
+        ({"branch": 3}, "bad_job"),
+        ({"skill_levels": [21]}, "bad_skill"),
+        ({"map": [11, 0]}, "bad_map"),
+        ({"records": [{"title": "Bad\nkey"}]}, "bad_quest"),
+    ],
+)
+def test_build_files_runs_the_ports_checks(change, code):
+    with pytest.raises(sd.SaveDataError, match=code):
+        sd.build_files({"hp": 10, "mp": 10, **change})
+
+
+def test_build_files_writes_the_slot():
+    files = sd.build_files({"hp": 10, "mp": 10, "level": 5, "map": [0, 0]}, slot=2)
+    assert sorted(files) == ["quest2", "theif2"]
+    assert sd.parse_character(files["theif2"]).level == 5
+
+
+def test_written_diff_ignores_unwritten_bytes():
+    character, quest = valid_pair()
+    theif, qbytes = sd.encode_character(character), sd.encode_quest(quest)
+    garbage = dataclasses.replace(character, unwritten_009=b"zzzz", unwritten_315=b"y" * 16)
+    assert sd.written_diff("theif0", sd.encode_character(garbage), theif) == []
+    tail = dataclasses.replace(quest, unwritten_tail=b"\x99" * 9)
+    assert sd.written_diff("quest0", sd.encode_quest(tail), qbytes) == []
+    richer = sd.encode_character(dataclasses.replace(character, meso=7))
+    assert sd.written_diff("theif0", richer, theif) == [
+        f"theif0.meso: built 7, other {character.meso}"
+    ]
+    states = bytearray(quest.flags_a)
+    states[7] = (states[7] + 1) % 3
+    moved = sd.encode_quest(dataclasses.replace(quest, flags_a=bytes(states)))
+    assert [line.split(" (")[1] for line in sd.written_diff("quest0", moved, qbytes)] == [
+        f"main quest 7): built {states[7]}, other {quest.flags_a[7]}"
+    ]
+    assert sd.written_diff("quest0", qbytes, qbytes[:-1]) != []
+
+
+def test_cli_build_and_describe(tmp_path, capsys):
+    character, quest = valid_pair()
+    character = dataclasses.replace(character, area=0, map=0)  # a map the checks know
+    desc = tmp_path / "start.json"
+    (tmp_path / "theif").write_bytes(sd.encode_character(character))
+    (tmp_path / "quest").write_bytes(sd.encode_quest(quest))
+    assert sd.main(["describe", str(tmp_path / "theif"), str(tmp_path / "quest")]) == 0
+    desc.write_text(capsys.readouterr().out)
+    assert sd.main(["build", str(desc), str(tmp_path / "out"), "--slot", "1"]) == 0
+    built = (tmp_path / "out" / "theif1").read_bytes()
+    assert sd.written_diff("theif1", built, sd.encode_character(character)) == []
+    desc.write_text('{"hp": 1, "mp": 1, "level": 200}')
+    assert sd.main(["build", str(desc), str(tmp_path / "bad")]) == 1
+    assert "bad_level" in capsys.readouterr().err
+    assert not (tmp_path / "bad").exists()
+    desc.write_text("[1]")
+    assert sd.main(["build", str(desc), str(tmp_path / "bad")]) == 1
+
+
+def test_build_turns_wrong_types_into_save_data_errors():
+    for desc in ({"hp": 1, "mp": 1, "skills": {"x": 1}}, {"hp": 1, "mp": 1, "main": [1]}):
+        with pytest.raises(sd.SaveDataError, match="description"):
+            sd.build(desc, SKILL_ROWS)
+
+
+def test_start_descriptions_are_well_formed():
+    starts = sorted((REPO / "tests" / "starts").glob("*.json"))
+    assert starts
+    for path in starts:
+        desc = json.loads(path.read_text(encoding="utf-8"))
+        assert isinstance(desc, dict) and set(desc) <= sd.DESCRIPTION_KEYS, path
+        assert "hp" in desc and "mp" in desc, path
+        # No game text in the repository: a caption is named by its strings key.
+        assert not isinstance(desc.get("caption"), str), path
