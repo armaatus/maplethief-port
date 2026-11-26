@@ -33,6 +33,7 @@ For people who want to build the game themselves or help develop it.
 | [Build from source](build/README.md) | The deep reference: tools per system, `just build`, and every step by hand |
 | [Running and options](build/running.md) | Every command-line option and setting |
 | [Testing and CI](build/testing.md) | The test suites, local CI, GitHub CI |
+| [How-tos](build/how-to/README.md) | Adding an HLE function, a selector on a host class or a setting; debugging a trap |
 | [Releases](build/releases.md) | How a release is cut ([checklist](release-checklist.md)) |
 | [Roadmap](ROADMAP.md) | The milestones, from foundation to v1.0 and after |
 | [Compendium: build and deploy](compendium/README.md) | How the [compendium site](https://armaatus.github.io/maplethief-port/) is built from your own copy, checked and deployed to GitHub Pages |
@@ -48,9 +49,9 @@ The technical reference: how the original game is built, and how the port is des
 | [Analysis](ANALYSIS.md) | Facts about the original program and its data |
 | [Decisions (ADRs)](adr/) | Every significant design decision, with the options considered and why |
 | [File formats](formats/README.md) | Specs of the game's file formats, each with a tested parser |
-| [Reverse-engineering notes](re/) | How parts of the original game work: audio, saves, scripts, program flow, … |
+| [Reverse-engineering notes](re/README.md) | How parts of the original game work: audio, saves, scripts, program flow, … |
 | [Control details](controls/README.md) | The default keys and buttons, the on-screen key pad, remapping |
-| [Playtest scripts](testing/) | Step-by-step runs used to check the game by hand |
+| [Playtest scripts](testing/README.md) | Step-by-step runs used to check the game by hand |
 
 ### Controls
 
