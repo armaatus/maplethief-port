@@ -48,6 +48,12 @@ With the generated code, `platform.title_60s` runs `MapleThief --fixed-step 16.6
 
 `PYTHONPATH=tools python3 -m mtport.titlerun coverage` configures `build/title-coverage/` with `-DMAPLETHIEF_TRACE_ENTRY=ON`, runs the same minute with `MAPLETHIEF_COVERAGE`, and writes `build/title-coverage/report/title.coverage` and `title-coverage.md`: every guest function entered on the way to the title. The fixed-step run is deterministic, so the same code gives the same report. It is derived from the IPA and never committed.
 
+### Timing tests on a busy machine
+
+A few tests measure time: `gfx_gpu_test`'s GPU time checks (the busy frame, the present filters, the border's blur, the colour-blind filter, widescreen's wide picture) and the real-time runs such as `platform.game_speed`. Another process's load only adds time, and it comes and goes, so they measure in a way that a passing load does not fail (#344). The GPU checks share one helper, `gpu_time()`: several short windows, every presenter of a with/without pair in turn in each window, the median over the windows, and a reading over its limit measured again after a pause, up to 8 rounds, keeping the smallest. The `gfx_gpu.*` cases hold one CTest `RESOURCE_LOCK` (no other GPU case draws while one measures). `platform.game_speed` is `RUN_SERIAL` and runs a run whose tick rate is outside the tolerance again, up to 3 times, each attempt logged with the load average. A real regression fails every window, round and attempt.
+
+`scripts/timing-stress` checks this: a busy loop on every core and a second process drawing on the GPU, while the time checks (and with `--game-speed`, `platform.game_speed`) run 20 times in a row (`--passes N`). Each pass prints its load average; the readings go to `build/test-output/<preset>/timing_stress/`.
+
 ### Playtests
 
 Step-by-step runs for checking the game by hand are in [docs/testing/](../testing/). The Nintendo Switch's hardware sign-off is [switch-checklist.md](../testing/switch-checklist.md). The playthrough checklist of #79 and #92 is generated from the knowledge base: [playthrough-checklist.md](../testing/playthrough-checklist.md).

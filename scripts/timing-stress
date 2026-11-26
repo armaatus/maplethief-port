@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# The timing tests under a synthetic CPU and GPU load (#344): a busy loop on every logical core
+# and a second process drawing on the GPU all along, while the timing tests run PASSES times in
+# a row. It stops at the first failure. Local only: it needs a GPU, and --game-speed needs the
+# game (scripts/bootstrap and work/gen).
+#
+# Usage: scripts/timing-stress [--passes N] [--preset NAME] [--game-speed] [--no-load]
+#
+#   --passes N     how many passes in a row (default 20)
+#   --preset NAME  the build whose tests run (default mac-debug; build it first)
+#   --game-speed   each pass also runs platform.game_speed (about two minutes a pass)
+#   --no-load      no synthetic load (a baseline)
+#
+# A pass is gfx_gpu_test's time checks (the busy frame, the present filters, the border's blur,
+# the colour-blind filter, widescreen's wide picture), each printing its readings, and with
+# --game-speed CTest's platform.game_speed. The load: `yes` per logical core, and gfx_gpu_test's
+# border case (every filter and scale mode at 16:9 and 21:9, a GPU-heavy case with no time
+# check) in a loop. Each pass's line has the load average; the readings and the per-pass logs
+# go to build/test-output/<preset>/timing_stress/.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+passes=20
+preset=mac-debug
+game_speed=0
+load=1
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+    --passes) passes="$2"; shift 2 ;;
+    --preset) preset="$2"; shift 2 ;;
+    --game-speed) game_speed=1; shift ;;
+    --no-load) load=0; shift ;;
+    -h | --help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 0 ;;
+    *) echo "timing-stress: unknown argument $1 (--help)" >&2; exit 2 ;;
+    esac
+done
+
+build="build/$preset"
+exe="$build/tests/gfx_gpu_test"
+[ -x "$exe" ] || { echo "timing-stress: no $exe (cmake --build --preset $preset)" >&2; exit 2; }
+out="build/test-output/$preset/timing_stress"
+rm -rf "$out"
+mkdir -p "$out"
+
+# doctest filters: a comma separates them, so names with one end in a wildcard.
+timed='batching: a busy frame is two batches*,present filters: GPU time per frame*'
+timed+=",present border: the blur's GPU time*,present colorblind: GPU time*"
+timed+=",present widescreen: the wide picture's GPU time*"
+drawing='present border: blur on SDL*'
+
+loadavg() {
+    if [ -r /proc/loadavg ]; then cut -d' ' -f1-3 /proc/loadavg; else sysctl -n vm.loadavg | tr -d '{}' | xargs; fi
+}
+cores() { getconf _NPROCESSORS_ONLN; }
+
+pids=()
+stop_load() {
+    for p in "${pids[@]+"${pids[@]}"}"; do
+        pkill -P "$p" 2>/dev/null || true
+        kill "$p" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
+}
+trap stop_load EXIT
+
+if [ "$load" = 1 ]; then
+    n="$(cores)"
+    for _ in $(seq "$n"); do
+        yes >/dev/null &
+        pids+=("$!")
+    done
+    (while :; do "$exe" -tc="$drawing" >/dev/null 2>&1 || true; done) &
+    pids+=("$!")
+    echo "timing-stress: load: $n busy loops and a second process drawing on the GPU"
+    sleep 5 # the load average catches up
+fi
+
+for i in $(seq "$passes"); do
+    log="$out/pass_$i.log"
+    start=$SECONDS
+    status=0
+    "$exe" -tc="$timed" >"$log" 2>&1 || status=$?
+    if grep -q "gfx_gpu: skipped" "$log"; then
+        echo "timing-stress: no GPU device here (gfx_gpu: skipped); log: $log" >&2
+        exit 2
+    fi
+    if [ "$status" = 0 ] && [ "$game_speed" = 1 ]; then
+        ctest --preset "$preset" -R '^platform\.game_speed$' --output-on-failure >>"$log" 2>&1 ||
+            status=$?
+    fi
+    grep -E "^gfx_gpu: (busy frame|present|border blur|colour-blind|widescreen)" "$log" \
+        >"$out/pass_${i}_readings.txt" || true
+    rounds="$(grep -oE "[0-9]+ round\(s\)" "$log" | grep -oE "^[0-9]+" | sort -n | tail -1)"
+    verdict=PASS
+    [ "$status" = 0 ] || verdict=FAIL
+    echo "pass $i/$passes: $verdict in $((SECONDS - start)) s, load average $(loadavg) on $(cores) cores, at most ${rounds:-?} round(s) a check"
+    if [ "$status" != 0 ]; then
+        echo "timing-stress: pass $i failed; log: $log" >&2
+        exit 1
+    fi
+done
+echo "timing-stress: $passes passes in a row (output in $out)"
