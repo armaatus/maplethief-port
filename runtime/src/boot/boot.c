@@ -7,6 +7,7 @@
 
 #include "boot/process.h"
 #include "maplethief/diag.h"
+#include "maplethief/events.h"
 #include "maplethief/gcd.h"
 #include "maplethief/hle/cxxabi.h"
 #include "maplethief/sjlj.h"
@@ -343,6 +344,7 @@ mt_process *mt_process_load(const mt_boot_config *cfg, const mt_program *prog, c
     /* Diagnostics (ADR 0030): the trace and the report go to this process's log, and the
      * HLE trace wraps the table step_link fills. */
     mt_diag_process_begin(p->cfg.imports.log, p->cfg.imports.log_user);
+    mt_run_hits_install(); /* the run coverage's natives and maps (#295, ADR 0160) */
     if (step_image(p, macho, size) != 0 || step_link(p) != 0 || mt_boot_objc_create(p) != 0 ||
         step_place(p) != 0 || step_binds(p) != 0 || mt_boot_objc_image(p) != 0 ||
         mt_boot_objc_overrides(p) != 0 || step_seal(p) != 0 || step_stack(p) != 0 ||

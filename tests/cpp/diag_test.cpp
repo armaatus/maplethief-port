@@ -29,6 +29,7 @@ extern "C" {
 // tests/cpp/trace_entry_fixture.c, compiled with MT_TRACE_ENTRY 1.
 void f_000225E5(mt_cpu *cpu);
 void f_00002001(mt_cpu *cpu);
+void f_00030001(mt_cpu *cpu);
 }
 
 namespace {
@@ -55,13 +56,15 @@ std::string report() {
 
 // Fresh diagnostics with the fixture's symbols and the log captured.
 struct Diag {
-    explicit Diag(const char *trace_hle = nullptr, const char *trace = nullptr) {
+    explicit Diag(const char *trace_hle = nullptr, const char *trace = nullptr,
+                  const char *coverage = nullptr) {
         mt_diag_reset();
         g_log.clear();
         REQUIRE(mt_symbols_load_text(fx::k_symbols, std::strlen(fx::k_symbols), nullptr) == 4);
         mt_diag_config cfg = mt_diag_config_default();
         cfg.trace_hle = trace_hle;
         cfg.trace = trace;
+        cfg.coverage_path = coverage;
         cfg.log = capture;
         REQUIRE(mt_diag_configure(&cfg) == 0);
     }
@@ -361,6 +364,157 @@ TEST_CASE("function-entry coverage (MT_TRACE_ENTRY 1)") {
     CHECK(cov == "# maplethief coverage 1: 2 guest functions entered (pointer, entries, name)\n"
                  "0x00002001 1 CGame::Update\n"
                  "0x000225E5 3 f_000225E5\n");
+}
+
+namespace {
+
+std::string hits() {
+    std::string s(mt_hits_format(nullptr, 0), '\0');
+    mt_hits_format(s.data(), s.size() + 1u);
+    return s;
+}
+
+std::string read_file(const std::filesystem::path &p) {
+    std::ifstream f(p, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+}
+
+std::vector<std::uint32_t> g_watched;
+void watch_r1(mt_cpu *cpu, std::uint32_t fn) {
+    g_watched.push_back(fn);
+    g_watched.push_back(cpu->r[1]);
+}
+
+} // namespace
+
+TEST_CASE("run coverage: hits by kind and key, off without a coverage path") {
+    {
+        Diag d; // no MAPLETHIEF_COVERAGE: nothing is recorded
+        CHECK(mt_hits_enabled() == 0);
+        mt_hit(MT_HIT_SCRIPT, "script/common/a.out");
+        CHECK(mt_hits_count(MT_HIT_SCRIPT) == 0u);
+        CHECK(hits().empty());
+    }
+    const auto dir = std::filesystem::temp_directory_path() / "maplethief_diag_hits";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    const std::string pattern = (dir / "coverage-%p.txt").string();
+    {
+        Diag d(nullptr, nullptr, pattern.c_str());
+        CHECK(mt_hits_enabled() == 1);
+        mt_hit(MT_HIT_SCRIPT, "script/common/portal200.out");
+        mt_hit(MT_HIT_SCRIPT, "script/chapter1/Manji.out");
+        mt_hit(MT_HIT_SCRIPT, "script/common/portal200.out");
+        // A numeric id: counted from the second hit on, named once.
+        CHECK(mt_hit_count(MT_HIT_NATIVE, 38u) == 0);
+        mt_hit_add(MT_HIT_NATIVE, 38u, "38 changeMap");
+        CHECK(mt_hit_count(MT_HIT_NATIVE, 38u) == 1);
+        CHECK(mt_hit_count(MT_HIT_MAP, 38u) == 0); // the same id in another kind
+        mt_hit_add(MT_HIT_MAP, 38u, "2.8");
+        mt_hit_add(MT_HIT_SELECTOR, 7u, "-[EAGLView drawView]\n"); // one line per key
+        mt_hit_add(MT_HIT_KINDS, 1u, "no such kind");
+        CHECK(mt_hits_count(MT_HIT_SCRIPT) == 2u);
+        CHECK(mt_hits_count(MT_HIT_NATIVE) == 1u);
+        CHECK(hits() == "hit selector 1 -[EAGLView drawView] \n"
+                        "hit script 1 script/chapter1/Manji.out\n"
+                        "hit script 2 script/common/portal200.out\n"
+                        "hit native 2 38 changeMap\n"
+                        "hit map 1 2.8\n");
+        // Many keys: the index grows.
+        char key[32];
+        for (int round = 0; round < 3; round++) {
+            for (int i = 0; i < 2000; i++) {
+                std::snprintf(key, sizeof key, "_f%d", i);
+                mt_hit(MT_HIT_IMPORT, key);
+            }
+        }
+        CHECK(mt_hits_count(MT_HIT_IMPORT) == 2000u);
+        CHECK(has(hits(), "hit import 3 _f1999\n"));
+        // At finish: the functions, then the hits, in the file named by the process.
+        mt_diag_finish();
+    }
+    std::vector<std::filesystem::path> files;
+    for (const auto &e : std::filesystem::directory_iterator(dir)) {
+        files.push_back(e.path());
+    }
+    REQUIRE(files.size() == 1u);
+    const std::string name = files[0].filename().string();
+    CHECK(name.rfind("coverage-", 0) == 0);
+    CHECK(name.find("%p") == std::string::npos);
+    const std::string text = read_file(files[0]);
+    CHECK(text.rfind("# maplethief coverage 1: ", 0) == 0);
+    CHECK(has(text, "\nhit script 2 script/common/portal200.out\n"));
+    CHECK(has(text, "\nhit map 1 2.8\n"));
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("run coverage: every import call is counted, traced or not") {
+    const auto path = (std::filesystem::temp_directory_path() / "maplethief_diag_imports.txt");
+    const std::string p = path.string();
+    {
+        Diag d(nullptr, nullptr, p.c_str()); // the coverage alone wraps every function import
+        mt_import_fn table[fx::k_import_count] = {};
+        mt_import_config icfg = mt_import_config_default();
+        icfg.unimplemented = MT_UNIMPLEMENTED_CONTINUE;
+        icfg.log = capture;
+        mt_imports_link(fx::k_descs, fx::k_import_count, table, fx::k_hle, 1u, &icfg);
+        CHECK(table[0] == mt_trace_import_call);
+        CHECK(table[1] == mt_trace_import_call);
+        CHECK(table[2] != mt_trace_import_call); // a data import: no call to count
+        REQUIRE(!g_log.empty());
+        CHECK(g_log.back() == "hle: counting the calls of 2 imports (run coverage)");
+        g_log.clear();
+        Guest g;
+        table[0](&g.cpu, 0u);
+        CHECK(g.cpu.r[0] == 42u);
+        table[0](&g.cpu, 0u);
+        CHECK(g_log.empty()); // counted, not traced
+        CHECK(hits() == "hit import 2 _answer\n");
+    }
+    {
+        Diag d("_missing", nullptr, p.c_str()); // traced and counted
+        mt_import_fn table[fx::k_import_count] = {};
+        mt_import_config icfg = mt_import_config_default();
+        icfg.unimplemented = MT_UNIMPLEMENTED_CONTINUE;
+        icfg.log = capture;
+        mt_imports_link(fx::k_descs, fx::k_import_count, table, fx::k_hle, 1u, &icfg);
+        CHECK(has(joined(), "hle: tracing 1 of 3 imports (_missing)\n"));
+        g_log.clear();
+        Guest g;
+        table[0](&g.cpu, 0u);
+        CHECK(g_log.empty());
+        table[1](&g.cpu, 1u);
+        CHECK(has(joined(), "hle: _missing(0x"));
+        CHECK(hits() == "hit import 1 _answer\nhit import 1 _missing\n");
+    }
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("run coverage: every entry of a watched function reaches its watcher") {
+    const auto path = (std::filesystem::temp_directory_path() / "maplethief_diag_watch.txt");
+    const std::string p = path.string();
+    Diag d(nullptr, nullptr, p.c_str());
+    CHECK(mt_coverage_watch(0x30001u, watch_r1) == 1);
+    g_watched.clear();
+    Guest g;
+    for (std::uint32_t r1 : {38u, 15u, 38u}) {
+        g.cpu.r[1] = r1;
+        f_00030001(&g.cpu);
+    }
+    CHECK(g_watched == std::vector<std::uint32_t>{0x30001u, 38u, 0x30001u, 15u, 0x30001u, 38u});
+    // Removed: the function stays watched (its flag), but nothing is called.
+    CHECK(mt_coverage_watch(0x30001u, nullptr) == 1);
+    f_00030001(&g.cpu);
+    CHECK(g_watched.size() == 6u);
+    // An unwatched function's first entry answers 0; the table holds 16.
+    std::uint64_t calls = 1;
+    CHECK(mt_trace_fn_first(&g.cpu, "f_00040001", &calls) == 0u);
+    for (std::uint32_t i = 1; i < 16u; i++) {
+        CHECK(mt_coverage_watch(0x50001u + 2u * i, watch_r1) == 1);
+    }
+    CHECK(mt_coverage_watch(0x60001u, watch_r1) == 0);
+    CHECK(mt_trace_fn_first(&g.cpu, "f_00050003", &calls) == 0x50003u);
+    std::filesystem::remove(path);
 }
 
 TEST_CASE("the trap report: kind, pc, registers and a symbolized r7 backtrace") {

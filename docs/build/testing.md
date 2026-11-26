@@ -54,6 +54,10 @@ A few tests measure time: `gfx_gpu_test`'s GPU time checks (the busy frame, the 
 
 `scripts/timing-stress` checks this: a busy loop on every core and a second process drawing on the GPU, while the time checks (and with `--game-speed`, `platform.game_speed`) run 20 times in a row (`--passes N`). Each pass prints its load average; the readings go to `build/test-output/<preset>/timing_stress/`.
 
+### Run coverage
+
+`python3 -m mtport.runcoverage run` builds the `mac-coverage` preset (the entry counters) and runs the baseline tests one at a time with `MAPLETHIEF_COVERAGE` set, then writes `work/coverage/run-coverage.md` and `.json`: the guest functions executed per function tag, the unexecuted ones, and the scripts, natives, maps, imports and selectors the runs used ([ADR 0160](../adr/0160-run-coverage-entry-counters-and-hit-recorders.md)). How, and the baseline's numbers: [testing/run-coverage.md](../testing/run-coverage.md).
+
 ### Playtests
 
 Step-by-step runs for checking the game by hand are in [docs/testing/](../testing/). The Nintendo Switch's hardware sign-off is [switch-checklist.md](../testing/switch-checklist.md). The playthrough checklist of #79 and #92 is generated from the knowledge base: [playthrough-checklist.md](../testing/playthrough-checklist.md).

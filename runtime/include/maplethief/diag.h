@@ -22,8 +22,10 @@
  *                                 the first entry of each guest function (MT_TRACE_ENTRY).
  *   MAPLETHIEF_REPORT=PATH        write the unimplemented report to PATH at exit, even when it
  *                                 is empty; "-" for stderr. Unset: stderr, only if not empty.
- *   MAPLETHIEF_COVERAGE=PATH      write the function-entry coverage (MT_TRACE_ENTRY builds)
- *                                 to PATH at exit.
+ *   MAPLETHIEF_COVERAGE=PATH      the run coverage (#295, ADR 0160): write the function-entry
+ *                                 coverage (MT_TRACE_ENTRY builds) and the hit recorders'
+ *                                 counts (imports, selectors, scripts, natives, maps) to PATH
+ *                                 at exit. "%p" in PATH becomes the process id.
  *   MAPLETHIEF_SYMBOLS=PATH       load the guest symbol table (python -m recomp symbols; the
  *                                 build writes <build dir>/maplethief.sym). Without one,
  *                                 addresses stay raw.
@@ -153,8 +155,22 @@ size_t mt_report_format(char *buf, size_t size) MT_NOEXCEPT;
 /* --- function-entry coverage (generated code built with MT_TRACE_ENTRY 1, calls.h) ----- */
 
 /* Called by MT_FN_ENTER on the first entry of a generated function: `fn_name` is its
- * __func__ ("f_000225E5"), `calls` its entry counter. */
-void mt_trace_fn_first(mt_cpu *cpu, const char *fn_name, const uint64_t *calls) MT_NOEXCEPT;
+ * __func__ ("f_000225E5"), `calls` its entry counter. Answers the function's pointer if the
+ * run coverage is on and a watcher is registered for it (mt_coverage_watch), else 0. */
+uint32_t mt_trace_fn_first(mt_cpu *cpu, const char *fn_name, const uint64_t *calls) MT_NOEXCEPT;
+
+/* Called by MT_FN_ENTER on every entry of a watched function (`fn` its pointer): runs its
+ * watcher, with the registers as the caller passed them. */
+void mt_trace_fn_watched(mt_cpu *cpu, uint32_t fn) MT_NOEXCEPT;
+
+/* A watcher only reads (registers, guest memory) and records hits (mt_hit): the guest runs
+ * the same with or without it. */
+typedef void (*mt_coverage_watch_fn)(mt_cpu *cpu, uint32_t fn);
+
+/* Registers `watcher` for function pointer `fn` (a second registration replaces the first;
+ * NULL removes it). It sees the entries from the function's first entry on, so register before
+ * the guest runs. Returns 0 if the table is full (16 functions), else 1. */
+int mt_coverage_watch(uint32_t fn, mt_coverage_watch_fn watcher) MT_NOEXCEPT;
 
 /* Functions entered so far. */
 uint32_t mt_coverage_count(void) MT_NOEXCEPT;
@@ -162,6 +178,46 @@ uint32_t mt_coverage_count(void) MT_NOEXCEPT;
 /* The coverage as text, by address: one line "0x000225E5 <calls> <symbol>" per function
  * entered, after a header line. Returns the full length (like snprintf). */
 size_t mt_coverage_format(char *buf, size_t size) MT_NOEXCEPT;
+
+/* --- the run coverage's hit recorders (#295, ADR 0160) --------------------------------- */
+
+/* What a hit counts. Imports count every call through the import table (mt_imports_link
+ * wraps the slots while the coverage is on), selectors every delivered message by the
+ * receiver's class (the ObjC runtime), scripts every script file read from the bundle
+ * (CoreFoundation's resource read), natives every entry of the script VM's Lua::callNative and
+ * maps every entry of the map loader (watchers, runtime/src/events/run_hits.cpp: those two
+ * need the MT_TRACE_ENTRY build). */
+enum mt_hit_kind {
+    MT_HIT_IMPORT = 0,   /* key: the import's name ("_memcpy") */
+    MT_HIT_SELECTOR = 1, /* key: "-[Class sel]" or "+[Class sel]" */
+    MT_HIT_SCRIPT = 2,   /* key: the bundle path ("script/common/portal200.out") */
+    MT_HIT_NATIVE = 3,   /* key: "<index> <name>" ("38 changeMap") */
+    MT_HIT_MAP = 4,      /* key: "<area>.<map>" ("2.8") */
+    MT_HIT_KINDS = 5
+};
+
+/* 1 while the run coverage is on (MAPLETHIEF_COVERAGE set). The recorders check it first. */
+int mt_hits_enabled(void) MT_NOEXCEPT;
+
+/* Counts one hit of (kind, id), where `id` identifies the key within its kind (an import id, a
+ * class and selector pair, a hash). Returns 1 if it was counted, 0 if the pair is new: then
+ * the caller names it with mt_hit_add, so a key is only formatted once. */
+int mt_hit_count(uint32_t kind, uint64_t id) MT_NOEXCEPT;
+
+/* Adds the new pair (kind, id) named `key` with one hit (or counts it if it exists). */
+void mt_hit_add(uint32_t kind, uint64_t id, const char *key) MT_NOEXCEPT;
+
+/* mt_hit_count, then mt_hit_add with `key` if new; the id is the FNV-1a 64 hash of `key`. Does
+ * nothing while the coverage is off. */
+void mt_hit(uint32_t kind, const char *key) MT_NOEXCEPT;
+
+/* The number of distinct keys of `kind` hit so far. */
+uint32_t mt_hits_count(uint32_t kind) MT_NOEXCEPT;
+
+/* The hits as text: one line "hit <kind> <count> <key>" per key, by kind ("import",
+ * "selector", "script", "native", "map") then key. Returns the full length (like snprintf).
+ * The coverage file has them after the functions. */
+size_t mt_hits_format(char *buf, size_t size) MT_NOEXCEPT;
 
 /* --- guest symbols -------------------------------------------------------------------- */
 

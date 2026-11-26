@@ -51,6 +51,15 @@
       }
     },
     {
+      "name": "mac-coverage",
+      "displayName": "macOS Debug with the run coverage's entry counters (host architecture)",
+      "description": "The generated code counts the entries of every guest function; MAPLETHIEF_COVERAGE=PATH writes them with the hit recorders' counts (ADR 0160, #295; python3 -m mtport.runcoverage)",
+      "inherits": "mac-debug",
+      "cacheVariables": {
+        "MAPLETHIEF_TRACE_ENTRY": "ON"
+      }
+    },
+    {
       "name": "mac-release-universal",
       "displayName": "macOS Release, universal (arm64 + x86_64)",
       "inherits": "mac-base",
@@ -305,6 +314,7 @@
   "buildPresets": [
     { "name": "mac-debug", "configurePreset": "mac-debug" },
     { "name": "mac-asan", "configurePreset": "mac-asan" },
+    { "name": "mac-coverage", "configurePreset": "mac-coverage" },
     { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
     { "name": "mac-app", "configurePreset": "mac-app" },
     { "name": "mac-player", "configurePreset": "mac-player", "targets": ["MapleThief"] },
@@ -352,6 +362,7 @@
     },
     { "name": "mac-debug", "inherits": "test-base", "configurePreset": "mac-debug" },
     { "name": "mac-asan", "inherits": "asan-base", "configurePreset": "mac-asan" },
+    { "name": "mac-coverage", "inherits": "test-base", "configurePreset": "mac-coverage" },
     { "name": "mac-release-universal", "inherits": "test-base", "configurePreset": "mac-release-universal" },
     { "name": "mac-app", "inherits": "test-base", "configurePreset": "mac-app" },
     { "name": "mac-player", "inherits": "player-base", "configurePreset": "mac-player" },
