@@ -1496,6 +1496,54 @@ foreach(part IN LISTS _chapter_1_parts)
                    FIXTURES_SETUP play_chapter_1_${part} ENVIRONMENT "${_env}")
     set(_previous ${part})
 endforeach()
+# Chapter 2's main quests (#298, docs/testing/chapter-2-quests.md): the same chain from the start
+# of chapter 2. starts.chapter_2 builds tests/starts/chapter_2.json (equal to part l's save,
+# start-states.md) and part a goes on from it; each later part from the save of the part before.
+# A part listed in _chapter_2_raised starts from the save before it with the level raised by the
+# game's level-up rules (tests/starts/raise/chapter_2_<part>.json over that save, savedata build
+# --base): levels 34-60 by play would take game-hours, so that part's test says synthetic.
+set(_chapter_2_parts a b c d e f)
+set(_chapter_2_raised b)
+add_test(NAME starts.chapter_2
+         COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                 "${PROJECT_SOURCE_DIR}/tests/starts/chapter_2.json"
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2/data/saves" --app
+                 "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+set_tests_properties(
+    starts.chapter_2
+    PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_SETUP start_chapter_2
+               ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+set(_previous_fixture start_chapter_2)
+set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2")
+foreach(part IN LISTS _chapter_2_parts)
+    set(_name play.chapter_2_${part})
+    if(part IN_LIST _chapter_2_raised)
+        add_test(NAME starts.chapter_2_${part}
+                 COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                         "${PROJECT_SOURCE_DIR}/tests/starts/raise/chapter_2_${part}.json"
+                         "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2_${part}/data/saves" --base
+                         "${_previous_dir}" --app
+                         "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+        set_tests_properties(
+            starts.chapter_2_${part}
+            PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120
+                       FIXTURES_REQUIRED ${_previous_fixture} FIXTURES_SETUP
+                       start_chapter_2_${part} ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+        set(_previous_fixture start_chapter_2_${part})
+        set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2_${part}")
+        set(_name ${_name}_synthetic)
+    endif()
+    add_test(NAME ${_name} COMMAND play_real_test chapter_2_${part}
+                                   "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_2_${part}")
+    set_tests_properties(
+        ${_name}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+                   FIXTURES_REQUIRED ${_previous_fixture} FIXTURES_SETUP play_chapter_2_${part}
+                   ENVIRONMENT
+                   "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${_previous_dir}")
+    set(_previous_fixture play_chapter_2_${part})
+    set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_2_${part}")
+endforeach()
 # The popup menu's skill, quest and option tabs by the d-pad (#164, prompts.h): from part c's
 # save, each list shows and the port's frame sits on its cursor, in each tab's window shot; A
 # opens each quest's page and B closes it (#167, the quest page fix).
