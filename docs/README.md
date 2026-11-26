@@ -11,11 +11,13 @@ For everyone. No programming needed.
 | [Playing MapleThief](play/README.md) | Start here: what you need and how to get the game running |
 | [Your game file](play/your-ipa.md) | Which copy of the game you need, and how to check it |
 | [Controls](play/controls.md) | Keyboard, mouse, touch, gamepad |
+| [Nintendo Switch controls](controls/switch.md) | The Joy-Con, Pro Controller and touch screen, in the game and in the menus |
 | [Settings](play/settings.md) | The settings menu, presets, display, sound and gameplay options |
-| [Saves](play/saves.md) | Where saves are, backups, moving them, portable mode |
+| [Saves](play/saves.md) | Where saves are, backups, moving them, the data folder next to the game or in your user folder |
 | [Saves from your iPhone](play/iphone-saves.md) | Bringing your original save over |
 | [Linux and Steam Deck](play/linux-and-steam-deck.md) | Installing on Linux and adding it to Steam |
 | [Playing on your iPhone](play/iphone.md) | Building the app on a Mac with Xcode and installing it, with a free or paid Apple account |
+| [Playing on the Nintendo Switch](play/switch.md) | Copying it to the SD card, the import on the console, saves |
 | [Troubleshooting](play/troubleshooting.md) | When something doesn't work, and common questions |
 | [Known issues](KNOWN_ISSUES.md) | What is open today, with workarounds |
 | [What's included, and what isn't](legal.md) | The legal side, in plain words |

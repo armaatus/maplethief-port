@@ -16,9 +16,11 @@ An app you built yourself isn't affected.
 
 Windows SmartScreen warns about programs it hasn't seen often. Click **More info**, then **Run anyway**.
 
-### "MapleThief-1.5.ipa missing" or "SHA-256 mismatch"
+### The import screen says "THAT FILE CANNOT BE USED"
 
-The game can't find your copy of the game, or it's a different file. See [Your game file](your-ipa.md).
+The game checked the file you chose and refused it. The line below the title says why: "This file is not an IPA", "This is the IPA of another app", "This is MapleThief 1.x; the port needs version 1.5", "This IPA's game executable is encrypted", or "This is MapleThief 1.5, but not the known MapleThief-1.5.ipa", with the file's size and the start of its SHA-256. Nothing is kept from a refused file. Choose another file, or drop one on the window. [Your game file](your-ipa.md#if-it-doesnt-match) says what each case means.
+
+When you build it yourself, the build checks the file in `original/` instead, and says what is wrong in its own words ([Your game file](your-ipa.md)).
 
 ### Linux: "version `GLIBC_2.xx' not found"
 
@@ -51,13 +53,9 @@ The game keeps your saves and settings in a `data` folder next to itself ([Saves
 
 ## Seeing what went wrong
 
-Start the game from a terminal to see its log:
+The game writes a log of each run to `logs/` in its data folder: settings menu → Saves → **Open logs folder**. Each file is named by the date and time the run started, so the newest is the latest run. You don't need a terminal for it.
 
-- Windows: open PowerShell in the game's folder and run `.\MapleThief.exe`
-- Mac: `MapleThief.app/Contents/MacOS/MapleThief`
-- Linux: `./MapleThief.sh`
-
-When you [report a problem](https://github.com/armaatus/maplethief-port/issues/new), include that log, your system, and what you did just before. [Known issues](../KNOWN_ISSUES.md) lists what we already know about.
+When you [report a problem](https://github.com/armaatus/maplethief-port/issues/new?template=bug.yml), attach that log, and say which system you play on and what you did just before. [Known issues](../KNOWN_ISSUES.md) lists what we already know about.
 
 ## Questions
 

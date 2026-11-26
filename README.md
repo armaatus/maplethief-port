@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/armaatus/maplethief-port/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/armaatus/maplethief-port/actions/workflows/ci.yml)
 
-**MapleStory Thief Edition** was a single-player MapleStory game for the iPhone and iPod touch (Nexon Mobile, 2010). It has been gone from the App Store for years. This project makes it run natively on **Windows, macOS, Linux and the Steam Deck**, with keyboard and controller support, fullscreen and sharper graphics. The game itself is unchanged.
+**MapleStory Thief Edition** was a single-player MapleStory game for the iPhone and iPod touch (Nexon Mobile, 2010). It has been gone from the App Store for years. This project makes it run natively on **Windows, macOS, Linux and the Steam Deck**, with keyboard and controller support, fullscreen and sharper graphics, and again on the **iPhone** (an app you build yourself) and the **Nintendo Switch** (a homebrew app, as a preview). The game itself is unchanged.
 
 You play it with **your own copy** of the game. This repository contains none of the game's code, art, music or text. Our downloads contain the program, with the game's code recompiled, but none of its art, music, maps or text: the game imports those from your copy on first launch. See [What's included, and what isn't](docs/legal.md).
 
@@ -49,7 +49,7 @@ The game boots, plays and saves on Windows, macOS and Linux, with mouse, touch, 
 | Linux | x86_64, glibc 2.39+ |
 | Steam Deck | As a non-Steam game ([guide](docs/play/linux-and-steam-deck.md)); not yet checked on a real Deck |
 | iPhone | iOS 16 or later, built yourself on a Mac with Xcode ([guide](docs/play/iphone.md)); reaches the first map on an iPhone 12, the only device checked so far |
-| iOS 16+ | Planned, sideloaded through Xcode ([#83](https://github.com/armaatus/maplethief-port/issues/83)) |
+| Nintendo Switch | Homebrew, from the Homebrew Menu ([guide](docs/play/switch.md)); a preview, not checked on a console yet |
 
 ## Privacy
 
