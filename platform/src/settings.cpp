@@ -9,6 +9,7 @@
 
 #include "maplethief/gfx.h"
 #include "port_text.h"
+#include "run_timer.h"
 
 namespace maplethief::frontend {
 
@@ -348,7 +349,17 @@ std::vector<std::string> &run_category_names() {
     return names;
 }
 
-std::vector<std::string> offer_run_categories() { return run_category_names(); }
+// The names game.cpp set; until then the shipped categories' (run_timer.h).
+std::vector<std::string> offer_run_categories() {
+    if (!run_category_names().empty()) {
+        return run_category_names();
+    }
+    std::vector<std::string> out;
+    for (const auto &file : shipped_run_category_files()) {
+        out.push_back(file.first);
+    }
+    return out;
+}
 
 constexpr SettingValue run_category_value() {
     SettingValue v = custom_value(&parse_run_category, &print_run_category,

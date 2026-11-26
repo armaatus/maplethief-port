@@ -971,8 +971,8 @@ inline constexpr const char *kFullscreenDisplayCurrent = "current";
 // The menu then offers "" (none) and these; with none set it offers nothing, as before.
 void set_pack_choices(std::string_view key, std::vector<std::string> values);
 // run_category (#406, run_timer.h): the categories' names the settings menu offers (game.cpp
-// sets them from the shipped categories and the data folder's). Empty until then: the menu then
-// offers no values. A category's name is 1 to 32 of a-z, 0-9 and '_'.
+// sets them from the shipped categories and the data folder's). Until then the menu offers the
+// shipped categories' names. A category's name is 1 to 32 of a-z, 0-9 and '_'.
 void set_run_category_choices(std::vector<std::string> names);
 inline constexpr std::size_t kMaxRunCategoryBytes = 32;
 
