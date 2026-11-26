@@ -108,6 +108,7 @@ Where to find each step for your system: installing, the controls, fixing a prob
 - [Controls](controls.md): keyboard, mouse, gamepad, Steam Deck; [iPhone controls](iphone-controls.md) for the phone
 - [Playing on the Nintendo Switch](switch.md): copying it to the SD card, the import on the console, saves
 - [Settings](settings.md): the settings menu, display, sound, graphics, gameplay options, the language and packs
+- [Speedrun timer](speedrun.md): the run timer, its categories, splits and personal bests, and what a clean run is
 - [Saves](saves.md): where they are, backups, moving them between computers, bringing your iPhone save over
 - [Uninstall and reset](uninstall-and-reset.md): putting the settings back, starting over, removing the game
 - [Troubleshooting](troubleshooting.md): when something doesn't work, and common questions

@@ -113,6 +113,10 @@ When it is on, the port asks github.com once a day which version is the latest. 
 
 GitHub sees your IP address and the port's version, as it would for any visit to the releases page. The port sends nothing else about you, your device or your saves. It keeps the time of its last check in `update_check.txt`, next to `settings.ini`. On Linux the check needs the system's libcurl; without it there is simply no check.
 
+## Speedrun timer
+
+**Speedrun timer** and **Speedrun category** in the **Other** tab (`run_timer`, `run_category`) time a run from a new character with automatic splits. [Speedrun timer](speedrun.md) explains them.
+
 ## On the Nintendo Switch
 
 The console's menu has only the rows that work there, so no row does nothing. Open it with **+**, by clicking both sticks, or with a tap on the gear in handheld mode (the HOME button belongs to the console). Then use the d-pad, A to choose, B to go back, and L / R to change tabs.
