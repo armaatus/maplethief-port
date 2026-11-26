@@ -329,6 +329,34 @@ inline void act(Run &r, Nav &n, const wm::Map &m, const Hero &h, double el, int 
     }
 }
 
+// On ice (area 9: mechanics.md, Movement; the bot wears no Snowshoes) the hero speeds up 1 px a
+// tick each tick, to 5, and slides on after the d-pad is let go, about v * v px, a tick late; a
+// jump keeps the slide's speed and the air has no steering. Walking straight at a spot swings
+// past it and back for ever (9.1's ladder at x 192 between x 175 and 205; Alchester on 9.0
+// between 345 and 374). So the approach coasts when the slide reaches near the spot, then taps
+// the d-pad for single ticks from rest. One turn of it toward d px away: false once the hero
+// rests within tol, true while it is still on the way.
+inline bool ice_approach(Run &r, Nav &n, const Hero &h, double el, int d, int tol) {
+    const int toward = n.vx * (d > 0 ? 1 : -1);
+    if (std::abs(d) > tol) {
+        bool press = toward < 0 || toward * toward + toward < std::abs(d) - 16;
+        if (!press && std::abs(d) <= 24 && n.vx == 0 && r.ticks > n.tap + 1) {
+            n.tap = r.ticks;
+        }
+        press = press || r.ticks == n.tap;
+        n.stuck_since = -1;
+        walk_toward(r, n, h, el, press ? (d > 0 ? 1 : -1) : 0);
+        hold(r, A, false);
+        return true;
+    }
+    if (n.vx != 0) {
+        walk_toward(r, n, h, el, 0);
+        hold(r, A, false);
+        return true;
+    }
+    return false;
+}
+
 // Every requirement of active quest (sort, n) met (below).
 inline bool requirements_met(mt_cpu *cpu, i32 sort, i32 n);
 
@@ -456,6 +484,10 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     }
     if (here == there) {
         const int d = tx - h.x;
+        if (n.ice && ice_approach(r, n, h, el, d, tol)) {
+            n.settled = -1;
+            return false;
+        }
         if (std::abs(d) <= tol) {
             walk_toward(r, n, h, el, 0);
             hold(r, A, false);
@@ -503,28 +535,8 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     // across, 16 up) passed the far end 1 px short.
     const bool on_the_run = e.move == wm::Move::jump && e.dir != 0 && d * e.dir >= 0 &&
                             std::abs(d) <= 7 && h.state != 2;
-    // On ice the hero speeds up 1 px a tick each tick, to 5, and slides on after the d-pad is let
-    // go, about v * v px, a tick late; a jump keeps the slide's speed and the air has no
-    // steering (9.1's ladder at x 192, 24 px above the floor, was passed in a swing between x 175
-    // and 205). So: coast when the slide reaches near the start, then single-tick taps from rest,
-    // and start a move only at rest, within 4 px of a ladder.
     if (n.ice && !on_the_run) {
-        const int toward = n.vx * (d > 0 ? 1 : -1);
-        const int start_tol = ladder ? 4 : step_tol;
-        if (std::abs(d) > start_tol) {
-            bool press = toward < 0 || toward * toward + toward < std::abs(d) - 16;
-            if (!press && std::abs(d) <= 24 && n.vx == 0 && r.ticks > n.tap + 1) {
-                n.tap = r.ticks;
-            }
-            press = press || r.ticks == n.tap;
-            n.stuck_since = -1;
-            walk_toward(r, n, h, el, press ? (d > 0 ? 1 : -1) : 0);
-            hold(r, A, false);
-            return false;
-        }
-        if (n.vx != 0) {
-            walk_toward(r, n, h, el, 0);
-            hold(r, A, false);
+        if (ice_approach(r, n, h, el, d, ladder ? 4 : step_tol)) {
             return false;
         }
     } else if (std::abs(d) > step_tol && !on_the_run) {
