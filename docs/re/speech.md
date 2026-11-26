@@ -1,6 +1,6 @@
 # Speech: where the game's text can be heard by the host, and the system voices per platform
 
-Research for [#378](https://github.com/armaatus/maplethief-port/issues/378): can the port read the game's text aloud, as an accessibility option? This note lists where each kind of text can be read **without changing what the guest does**, and the speech interfaces each target offers. Addresses are armv7 VM addresses; function pointers carry the Thumb bit. Nothing here is built yet; the follow-ups are listed at the end.
+Research for [#378](https://github.com/armaatus/maplethief-port/issues/378): can the port read the game's text aloud, as an accessibility option? This note lists where each kind of text can be read **without changing what the guest does**, and the speech interfaces each target offers. Addresses are armv7 VM addresses; function pointers carry the Thumb bit. The speech layer itself is built ([ADR 0174](../adr/0174-text-to-speech-layer-system-voices-and-queue.md), #390); the text sources are the follow-ups listed at the end.
 
 ## Verdict
 
@@ -39,4 +39,4 @@ SDL3 has no speech API.
 
 ## Follow-ups
 
-Epic [#398](https://github.com/armaatus/maplethief-port/issues/398) (Backlog): [#390](https://github.com/armaatus/maplethief-port/issues/390) the speech layer (backends, queue, settings, the capability), [#391](https://github.com/armaatus/maplethief-port/issues/391) dialogue and the scenes' speech boxes, [#392](https://github.com/armaatus/maplethief-port/issues/392) notify lines and popups, [#393](https://github.com/armaatus/maplethief-port/issues/393) the menus. The design decisions go in #390's ADR.
+Epic [#398](https://github.com/armaatus/maplethief-port/issues/398) (Backlog): [#390](https://github.com/armaatus/maplethief-port/issues/390) the speech layer (backends, queue, settings, the capability), [#391](https://github.com/armaatus/maplethief-port/issues/391) dialogue and the scenes' speech boxes, [#392](https://github.com/armaatus/maplethief-port/issues/392) notify lines and popups, [#393](https://github.com/armaatus/maplethief-port/issues/393) the menus. The design decisions are in #390's [ADR 0174](../adr/0174-text-to-speech-layer-system-voices-and-queue.md).
