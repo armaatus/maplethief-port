@@ -56,9 +56,8 @@ def census() -> dict[tuple[str, str], tuple[str, str | None]]:
 
 def test_every_way_into_the_guest_is_in_the_census():
     missing = sorted(sites() - census().keys())
-    assert not missing, "not in platform/src/run_census.cpp (recorded, pure or refused?): " + ", ".join(
-        f"{f}: {c}" for f, c in missing
-    )
+    listed = ", ".join(f"{f}: {c}" for f, c in missing)
+    assert not missing, f"not in platform/src/run_census.cpp (recorded, pure or refused?): {listed}"
 
 
 def test_the_census_names_no_site_that_is_gone():
@@ -75,7 +74,8 @@ def test_every_refused_site_ends_the_recording_by_its_name():
             continue
         assert refuse, f"{file}: {call} is refused without a name"
         code = strip_comments((SRC / file).read_text(encoding="utf-8"))
-        assert f'run_refuse("{refuse}")' in code, f'{file} must call run_refuse("{refuse}") before {call}'
+        call_line = f'run_refuse("{refuse}")'
+        assert call_line in code, f"{file} must call {call_line} before {call}"
 
 
 def test_the_scan_sees_what_it_looks_for():
