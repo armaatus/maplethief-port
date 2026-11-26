@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The APK's manifest (ADR 0150, issue #356). The package name, versionCode and versionName come
+     from platform/android/build.gradle. No permission is declared (ADR 0150): the data folder is
+     the app's external files folder, which needs none. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- SDL's opengles2 renderer draws the software rasterizer's picture (ADR 0150). -->
+    <uses-feature android:glEsVersion="0x00020000" android:required="true" />
+    <!-- Touch, controllers and a mouse are welcome but none is required. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.type.pc" android:required="false" />
+
+    <!-- hasFragileUserData: the uninstall dialog offers to keep the data folder (ADR 0150).
+         allowBackup off: the saves leave the phone through the in-game export, not a cloud
+         backup that a restore could mix with newer ones. -->
+    <application
+        android:label="MapleThief"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:hasFragileUserData="true"
+        android:hardwareAccelerated="true"
+        android:enableOnBackInvokedCallback="false"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+
+        <activity
+            android:name=".MapleThiefActivity"
+            android:label="MapleThief"
+            android:exported="true"
+            android:screenOrientation="sensorLandscape"
+            android:alwaysRetainTaskState="true"
+            android:launchMode="singleInstance"
+            android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:preferMinimalPostProcessing="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

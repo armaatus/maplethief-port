@@ -1,5 +1,6 @@
 # SDL3 frontend (ARCHITECTURE.md section 3). Shared C++ lives in src/; per-OS files go in
-# macos/, windows/, ios/, linux/ and switch/ (Objective-C++ only under macos/ and ios/, ADR 0002).
+# macos/, windows/, ios/, linux/, switch/ and android/ (Objective-C++ only under macos/ and ios/,
+# ADR 0002).
 
 set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
 if(APPLE)
@@ -187,7 +188,12 @@ set_source_files_properties(src/player_log.cpp PROPERTIES COMPILE_DEFINITIONS
 # The capture converts the mix to 16-bit the same way on every CPU (ADR 0045).
 maplethief_strict_fp(src/audio_out.cpp)
 
-add_executable(MapleThief src/main.cpp src/gfx_prototype.cpp)
+if(ANDROID)
+    # libmain.so, whose SDL_main SDL's Java activity calls (android/android.cmake, ADR 0150).
+    add_library(MapleThief SHARED src/main.cpp src/gfx_prototype.cpp)
+else()
+    add_executable(MapleThief src/main.cpp src/gfx_prototype.cpp)
+endif()
 # The prototype scene of --gfx-prototype (#55, ADR 0039) computes its vertices in floats, which
 # must round as in its golden image (tests/cpp/gfx_test.cpp).
 maplethief_strict_fp(src/gfx_prototype.cpp)
@@ -374,4 +380,9 @@ endif()
 # checks (#235, ADR 0138).
 if(NINTENDO_SWITCH)
     include("${CMAKE_CURRENT_SOURCE_DIR}/switch/switch.cmake")
+endif()
+# Android: libmain.so packaged into MapleThief.apk with Gradle, with its icon and its host-side
+# check (#356, ADR 0150).
+if(ANDROID)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/android/android.cmake")
 endif()

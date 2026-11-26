@@ -150,7 +150,7 @@ File open_report() {
     return kNoFile;
 }
 
-// Starts `<this program> --crash-dialog <file>`. Not on iOS.
+// Starts `<this program> --crash-dialog <file>`. Not on iOS or Android.
 void spawn_dialog_helper() {
 #if defined(_WIN32)
     std::size_t n = 0;
@@ -182,7 +182,9 @@ void spawn_dialog_helper() {
     if (R_SUCCEEDED(errorApplicationCreate(&c, message, nullptr))) {
         errorApplicationShow(&c);
     }
-#elif !defined(SDL_PLATFORM_IOS)
+#elif !defined(SDL_PLATFORM_IOS) && !defined(__ANDROID__)
+    // Not on Android either: the process is the system's app_process, not a program this one
+    // can start again, and Bionic has posix_spawn only from API 28 (#356).
     char *argv[] = {g_exe, const_cast<char *>("--crash-dialog"), g_path, nullptr};
     pid_t pid = 0;
     posix_spawn(&pid, g_exe, nullptr, nullptr, argv, environ);
