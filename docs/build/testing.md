@@ -50,7 +50,7 @@ With the generated code, `platform.title_60s` runs `MapleThief --fixed-step 16.6
 
 ### Playtests
 
-Step-by-step runs for checking the game by hand are in [docs/testing/](../testing/). The Nintendo Switch's hardware sign-off is [switch-checklist.md](../testing/switch-checklist.md).
+Step-by-step runs for checking the game by hand are in [docs/testing/](../testing/). The Nintendo Switch's hardware sign-off is [switch-checklist.md](../testing/switch-checklist.md). The playthrough checklist of #79 and #92 is generated from the knowledge base: [playthrough-checklist.md](../testing/playthrough-checklist.md).
 
 ## Sanitizers: ASan and UBSan
 
