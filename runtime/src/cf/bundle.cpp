@@ -20,6 +20,7 @@
 #include "cf/cf_hle.h"
 #include "cf/cf_objects.h"
 #include "foundation/foundation.h"
+#include "maplethief/diag.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
 #include "snapshot/snapshot_internal.h"
@@ -292,6 +293,10 @@ extern "C" void mt_hle_CFURLCreateDataAndPropertiesFromResource(mt_cpu *cpu,
     if (ok) {
         // A text pack's table text (#189, ADR 0108): written into the data tables' bytes.
         mt_textpack::patch_table(rel, bytes);
+        // The run coverage (#295, ADR 0160): the scripts the game read.
+        if (rel.rfind("script/", 0) == 0) {
+            mt_hit(MT_HIT_SCRIPT, rel.c_str());
+        }
     }
     u32 data = 0, props = 0;
     if (ok && data_out != 0) {

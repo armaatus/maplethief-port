@@ -86,6 +86,15 @@ typedef struct mt_game_events_stats {
 mt_game_events_stats mt_game_events_get_stats(void) MT_NOEXCEPT;
 void mt_game_events_reset_stats(void) MT_NOEXCEPT;
 
+/* The run coverage's watchers (#295, ADR 0160; runtime/src/events/run_hits.cpp): the natives
+ * the scripts call (Lua::callNative (L, index, base), a hit "<index> <name>") and the maps
+ * entered (the map loader (this, area, map, newArea), a hit "<area>.<map>"). Registered with
+ * mt_coverage_watch (maplethief/diag.h); they record only while the run coverage is on, and
+ * only the MT_TRACE_ENTRY build calls them. The boot installs them for each guest process. */
+#define MT_RUN_HITS_FN_CALL_NATIVE 0x9B37Du
+#define MT_RUN_HITS_FN_LOAD_MAP 0x86699u
+void mt_run_hits_install(void) MT_NOEXCEPT;
+
 /* The observed functions' pointers (recomp/observe.py lists the same). */
 #define MT_EVENTS_FN_LEVEL_UP 0x65089u
 #define MT_EVENTS_FN_TAKE_DAMAGE 0x65B55u
