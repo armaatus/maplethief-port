@@ -91,8 +91,9 @@ enum class SafeStartChoice { kDefaults, kNormal };
 using SafeStartPrompt = std::function<SafeStartChoice(const std::string &crash_file)>;
 void set_safe_start_prompt_for_test(SafeStartPrompt prompt); // null: the default
 // Whether this start is a safe one: `flag` (--safe-start), or the last run crashed, `interactive`
-// and the player chose it.
-bool decide_safe_start(bool flag, const LastRun &last, bool interactive);
+// and the player chose it. `ask` (null: the SDL box) asks; a test prompt comes first.
+bool decide_safe_start(bool flag, const LastRun &last, bool interactive,
+                       const SafeStartPrompt &ask = nullptr);
 
 // With a recovery point (#335, ADR 0151): the box gains a paragraph on the point and four
 // buttons. Resume (the default; the player's settings, the point armed), Resume with default
@@ -109,10 +110,24 @@ struct StartDecision {
     bool safe_start = false;
     bool resume = false; // arm the offer's point (else the caller deletes it)
 };
+// Who asks the question: null ones are the SDL box; the window's question (start_question.h,
+// #416) where the box cannot be answered with every input method.
+struct StartPrompts {
+    SafeStartPrompt safe_start;
+    RecoveryPrompt recovery;
+};
 // decide_safe_start, and with `offer` offered the four-button question. `flag` (--safe-start):
 // a safe start, no resume. A run that is not interactive (and no test prompt): neither.
 StartDecision decide_start(bool flag, const LastRun &last, bool interactive,
-                           const RecoveryOffer &offer);
+                           const RecoveryOffer &offer, const StartPrompts &ask = {});
+// Whether decide_start would ask anything (the window's question waits for the window).
+bool start_asks(bool flag, const LastRun &last, bool interactive);
+// The question's words and buttons, the box's and the window's alike: the two-button question
+// (no recovery point) and ADR 0151's four-button one.
+std::string safe_start_question_text(const std::string &crash_file);
+std::string recovery_question_text(const std::string &crash_file, const RecoveryOffer &offer);
+const char *start_choice_label(SafeStartChoice choice);
+const char *start_choice_label(RecoveryChoice choice);
 
 } // namespace maplethief::frontend
 

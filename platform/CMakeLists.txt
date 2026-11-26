@@ -99,6 +99,7 @@ add_library(
     src/switch_applet.cpp
     src/settings.cpp
     src/settings_menu.cpp
+    src/start_question.cpp
     src/switch_pads.cpp
     src/pack_folders.cpp
     src/list_keys.cpp
