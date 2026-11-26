@@ -72,3 +72,44 @@ Both are recorded, RTA is shown. Which one a leaderboard ranks by is the communi
 - The end of a full-game run, mob 69's death, has never been reached in the port. Its event can be tested on a synthetic mob and with a save moved to the boss's map; a whole run to it waits for #285's verification chain.
 - Every port write into guest memory (the Assists, `game_speed`, the cash shop's counters, auto-loot's hook) must be recorded or refused by the recorder. The recorder's child inventories them as #202 did the host states, and a test fails by name on one it misses.
 - How we'd know this was wrong: a replay that fails to verify on the build that recorded it (a guest input or clock read the tape misses: the census or the clock hook is incomplete); a guest digest that differs between two presentations of one run (a presentation setting reaches the guest, and becomes a run variable); or runners who ignore the overlay for LiveSplit's own timer everywhere (then the overlay can shrink to the split name).
+
+## Addendum: the recorder, its census and the file's size (#405, 2026-11-26)
+
+Accepted (delegated by Joris, 2026-11-26). #405 built the recorder and `--play-run`. The issue asked for this addendum on ADR 0147; it belongs here, with the replay it builds.
+
+**Where the tape sits.** In the runtime (`maplethief/runtape.h`), not the frontend:
+
+- *The clock tape* wraps whatever clocks the platform installed (the virtual, paced or launch clock as `mt_libc_config.clock`, and GCD's clock and sleep) and records every value the guest reads, run-length coded per stream. One more value reaches the guest from real time and is a third stream: `-[AVAudioPlayer isPlaying]`, since a player plays out on the audio device's thread.
+- *The boundary* is the runtime's own entry points: `mt_input_press`, `mt_input_release`, `mt_input_release_all`, `mt_uikit_touch`, `mt_uikit_lifecycle_event`, `mt_runloop_set_fire_tolerance` and `mt_runtape_poke` (a port write into guest memory) record each call at its run-loop turn. While a tape plays they take only the tape's calls, which UIApplicationMain's loop delivers after the turn's run-loop work and before the turn hook. So everything above them in the frontend (the devices, bindings, the focus engine, menu repeat, the Assists' latches, `skip_intros`' taps, `--tap`) is recorded without the frontend knowing, and plays back without its devices.
+- *The host's own reads of the time* (its waits, pacing, overlays, menu timing) go through `mt_runtape_host_time`, which is not taped: a replay runs on the fixed-step loop and makes none of them.
+
+**The replay** (`MapleThief --play-run FILE`, headless with `SDL_VIDEO_DRIVER=dummy`) puts the file's game files in a scratch data folder, takes the file's settings (only `fullscreen` and `vsync` from the command line), installs no platform clock, applies each recorded setting change at its turn through `apply_live_setting`, never waits, and compares a checkpoint (guest memory digest and state line) every 1,000 game ticks and at the recording's last whole turn. It refuses a file from another binary or port version. Exit status 6 if a checkpoint differs or the replay ends early.
+
+**The census** (`platform/src/run_census.cpp`, checked by `tests/test_run_census.py`, which scans `platform/src` and fails by file and call on a site it does not list). 54 sites in 21 files:
+
+| Kind | Sites | What |
+|---|---|---|
+| recorded | 15 | every action press and release (actions, gamepads, focus, menu repeat, the Assists' latches, `skip_intros`), touches, lifecycle messages, the 1 ms grid's fire tolerance |
+| pure | 35 | a function of guest state and the settings, which the file holds with every change: the hooks of `fix_original_bugs`, `screen_shake`, `flashes`, `auto_loot`, list keys, the list scroll, `keypad_layout`; `game_speed`'s table and interval; `ui_animations`; widescreen's view width and touch area; the key pad's and the minimap's host transforms; observers that pass through (haptics, crash recovery's save count, the backups' save hook); a save state's own file |
+| refused | 4 | `autosave`'s guest save (the window closes or hides, which a replay has no window for), a save state's load, a save import or backup restore, a data folder switch: the recording ends with the last whole turn before it (`END_`: refused, and which) |
+
+The Assists are not refused: their input goes through the boundary (turbo, auto-potion, auto-run) or they are pure (`game_speed`, `auto_loot`, fast-forward only changes the clock the tape records). The cash shop's counters are written by the runtime's own cash shop, inside the guest's calls, so they replay as the guest does. Whether an Assist makes a run *assisted* is #406's clean-run rule, not the recorder's.
+
+**Evidence** (local, real assets, Debug, Apple M4, 2026-11-26). A scripted real-time session of 120 s: the title, Play, a new character, the intro and the first map (2.8, the field), driven by `--tap` and a virtual Xbox 360 pad (`--pad`, 121 button changes taken from `tests/regress/title_to_combat.replay`'s timing), recorded with `record_runs = on`, then `--play-run` three times on each recording:
+
+| Pacing | Turns | Events | File | Checkpoints (ticks) | 3 replays |
+|---|---|---|---|---|---|
+| display (window, locked to 60 Hz) | 3,604 | 112 | 6,697 B | 1000, 2000, 2392 (map 2.8) | all equal |
+| `pacing = wall` (window) | 84,261 | 124 | 474,357 B | 1000 (2.8, an NPC chat), 2000, 2382 (2.9) | all equal |
+| the 1 ms grid (dummy display, ADR 0131) | 96,655 | 123 | 18,758 B | 1000, 2000, 2386 (map 2.8) | all equal |
+
+Each replay ran the 120 s in about 41 s (display) and reproduced every digest and state line. The three recordings reached different places (each is its own real-time run), so pacing does not matter to the replay: each plays back exactly.
+
+**Size per hour** (from those 120 s, the boot included): about **0.2 MB** locked to a display, **0.6 MB** on the 1 ms grid, **14 MB** with `pacing = wall`, where every read sees a new microsecond and the deltas do not repeat. The events are a few bytes each and do not matter at that scale. The default pacing is display, so a player's hour is under a megabyte.
+
+**Consequences.**
+
+- #408's `--verify-run` is `--play-run` with the split times recomputed; #406 writes the splits into `SPLT`; #409's practice states are save states, which the recorder refuses.
+- A new way into the guest from the frontend fails `test_run_census.py` until it is classified. A `pure` site that turns out to read host state (a device, the host's clock) is a replay that diverges at its first checkpoint: it becomes recorded (through `mt_runtape_poke` or a new event kind) or refused.
+- The file names actions by number, so it plays only on the version that recorded it, as this ADR already required.
+- How we'd know this was wrong: a replay that differs on the build that recorded it (a census site that is not what it says, or a clock read that does not go through the hooks); or `pacing = wall` files that players keep for hours (then the clock stream needs a coarser coding, for example the delta from the paced plan).
