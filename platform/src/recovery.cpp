@@ -154,8 +154,7 @@ RecoveryOffer find_recovery_point(const std::string &data_dir, const std::string
         const std::optional<fs::file_time_type> crash =
             crash_file.empty() ? std::nullopt : mtime(utf8_path(crash_file));
         if (crash && taken) {
-            offer.minutes_before =
-                std::chrono::duration<double>(*crash - *taken).count() / 60.0;
+            offer.minutes_before = std::chrono::duration<double>(*crash - *taken).count() / 60.0;
             if (offer.minutes_before < 0) {
                 offer.minutes_before = 0;
             }
@@ -221,9 +220,9 @@ RecoveryTurn RecoveryPoints::resume(const RecoveryOps &ops, const RecoveryWhere 
         return out;
     };
     if (w.slot != armed_slot_) {
-        return drop(tr(Txt::recovery_why_other_slot),
-                    "character " + std::to_string(w.slot + 1) + " was loaded, not " +
-                        std::to_string(armed_slot_ + 1));
+        return drop(tr(Txt::recovery_why_other_slot), "character " + std::to_string(w.slot + 1) +
+                                                          " was loaded, not " +
+                                                          std::to_string(armed_slot_ + 1));
     }
     // The safe point, but for held input: a restore lets go of it (quick_load's rule).
     std::string why;
@@ -277,41 +276,41 @@ RecoveryTurn RecoveryPoints::resume(const RecoveryOps &ops, const RecoveryWhere 
 void RecoveryPoints::write_async(const RecoveryOps &ops, std::vector<std::uint8_t> stored) {
     wait(); // the last worker is done (busy_ said so): join it
     busy_.store(true, std::memory_order_release);
-    worker_ = std::thread([this, deflate = ops.deflate, write = ops.write,
-                           stored = std::move(stored)]() mutable {
-        const auto t0 = std::chrono::steady_clock::now();
-        std::vector<std::uint8_t> file;
-        std::string why;
-        bool ok = deflate(stored, &file, &why);
-        stored = std::vector<std::uint8_t>(); // the raw state's memory back before the write
-        const std::string newest = recovery_path(data_dir_, 1);
-        if (ok) {
-            std::error_code ec;
-            if (fs::is_regular_file(utf8_path(newest), ec)) {
-                fs::rename(utf8_path(newest), utf8_path(recovery_path(data_dir_, 2)), ec);
-            }
-            ok = write(newest, file);
-            if (!ok) {
-                why = newest + " could not be written";
-            }
-        }
-        {
-            std::lock_guard<std::mutex> lock(mu_);
+    worker_ = std::thread(
+        [this, deflate = ops.deflate, write = ops.write, stored = std::move(stored)]() mutable {
+            const auto t0 = std::chrono::steady_clock::now();
+            std::vector<std::uint8_t> file;
+            std::string why;
+            bool ok = deflate(stored, &file, &why);
+            stored = std::vector<std::uint8_t>(); // the raw state's memory back before the write
+            const std::string newest = recovery_path(data_dir_, 1);
             if (ok) {
-                stats_.written++;
-                stats_.last_written = file.size();
-            } else {
-                stats_.failed++;
+                std::error_code ec;
+                if (fs::is_regular_file(utf8_path(newest), ec)) {
+                    fs::rename(utf8_path(newest), utf8_path(recovery_path(data_dir_, 2)), ec);
+                }
+                ok = write(newest, file);
+                if (!ok) {
+                    why = newest + " could not be written";
+                }
             }
-        }
-        if (ok) {
-            SDL_Log("recovery: point written: %.2f MB in %.0f ms", megabytes(file.size()),
-                    ms_since(t0));
-        } else {
-            SDL_Log("recovery: point not written: %s", why.c_str());
-        }
-        busy_.store(false, std::memory_order_release);
-    });
+            {
+                std::lock_guard<std::mutex> lock(mu_);
+                if (ok) {
+                    stats_.written++;
+                    stats_.last_written = file.size();
+                } else {
+                    stats_.failed++;
+                }
+            }
+            if (ok) {
+                SDL_Log("recovery: point written: %.2f MB in %.0f ms", megabytes(file.size()),
+                        ms_since(t0));
+            } else {
+                SDL_Log("recovery: point not written: %s", why.c_str());
+            }
+            busy_.store(false, std::memory_order_release);
+        });
 }
 
 RecoveryTurn RecoveryPoints::turn(const RecoveryOps &ops, bool on, double t,
@@ -411,8 +410,7 @@ void install_game_save_counter() {
 std::uint64_t game_saves_seen() { return g_game_saves.load(std::memory_order_relaxed); }
 
 RecoveryOps game_recovery_ops(mt_cpu *cpu, std::function<void()> release,
-                              void (*rebase)(void *user, std::uint64_t guest_unix_us),
-                              void *user) {
+                              void (*rebase)(void *user, std::uint64_t guest_unix_us), void *user) {
     const QuickOps quick = game_quick_ops(cpu, std::move(release), rebase, user);
     auto sha = std::make_shared<std::array<std::uint8_t, 32>>();
     mt_process_image_sha256(mt_process_current(), sha->data());

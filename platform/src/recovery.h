@@ -198,8 +198,7 @@ std::uint64_t game_saves_seen();
 // RecoveryOps on the running game, as game_quick_ops (quick_state.h) with the stored save and
 // mt_snapshot_deflate.
 RecoveryOps game_recovery_ops(mt_cpu *cpu, std::function<void()> release,
-                              void (*rebase)(void *user, std::uint64_t guest_unix_us),
-                              void *user);
+                              void (*rebase)(void *user, std::uint64_t guest_unix_us), void *user);
 
 } // namespace maplethief::frontend
 
