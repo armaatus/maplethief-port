@@ -82,7 +82,7 @@ The skill ids are `skill.dat` rows. `@etc` is the skill's etc value (see [Skills
 
 **Stars.** A star skill needs as many stars as it uses (`CHero::isSpear` `0x5FF3D` counts all stacks). `CHero::UseStars` `0x67005` takes them from the first stack that holds enough, and that stack's star decides the damage bonus. An empty star stack stays in the inventory with count 0, ready to be recharged at a shop.
 
-**Shadow Web** (`CSkill::ShadowWeb` `0x7EB8D`) does no damage: each mob in the box is bound (mob `+0xD4`) for `@etc` ticks and cannot move.
+**Shadow Web** (`CSkill::ShadowWeb` `0x7EB8D`) does no damage: each mob in the box is bound for `@etc` ticks and cannot move. It sets the mob's bind state (`+0xD4`) to 1, which the mob's own tick moves on to 2 while bound, and its bind ticks (`+0xD8`) to `@etc` (`play.skills_assassin_synthetic` reads 60 at level 2).
 
 Example: a claw Assassin with Shadow Partner on throws Lucky Seven: four stars leave, four damage rolls are made against the one target, and four stars are taken from the first stack with at least four.
 
@@ -169,7 +169,7 @@ A high defense therefore never makes contact harmless: the damage falls to betwe
 
 **A mob** (`CMob::TakeHit` `0x73715`, after the checks above):
 
-- Drain (7) heals the hero by damage × `@etc` / 100, up to max HP (`CSkill::Drain` `0x7D4A5`).
+- Drain (7) heals the hero by damage × `@etc` / 100, up to max HP (`CSkill::Drain` `0x7D4A5`). The damage is the rolled one: on a killing blow it can be more than the HP the mob had left, and so is the heal.
 - With Pickpocket (19) on, `CSkill::Pickpocket` `0x7EB35` drops meso with `Rand_Percent`(`@etc`): an amount from `mob meso` / 18 − 5 to `mob meso` / 18, then the usual 80 % meso roll (see [Drops](#drops)).
 - HP drops by the damage. At 0 or below the mob [dies](#drops); otherwise it is knocked back (non-bosses, for a short while) and shows its HP bar.
 
@@ -281,7 +281,7 @@ Each skill's value columns in `skill.dat` give `base + (skill level − 1) × pe
 - **`@dmg`** (`CSkill::DamageValue` `0x7D551`): `damage_base`, `damage_per_level` (but see the level used by [The hero's damage](#the-heros-damage)).
 - **Duration** (`CSkill::Duration` `0x7EC3D`): `time_base`, `time_per_level`, in ticks, for buffs (type 2) only. 600 ticks is 30 s at the default speed.
 
-**Buffs** (type 2). `CSkill::CastBuff` `0x7F749` pays the MP and adds the buff to the list at skills `+0xD64` (skill id, ticks left). Casting a buff that is already on only refreshes its timer; the stats are not added twice. `CSkill::TickBuffs` `0x7F669` counts the timers down from `CHero::Flush`, and `CSkill::EndBuff` `0x7F581` removes the buff and its stats. The icon blinks in the last 30 ticks (`CSkill::IsBuffEnding` `0x7ED51`).
+**Buffs** (type 2). `CSkill::CastBuff` `0x7F749` pays the MP and adds the buff to the list at skills `+0xD64` (skill id `+0x00`, ticks on `+0x04`). Casting a buff that is already on only refreshes its timer; the stats are not added twice. `CSkill::TickBuffs` `0x7F669` counts each buff's ticks up from `CHero::Flush` (not while a menu is open), and when they reach the duration `CSkill::EndBuff` `0x7F581` removes the buff and its stats: the last value seen is the duration (`play.skills_*_synthetic`). The icon blinks in the last 30 ticks (`CSkill::IsBuffEnding` `0x7ED51`).
 
 - Concentration (12 and 21): attack plus `@dmg`, accuracy plus `@etc`.
 - Dark Sight (5): the hero turns translucent and contact does no harm; attacking ends it.

@@ -78,6 +78,16 @@ RUNS: dict[str, str] = {
     "quest:1-main-20": _CH1 + "l",
     "quest:1-sub-11": _CH1 + "l",
     "event:chapter1-Pirate-chapter_end": _CH1 + "l",
+    # From built start states (#302, docs/testing/skills-and-jobs.md).
+    "job_advancement:1-2-1": "play.jobs_1_2_assassin_synthetic",
+    "job_advancement:2-2-1": "play.jobs_2_2_assassin_synthetic",
+    "job_advancement:2-2-2": "play.jobs_2_2_bandit_synthetic",
+    "job_advancement:2-3-same": "play.jobs_2_3_assassin_synthetic",
+    "job_advancement:3-1-0": "play.jobs_3_1_synthetic",
+    "job_advancement:3-2-1": "play.jobs_3_2_assassin_synthetic",
+    "job_advancement:3-2-2": "play.jobs_3_2_bandit_synthetic",
+    "job_advancement:3-3-same": "play.jobs_3_4_assassin_synthetic",
+    "job_advancement:3-4-same": "play.jobs_3_4_assassin_synthetic",
 }
 
 # Save and load (docs/re/autosave.md), our words: (row, automated run).

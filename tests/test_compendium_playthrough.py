@@ -151,6 +151,9 @@ def _ctest_names() -> set[str]:
     parts = re.search(r"set\(_chapter_1_parts ([a-z ]+)\)", text)
     assert parts, "tests/CMakeLists.txt has no _chapter_1_parts"
     names |= {f"play.chapter_1_{p}" for p in parts.group(1).split()}
+    starts = re.search(r"set\(_from_starts([\w:\s]+)\)", text)
+    assert starts, "tests/CMakeLists.txt has no _from_starts"
+    names |= {f"play.{pair.split(':')[0]}_synthetic" for pair in starts.group(1).split()}
     return names
 
 
