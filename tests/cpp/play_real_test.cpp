@@ -117,6 +117,7 @@
 #include "quest_bot.h"
 #include "quick_state.h"
 #include "recovery.h"
+#include "run_timer.h"
 #include "save_state_input.h"
 #include "save_tools.h"
 #include "settings.h"
@@ -2120,7 +2121,12 @@ void chapter_1_a_checks(Run &, u64) {}
 // The run events (#403, ADR 0156) a part sees: a listener beside the frontend's, installed by
 // from_save, keeps the speedrun kinds and prints each one as it comes.
 std::vector<mt_game_event> g_run_events;
+// The speedrun timer a part times (#406, run_timer.h): fed every event the listener hears.
+maplethief::frontend::RunTimer *g_run_timer = nullptr;
 void hear_run_event(void *, const mt_game_event *e) {
+    if (g_run_timer != nullptr) {
+        g_run_timer->on_event(*e);
+    }
     if (e->kind < MT_GAME_EVENT_CHAPTER_END || e->kind > MT_GAME_EVENT_MAP_CHANGE) {
         return;
     }
@@ -2687,6 +2693,31 @@ void chapter_1_k_checks(Run &, u64) {}
 void chapter_1_l(Run &r, u64) {
     using namespace quest_bot;
     from_save(r);
+    // The speedrun timer (#406) on Chapter 1's last split, from this save before the trip to
+    // Orbis: a run of the shipped category's last split only (the ones before it are earlier
+    // parts'), started now on the host's monotonic clock and the game's ticks.
+    namespace fe = maplethief::frontend;
+    static fe::RunTimer timer(fe::RunClock{[] {
+                                               return fe::RunInstant{
+                                                   static_cast<double>(SDL_GetTicksNS()) / 1e9,
+                                                   mt_input_get_stats().ticks};
+                                           },
+                                           [] { return std::string("2026-11-26 00:00:00"); }});
+    then_do(r, "the speedrun timer: Chapter 1's last split, from here", [](mt_cpu *) {
+        std::vector<std::string> problems;
+        std::optional<fe::RunCategory> last;
+        for (const auto &[name, text] : fe::shipped_run_category_files()) {
+            if (name == "chapter_1") {
+                last = fe::parse_run_category(name, text, &problems);
+            }
+        }
+        check(last.has_value() && problems.empty(), "the shipped chapter_1 category parses");
+        last->splits.erase(last->splits.begin(), last->splits.end() - 1);
+        timer.set_category(*last, std::nullopt);
+        g_run_timer = &timer;
+        timer.start();
+        check(timer.state() == fe::RunTimer::State::kRunning, "the timer runs");
+    });
     const FarmStyle fight = chapter_1_fight();
     const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
     then_spend_sp(r, "Critical Stab, HP Mastery", build);
@@ -2715,6 +2746,29 @@ void chapter_1_l(Run &r, u64) {
                  });
     then_run_event(r, "chapter 1 ends (the trip to Orbis)", MT_GAME_EVENT_CHAPTER_END, 1);
     then_run_event(r, "the trip to Orbis (4.1)", MT_GAME_EVENT_MAP_CHANGE, 4, {1});
+    then_do(r, "the speedrun timer: Chapter 1's last split fired, the log has both times",
+            [&r](mt_cpu *) {
+                namespace fe = maplethief::frontend;
+                g_run_timer = nullptr;
+                std::vector<fe::RunRecord> runs = timer.take_records();
+                check(timer.state() == fe::RunTimer::State::kFinished && runs.size() == 1,
+                      "the run finished at the split (" + std::to_string(runs.size()) +
+                          " records)");
+                std::string path, why;
+                bool best = false;
+                check(fe::write_run(r.out.string(), runs[0], nullptr, &path, &best, &why),
+                      "the run log written: " + why);
+                std::ifstream in(path, std::ios::binary);
+                const std::string text{std::istreambuf_iterator<char>(in),
+                                       std::istreambuf_iterator<char>()};
+                std::printf("run log %s:\n%s", path.c_str(), text.c_str());
+                std::vector<std::string> problems;
+                const std::optional<fe::RunRecord> back = fe::parse_run_log(text, &problems);
+                check(back.has_value() && back->finished && back->times.size() == 1 &&
+                          back->times[0].ms > 0 && back->times[0].ticks > 0 &&
+                          back->times[0] == back->end,
+                      "the log holds the split's real time and game ticks");
+            });
     then_do(r, "chapter 2 on Orbis (4.1) in guest memory", [](mt_cpu *cpu) {
         const Hero h = hero(cpu);
         std::string q;
