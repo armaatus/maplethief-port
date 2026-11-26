@@ -266,6 +266,6 @@ Every game run logs at exit its tick rate and tick intervals (p50, p99, max, the
 | `MAPLETHIEF_TRACE=CHANNELS` | trace channels, comma-separated, e.g. `boot,objc` |
 | `MAPLETHIEF_TRACE_HLE=FILTERS` | traces HLE calls by import name ([ADR 0030](../adr/0030-runtime-diagnostics.md)) |
 | `MAPLETHIEF_GL_TRACE_FILE=PATH` | writes the GL trace to a file |
-| `MAPLETHIEF_COVERAGE=PATH` | function-entry coverage (builds with `MT_TRACE_ENTRY`) |
+| `MAPLETHIEF_COVERAGE=PATH` | run coverage: function entries (builds with `MT_TRACE_ENTRY`, the `mac-coverage` preset) and the imports, selectors, scripts, natives and maps hit; `%p` is the process id ([ADR 0160](../adr/0160-run-coverage-entry-counters-and-hit-recorders.md)) |
 
 The build's own variables (`MAPLETHIEF_VERSION`, `PYTHON`, and the rest) are on [Build from source](README.md).

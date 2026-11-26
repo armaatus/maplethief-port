@@ -48,6 +48,10 @@ With the generated code, `platform.title_60s` runs `MapleThief --fixed-step 16.6
 
 `PYTHONPATH=tools python3 -m mtport.titlerun coverage` configures `build/title-coverage/` with `-DMAPLETHIEF_TRACE_ENTRY=ON`, runs the same minute with `MAPLETHIEF_COVERAGE`, and writes `build/title-coverage/report/title.coverage` and `title-coverage.md`: every guest function entered on the way to the title. The fixed-step run is deterministic, so the same code gives the same report. It is derived from the IPA and never committed.
 
+### Run coverage
+
+`python3 -m mtport.runcoverage run` builds the `mac-coverage` preset (the entry counters) and runs the baseline tests one at a time with `MAPLETHIEF_COVERAGE` set, then writes `work/coverage/run-coverage.md` and `.json`: the guest functions executed per function tag, the unexecuted ones, and the scripts, natives, maps, imports and selectors the runs used ([ADR 0160](../adr/0160-run-coverage-entry-counters-and-hit-recorders.md)). How, and the baseline's numbers: [testing/run-coverage.md](../testing/run-coverage.md).
+
 ### Playtests
 
 Step-by-step runs for checking the game by hand are in [docs/testing/](../testing/). The Nintendo Switch's hardware sign-off is [switch-checklist.md](../testing/switch-checklist.md).
