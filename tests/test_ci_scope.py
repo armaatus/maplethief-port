@@ -50,6 +50,8 @@ def test_compendium_and_docs_only_skip_the_build():
             "tests/test_env_vars_documented.py",
             "tests/test_docs_indexes.py",
             "tools/mtport/handoffs.py",
+            "tools/mtport/cireport.py",
+            "tests/test_ci_report.py",
             "tests/test_handoff_checklists.py",
             ".github/ISSUE_TEMPLATE/bug.yml",
             "tests/test_issue_templates.py",

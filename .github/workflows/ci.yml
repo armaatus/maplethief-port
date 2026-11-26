@@ -8,6 +8,11 @@
 #                            and Python. release.yml checks the title and, after the merge, tags
 #                            and drafts the release.
 #   manual run               the full profile (Release unless its `release` input is off).
+#   weekly schedule          the full profile with Release, on dev (the default branch; issue #339):
+#                            the `weekly-report` job checks that every job ran and passed and
+#                            opens or updates one issue labelled ci-weekly when one didn't
+#                            (tools/mtport/cireport.py). A manual run with the `report` input
+#                            runs that job too, to try it on a branch.
 #
 # Pushes don't trigger it. The repository is public, so GitHub-hosted runners cost no minutes;
 # the split keeps a feature pull request's wait short and puts macOS and Windows where a release
@@ -66,6 +71,14 @@ on:
         type: choice
         options: [hosted, self-hosted]
         default: hosted
+      report:
+        description: "Run the weekly report job: open or update the ci-weekly issue when a job failed"
+        type: boolean
+        default: false
+  schedule:
+    # Monday 04:17 UTC, on the default branch (dev): toolchains on the *-latest images change
+    # under the project, and macOS, Windows and iOS otherwise build only for a release.
+    - cron: "17 4 * * 1"
 
 permissions:
   contents: read
@@ -143,11 +156,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Into dev: Linux only. Into main (the release pull request) and manual runs: all three.
+        # Into dev: Linux only. Into main (the release pull request), manual and weekly runs:
+        # all three.
         os: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref != 'main' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
-        # Release builds and kits on the release pull request, and on manual runs unless the
-        # `release` input is off (ADR 0126).
-        config: ${{ fromJSON(((github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'workflow_dispatch' && inputs.release)) && '["debug","release"]' || '["debug"]') }}
+        # Release builds and kits on the release pull request, the weekly run, and manual runs
+        # unless the `release` input is off (ADR 0126).
+        config: ${{ fromJSON(((github.event_name == 'pull_request' && github.base_ref == 'main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release)) && '["debug","release"]' || '["debug"]') }}
     steps:
       - name: Check out (without Git LFS objects)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -342,7 +356,7 @@ jobs:
   ios:
     name: ios arm64 (compile, no IPA, no signing)
     needs: scope
-    if: needs.scope.outputs.native == 'true' && inputs.runners != 'self-hosted' && (github.event_name == 'workflow_dispatch' || github.base_ref == 'main')
+    if: needs.scope.outputs.native == 'true' && inputs.runners != 'self-hosted' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.base_ref == 'main')
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -613,3 +627,32 @@ jobs:
           fi
         env:
           NEEDS: ${{ toJSON(needs) }}
+
+  # The weekly run's report (issue #339, tools/mtport/cireport.py): after every other job, even
+  # when one failed, it lists the run's jobs and checks that each job of the full profile ran
+  # and passed, then opens or comments on the one ci-weekly issue, or closes it when green. A
+  # manual run with the `report` input runs it too. `CI result` doesn't need it: it runs only on
+  # those runs, and isn't a check of a pull request.
+  weekly-report:
+    name: weekly report
+    needs: [scope, build, asan, ios, switch, android, lint-python, clang-tidy, ci-result]
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.report) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - name: Check out (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+          sparse-checkout: tools/mtport
+          sparse-checkout-cone-mode: false
+
+      - name: Check every job ran and passed; open, update or close the ci-weekly issue
+        run: PYTHONPATH=tools python3 -m mtport.cireport
+        env:
+          GH_TOKEN: ${{ github.token }}

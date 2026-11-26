@@ -43,6 +43,13 @@ def required(name: str) -> set[str]:
 
 
 CI = jobs("ci.yml")
+# Jobs that never run on a pull request (the weekly run's report, #339): no ruleset can require
+# them, and `CI result` doesn't wait for them.
+NOT_ON_PULL_REQUESTS = {
+    job_id
+    for job_id, job in CI.items()
+    if job.get("if") == "${{ !cancelled() && (github.event_name == 'schedule' || inputs.report) }}"
+}
 
 
 def test_ci_result_needs_every_other_job_and_always_runs():
@@ -50,17 +57,27 @@ def test_ci_result_needs_every_other_job_and_always_runs():
     assert gate["name"] == "CI result"
     assert gate["if"] == "always()"
     needs = set(gate["needs"].strip("[]").replace(" ", "").split(","))
-    assert needs == set(CI) - {"ci-result"}
+    assert needs == set(CI) - {"ci-result"} - NOT_ON_PULL_REQUESTS
+
+
+def test_the_weekly_report_never_runs_on_a_pull_request():
+    assert NOT_ON_PULL_REQUESTS == {"weekly-report"}
 
 
 def test_dev_requires_only_checks_that_never_skip():
-    always = {j["name"] for j in CI.values() if j.get("if") in (None, "always()")}
+    always = {
+        j["name"]
+        for i, j in CI.items()
+        if j.get("if") in (None, "always()") and i not in NOT_ON_PULL_REQUESTS
+    }
     assert required("dev") == always
     assert "CI result" in required("dev")
 
 
 def test_main_requires_the_full_profile_and_the_release_title():
-    names = {j["name"] for j in CI.values() if "${{" not in j["name"]}
+    names = {
+        j["name"] for i, j in CI.items() if "${{" not in j["name"] and i not in NOT_ON_PULL_REQUESTS
+    }
     matrix = {
         f"{os} {cfg}"
         for os in ("ubuntu-latest", "macos-latest", "windows-latest")

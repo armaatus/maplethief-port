@@ -130,13 +130,14 @@ Windows has no container: run `scripts\test.ps1` (Debug and pytest) and `scripts
 
 ## GitHub CI
 
-`dev` is the integration branch and the default. Every feature, fix or epic pull request targets it. `main` moves only through a release pull request from `dev` ([Releases](releases.md)). [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs on pull requests and manual runs, not on pushes, and the pull request's target decides what runs ([ADR 0126](../adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md)):
+`dev` is the integration branch and the default. Every feature, fix or epic pull request targets it. `main` moves only through a release pull request from `dev` ([Releases](releases.md)). [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs on pull requests, manual runs and once a week, not on pushes, and the pull request's target decides what runs ([ADR 0126](../adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md)):
 
 | Pull request into | Runs |
 |---|---|
 | `dev` | lint and Python 3.10 and latest (Linux), clang-tidy, the Linux Debug build with the C/C++ tests, the same tests under ASan and UBSan with the fuzz smoke, the Switch NRO and the Android APK |
 | `main` | lint and Python, clang-tidy, Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux, the ASan and UBSan tests, the iOS compile, the Switch NRO and the Android APK |
 | manual run | the full set, Release unless its `release` input is off |
+| weekly, on `dev` | the full set with Release, then the `weekly report` job ([below](#the-weekly-run)) |
 
 `scripts/ci-scope` skips the native jobs when a pull request touches only docs or compendium work, and the Switch or Android job when the native paths touch only another platform's own files.
 
@@ -156,7 +157,25 @@ A pull request is merged only when its checks are green (`gh pr checks --watch`)
 - **The `ios` job** (macOS, on the runs that build every OS: the release pull request and manual runs) runs the `ios-ci` workflow: our own code for iOS arm64, Debug and Release, no IPA and no signing. It links the frontend and runtime into the placeholder shell and checks the app is arm64 ([ADR 0136](../adr/0136-ios-app-through-xcode.md)). The game itself and a device are local.
 - **The `switch` job** (Linux, on every pull request and manual run) runs `scripts/build-switch HEAD --preset switch-release --arch amd64`: `MapleThief.nro` from our own code in the devkitA64 image pinned by digest, no IPA. Its CTest checks read the NRO's NACP and icon (`platform.switch_nro`) and run the release guard on it (`platform.switch_guard`). It also builds every test NRO, `MapleThiefTests.nro` among them. A console is never involved: hardware runs are local, with `scripts/switch-run` and `scripts/switch-test` ([ADR 0138](../adr/0138-nintendo-switch-homebrew-target.md)).
 - **Docs-only changes.** A pull request that touches only documentation or compendium work skips the build jobs, and one whose native changes only touch another platform's own files (`platform/macos/`, `scripts/*.ps1`, the Linux containers, …) skips the `switch` job. `scripts/ci-scope` decides, from an allow-list ([ADR 0006](../adr/0006-continuous-integration.md)'s addendum).
-- **`CI result`.** The last job waits for all the others and fails if any failed or was cancelled; a skipped job passes. It is what `dev`'s ruleset requires, since a skipped matrix job never reports under its expanded name. On a pull request into `main` nothing is skipped ([Branch rules](releases.md#branch-rules), [ADR 0173](../adr/0173-branch-rulesets-ci-result-gate-and-merge-commits-only.md)).
+- **`CI result`.** It waits for all the other jobs but the [weekly report](#the-weekly-run) and fails if any failed or was cancelled; a skipped job passes. It is what `dev`'s ruleset requires, since a skipped matrix job never reports under its expanded name. On a pull request into `main` nothing is skipped ([Branch rules](releases.md#branch-rules), [ADR 0173](../adr/0173-branch-rulesets-ci-result-gate-and-merge-commits-only.md)).
+
+### The weekly run
+
+Pull requests into `dev` build only on Linux, and the runner images are `*-latest`, so a toolchain update can break macOS, Windows or iOS without any change of ours. CI therefore also runs every Monday at 04:17 UTC on `dev` (GitHub runs a schedule on the default branch), with the manual run's full set and the Release jobs ([#339](https://github.com/armaatus/maplethief-port/issues/339)).
+
+Its last job, `weekly report`, runs after the others even when they fail. `tools/mtport/cireport.py` lists the run's jobs through GitHub's API and checks that every job of the full set ran and passed: a missing, skipped or cancelled job counts as a failure, since a run has ended as a failure with jobs missing and no log. Then:
+
+- **a failure** opens one issue titled *Weekly CI failed on dev*, labelled `ci-weekly`, with the failed jobs' links and the missing jobs' names, or comments on that issue if it is already open;
+- **a green run** comments on the open issue and closes it.
+
+The script's list of expected jobs (`EXPECTED`) has to follow `ci.yml`: `tests/test_ci_report.py` fails when a job is added to or removed from one but not the other, and when the report job doesn't `need` every job. If a run fails before any job starts (an invalid workflow, a startup failure), the report job can't run; GitHub then emails whoever last changed the schedule.
+
+To try the report on a branch, start a manual run with the `report` input; it files to the same issue:
+
+```sh
+gh workflow run ci.yml --ref <branch> -f report=true
+PYTHONPATH=tools python3 -m mtport.cireport --run-id <run id> --dry-run   # read only
+```
 
 CI never sees the IPA. A guard step in every job fails if a `*.ipa` ever shows up in the checkout, and `real_assets` tests show up as skipped. A job uploads an artifact only when it fails, and then only `build/test-output/` and CTest's logs.
 
