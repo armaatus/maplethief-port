@@ -49,14 +49,14 @@ In a protected folder (`C:\Program Files`), on a read-only disk, or on a Mac whe
 
 With **Crash recovery** on (settings menu → Gameplay, or `crash_recovery = on`; part of the Enhanced preset), the port keeps a recovery point of the game while you play: after each map loads, after each save, and every five minutes of play. Play pauses for a moment while it takes one (a tick or two). The two newest points are in `states` (`recovery-1.state`, `recovery-2.state`), beside the game's saves, which they never change. Quitting normally deletes them.
 
-If the game crashes, the next start says so and offers four choices:
+If the game crashes, the next start says so and offers four choices. On a computer it asks in a message box. On the Nintendo Switch and in a Steam Deck's Game Mode it asks in the game's window instead, so a controller or the touch screen can answer: Up and Down choose, A (or Enter) confirms, and B (or Esc) is **Start normally**. Without a recovery point the same question has two choices, **Start with default settings** and **Start normally**.
 
 | Button | What happens |
 |---|---|
-| **Resume** (Enter) | Your settings. Load the same character as usual; once it is in the field, the game goes on from the recovery point. |
+| **Resume** (Enter, A) | Your settings. Load the same character as usual; once it is in the field, the game goes on from the recovery point. |
 | **Resume with default settings** | The same, with default settings for this run (no texture or audio packs, the software renderer). For a crash that a pack or a setting might have caused. |
 | **Start with default settings** | Default settings for this run; the recovery point is deleted. |
-| **Start normally** (Esc) | Your settings; the recovery point is deleted. |
+| **Start normally** (Esc, B) | Your settings; the recovery point is deleted. |
 
 A point is used once. If the resumed game crashes again before the next point, the following start offers the older one. A point is not offered when it is older than that character's last save (it would undo progress already saved), when it was made by another version of the port, or when its file is damaged. If you load a different character first, the point is dropped and the game says so.
 

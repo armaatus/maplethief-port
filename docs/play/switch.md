@@ -77,6 +77,7 @@ Everything is on the SD card, in `sdmc:/switch/maplethief/` ([ADR 0127](../adr/0
 - **"Running short of memory" on screen, or the game closes on a map:** you started it from the Album. Start the Homebrew Menu through a game (hold R while starting one) and start MapleThief from there.
 - **The import screen comes back on every start:** the import didn't finish (the console went to sleep or MapleThief was closed during it), or `game/` was deleted. Let it run to the end; nothing half-imported is kept.
 - **The import says there is not enough memory:** the same as above: start through a game.
+- **After a crash** the next start asks in the window whether to start with default settings (no packs, the software renderer) or normally: Up/Down and A, or B for **Start normally**, or tap a choice. [Saves](saves.md#after-a-crash-recovery-points) explains the choices.
 - **Something else:** the log of each run is in `sdmc:/switch/maplethief/data/logs/MapleThief-<time>.log`, and a crash report in `sdmc:/switch/maplethief/crash.txt` and `data/crashes/`. Attach them to an [issue](https://github.com/armaatus/maplethief-port/issues). More in [Troubleshooting](troubleshooting.md).
 
 ## A HOME menu icon
