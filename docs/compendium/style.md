@@ -6,7 +6,7 @@ The mechanical rules are enforced by the prose lint, `PYTHONPATH=tools python3 -
 
 ## The lint
 
-- **What it reads:** with no arguments, the tracked `docs/compendium/**/*.md` and the site generator's templates (`tools/mtport/compendium/templates/`, once they exist). Given paths, it reads those files, or every `.md`, `.html` and `.htm` file under a directory, so `PYTHONPATH=tools python3 -m mtport.prose_lint build/compendium/site` checks the built site.
+- **What it reads:** with no arguments, the tracked `docs/compendium/**/*.md`. The site generator's templates are Python (`tools/mtport/compendium/templates.py`), so their words are checked in the built pages: the site build runs `lint_text` over every HTML page it writes. Given paths, it reads those files, or every `.md`, `.html` and `.htm` file under a directory, so `PYTHONPATH=tools python3 -m mtport.prose_lint build/compendium/site` checks the built site.
 - **Rules:** `em-dash`, `en-dash`, `other-dash`, `double-hyphen`, `banned-phrase`, `first-person`, `term`, `emoji` and `title-case-heading`, each one described in the sections below. One line per finding, `path:line:col: rule: message`; the exit status is 1 when there is any.
 - **Exempt in Markdown:** fenced code blocks, code spans, `{{...}}` references and template tags, link targets, inline HTML tags and any inline element with a `data-verbatim` attribute.
 - **Exempt in HTML:** any element with a `data-verbatim` attribute and everything inside it, `<script>`, `<style>`, `<code>` and `<pre>`. The site generator puts `data-verbatim` on every piece of game text, entity names included.

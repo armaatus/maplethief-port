@@ -135,7 +135,7 @@ None of this happens in the shipped files.
 
 Every name in the shipped files has a script: each portal name has a `script/common/` file, and each NPC and map-script name has one in `common/` or a `chapter<n>/` directory. The main update (`0x87501` at `0x879B6`–`0x87B64`) looks up the map-script record's name (`PerionMap`, `BalogMap`, `TutorialMap`, `MelodyMap`, `WolfMap`, `HomunMap`) the same way and runs its main once each time a map has finished loading (game mode 7), so on every entry and every revisit, but not during Monster Carnival (`CStateGame +0x404`) or while `CStateGame +0x1E8` is set. `CMob::Flush` (`0x7458D`) runs it again when a boss dies ([script-vm.md](../re/script-vm.md#entry-points)).
 
-Shops are not a record type. `Equip00`/`Etc00` (kinds 5 and 6) are ordinary NPCs. Judging by their names, their scripts open the equipment and etc. shops ([#19](https://github.com/armaatus/maplethief-port/issues/19)).
+Shops are not a record type. `Equip00`/`Etc00` (kinds 5 and 6) are ordinary NPCs whose scripts open a shop: each `main` is one call to the native `showMarket` (`0x998D1`), with shop 2 for `Equip00` and shop 5 for `Etc00` (the `shop` column of `MarketItem`, [data-tables.md](data-tables.md); the script format is in [script-out.md](script-out.md)).
 
 ## Portals and arrival points
 
