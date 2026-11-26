@@ -37,13 +37,13 @@ Closes [#93](https://github.com/armaatus/maplethief-port/issues/93). Follow [the
 
 ## #79: Full playthrough
 
-Closes [#79](https://github.com/armaatus/maplethief-port/issues/79). There is no chapter by chapter checklist in the repository yet (the issue's agent task); use the compendium's walkthrough as the list: [chapter 1](https://armaatus.github.io/maplethief-port/walkthrough/chapter-1.html), [chapter 2](https://armaatus.github.io/maplethief-port/walkthrough/chapter-2.html), [chapter 3](https://armaatus.github.io/maplethief-port/walkthrough/chapter-3.html), [the endings](https://armaatus.github.io/maplethief-port/walkthrough/endings.html) and [the bosses](https://armaatus.github.io/maplethief-port/monsters/bosses.html). Do #223's quests and #228's chapter 1 run along the way.
+Closes [#79](https://github.com/armaatus/maplethief-port/issues/79). The list is the [playthrough checklist](../playthrough-checklist.md): `PYTHONPATH=tools python3 -m mtport.compendium.kb build`, then `PYTHONPATH=tools python3 -m mtport.compendium.playthrough` writes `build/checklists/playthrough.md`, every quest, boss, job advancement, climb and scene chapter by chapter with a tick box each. The compendium's walkthrough has the routes: [chapter 1](https://armaatus.github.io/maplethief-port/walkthrough/chapter-1.html), [chapter 2](https://armaatus.github.io/maplethief-port/walkthrough/chapter-2.html), [chapter 3](https://armaatus.github.io/maplethief-port/walkthrough/chapter-3.html), [the endings](https://armaatus.github.io/maplethief-port/walkthrough/endings.html) and [the bosses](https://armaatus.github.io/maplethief-port/monsters/bosses.html). Do #223's quests and #228's chapter 1 run along the way.
 
 1. Optional baseline first: `scripts/regress`, and the automated chapter 1 chain ([chapter-1-quests.md](../chapter-1-quests.md)).
-2. Play chapters 1 to 3, every mini-game and every ending in `dist/mac/MapleThief.app`.
+2. Play chapters 1 to 3, every mini-game and every ending in `dist/mac/MapleThief.app`, ticking `build/checklists/playthrough.md` as you go.
 3. File each bug with the bug template.
 
-**Post back:** "checklist completed, signed off" and the bug issue numbers.
+**Post back:** "checklist completed, signed off", the rows you could not tick (by their ids) and the bug issue numbers.
 
 ## #223: Five compendium quests in the port
 
@@ -69,7 +69,7 @@ Closes [#228](https://github.com/armaatus/maplethief-port/issues/228). Its 2026-
 
 ## #92: The playthrough on every platform
 
-Closes [#92](https://github.com/armaatus/maplethief-port/issues/92). The #79 playthrough, shorter, on each platform's **player build** (from the release, or built), with the import on first start, once per preset (Original, Original + controller, Enhanced). Each platform also gets a controller-first pass: plays with the defaults and no launcher, glyphs match the pad, legible at 1280 x 800, text entry with a controller, a steady 20 ticks a second (#142).
+Closes [#92](https://github.com/armaatus/maplethief-port/issues/92). The template is `build/checklists/platforms.md` from the same command as #79 ([playthrough checklist](../playthrough-checklist.md)): a sign-off row per platform, the Switch included, and per platform a column per preset and a controller-first section. The #79 playthrough, shorter, on each platform's **player build** (from the release, or built), with the import on first start, once per preset (Original, Original + controller, Enhanced). Each platform also gets a controller-first pass: plays with the defaults and no launcher, glyphs match the pad, legible at 1280 x 800, text entry with a controller, a steady 20 ticks a second (#142).
 
 1. macOS: the `mac-player` kit, also once under Rosetta (`arch -x86_64`).
 2. Windows: the `win-player` kit ([Windows](windows.md)).
