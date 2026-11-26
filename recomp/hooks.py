@@ -180,6 +180,13 @@ HOOKED: dict[int, Hooked] = {
         "(this): the field's frame; a scene's camera shake (+0x47E on, amplitude +0x488) is "
         "drawn here, so screen_shake below 100 (#158, ADR 0093) scales the amplitude for the call",
     ),
+    0x8D4C9: Hooked(
+        "CStateGame::OnKeyPressed",
+        "(this, key): the field's keys and its popups, among them the death popup 0x68 and its "
+        "\"Go to main menu\" popup 0x6D, which leaves without a save; autosave = on_quit (#336) "
+        "checks its guards when Yes on 0x6D is confirmed, and finds the hero dead "
+        "(docs/re/autosave.md)",
+    ),
     0xAAAB9: Hooked(
         "MainMenuView_clickPlay",
         "-[MainMenuView clickPlay:] (self, _cmd, sender): Play before the engine's main menu "

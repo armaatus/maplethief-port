@@ -92,7 +92,10 @@ MT_EXTERN_C_BEGIN
 #define MT_HOOK_FN_OBJECT_TOUCHES 0x6CF01u
 /* CStateGame::PaintExitToMenu (this): the scene runner, from CStateGame::Paint */
 #define MT_HOOK_FN_SCENE_RUNNER 0x83C71u
-#define MT_HOOK_FN_STATE_GAME_PAINT 0x87501u     /* CStateGame::Paint (this): the field's frame */
+#define MT_HOOK_FN_STATE_GAME_PAINT 0x87501u /* CStateGame::Paint (this): the field's frame */
+/* CStateGame::OnKeyPressed (this, key): the field's keys and popups; #336 checks the autosave's
+ * guards on the death popup's exit to the main menu (popup 0x6D) */
+#define MT_HOOK_FN_STATE_GAME_ON_KEY 0x8D4C9u
 #define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u /* -[MainMenuView clickPlay:] */
 /* -[TouchKeyPadView colorAtPixel:onImage:] (self, _cmd, CGPoint in r2/r3, UIImage at sp) */
 #define MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL 0xB4DB5u
