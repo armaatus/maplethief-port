@@ -1,8 +1,10 @@
 # Releases (ADR 0126, ADR 0024, ADR 0125). A release is a pull request from dev into main
 # titled "Release vX.Y.Z" (or "Release vX.Y.Z-rc.N", a pre-release):
 #
-#   while it is open    `title` checks that it comes from dev, that its title names a tag, and
-#                       that the tag doesn't exist yet. CI (ci.yml) runs the full profile on it.
+#   while it is open    `title` checks that it comes from dev, that its title names a tag,
+#                       that the tag doesn't exist yet, and that it carries the type:release
+#                       label, which keeps it out of the generated notes (.github/release.yml,
+#                       #313). CI (ci.yml) runs the full profile on it.
 #   once it is merged   `tag` creates the annotated tag on the merge commit and the draft
 #                       release (the committed notes header above generated notes); `kits`
 #                       builds the three kits of ADR 0024 on hosted runners from the tag, checks
@@ -22,7 +24,7 @@ name: Release
 on:
   pull_request:
     branches: [main]
-    types: [opened, edited, reopened, synchronize, closed]
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled, closed]
 
 permissions:
   contents: read
@@ -60,8 +62,13 @@ jobs:
             echo "::error::The tag $tag exists already; pick the next version."
             exit 1
           fi
+          if [ "$RELEASE_LABEL" != true ]; then
+            echo "::error::Label this pull request type:release (gh pr edit N --add-label type:release), so the release notes leave it out (#313)."
+            exit 1
+          fi
           echo "OK: merging this releases $tag"
         env:
+          RELEASE_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'type:release') }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
 

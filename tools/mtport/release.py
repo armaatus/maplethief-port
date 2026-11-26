@@ -62,6 +62,9 @@ CLI::
     python3 -m mtport.release known-issues [FILE] [--closed FILE]
                                                         fails if FILE (docs/KNOWN_ISSUES.md)
                                                         cites a closed issue (#309)
+    python3 -m mtport.release notes-check TAG [--previous TAG] [--target REF] [--notes FILE]
+                                                        fails if a merged pull request since
+                                                        the last tag is in "Other changes" (#313)
     python3 -m mtport.release itch TAG [--dry-run] [--platforms LIST] [--from DIR]
                                                         pushes the published release's player
                                                         builds to itch.io (mtport.itch, ADR 0146)
@@ -71,6 +74,11 @@ holds only while the issue it cites is open, and fails when it cites a closed is
 ``#N`` or a link to ``.../issues/N`` of this repository. The closed issues come from
 ``gh issue list --state closed``, or from ``--closed FILE`` (a JSON list of numbers) in the
 tests.
+
+The **notes pre-flight** asks GitHub for the notes it would generate for TAG (the
+``generate-notes`` endpoint, which reads ``.github/release.yml`` and creates nothing) and fails
+when a pull request lands in the catch-all category, "Other changes": that pull request has no
+label of any category. ``--notes FILE`` reads the notes from a file instead (the tests).
 
 Checksum files use the ``sha256sum``/``shasum -a 256`` format, ``<hex>  <name>``, so
 ``sha256sum -c`` and ``shasum -a 256 -c`` read them.
@@ -720,6 +728,81 @@ def _cmd_known_issues(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- Release notes --------------------------------------------------------------------------
+
+# The title of the catch-all category ("*") of .github/release.yml.
+OTHER_CHANGES = "Other changes"
+_NOTES_ENTRY = re.compile(
+    r"^\* (?P<title>.*?)(?: by @\S+)? in (?P<url>\S+/pull/(?P<number>\d+))\s*$"
+)
+
+
+@dataclass(frozen=True)
+class NotesEntry:
+    number: int
+    title: str
+
+
+def other_changes(notes: str) -> list[NotesEntry]:
+    """The pull requests listed under "Other changes" in GitHub's generated notes."""
+    found = []
+    inside = False
+    for line in notes.splitlines():
+        if line.startswith("#"):
+            inside = line.lstrip("#").strip() == OTHER_CHANGES
+            continue
+        if not inside:
+            continue
+        m = _NOTES_ENTRY.match(line.strip())
+        if m:
+            found.append(NotesEntry(int(m["number"]), m["title"]))
+        elif line.startswith("**"):  # **Full Changelog** or **New Contributors** ends it
+            inside = False
+    return found
+
+
+def generated_notes(
+    tag: str, target: str | None, previous: str | None, repo: str = GITHUB_REPO
+) -> str:
+    """The notes GitHub would generate for ``tag``, through the GitHub CLI (creates nothing)."""
+    cmd = ["gh", "api", f"repos/{repo}/releases/generate-notes", "-f", f"tag_name={tag}"]
+    if target:
+        cmd += ["-f", f"target_commitish={target}"]
+    if previous:
+        cmd += ["-f", f"previous_tag_name={previous}"]
+    out = subprocess.run(
+        [*cmd, "--jq", ".body"], capture_output=True, text=True, check=False, timeout=120
+    )
+    if out.returncode != 0:
+        raise OSError(f"gh api generate-notes failed: {out.stderr.strip() or out.returncode}")
+    return out.stdout
+
+
+def _cmd_notes_check(args: argparse.Namespace) -> int:
+    parse_tag(args.tag)
+    if args.notes:
+        source = args.notes
+        notes = Path(args.notes).read_text(encoding="utf-8")
+    else:
+        source = f"the notes GitHub generates for {args.tag}"
+        notes = generated_notes(args.tag, args.target, args.previous)
+        if args.print:
+            print(notes)
+    unlabelled = other_changes(notes)
+    if unlabelled:
+        print(
+            f"notes: {source} list {len(unlabelled)} pull request(s) under "
+            f'"{OTHER_CHANGES}": label each with its area (gh pr edit N --add-label '
+            "type:epic,area:...; .github/release.yml has the categories):",
+            file=sys.stderr,
+        )
+        for e in unlabelled:
+            print(f"  #{e.number} {e.title}", file=sys.stderr)
+        return 1
+    print(f'notes: OK {source}: no pull request under "{OTHER_CHANGES}"')
+    return 0
+
+
 # --- CLI -----------------------------------------------------------------------------------
 
 
@@ -799,6 +882,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--closed", metavar="FILE", help="a JSON list of the closed issues (default: ask gh)"
     )
+    p = sub.add_parser(
+        "notes-check", help='fail if a merged pull request since the last tag is in "Other changes"'
+    )
+    p.add_argument("tag", help="the release's tag (it need not exist yet)")
+    p.add_argument("--previous", metavar="TAG", help="the last release's tag (default: GitHub's)")
+    p.add_argument("--target", metavar="REF", help="the branch or commit (default: the tag's)")
+    p.add_argument("--notes", metavar="FILE", help="read the notes from FILE, not from GitHub")
+    p.add_argument("--print", action="store_true", help="also print the generated notes")
     from mtport import itch  # imports this module
 
     itch.add_parser(sub)
@@ -812,6 +903,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_guard(args)
         if args.cmd == "known-issues":
             return _cmd_known_issues(args)
+        if args.cmd == "notes-check":
+            return _cmd_notes_check(args)
         if args.cmd == "tag":
             version, pre = parse_tag(args.tag)
             print(version)

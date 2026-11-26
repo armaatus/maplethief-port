@@ -320,6 +320,7 @@
 #include "data_location.h"
 #include "data_switch.h"
 #include "desktop.h"
+#include "file_dialog.h"
 #include "game.h"
 #include "gfx_backend.h"
 #include "gfx_prototype.h"
@@ -335,6 +336,7 @@
 #include "save_tools.h"
 #include "scaling.h"
 #include "settings.h"
+#include "start_question.h"
 #include "thread_priority.h"
 
 #if defined(__SWITCH__)
@@ -1435,6 +1437,29 @@ int main(int argc, char *argv[]) {
     // The last run's crash (#198): offer a safe start, before anything uses the settings. The
     // marker is set now, so a crash during the start counts too.
     bool safe_start = false;
+    // The answer, from the box now or from the window's question once the window exists.
+    const auto apply_start = [&](const StartDecision &start, const RecoveryOffer &offer) {
+        safe_start = start.safe_start;
+        if (start.resume) {
+            options.game.recovery = offer;
+        } else if (offer.offered) {
+            SDL_Log("recovery: not offered (discarded at the start)");
+            delete_recovery_points(data_dir());
+        }
+        if (safe_start) {
+            settings = safe_start_settings(settings);
+            set_settings_write_blocked(true);
+            SDL_Log("safe start: default settings for this run (no texture or audio packs, the "
+                    "software renderer); settings.ini is not changed");
+        }
+    };
+    // Where no message box can be answered with every input method (the Switch, a Steam Deck's
+    // Game Mode; #416), the question waits for the window.
+    struct StartLater {
+        LastRun last;
+        RecoveryOffer offer;
+    };
+    std::optional<StartLater> start_later;
     if (game) {
         // What the settings name is the player's too: log lines quote these as they use them.
         // (Very short values would mangle unrelated text.)
@@ -1458,19 +1483,12 @@ int main(int argc, char *argv[]) {
         const RecoveryOffer offer = find_recovery_point(
             data_dir(), settings.save_dir.empty() ? loc.saves : settings.save_dir, last.crashed,
             last.crash_file);
-        const StartDecision start = decide_start(options.safe_start, last, interactive, offer);
-        safe_start = start.safe_start;
-        if (start.resume) {
-            options.game.recovery = offer;
-        } else if (offer.offered) {
-            SDL_Log("recovery: not offered (discarded at the start)");
-            delete_recovery_points(data_dir());
-        }
-        if (safe_start) {
-            settings = safe_start_settings(settings);
-            set_settings_write_blocked(true);
-            SDL_Log("safe start: default settings for this run (no texture or audio packs, the "
-                    "software renderer); settings.ini is not changed");
+        if (start_question_in_window(dialog_place(nullptr).gamescope) &&
+            start_asks(options.safe_start, last, interactive)) {
+            SDL_Log("safe start: the question is asked in the window");
+            start_later = StartLater{last, offer};
+        } else {
+            apply_start(decide_start(options.safe_start, last, interactive, offer), offer);
         }
         if (last.crashed) {
             SDL_Log("the last run did not end cleanly (report: %s)",
@@ -1625,6 +1643,29 @@ int main(int argc, char *argv[]) {
     SDL_Renderer *renderer = window != nullptr ? gfx_backend.open(window, settings.gfx_backend,
                                                                   wants_gpu_renderer(settings))
                                                : nullptr;
+    // #198's question in the window (#416), then the safe start's settings; a safe start that
+    // changes what draws opens the renderer again (as after the preset picker). A window closed
+    // in the question quits and keeps the marker, so the next start asks again.
+    if (start_later && renderer != nullptr) {
+        bool quit = false;
+        const Settings before = settings;
+        const StartDecision start =
+            decide_start(false, start_later->last, true, start_later->offer,
+                         window_start_prompts(window, renderer, settings, &quit));
+        if (quit) {
+            run_end.crashes_dir.clear();
+            gfx_backend.close();
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return kExitOk;
+        }
+        apply_start(start, start_later->offer);
+        if (settings.gfx_backend != before.gfx_backend ||
+            wants_gpu_renderer(settings) != wants_gpu_renderer(before)) {
+            gfx_backend.close();
+            renderer = gfx_backend.open(window, settings.gfx_backend, wants_gpu_renderer(settings));
+        }
+    }
     // The bundle (#182, game.h's find_bundle): found, or imported now from the player's IPA by
     // the import screen in an interactive run; without one the game cannot start.
     if (game && renderer != nullptr) {

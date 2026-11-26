@@ -91,3 +91,7 @@ Every command takes `--dry-run` (`-DryRun`): all local steps, the GitHub calls p
 ## Addendum: the tag, the draft and the kits from CI (ADR 0126, 2026-11-07)
 
 A release is now a pull request from `dev` into `main` titled `Release vX.Y.Z[-rc.N]`. When it merges, `.github/workflows/release.yml` creates the annotated tag on the merge commit and the draft (steps 1 and 2 of the flow above), then builds, checks, guards, checksums and uploads the three kits on hosted runners (steps 3 and 4 for the kits). The contents, names, guard and `publish` are unchanged. The by-hand flow still works ([ADR 0126](0126-dev-branch-release-pull-requests-and-ci-by-target.md)).
+
+## Addendum: a notes pre-flight and the release label (#313, 2026-11-26)
+
+The consequence above happened: the v0.1.0 notes put twelve PRs in "Other changes", among them the release PR itself, and the ten PRs since then had no label. GitHub's generated notes stay; the labelling is now checked. `scripts/release notes TAG` (and `start`) asks GitHub's `generate-notes` endpoint for the notes it would write, which creates nothing, and fails while any PR lands in "Other changes" (`python3 -m mtport.release notes-check`). `.github/release.yml` gained a Nintendo Switch and a Compendium group and leaves out PRs labelled `type:release`; the release PR carries that label, which the `release title` check of ADR 0126 now requires. The notes header opens with a "What's new" written for players, rewritten for each release ([docs/release-checklist.md](../release-checklist.md)).

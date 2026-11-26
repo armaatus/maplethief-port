@@ -257,6 +257,30 @@ The loader trusts everything above: it indexes tables with item ids, loads `<are
 
 The limits are facts about the 1.5 data. `tests/test_savecheck_real.py` checks them against the bundle, and checks that every `Scripts.strings` key passes the key rule. `unwritten_*` bytes, `exp`, `hp`, `mp`, `meso`, positions, flags, `chapter`, quest progress and the other `config` bytes are not checked: the game reads them as numbers and never as indexes.
 
+## Building a save
+
+`python3 -m mtport.savedata build DESCRIPTION OUT_DIR [--slot S] [--app APP] [--language en|ko]` writes `theif<S>` and `quest<S>` from a JSON description of one character ([#297](https://github.com/armaatus/maplethief-port/issues/297), [ADR 0161](../adr/0161-bot-world-tables-from-the-knowledge-base-and-built-start-states.md)). It refuses to write the pair unless [the checks](#checking-a-save) pass. `python3 -m mtport.savedata describe THEIF QUEST [--app APP]` prints the description of an existing pair, so a state a run reached can be captured and built again. The rule for using a built save in a test is in [testing/start-states.md](../testing/start-states.md).
+
+Every key is optional except `hp` and `mp`. A key left out keeps the value of [a new character](#a-new-character).
+
+| Key | Value | Field |
+| --- | --- | --- |
+| `level`, `exp`, `sp`, `hp`, `mp`, `meso` | numbers | the same names in `theif` |
+| `branch`, `job_tier` | 0 Rogue, 1 Assassin, 2 Bandit; the advancement, 0 to 4 | `branch`, `job_tier` |
+| `map`, `position` | `[area, map]`, `[x, y]` (`[-1, -1]`: the map's default spawn) | `area`, `map`, `x`, `y` |
+| `flags`, `action` | numbers | `flags`, `action` |
+| `caption` | text, or `{"key": K}`: the text of key `K` of `Scripts` or `ScriptExtra` in `--language` (needs `--app`; the sections' titles are `CDataMgr.m_strQuestTitle.<n>`) | `caption` |
+| `equip_inventory`, `equipped` | up to 48 and 5 slots in order: `null` for empty, or `{"id", "rolled", "slots_left", "scrolls_used", "attack", "defense", "accuracy", "avoid", "hp", "mp"}` with any but `id` left out for 0 | the equipment records |
+| `etc_inventory` | up to 48 slots: `null` or `[id, count]` | `etc_inventory` |
+| `skills` | `{"<skill id>": level}`, placed in the [skill slots](#skill-slots) of `branch` and `job_tier` (needs `--app` for `skill.dat`) | `skill_levels` |
+| `skill_levels` | the 13 slot levels as they are stored, instead of `skills` | `skill_levels` |
+| `shortcuts` | 5 slots: `null` or `[kind, id]` | `shortcuts` |
+| `chapter` | the chapter | `quest` 0x000 |
+| `main`, `side` | `{"<quest number>": state}`, state 0 to 2 ([quest states](#quest-states)) | `quest` 0x001, 0x065 |
+| `records` | up to 10 active quests in order: `{"kind", "number", "npc", "title", "description", "requirements", "rewards"}`; `title` and `description` are `Scripts.strings` keys; a requirement is `{"item": [table, id], "count"}`, `{"mob", "needed", "progress"}` or `{"meso"}`, a reward `{"item": [table, id], "count"}`, `{"meso"}` or `{"exp"}` (up to 5 each) | the [quest records](#quest-record-0x1c9-bytes) |
+
+The bytes the game never writes are zero in a built save. `savedata.written_diff` compares two files in every byte the game does write, and names the field or quest that differs.
+
 ## Pulling a save from a device
 
 Without a jailbreak, make an unencrypted Finder or iTunes backup of the device and run `python3 -m mtport.iosbackup import <backup> --program <MapleThief>`. It finds the game's files in the backup (`AppDomain-com.nexonmobile.maplestory.thief`, `Documents/`), checks them and imports them ([Saves from your iPhone](../play/iphone-saves.md), [ios-backup.md](ios-backup.md), #149).
@@ -267,4 +291,6 @@ On a jailbroken device the files are in the app's sandbox: `/var/mobile/Applicat
 
 - `tests/test_savedata.py` (CI) builds synthetic saves from this spec. It checks that every field lands at the offset in the tables above, and that a synthetic character, quest state, `config`, `cupon` and receipt list round-trip byte-exactly through parse and encode. It also round-trips random bytes for each fixed-size file, checks the new-character defaults against `LoadSaveData`, checks the quest-record overlap, rejects malformed input, and checks that this spec's `theif` and `quest` tables list the parser's fields in order.
 - `tests/test_savecheck.py` (CI) runs [the checks](#checking-a-save) in Python on 50 fixture sets, valid and hostile, and checks that the C side has the same limits, codes and order. CTest `saves.check_parity` runs the same fixtures through `MapleThief --check-saves` as folders and as deflated zips, and compares the verdicts. `saves.cli_round_trip` imports each fixture with `--import-saves`: a refused one changes nothing, and an accepted one ends in `Documents/` byte for byte. It is then exported to a folder and to a zip, and both match.
+- `tests/test_savedata.py` (CI) also builds pairs from descriptions: the defaults are the new character, `describe` then `build` gives every written byte back, skills by id and captions by key land where they should, malformed descriptions are refused, and a description that breaks a check (an item, level, job, skill, map or quest key) is refused with that check's code.
+- `tests/test_savedata_build_real.py` (local): `tests/starts/chapter_2.json`, built with the shipped bundle, equals part L's save of the chapter-1 chain in every byte the game writes ([testing/start-states.md](../testing/start-states.md)).
 - `tests/test_savedata_real.py` (local): the new-character save built from the shipped `hero.dat` refers to the Wooden Club, the two potions, `28.map` and `2.mapprj`. The default caption matches `ScriptExtra.strings`. The skill slots of a tier-4 Assassin and Bandit fill exactly 13 distinct skills. The named functions exist in the Ghidra export. A pulled device save round-trips (skipped until one exists).

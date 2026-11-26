@@ -4,7 +4,7 @@ You only need this page to change the port, or to play on a system without a dow
 
 The repository holds only our own work. **You bring your own copy of the game**, `MapleThief-1.5.ipa`, and everything else is made from it locally by scripts: extracted files, converted assets, recompiled code and binaries. All of it lands in the git-ignored `work/`, `assets-out/`, `build/` and `dist/`, and none of it is ever committed ([ADR 0100](../adr/0100-public-repository-and-player-releases.md)). What you build holds the game: keep it to your own machines.
 
-Below: the tools for each system, then the [one-command build](#one-command-build-just-build), then every step by hand. The other pages are [Running and options](running.md), [Testing and CI](testing.md) and [Releases](releases.md). `just doctor` checks what you have and says the fix for what's missing.
+Below: the tools for each system, then the [one-command build](#one-command-build-just-build), then every step by hand. The other pages are [Running and options](running.md), [Testing and CI](testing.md), [Releases](releases.md) and the [how-tos](how-to/README.md) for the most common changes. `just doctor` checks what you have and says the fix for what's missing.
 
 ## Tools
 

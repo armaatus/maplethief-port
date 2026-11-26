@@ -237,7 +237,8 @@ inline void act(Run &r, Nav &n, const wm::Map &m, const Hero &h, double el, int 
 }
 
 // One turn toward goal g. True once the hero stands within g.tol of g.x on g's platform. On
-// another map it goes to the portal toward g's map (links()) and up through it; `closed` lists
+// another map it goes to the portal toward g's map (wm::links() of the hero's chapter) and up
+// through it; `closed` lists
 // portal links it may not take ((area * 100 + map, kind)).
 inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
                   const std::vector<std::pair<int, int>> &closed = {}) {
@@ -279,21 +280,19 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     int tx = g.x, ty = g.y, tol = g.tol;
     bool enter = false;
     if (!h.on(g.area, g.map)) {
-        // The portals whose scripts check a quest (script/chapter1/portal*.out) are closed
-        // until it allows them: portal201 (2.0) main 9 done, portal212 (2.1) side 25 active,
-        // portal240 (2.4) side 7 done, portal371 (3.7) main 18 active. Chapter 1's quest
-        // numbers: a later chapter runs common/'s portal scripts, and its quests are others.
+        // The portals whose warps have conditions (the generated tables' gates: in chapter 1
+        // portal201 on 2.0 wants main 9 done, portal212 on 2.1 side 25 active, portal240 on 2.4
+        // side 7 done, portal371 on 3.7 main 18 active) are shut until the quest states allow
+        // them. Each chapter has its own links and gates.
         std::vector<std::pair<int, int>> shut = closed;
-        const auto gate = [&](int area, int map, int kind, u32 sort, u32 n, i32 state) {
-            if (h.chapter == 1 && quest_state(cpu, h, sort, n) != state) {
-                shut.push_back({area * 100 + map, kind});
+        for (const wm::Link &l : wm::links()) {
+            if (l.chapter == h.chapter && !l.gate.empty() && !wm::open(l, [&](int kind, int n) {
+                    return quest_state(cpu, h, static_cast<u32>(kind), static_cast<u32>(n));
+                })) {
+                shut.push_back({l.area * 100 + l.map, l.kind});
             }
-        };
-        gate(2, 0, 1, 0, 9, 2);
-        gate(2, 1, 2, 1, 25, 1);
-        gate(2, 4, 2, 1, 7, 2);
-        gate(3, 7, 1, 0, 18, 1);
-        const int kind = wm::next_portal(h.area, h.map, g.area, g.map, shut);
+        }
+        const int kind = wm::next_portal(h.chapter, h.area, h.map, g.area, g.map, shut);
         const wm::Object *p = kind >= 0 ? m.portal(kind) : nullptr;
         if (p == nullptr) {
             say(n, "no way from " + std::to_string(h.area) + "." + std::to_string(h.map) + " to " +
@@ -467,6 +466,16 @@ inline Goal at_object(int area, int map, const std::string &name, int tol = 6) {
     return {area, map, o->x, o->y, tol};
 }
 
+// The shop NPC on a map of `area` who sells `id` (an other item, or with `equip` equipment), from
+// the generated shop tables, as a goal; area -1 when no shop of the area sells it.
+inline Goal shop_goal(int area, i32 id, bool equip = false) {
+    const wm::Shop *s = wm::shop_selling(area, equip ? 0 : 1, id);
+    if (s == nullptr) {
+        return Goal{};
+    }
+    return at_object(s->area, s->map, s->npc, 6);
+}
+
 // The map's live objects (CMMap, *(*0xF13C0); docs/formats/obj.md): the width in tiles +0x20,
 // the objects +0x48 (each: cell +0, kind +2, visible +6), their count +0x4C, their script names
 // +0x54. A scene can move an object (its commands 37-41 rewrite the cell): the boss map's
@@ -604,10 +613,10 @@ inline bool in_shop(mt_cpu *cpu) {
     return mt_input_panel() == 6 && game_mode(cpu) == 2 && popup_id(cpu) == -1;
 }
 
-// Buys other item `id` (its row on the Buy tab) one at a time from the shop NPC `npc` on (area,
-// map) until the hero carries `want` of it or has less than `keep` meso left after one more: goes
-// there, up opens the shop, down to the row, A (popup 5 / 3: how many, buy?), A (popup 111:
-// bought), A; B closes the shop.
+// Buys other item `id` (its row on the Buy tab) one at a time from a shop NPC until the hero
+// carries `want` of it or has less than `keep` meso left after one more: goes there, up opens the
+// shop, down to the row, A (popup 5 / 3: how many, buy?), A (popup 111: bought), A; B closes the
+// shop.
 // The stock-up's state between turns.
 struct Stock {
     Nav nav;
@@ -673,10 +682,15 @@ inline bool stock_turn(Run &r, mt_cpu *cpu, double el, Stock &s, const Goal &g, 
     return false;
 }
 
-inline void then_stock(Run &r, std::string what, int area, int map, const std::string &npc, i32 id,
-                       i32 want, i32 keep = 0, double timeout = 240) {
+// Buys other item `id` up to `want` from the shop of `area` that sells it (shop_goal).
+inline void then_stock(Run &r, std::string what, int area, i32 id, i32 want, i32 keep = 0,
+                       double timeout = 240) {
     auto s = std::make_shared<Stock>();
-    const Goal g = at_object(area, map, npc, 6);
+    const Goal g = shop_goal(area, id);
+    if (g.area < 0) {
+        std::printf("FAIL: no shop of area %d sells item %d\n", area, id);
+        g_failures++;
+    }
     then(r, "stock: " + what, timeout, [&r, s, g, id, want, keep](mt_cpu *cpu, double el) {
         return stock_turn(r, cpu, el, *s, g, id, want, keep);
     });
@@ -783,12 +797,16 @@ inline void then_equip(Run &r, std::string what, i32 id, i32 slot) {
     });
 }
 
-// Buys equipment `id` from the equip shop NPC `npc` on (area, map), keeping at least `keep` meso,
-// and wears it in item_equip slot `slot`. Short of meso it buys nothing and goes on.
-inline void then_gear(Run &r, std::string what, int area, int map, const std::string &npc, i32 id,
-                      i32 slot, i32 keep = 0, double timeout = 240) {
+// Buys equipment `id` from the equip shop of `area` that sells it (shop_goal), keeping at least
+// `keep` meso, and wears it in item_equip slot `slot`. Short of meso it buys nothing and goes on.
+inline void then_gear(Run &r, std::string what, int area, i32 id, i32 slot, i32 keep = 0,
+                      double timeout = 240) {
     auto s = std::make_shared<Stock>();
-    const Goal g = at_object(area, map, npc, 6);
+    const Goal g = shop_goal(area, id, true);
+    if (g.area < 0) {
+        std::printf("FAIL: no shop of area %d sells equipment %d\n", area, id);
+        g_failures++;
+    }
     then(r, "gear: " + what, timeout, [&r, s, g, id, keep](mt_cpu *cpu, double el) {
         return stock_turn(r, cpu, el, *s, g, id, 1, keep, true);
     });
@@ -1013,10 +1031,13 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
         std::size_t restock_index = 0;
     };
     auto s = std::make_shared<S>();
-    // Out of Red Potions with meso to spare: more from the area's town shop (Etc00 in Kerning
-    // City, Etc10 in Perion, Etc20 in Henesys, Etc30 on 3.0), then back.
-    static const char *const k_shops[] = {"Etc00", "Etc10", "Etc20", "Etc30"};
-    const Goal shop_at = area >= 0 && area <= 3 ? at_object(area, 0, k_shops[area]) : Goal{};
+    // Out of a restocked item with meso to spare: more from the shop of the area that sells it
+    // (the generated shop tables: Etc00 in Kerning City, Etc10 in Perion, Etc20 in Henesys,
+    // Etc30 on 3.0 for the potions), then back. None in the area: no restock.
+    std::vector<Goal> shop_at;
+    for (const Restock &w : style.restock) {
+        shop_at.push_back(shop_goal(area, w.id));
+    }
     then(r, "farm: " + what, timeout,
          [&r, s, area, map, ids, done, shop_at, style](mt_cpu *cpu, double el) {
              const Hero h = hero(cpu);
@@ -1031,11 +1052,11 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
                  s->falls++;
                  std::printf("farm: the hero fell at %.2f s (%s)\n", r.t, where(cpu).c_str());
              }
-             if (!s->restocking && shop_at.area >= 0 && h.addr != 0 && h.hp > 0 &&
-                 el >= s->restock_after) {
+             if (!s->restocking && h.addr != 0 && h.hp > 0 && el >= s->restock_after) {
                  for (std::size_t i = 0; i < style.restock.size() && !s->restocking; i++) {
                      const Restock &w = style.restock[i];
-                     if (item_count(cpu, h, w.id) < w.below && h.meso >= w.min_meso) {
+                     if (shop_at[i].area >= 0 && item_count(cpu, h, w.id) < w.below &&
+                         h.meso >= w.min_meso) {
                          s->restocking = true;
                          s->stock = Stock{};
                          s->restock_index = i;
@@ -1046,7 +1067,8 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
              }
              if (s->restocking) {
                  const Restock &w = style.restock[s->restock_index];
-                 if (stock_turn(r, cpu, el, s->stock, shop_at, w.id, w.want, w.keep)) {
+                 if (stock_turn(r, cpu, el, s->stock, shop_at[s->restock_index], w.id, w.want,
+                                w.keep)) {
                      s->restocking = false;
                      s->restock_after = el + 120;
                  }

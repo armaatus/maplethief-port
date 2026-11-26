@@ -102,6 +102,8 @@ These script a run, for tests and for reproducing a problem. Scripted and headle
 | `--no-audio`, `--audio-capture FILE`, `--audio-test-tone` | no sound; write the mix to a file; the placeholder plays a test tone and checks it |
 | `--perf-csv FILE` | a row per window frame ([frame telemetry](#frame-telemetry)) |
 | `--dump-textures DIR` | writes every texture the game uploads ([texture packs](#texture-packs)) |
+| `--force-crash host\|trap` | crashes on purpose 2 s after the first run-loop turn: a bad host write, or a guest trap, to see the crash report and dialog ([Debugging a trap](how-to/trap.md)) |
+| `--safe-start` | this run with the default settings (no packs, the software renderer), as the offer after a crash gives; `settings.ini` is not changed |
 
 ## Exit codes
 
@@ -264,9 +266,15 @@ Every game run logs at exit its tick rate and tick intervals (p50, p99, max, the
 | `MAPLETHIEF_GFX_GPU_TIMING=1` | logs the GPU time per frame at exit |
 | `MAPLETHIEF_GPU_READBACK=1` | the read-back path of the GPU presentation |
 | `MAPLETHIEF_MAIN_THREAD_PRIORITY=normal` | keeps the main thread's default priority ([ADR 0120](../adr/0120-main-thread-priority-in-real-time-runs.md)) |
-| `MAPLETHIEF_TRACE=CHANNELS` | trace channels, comma-separated, e.g. `boot,objc` |
+| `MAPLETHIEF_GAMESCOPE_WINDOW=WxH` | the window size `MapleThief.sh` opens under gamescope, 1280x800 by default ([Linux and Steam Deck](../play/linux-and-steam-deck.md)) |
+| `MAPLETHIEF_TRACE=CHANNELS` | trace channels, comma-separated, e.g. `audio,uikit`, or `all` ([the channels](how-to/trap.md#4-trace-what-led-up-to-it)) |
 | `MAPLETHIEF_TRACE_HLE=FILTERS` | traces HLE calls by import name ([ADR 0030](../adr/0030-runtime-diagnostics.md)) |
 | `MAPLETHIEF_GL_TRACE_FILE=PATH` | writes the GL trace to a file |
 | `MAPLETHIEF_COVERAGE=PATH` | function-entry coverage (builds with `MT_TRACE_ENTRY`) |
+| `MAPLETHIEF_REPORT=PATH` | writes the unimplemented report (imports and selectors the game called that the runtime lacks) to PATH at exit, even when it is empty; `-` for stderr. Unset: stderr, only when not empty |
+| `MAPLETHIEF_SYMBOLS=PATH` | the guest symbol table, so traces and crash reports name functions; the build writes `build/<preset>/maplethief.sym` |
+| `MAPLETHIEF_UNIMPLEMENTED_IMPORT=POLICY` | what an unimplemented import or selector does: `stop` (the default: the guest traps), `continue` (logs the first call, returns 0) or `trace` (logs every call, returns 0) |
+| `MAPLETHIEF_HW_MACHINE=MODEL` | the device the game sees (`hw.machine`), `iPhone3,1` (an iPhone 4) by default |
+| `MAPLETHIEF_CRASH_DIALOG_LOG=FILE` | a test seam: a crash appends `dialog: <path>` to FILE instead of showing the crash dialog |
 
-The build's own variables (`MAPLETHIEF_VERSION`, `PYTHON`, and the rest) are on [Build from source](README.md).
+How to use the diagnostic ones is in [Debugging a trap](how-to/trap.md). `tests/test_env_vars_documented.py` fails when the program reads a `MAPLETHIEF_*` variable this table lacks. The build's own variables (`MAPLETHIEF_VERSION`, `PYTHON`, and the rest) are on [Build from source](README.md).

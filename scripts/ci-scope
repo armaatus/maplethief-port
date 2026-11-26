@@ -37,6 +37,8 @@ while IFS= read -r path || [ -n "$path" ]; do
         tests/test_doc_links.py) continue ;;
         tests/test_platform_docs.py) continue ;;
         tests/test_play_coverage.py) continue ;;
+        tests/test_env_vars_documented.py) continue ;;
+        tests/test_docs_indexes.py) continue ;;
         tools/mtport/handoffs.py) continue ;;
         tests/test_handoff_checklists.py) continue ;;
         tools/mtport/cireport.py) continue ;;   # the weekly report job (#339)
@@ -45,6 +47,9 @@ while IFS= read -r path || [ -n "$path" ]; do
         tests/fixtures/compendium/*) continue ;;
         scripts/compendium) continue ;;
         scripts/ci-scope) continue ;;
+        scripts/rulesets) continue ;;
+        tests/test_rulesets.py) continue ;;
+        .github/rulesets/*) continue ;;
         scripts/local-ci) continue ;;   # never runs in CI
         .github/workflows/compendium.yml) continue ;;
         *) native=true ;;

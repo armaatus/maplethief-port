@@ -42,11 +42,15 @@
 # runners"); pull requests always run on GitHub-hosted runners, so code from a pull request
 # never runs on our machines.
 #
-# A pull request (into either branch) that only touches documentation or compendium work
+# A pull request into dev that only touches documentation or compendium work
 # (scripts/ci-scope has the list) skips the build matrix: the `scope` job decides, and the
 # build jobs then show as skipped. The `switch` job is skipped too when the native changes only
-# touch another platform's own files. The lint + Python job always runs. Manual runs always run
-# everything.
+# touch another platform's own files. The lint + Python job always runs. Manual runs and the
+# release pull request into main always run everything.
+#
+# The `ci-result` job ("CI result") waits for every other job and fails when any of them failed
+# or was cancelled; a job the scope skipped passes. It is the check dev's ruleset requires, since
+# a skipped matrix job never reports under its expanded name (ADR 0173, .github/rulesets/).
 #
 # Third-party actions are pinned to full commit SHAs (the tag is in the comment). Bump one
 # action per commit.
@@ -120,7 +124,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "$EVENT" != pull_request ]; then
+          # Manual runs and the release pull request into main always run everything: main's
+          # ruleset requires every job of the full profile by name (ADR 0173).
+          if [ "$EVENT" != pull_request ] || [ "$BASE" = main ]; then
             printf 'native=true\nswitch=true\nandroid=true\n' | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -135,6 +141,7 @@ jobs:
           scripts/ci-scope < changed.txt | tee -a "$GITHUB_OUTPUT"
         env:
           EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ github.token }}
@@ -597,13 +604,38 @@ jobs:
       - name: Lint (scripts/lint, with clang-tidy)
         run: scripts/lint
 
+  # The one check dev's ruleset requires besides scope and lint (ADR 0173): a skipped matrix job
+  # reports as "${{ matrix.os }} ${{ matrix.config }}", never as "ubuntu-latest debug", so the
+  # ruleset can't name the build jobs on dev. This job passes when every job succeeded or was
+  # skipped by the scope, and fails on any failure or cancellation.
+  ci-result:
+    name: CI result
+    needs: [scope, build, asan, ios, switch, android, lint-python, clang-tidy]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail unless every job succeeded or was skipped
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          bad=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key] | join(" ")')
+          if [ -n "$bad" ]; then
+            echo "::error::Failed or cancelled: $bad"
+            exit 1
+          fi
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+
   # The weekly run's report (issue #339, tools/mtport/cireport.py): after every other job, even
   # when one failed, it lists the run's jobs and checks that each job of the full profile ran
   # and passed, then opens or comments on the one ci-weekly issue, or closes it when green. A
-  # manual run with the `report` input runs it too.
+  # manual run with the `report` input runs it too. `CI result` doesn't need it: it runs only on
+  # those runs, and isn't a check of a pull request.
   weekly-report:
     name: weekly report
-    needs: [scope, build, asan, ios, switch, android, lint-python, clang-tidy]
+    needs: [scope, build, asan, ios, switch, android, lint-python, clang-tidy, ci-result]
     if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.report) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

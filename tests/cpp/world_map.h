@@ -1,7 +1,8 @@
 // The maps as the bot sees them (#77): each map's collision grid (.att, docs/formats/att.md) and
 // objects (.obj, docs/formats/obj.md), read from the extracted bundle, turned into platforms,
 // ladders and the moves between them. A route on one map is a list of those moves; between maps
-// the bot follows the portal links of chapter 1 (k_links, from the portal scripts). Read only.
+// the bot follows the portal links of the hero's chapter, generated from the knowledge base
+// (tables()). Read only.
 // Header-only, like game_driver.h.
 #ifndef MAPLETHIEF_TESTS_WORLD_MAP_H
 #define MAPLETHIEF_TESTS_WORLD_MAP_H
@@ -10,12 +11,14 @@
 #include <climits>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <queue>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -432,34 +435,142 @@ inline std::vector<Step> route(const Map &m, int from, int from_x, int to) {
     return out;
 }
 
-// Chapter 1's portal links (script/chapter1 and script/common portal scripts: changeMap(area,
-// map, portal)): from map (area, map), the portal object of `kind` leads to (to_area, to_map).
-// Portals whose script checks a quest (portal201 main quest 9, portal240 side quest 7,
-// portal212 side quest 25, portal371 main quest 18) are listed; the bot only takes them once
-// the quest allows it.
-struct Link {
-    int area, map, kind, to_area, to_map;
+// The portal links and shops of every chapter, from the generated tables (#297): CTest
+// play.bot_world writes them from the knowledge base (python3 -m mtport.botworld, which
+// documents the format) into the build tree, MT_BOT_WORLD_FILE; MT_BOT_WORLD overrides the path.
+// A link leads from the portal object of `kind` on (area, map) to (to_area, to_map) in
+// `chapter`. Its gate is the warp's conditions: alternatives of terms that hold together, each a
+// quest's state (kind 0 main, 1 side) compared with a value; `known` false is a term the bot
+// can't test (checkRequire, the level), which shuts its alternative. No alternative: open.
+struct Term {
+    int kind = 0, number = 0, value = 0;
+    std::string op = "==";
+    bool known = false;
 };
-inline const std::vector<Link> &links() {
-    static const std::vector<Link> k = {
-        {0, 0, 0, 0, 1}, {0, 0, 1, 0, 3}, {0, 1, 1, 0, 2}, {0, 1, 0, 0, 0}, {0, 2, 1, 1, 1},
-        {0, 2, 0, 0, 1}, {0, 3, 0, 0, 0}, {0, 3, 1, 0, 4}, {0, 4, 0, 0, 3}, {0, 4, 1, 2, 4},
-        {1, 0, 0, 1, 2}, {1, 0, 1, 1, 3}, {1, 1, 1, 1, 2}, {1, 1, 0, 0, 2}, {1, 2, 1, 1, 0},
-        {1, 2, 0, 1, 1}, {1, 3, 0, 1, 0}, {1, 3, 1, 1, 4}, {1, 4, 0, 1, 3}, {1, 4, 1, 2, 1},
-        {2, 0, 0, 2, 3}, {2, 0, 1, 2, 2}, {2, 1, 2, 2, 6}, {2, 1, 0, 1, 4}, {2, 1, 1, 2, 2},
-        {2, 2, 1, 2, 1}, {2, 2, 0, 2, 0}, {2, 3, 0, 2, 4}, {2, 3, 1, 2, 0}, {2, 4, 3, 2, 5},
-        {2, 4, 0, 0, 4}, {2, 4, 1, 2, 3}, {2, 4, 2, 3, 1}, {2, 5, 0, 2, 4}, {2, 6, 1, 2, 7},
-        {2, 6, 0, 2, 1}, {2, 7, 0, 2, 6}, {3, 0, 0, 3, 2}, {3, 0, 1, 3, 3}, {3, 1, 0, 2, 4},
-        {3, 1, 1, 3, 2}, {3, 2, 0, 3, 1}, {3, 2, 1, 3, 0}, {3, 3, 0, 3, 0}, {3, 3, 1, 3, 4},
-        {3, 4, 0, 3, 3}, {3, 4, 1, 3, 5}, {3, 5, 0, 3, 4}, {3, 5, 1, 3, 6}, {3, 6, 0, 3, 5},
-        {3, 6, 1, 3, 7}, {3, 7, 0, 3, 6}, {3, 7, 1, 3, 8},
-    };
-    return k;
+struct Link {
+    int chapter, area, map, kind, to_area, to_map;
+    std::vector<std::vector<Term>> gate;
+};
+// A shop an NPC opens: the NPC object `npc` on (area, map) in `chapter` sells item `item` of
+// `table` (0 equipment, 1 other items) for `price`.
+struct Shop {
+    int chapter, area, map;
+    std::string npc;
+    int shop, table, item, price;
+};
+struct Tables {
+    std::vector<Link> links;
+    std::vector<Shop> shops;
+};
+
+inline Term parse_term(const std::string &t) {
+    Term out;
+    if (t.size() < 2 || t[0] != 'q') {
+        return out; // "?"
+    }
+    const std::size_t dot = t.find('.');
+    const std::size_t op = t.find_first_of("=!<>", dot);
+    if (dot == std::string::npos || op == std::string::npos) {
+        return out;
+    }
+    std::size_t end = op + 1;
+    if (end < t.size() && t[end] == '=') {
+        end++;
+    }
+    out.kind = std::atoi(t.substr(1, dot - 1).c_str());
+    out.number = std::atoi(t.substr(dot + 1, op - dot - 1).c_str());
+    out.op = t.substr(op, end - op);
+    out.value = std::atoi(t.substr(end).c_str());
+    out.known = true;
+    return out;
 }
 
-// The portal kinds to take from (area, map) to reach (to_area, to_map): the first hop of a
-// breadth-first search over links() that skips the `closed` links. -1 when unreachable.
-inline int next_portal(int area, int map, int to_area, int to_map,
+inline const Tables &tables() {
+    static const Tables k = [] {
+        Tables t;
+        const char *env = std::getenv("MT_BOT_WORLD");
+        const std::string path = env != nullptr && *env != '\0' ? env : MT_BOT_WORLD_FILE;
+        std::ifstream in(path);
+        std::string line;
+        while (std::getline(in, line)) {
+            std::istringstream f(line);
+            std::string kind;
+            f >> kind;
+            if (kind == "link") {
+                Link l{};
+                f >> l.chapter >> l.area >> l.map >> l.kind >> l.to_area >> l.to_map;
+                std::string alt;
+                while (f >> alt) {
+                    std::vector<Term> terms;
+                    std::size_t at = 0;
+                    while (at <= alt.size()) {
+                        const std::size_t amp = std::min(alt.find('&', at), alt.size());
+                        terms.push_back(parse_term(alt.substr(at, amp - at)));
+                        at = amp + 1;
+                    }
+                    l.gate.push_back(std::move(terms));
+                }
+                t.links.push_back(std::move(l));
+            } else if (kind == "shop") {
+                Shop s{};
+                f >> s.chapter >> s.area >> s.map >> s.npc >> s.shop >> s.table >> s.item >>
+                    s.price;
+                t.shops.push_back(std::move(s));
+            }
+        }
+        if (t.links.empty()) {
+            std::fprintf(stderr,
+                         "world_map: no bot world tables in %s: run CTest play.bot_world "
+                         "(python3 -m mtport.botworld)\n",
+                         path.c_str());
+            std::exit(1);
+        }
+        return t;
+    }();
+    return k;
+}
+inline const std::vector<Link> &links() { return tables().links; }
+
+// Whether `l` is open with these quest states: `state(kind, number)` reads one.
+template <class State> bool open(const Link &l, State &&state) {
+    if (l.gate.empty()) {
+        return true;
+    }
+    for (const std::vector<Term> &alt : l.gate) {
+        bool all = true;
+        for (const Term &t : alt) {
+            const int v = t.known ? state(t.kind, t.number) : 0;
+            all = all && t.known &&
+                  (t.op == "=="   ? v == t.value
+                   : t.op == "!=" ? v != t.value
+                   : t.op == "<"  ? v < t.value
+                   : t.op == "<=" ? v <= t.value
+                   : t.op == ">"  ? v > t.value
+                                  : v >= t.value);
+        }
+        if (all) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The NPC who sells item `item` of `table` on a map of `area` in `chapter` (any chapter: -1),
+// nullptr if none does.
+inline const Shop *shop_selling(int area, int table, int item, int chapter = -1) {
+    for (const Shop &s : tables().shops) {
+        if (s.area == area && s.table == table && s.item == item &&
+            (chapter < 0 || s.chapter == chapter)) {
+            return &s;
+        }
+    }
+    return nullptr;
+}
+
+// The portal kinds to take from (area, map) to reach (to_area, to_map) in `chapter`: the first
+// hop of a breadth-first search over that chapter's links() that skips the `closed` links
+// ((area * 100 + map, kind)). -1 when unreachable.
+inline int next_portal(int chapter, int area, int map, int to_area, int to_map,
                        const std::vector<std::pair<int, int>> &closed = {}) {
     using M = std::pair<int, int>;
     std::map<M, std::pair<M, int>> prev;
@@ -479,7 +590,7 @@ inline int next_portal(int area, int map, int to_area, int to_map,
         }
         for (const Link &l : links()) {
             const M from{l.area, l.map}, to{l.to_area, l.to_map};
-            if (from != u || prev.count(to) ||
+            if (l.chapter != chapter || from != u || prev.count(to) ||
                 std::find(closed.begin(), closed.end(), M{l.area * 100 + l.map, l.kind}) !=
                     closed.end()) {
                 continue;

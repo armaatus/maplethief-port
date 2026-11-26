@@ -43,6 +43,7 @@ EXPECTED: dict[str, tuple[str, ...]] = {
     "android": ("android (APK, pinned SDK and NDK container, no IPA)",),
     "lint-python": ("lint + Python min/latest",),
     "clang-tidy": ("lint (clang-tidy)",),
+    "ci-result": ("CI result",),
 }
 # The job that runs this module; it is still running when it reads the list.
 SELF = ("weekly-report", "weekly report")

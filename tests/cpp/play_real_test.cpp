@@ -2100,12 +2100,12 @@ void chapter_1_a(Run &r, u64) {
     r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
     then_new_game(r);
     then_tutorial(r);
-    then_stock(r, "Red Potions from Mr. Wang (Etc20, Henesys)", 2, 0, "Etc20", 3, 20, 100);
+    then_stock(r, "Red Potions from Mr. Wang (Etc20, Henesys)", 2, 3, 20, 100);
     then_farm(r, "5 Red Snails on 2.3 (Elder's Advice)", 2, 3, {2}, defeated(0, 7, 5), 900);
     then_farm(r, "level 10 on 2.3", 2, 3, {}, level_at_least(10), 2400);
     then_talk_to(r, "Stan: Elder's Advice (main 7) done, Find the Dark Lord (8) given", 2, 0,
                  "Stan", 1, main_quests(7, 8));
-    then_stock(r, "Red Potions", 2, 0, "Etc20", 3, 40, 200);
+    then_stock(r, "Red Potions", 2, 3, 40, 200);
     then_talk_to(r, "Darklord: Find the Dark Lord done, Job Advancement Evaluation (21) given", 0,
                  0, "Darklord", 1, main_quests(8, 21));
     then_farm(r, "10 Stumps on 0.4 (Job Advancement Evaluation)", 0, 4, {4}, defeated(0, 21, 10),
@@ -2146,7 +2146,7 @@ void chapter_1_b(Run &r, u64) {
     then_equip(r, "the Fruit Knife (the Job Advancement's reward)", 24, 1);
     then_check(r, "the hero wields the Fruit Knife",
                [](mt_cpu *cpu) { return worn(cpu, 1) == 24; });
-    then_stock(r, "Red Potions", 2, 0, "Etc20", 3, 60, 200);
+    then_stock(r, "Red Potions", 2, 3, 60, 200);
     then_talk_to(r, "Humanoid: Human Longings (side 3) given", 2, 0, "Humanoid0", -1,
                  quest_is(1, 3, 1));
     then_talk_to(r, "Pia: Pia's Play Costume (side 2) given", 2, 0, "Pia", -1, quest_is(1, 2, 1));
@@ -2218,20 +2218,20 @@ void chapter_1_d(Run &r, u64) {
     fight.restock = {Restock{3, 100, 300, 25, 400}, Restock{6, 60, 300, 5, 300}};
     then_spend_sp(r, "Double Step, then Nimble Body", build);
     then_quick_slot(r, "Double Step on LB (quick slot 3)", 3, 3);
-    then_gear(r, "Red Woolen Hat", 1, 0, "Equip10", 0, 0);
-    then_gear(r, "Gidder Shoes", 1, 0, "Equip10", 48, 4);
-    then_gear(r, "Red Cloth Vest", 1, 0, "Equip10", 12, 2);
+    then_gear(r, "Red Woolen Hat", 1, 0, 0);
+    then_gear(r, "Gidder Shoes", 1, 48, 4);
+    then_gear(r, "Red Cloth Vest", 1, 12, 2);
     then_farm(r, "level 20 on 0.1 (Stumps, Orange Mushrooms)", 0, 1, {4, 6}, level_at_least(20),
               2400, fight);
     then_spend_sp(r, "level 20", build);
-    then_gear(r, "the Triple-Tipped Zamadar (level 20)", 0, 0, "Equip00", 26, 1);
+    then_gear(r, "the Triple-Tipped Zamadar (level 20)", 0, 26, 1);
     then_farm(r, "30 Leaves from the Dark Stumps on 1.2 (Missing Master)", 1, 2, {9}, ready(0, 10),
               2400, fight);
     then_farm(r, "7,800 meso on 1.2", 1, 2, {9}, meso_at_least(7800), 3600, fight);
     then_spend_sp(r, "Perion", build);
-    then_gear(r, "the Red Pao (level 20)", 1, 0, "Equip10", 14, 2, 300);
-    then_gear(r, "the Red Loose Cap (level 20)", 1, 0, "Equip10", 2, 0, 300);
-    then_gear(r, "the Enamel Boots (level 20)", 1, 0, "Equip10", 50, 4, 300);
+    then_gear(r, "the Red Pao (level 20)", 1, 14, 2, 300);
+    then_gear(r, "the Red Loose Cap (level 20)", 1, 2, 0, 300);
+    then_gear(r, "the Enamel Boots (level 20)", 1, 50, 4, 300);
     then_talk_to(r, "Manzie: Missing Master (10) done, Missing Master 2 (11) given", 1, 0,
                  "Manzie2", -1, main_quests(10, 11));
     then_talk_to(r, "Bruce: Missing Master 2 (11) done, Bruce's Research (12) given", 2, 0, "Bruce",
@@ -2476,8 +2476,8 @@ void chapter_1_h(Run &r, u64) {
               fight);
     then_talk_to(r, "Guard: Crafting Armor (side 29) done", 2, 4, "Guard", -1, quest_is(1, 29, 2));
     then_equip(r, "the Dark Silver Stealer (Crafting Armor's reward)", 16, 2);
-    then_gear(r, "the Dark Guise (level 30)", 3, 0, "Equip30", 4, 0, 1500);
-    then_gear(r, "the Line Boots (level 30)", 3, 0, "Equip30", 53, 4, 1500);
+    then_gear(r, "the Dark Guise (level 30)", 3, 4, 0, 1500);
+    then_gear(r, "the Line Boots (level 30)", 3, 53, 4, 1500);
     then_talk_to(r, "Chrishrama: Chrishrama's Request 1 (side 9) given", 3, 0, "Cri", -1,
                  quest_is(1, 9, 1));
     then_farm(r, "30 Evil Eye Tails on 3.4 (Chrishrama's Request 1)", 3, 4, {17}, ready(1, 9), 3600,
@@ -2609,8 +2609,8 @@ void chapter_1_k(Run &r, u64) {
     // attacks when its body is in front of the hero.
     // A first try with 100 Red Potions ran out with Malady at 2,500 of 15,000 HP, about 1,300
     // game-s in; Blue Potions went at about one a minute.
-    then_stock(r, "Red Potions (Etc30)", 3, 0, "Etc30", 3, 200, 500, 480);
-    then_stock(r, "Blue Potions (Etc30)", 3, 0, "Etc30", 6, 60, 500);
+    then_stock(r, "Red Potions (Etc30)", 3, 3, 200, 500, 480);
+    then_stock(r, "Blue Potions (Etc30)", 3, 6, 60, 500);
     FarmStyle boss = fight;
     boss.restock = {};
     boss.reach_up = 100;

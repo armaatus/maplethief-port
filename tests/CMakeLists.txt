@@ -426,6 +426,7 @@ maplethief_add_cpp_test(
             cpp/switch_applet_test.cpp
             cpp/data_copy_test.cpp
             cpp/crash_report_test.cpp
+            cpp/start_question_test.cpp
             cpp/switch_input_test.cpp
             cpp/gfx_dksh_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
@@ -970,12 +971,33 @@ target_include_directories(play_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime
 target_compile_definitions(
     play_real_test
     PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
-            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app"
+            MT_BOT_WORLD_FILE="${CMAKE_CURRENT_BINARY_DIR}/bot_world.txt")
 if(TARGET maplethief_gen)
     target_link_libraries(play_real_test PRIVATE maplethief_gen)
     target_compile_definitions(play_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
 endif()
 maplethief_target_defaults(play_real_test)
+# The play bot's reader of its world tables (#297, world_map.h) on a synthetic file; the
+# generator's side is tests/test_botworld.py.
+maplethief_add_cpp_test(world_map_test AREA bot SOURCES cpp/world_map_test.cpp)
+target_compile_definitions(
+    world_map_test
+    PRIVATE MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/tests/cpp/data/bot_world"
+            MT_BOT_WORLD_FILE="${PROJECT_SOURCE_DIR}/tests/cpp/data/bot_world/bot_world.txt")
+# The bot's world tables (#297, tools/mtport/botworld.py): the portal links of every chapter with
+# their quest gates, and the shops, from the knowledge base built from the bundle, written into
+# the build tree (MT_BOT_WORLD_FILE) at test time; nothing derived is committed. Every play.*
+# test requires it (the end of this file). Kept while newer than its inputs; skipped (77) without
+# the bundle.
+add_test(NAME play.bot_world
+         COMMAND "${Python3_EXECUTABLE}" -B -m mtport.botworld --app
+                 "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app" --out
+                 "${CMAKE_CURRENT_BINARY_DIR}/bot_world.txt" --if-stale)
+set_tests_properties(
+    play.bot_world
+    PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 900 FIXTURES_SETUP play_bot_world
+               ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
 # The regression run (#91, ADR 0104, docs/testing/regression-replay.md): mtport.regress plays
 # the recorded replay tests/regress/title_to_combat.replay (the title, Play, the intro, the first
 # map, the tutorial to the snail) with play_real_test regress, twice: every expect holds (the
@@ -1844,3 +1866,12 @@ if(TARGET maplethief_gen)
 endif()
 
 add_subdirectory(golden)
+
+# Every play.* test can drive the bot between maps and to the shops: each requires the bot's world
+# tables (play.bot_world, above).
+get_property(_tests DIRECTORY PROPERTY TESTS)
+foreach(_test IN LISTS _tests)
+    if(_test MATCHES "^play\\." AND NOT _test STREQUAL "play.bot_world")
+        set_property(TEST ${_test} APPEND PROPERTY FIXTURES_REQUIRED play_bot_world)
+    endif()
+endforeach()

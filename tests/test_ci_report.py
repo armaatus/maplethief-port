@@ -111,10 +111,10 @@ def test_a_missing_job_fails_even_when_the_rest_passed():
 
 
 def test_an_unexpected_job_fails_only_when_it_failed():
-    assert assess(jobs() + [Job("CI result", "success", "u")]).green
+    assert assess(jobs() + [Job("new gate", "success", "u")]).green
     assert assess(jobs() + [Job("new job", "skipped", "u")]).green
-    assert [j.name for j in assess(jobs() + [Job("CI result", "failure", "u")]).failed] == [
-        "CI result"
+    assert [j.name for j in assess(jobs() + [Job("new gate", "failure", "u")]).failed] == [
+        "new gate"
     ]
 
 

@@ -47,6 +47,8 @@ def test_compendium_and_docs_only_skip_the_build():
             "tests/test_doc_links.py",
             "tests/test_platform_docs.py",
             "tests/test_play_coverage.py",
+            "tests/test_env_vars_documented.py",
+            "tests/test_docs_indexes.py",
             "tools/mtport/handoffs.py",
             "tools/mtport/cireport.py",
             "tests/test_ci_report.py",
@@ -55,6 +57,9 @@ def test_compendium_and_docs_only_skip_the_build():
             "scripts/compendium",
             "scripts/local-ci",
             ".github/workflows/compendium.yml",
+            "scripts/rulesets",
+            "tests/test_rulesets.py",
+            ".github/rulesets/dev.json",
         )
         == NONE
     )

@@ -73,6 +73,11 @@ enum Capability : std::uint32_t {
     // import screen looks in <base> for MapleThief-1.5.ipa and then any other *.ipa, imports by
     // itself, and offers to delete the file afterwards (import_screen.h's SD-card route).
     kCapIpaOnSdCard = 1u << 13,
+    // A message box (SDL_ShowMessageBox) that every input method of the platform answers:
+    // keyboard and mouse on the desktop, touch on iOS. Without it, #198's start-up question after
+    // a crash is asked in the window (start_question.h, #416); a Steam Deck's Game Mode asks
+    // there too (start_question_in_window).
+    kCapMessageBox = 1u << 14,
 };
 
 struct PlatformCaps {
@@ -83,7 +88,8 @@ struct PlatformCaps {
 
 inline constexpr std::uint32_t kDesktopCaps =
     kCapWindow | kCapDisplays | kCapCursor | kCapKeyboard | kCapFileDialogs | kCapOpenFolder |
-    kCapTypedValues | kCapDataLocationChoice | kCapAudioDevices | kCapQuit | kCapUpdateFetch;
+    kCapTypedValues | kCapDataLocationChoice | kCapAudioDevices | kCapQuit | kCapUpdateFetch |
+    kCapMessageBox;
 
 // The table. The iOS row says what the iOS app (ADR 0136) has: the window is always the whole
 // screen (ADR 0055), an iPad's pointer clicks, a keyboard can be attached; the saves go through
@@ -92,7 +98,7 @@ inline constexpr PlatformCaps kPlatformCaps[] = {
     {SettingsPlatform::kDesktop, "desktop", kDesktopCaps},
     {SettingsPlatform::kIos, "ios",
      kCapCursor | kCapKeyboard | kCapTypedValues | kCapAudioDevices | kCapUpdateFetch |
-         kCapFilesApp},
+         kCapFilesApp | kCapMessageBox},
     // The Homebrew Menu takes the player back after a quit.
     {SettingsPlatform::kSwitch, "switch", kCapQuit | kCapPackFolders | kCapIpaOnSdCard},
 };
@@ -130,6 +136,7 @@ constexpr const char *platform_name(SettingsPlatform platform) {
 
 static_assert(platform_has(kDesktopCaps, SettingsPlatform::kDesktop));
 static_assert(!platform_has(kCapWindow, SettingsPlatform::kSwitch));
+static_assert(!platform_has(kCapMessageBox, SettingsPlatform::kSwitch));
 
 } // namespace maplethief::frontend
 
