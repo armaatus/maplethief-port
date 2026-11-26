@@ -482,12 +482,14 @@ inline std::vector<Step> route(const Map &m, int from, int from_x, int to) {
 // documents the format) into the build tree, MT_BOT_WORLD_FILE; MT_BOT_WORLD overrides the path.
 // A link leads from the portal object of `kind` on (area, map) to (to_area, to_map) in
 // `chapter`. Its gate is the warp's conditions: alternatives of terms that hold together, each a
-// quest's state (kind 0 main, 1 side) compared with a value; `known` false is a term the bot
-// can't test (checkRequire, the level), which shuts its alternative. No alternative: open.
+// quest's state (kind 0 main, 1 side) compared with a value, or with `require` whether that
+// active quest's requirements are met (checkRequire: 1 met, 0 not); `known` false is a term the
+// bot can't test (the level), which shuts its alternative. No alternative: open.
 struct Term {
     int kind = 0, number = 0, value = 0;
     std::string op = "==";
     bool known = false;
+    bool require = false;
 };
 struct Link {
     int chapter, area, map, kind, to_area, to_map;
@@ -507,7 +509,7 @@ struct Tables {
 
 inline Term parse_term(const std::string &t) {
     Term out;
-    if (t.size() < 2 || t[0] != 'q') {
+    if (t.size() < 2 || (t[0] != 'q' && t[0] != 'r')) {
         return out; // "?"
     }
     const std::size_t dot = t.find('.');
@@ -523,6 +525,7 @@ inline Term parse_term(const std::string &t) {
     out.number = std::atoi(t.substr(dot + 1, op - dot - 1).c_str());
     out.op = t.substr(op, end - op);
     out.value = std::atoi(t.substr(end).c_str());
+    out.require = t[0] == 'r';
     out.known = true;
     return out;
 }
@@ -573,7 +576,8 @@ inline const Tables &tables() {
 }
 inline const std::vector<Link> &links() { return tables().links; }
 
-// Whether `l` is open with these quest states: `state(kind, number)` reads one.
+// Whether `l` is open with these quest states: `state(kind, number, require)` reads one (with
+// `require` 1 when that active quest's requirements are met, else 0).
 template <class State> bool open(const Link &l, State &&state) {
     if (l.gate.empty()) {
         return true;
@@ -581,7 +585,7 @@ template <class State> bool open(const Link &l, State &&state) {
     for (const std::vector<Term> &alt : l.gate) {
         bool all = true;
         for (const Term &t : alt) {
-            const int v = t.known ? state(t.kind, t.number) : 0;
+            const int v = t.known ? state(t.kind, t.number, t.require) : 0;
             all = all && t.known &&
                   (t.op == "=="   ? v == t.value
                    : t.op == "!=" ? v != t.value

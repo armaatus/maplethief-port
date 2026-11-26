@@ -29,8 +29,12 @@ def quest_cond(kind, number, op, value):
     }
 
 
-def other_cond(kind, number):
+def require_cond(kind, number):
     return {"native": "checkRequire", "args": [kind, number], "op": "==", "value": 0}
+
+
+def level_cond(level):
+    return {"native": "getLevel", "args": [], "op": ">=", "value": level}
 
 
 def entities():
@@ -44,7 +48,7 @@ def entities():
             "9-4",
             2,
             "9-5",
-            ([other_cond(0, 8), quest_cond(0, 8, "==", 1)],),
+            ([require_cond(0, 8), quest_cond(0, 8, "==", 1)],),
         ),
         warp(
             "common-portal280-1",
@@ -52,7 +56,7 @@ def entities():
             "2-8",
             1,
             "2-9",
-            ([quest_cond(0, 4, "==", 1)], [other_cond(0, 5), quest_cond(0, 4, "!=", 1)]),
+            ([quest_cond(0, 4, "==", 1)], [level_cond(5), quest_cond(0, 4, "!=", 1)]),
         ),
         warp("chapter1-Pirate-1", [1], "2-0", None, "4-1", role="npc"),
         warp("chapter1-unused-1", [1], "5-0", 0, "5-1", used=False),
@@ -93,7 +97,7 @@ def test_links_per_chapter_with_gates():
         "link 1 5 1 0 5 0 ?",
         "link 2 0 0 0 0 1",
         "link 2 0 1 0 0 0",
-        "link 2 9 4 2 9 5 ?&q0.8==1",
+        "link 2 9 4 2 9 5 r0.8==0&q0.8==1",
     ]
 
 
@@ -126,7 +130,10 @@ def test_gate_opens_with_quest_states():
     tutorial = by[(0, 2, 8)]
     assert bw.open_now(tutorial, {(0, 4): 1})
     assert not bw.open_now(tutorial, {(0, 4): 2})
-    assert not bw.open_now(by[(2, 9, 4)], {(0, 8): 1})
+    # checkRequire: the boss's map opens while main 8 is active and its kill not yet made.
+    assert bw.open_now(by[(2, 9, 4)], {(0, 8): 1})
+    assert not bw.open_now(by[(2, 9, 4)], {(0, 8): 1}, met={(0, 8)})
+    assert not bw.open_now(by[(2, 9, 4)], {(0, 8): 2})
     assert not bw.open_now(by[(1, 5, 1)], {})
 
 
@@ -134,6 +141,9 @@ def test_every_operator_parses():
     for op in bw.OPS:
         t = bw.Term((1, 25), op, 1)
         assert bw._parse_term(t.text()) == t
+        r = bw.Term((1, 37), op, 0, require=True)
+        assert r.text().startswith("r1.37")
+        assert bw._parse_term(r.text()) == r
 
 
 def test_parse_rejects_bad_lines():

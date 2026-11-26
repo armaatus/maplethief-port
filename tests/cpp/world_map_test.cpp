@@ -30,7 +30,7 @@ const world_map::Link &link(int chapter, int area, int map, int kind) {
 } // namespace
 
 TEST_CASE("the tables load every link and shop") {
-    CHECK(world_map::links().size() == 9);
+    CHECK(world_map::links().size() == 10);
     const world_map::Link &l = link(2, 0, 1, 1);
     REQUIRE(l.gate.size() == 2);
     REQUIRE(l.gate[0].size() == 1);
@@ -47,7 +47,9 @@ TEST_CASE("the tables load every link and shop") {
 
 TEST_CASE("a gate opens with the quest states") {
     States s;
-    const auto read = [&s](int kind, int number) { return state(s, kind, number); };
+    const auto read = [&s](int kind, int number, bool require) {
+        return require ? 0 : state(s, kind, number);
+    };
     const world_map::Link &perion = link(1, 0, 1, 1);
     CHECK_FALSE(world_map::open(perion, read));
     s[{0, 9}] = 1;
@@ -63,6 +65,24 @@ TEST_CASE("a gate opens with the quest states") {
     s[{1, 25}] = 2;
     CHECK(world_map::open(two, read));
     CHECK_FALSE(world_map::open(link(2, 0, 1, 2), read));
+}
+
+TEST_CASE("a requirement term opens until the quest's requirements are met") {
+    States s{{{0, 8}, 1}};
+    bool met = false;
+    const auto read = [&](int kind, int number, bool require) {
+        return require ? (met ? 1 : 0) : state(s, kind, number);
+    };
+    const world_map::Link &boss = link(2, 0, 3, 1);
+    REQUIRE(boss.gate.size() == 1);
+    CHECK(boss.gate[0][0].require);
+    CHECK_FALSE(boss.gate[0][1].require);
+    CHECK(world_map::open(boss, read));
+    met = true;
+    CHECK_FALSE(world_map::open(boss, read));
+    met = false;
+    s[{0, 8}] = 2;
+    CHECK_FALSE(world_map::open(boss, read));
 }
 
 TEST_CASE("routes use the chapter's links and skip the closed ones") {
@@ -102,6 +122,11 @@ TEST_CASE("a term the format does not know is unknown") {
     CHECK(t.number == 7);
     CHECK(t.op == "<");
     CHECK(t.value == 2);
+    CHECK_FALSE(t.require);
+    const world_map::Term r = world_map::parse_term("r1.37==0");
+    CHECK(r.known);
+    CHECK(r.require);
+    CHECK(r.number == 37);
 }
 
 // A synthetic grid like 4.3's: a floor, a rope hanging 24 px above it, and a ledge whose end is

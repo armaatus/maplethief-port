@@ -289,6 +289,9 @@ inline void act(Run &r, Nav &n, const wm::Map &m, const Hero &h, double el, int 
     }
 }
 
+// Every requirement of active quest (sort, n) met (below).
+inline bool requirements_met(mt_cpu *cpu, i32 sort, i32 n);
+
 // One turn toward goal g. True once the hero stands within g.tol of g.x on g's platform. On
 // another map it goes to the portal toward g's map (wm::links() of the hero's chapter) and up
 // through it; `closed` lists
@@ -335,12 +338,16 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     if (!h.on(g.area, g.map)) {
         // The portals whose warps have conditions (the generated tables' gates: in chapter 1
         // portal201 on 2.0 wants main 9 done, portal212 on 2.1 side 25 active, portal240 on 2.4
-        // side 7 done, portal371 on 3.7 main 18 active) are shut until the quest states allow
-        // them. Each chapter has its own links and gates.
+        // side 7 done, portal371 on 3.7 main 18 active; in chapter 2 the boss maps' portal4111
+        // and portal942 want their quest active and its kill not made yet, checkRequire) are
+        // shut until the quest states allow them. Each chapter has its own links and gates.
         std::vector<std::pair<int, int>> shut = closed;
         for (const wm::Link &l : wm::links()) {
-            if (l.chapter == h.chapter && !l.gate.empty() && !wm::open(l, [&](int kind, int n) {
-                    return quest_state(cpu, h, static_cast<u32>(kind), static_cast<u32>(n));
+            if (l.chapter == h.chapter && !l.gate.empty() &&
+                !wm::open(l, [&](int kind, int n, bool require) {
+                    return require
+                               ? (requirements_met(cpu, kind, n) ? 1 : 0)
+                               : quest_state(cpu, h, static_cast<u32>(kind), static_cast<u32>(n));
                 })) {
                 shut.push_back({l.area * 100 + l.map, l.kind});
             }
