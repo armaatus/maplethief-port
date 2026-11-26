@@ -98,7 +98,7 @@ GitHub sees your IP address and the port's version, as it would for any visit to
 
 ## On the Nintendo Switch
 
-The console's menu has only the rows that work there, so no row does nothing. Open it by clicking both sticks, or with a tap on the gear in handheld mode (the HOME button belongs to the console). Then use the d-pad, A to choose, B to go back, and L / R to change tabs.
+The console's menu has only the rows that work there, so no row does nothing. Open it with **+**, by clicking both sticks, or with a tap on the gear in handheld mode (the HOME button belongs to the console). Then use the d-pad, A to choose, B to go back, and L / R to change tabs.
 
 Not in the Switch's menu:
 

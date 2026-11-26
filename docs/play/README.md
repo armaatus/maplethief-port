@@ -7,7 +7,7 @@ MapleThief is MapleStory Thief Edition, the 2010 iPhone game, running natively o
 ## What you need
 
 1. **Your own copy of the game**: the file `MapleThief-1.5.ipa`. We can't give it to you. [Your game file](your-ipa.md) explains which file it has to be and how to check it.
-2. **A computer** with one of these:
+2. **A computer, phone or console** with one of these:
 
    | System | Minimum |
    |---|---|
@@ -15,8 +15,8 @@ MapleThief is MapleStory Thief Edition, the 2010 iPhone game, running natively o
    | Mac | macOS 13 Ventura or later (Apple silicon or Intel) |
    | Linux | x86_64 with glibc 2.39 or later (Ubuntu 24.04, Fedora 40, current SteamOS) |
    | Steam Deck | Yes, as a non-Steam game ([Linux and Steam Deck](linux-and-steam-deck.md)) |
-| iPhone | iOS 16 or later, built yourself on a Mac with Xcode ([Playing on your iPhone](iphone.md)), not checked on a device yet |
-| Nintendo Switch | One that runs homebrew from the Homebrew Menu ([Playing on the Nintendo Switch](switch.md)), not checked on a console yet |
+   | iPhone | iOS 16 or later, built yourself on a Mac with Xcode ([Playing on your iPhone](iphone.md)); checked on an iPhone 12 so far |
+   | Nintendo Switch | One that runs homebrew from the Homebrew Menu ([Playing on the Nintendo Switch](switch.md)), not checked on a console yet |
 
 ## Download and play
 

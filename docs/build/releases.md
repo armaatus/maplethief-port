@@ -42,7 +42,7 @@ scripts\release.ps1 build TAG -PlayersOnly   # Windows PC, from the x64 develope
 scripts/release publish TAG                  # Mac: every file present, SHA256SUMS, publish
 ```
 
-Each `build` works from a clean checkout of the tag, with `MAPLETHIEF_VERSION` taken from the tag, and unpacks every file to check it (`--version` prints the tag's version; `lipo` and `codesign` on the Mac; on Windows no MSVC runtime DLL in the player build). `publish` checks that all six files and their `.sha256` are on the draft, downloads and verifies them, guards each again, writes `SHA256SUMS` and publishes.
+Each `build` works from a clean checkout of the tag, with `MAPLETHIEF_VERSION` taken from the tag, and unpacks every file to check it (`--version` prints the tag's version; `lipo` and `codesign` on the Mac; on Windows no MSVC runtime DLL in the player build). `publish` checks that `docs/KNOWN_ISSUES.md` at the tag cites no closed issue (`python3 -m mtport.release known-issues`, #309), that all six files and their `.sha256` are on the draft, downloads and verifies them, guards each again, writes `SHA256SUMS` and publishes.
 
 Options: `--dry-run` runs every local step and prints the GitHub commands instead, so the flow can be rehearsed on a local tag. `--replace` (`-Replace`) replaces a file already on the draft. `--platforms` narrows what `build` makes and what `publish` requires. Everything also stays in `build/release/TAG/`.
 

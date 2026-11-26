@@ -9,7 +9,7 @@ What is open today, each with where it's tracked. An entry holds for as long as 
 | Text uses an open font instead of Apple's fonts, so it looks plainer and widths differ a little. It hasn't been compared with a real device, so a line may wrap or clip differently | None | [#118](https://github.com/armaatus/maplethief-port/issues/118), [ADR 0036](adr/0036-coregraphics-and-uikit-drawing.md) |
 | The cash shop can't take real money: every payment is cancelled, as Apple's store is not there | `cash_shop = meso` lets it pay in the game's meso ([settings](play/settings.md)) | [ADR 0034](adr/0034-offline-services.md), [ADR 0072](adr/0072-offline-cash-shop-and-revives.md) |
 | More Games and the banner do nothing: they opened Nexon's pages, which are gone | `hide_online_ui = on` hides them | [Troubleshooting](play/troubleshooting.md#while-playing) |
-| On Windows and Linux, the window size keys Ctrl+1 … Ctrl+5 also attack once in the field, because Ctrl is an attack key | Press them in a menu, or give the sizes other keys in [`[window]`](controls/remapping.md#the-windows-size-keys) | [Keyboard](controls/keyboard.md#the-ports-own-keys) |
+| On Windows and Linux, the window size keys Ctrl+1 … Ctrl+5 also attack once in the field, because Ctrl is an attack key | Press them in a menu, or give the sizes other keys in [`[window]`](controls/remapping.md#the-windows-size-keys) | [#381](https://github.com/armaatus/maplethief-port/issues/381), [Keyboard](controls/keyboard.md#the-ports-own-keys) |
 
 ## Getting it running
 
@@ -27,13 +27,13 @@ Nobody has confirmed these on the real thing yet. They may well be fine.
 
 | What | Source |
 |---|---|
-| The whole game: all chapters, mini-games and endings, on each system | [#79](https://github.com/armaatus/maplethief-port/issues/79), [#92](https://github.com/armaatus/maplethief-port/issues/92), and the automated Chapter 1 runs [#160](https://github.com/armaatus/maplethief-port/issues/160), [#161](https://github.com/armaatus/maplethief-port/issues/161), [#162](https://github.com/armaatus/maplethief-port/issues/162) |
+| The whole game by a person: all chapters, mini-games and endings, on each system | [#79](https://github.com/armaatus/maplethief-port/issues/79), [#92](https://github.com/armaatus/maplethief-port/issues/92) |
 | A clean Windows 11 machine with only the zip | [#82](https://github.com/armaatus/maplethief-port/issues/82) |
 | A real Steam Deck: Game Mode's window, the controller layout, the touch screen | [#84](https://github.com/armaatus/maplethief-port/issues/84) |
 | Steady speed on Windows, the Steam Deck and Intel Macs; it's only been measured on an Apple M4 | [#142](https://github.com/armaatus/maplethief-port/issues/142) |
 | Every `game_speed` length on a real 144 Hz screen; it's only been measured on a 60 Hz screen and with no display lock | [#272](https://github.com/armaatus/maplethief-port/issues/272) |
 | The GPU renderer (`gfx_backend = gpu`) on Windows and Linux; it's only been run on macOS. The default is `software` | [#131](https://github.com/armaatus/maplethief-port/issues/131) |
-| The GPU renderer (`gfx_backend = gpu`) and the filters on a Nintendo Switch; they're built but haven't run on a console. The default is `software` | [#242](https://github.com/armaatus/maplethief-port/issues/242) |
+| The GPU renderer and the filters on a Nintendo Switch, where `gpu` is the default; they're built but haven't run on a console | [#242](https://github.com/armaatus/maplethief-port/issues/242), [ADR 0145](adr/0145-switch-performance-session-and-defaults.md) |
 | The first-start fullscreen fix on macOS 27 | [#179](https://github.com/armaatus/maplethief-port/issues/179) |
 | Playing with only a real gamepad or only a keyboard | [#132](https://github.com/armaatus/maplethief-port/issues/132) |
 | A forced crash showing the crash dialog on macOS and Windows | [#198](https://github.com/armaatus/maplethief-port/issues/198) |
@@ -42,11 +42,10 @@ Nobody has confirmed these on the real thing yet. They may well be fine.
 | Window size keys and fullscreen on a second display | [#196](https://github.com/armaatus/maplethief-port/issues/196) |
 | The Saves tab's file dialogs and Open data folder on real desktops | [#192](https://github.com/armaatus/maplethief-port/issues/192) |
 | All 44 sounds and the music by ear, over a long session | [#124](https://github.com/armaatus/maplethief-port/issues/124) |
-| The picture against screenshots from a real iPhone or iPod | [#60](https://github.com/armaatus/maplethief-port/issues/60) |
 
 ## Preview
 
-A preview platform ships with the release and plays, but hasn't been signed off on the device yet. The label comes off when the issues next to it are closed ([ADR 0147](adr/0147-what-v1-is-and-what-gates-it.md)).
+A preview platform plays, but hasn't been signed off on the device yet: the Switch's zip ships with the release, and the iOS app is built from source. The label comes off when the issues next to it are closed ([ADR 0147](adr/0147-what-v1-is-and-what-gates-it.md)).
 
 | What | Source |
 |---|---|

@@ -13,6 +13,7 @@ For every step by hand, the presets and all the options, see the deep reference:
 | Linux x86_64 | builds a folder and a tarball, in Docker |
 | Steam Deck | [built on another computer](#steam-deck), then copied over |
 | iOS 16 or later | [built on a Mac with Xcode](#ios), then installed from Xcode |
+| Nintendo Switch | [built in Docker](#nintendo-switch) on a Mac or Linux, then copied to the SD card |
 
 ## 1. Install the tools
 
@@ -129,6 +130,10 @@ Build on another computer with `just build linux` (it needs Docker), then copy t
 ## iOS
 
 On a Mac with Xcode, `just build ios` builds `dist/ios/MapleThief.app` and the Xcode project you install it from ([ADR 0136](adr/0136-ios-app-through-xcode.md)). [Playing on your iPhone](play/iphone.md) has the steps: the signing team, the build, and installing it on the phone.
+
+## Nintendo Switch
+
+On a Mac or Linux with Docker, `just build switch` builds `dist/switch/MapleThief.nro` in a container: the game when your IPA is in `original/`, else a small app that only shows its version. Copy it to `sdmc:/switch/maplethief/` on the SD card and start it from the Homebrew Menu ([Playing on the Nintendo Switch](play/switch.md)). The deep reference has the rest: [Nintendo Switch](build/README.md#nintendo-switch).
 
 ## When doctor complains
 

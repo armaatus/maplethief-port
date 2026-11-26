@@ -1,0 +1,59 @@
+{
+  "about": "The systems MapleThief plays on, one entry each (#309). README.md, docs/play/README.md and docs/BUILDING.md each have a table whose first column is 'System' with one row per entry, labelled as `rows` says; tests/test_platform_docs.py checks that. A new system joins here first, once it plays (Android, ADR 0150, joins when its APK reaches the game).",
+  "platforms": [
+    {
+      "id": "windows",
+      "status": "supported",
+      "rows": {
+        "README.md": "Windows 10/11",
+        "docs/play/README.md": "Windows",
+        "docs/BUILDING.md": "Windows 10/11, x64"
+      }
+    },
+    {
+      "id": "macos",
+      "status": "supported",
+      "rows": {
+        "README.md": "macOS 13+",
+        "docs/play/README.md": "Mac",
+        "docs/BUILDING.md": "macOS 13 or later"
+      }
+    },
+    {
+      "id": "linux",
+      "status": "supported",
+      "rows": {
+        "README.md": "Linux",
+        "docs/play/README.md": "Linux",
+        "docs/BUILDING.md": "Linux x86_64"
+      }
+    },
+    {
+      "id": "steam-deck",
+      "status": "supported",
+      "rows": {
+        "README.md": "Steam Deck",
+        "docs/play/README.md": "Steam Deck",
+        "docs/BUILDING.md": "Steam Deck"
+      }
+    },
+    {
+      "id": "ios",
+      "status": "preview",
+      "rows": {
+        "README.md": "iPhone",
+        "docs/play/README.md": "iPhone",
+        "docs/BUILDING.md": "iOS 16 or later"
+      }
+    },
+    {
+      "id": "switch",
+      "status": "preview",
+      "rows": {
+        "README.md": "Nintendo Switch",
+        "docs/play/README.md": "Nintendo Switch",
+        "docs/BUILDING.md": "Nintendo Switch"
+      }
+    }
+  ]
+}

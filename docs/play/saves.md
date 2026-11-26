@@ -14,7 +14,7 @@ Everything the game keeps for you is in a **`data` folder next to the game**: be
 | `states`, `screenshots` | save states and screenshots |
 | `exports`, `import` | for moving saves ([below](#moving-saves-to-another-computer)) |
 
-`game`, beside `data`, holds the game imported from your IPA. It doesn't need a backup: import it again any time.
+`game`, beside `data`, holds the game imported from your IPA (with [the user folder](#the-user-folder-instead), it is inside that folder instead). It doesn't need a backup: import it again any time.
 
 To open the data folder from the game: settings menu (F1, or Guide on a gamepad) → Saves → **Open data folder**. It opens in Finder, Explorer or your file manager. The Saves tab shows its path at the top, and `MapleThief --print-data-dir` prints it.
 

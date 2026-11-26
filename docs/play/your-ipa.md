@@ -35,5 +35,5 @@ The long string it prints must match exactly.
 
 ## Where to put it
 
-- **Download and play**: the game asks for it on the first start. Choose the file wherever it is, or drag it onto the window. The game copies the game's files into the `game/` folder of its data folder ([Saves](saves.md) lists where that is), so you can move or delete the IPA afterwards. `--import-ipa FILE` imports another copy.
+- **Download and play**: the game asks for it on the first start. Choose the file wherever it is, or drag it onto the window. The game copies the game's files into a `game/` folder beside its `data` folder, or inside the user folder when you keep your data there ([Saves](saves.md#where-your-saves-are)), so you can move or delete the IPA afterwards. `--import-ipa FILE` imports another copy.
 - **Build it yourself**: copy it into the project's `original/` folder, named exactly `MapleThief-1.5.ipa` ([original/README.md](../../original/README.md)), or name it when you build: `scripts/build-from-ipa PATH` ([Build from your own copy](../build/README.md#build-from-your-own-copy-wherever-it-is)).
