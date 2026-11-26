@@ -84,6 +84,15 @@ mt_snapshot_meta mt_snapshot_meta_default(void) MT_NOEXCEPT;
 int mt_snapshot_save(mt_cpu *cpu, const mt_snapshot_meta *meta, uint8_t **out, size_t *size,
                      char *why, size_t why_size) MT_NOEXCEPT;
 
+/* The deflated state file of a stored one (#335, ADR 0151): every section of `bytes` (a state
+ * file, checked as mt_snapshot_read_header checks it, with no expectations) re-packed as
+ * mt_snapshot_save packs it without MT_SNAPSHOT_STORE, the header's STORE flag cleared, so the
+ * result equals the deflated save of the same moment byte for byte. *out (malloc'd, freed with
+ * free) and *size. Returns 0, or -1 with the reason (the file does not read, out of memory).
+ * Reads only `bytes`, never the game: any thread may call it, the turn hook's or not. */
+int mt_snapshot_deflate(const uint8_t *bytes, size_t size, uint8_t **out, size_t *out_size,
+                        char *why, size_t why_size) MT_NOEXCEPT;
+
 /* --- reading -------------------------------------------------------------------------------- */
 
 typedef struct mt_snapshot_header {
