@@ -543,3 +543,56 @@ def test_start_descriptions_are_well_formed():
         assert "hp" in desc and "mp" in desc, path
         # No game text in the repository: a caption is named by its strings key.
         assert not isinstance(desc.get("caption"), str), path
+
+
+def test_level_up_follows_the_games_rules():
+    gains = [(10 + i, 5 + i) for i in range(40)]  # level i + 1's hp_gain, mp_gain
+    desc = {"level": 8, "exp": 30, "sp": 1, "hp": 3, "mp": 2, "meso": 7}
+    up = sd.level_up(desc, 32, gains)
+    # Levels 9: none; 10-29: 1 each; 30-32: 2 each.
+    assert up["sp"] == 1 + 0 + 20 + 6
+    assert (up["level"], up["exp"], up["meso"]) == (32, 0, 7)
+    assert up["hp"] == sum(10 + i for i in range(32)) and up["mp"] == sum(5 + i for i in range(32))
+    assert desc["level"] == 8  # the input is left alone
+    for bad in (8, 7, 41):
+        with pytest.raises(sd.SaveDataError, match="level up"):
+            sd.level_up(desc, bad, gains)
+    assert [sd.skill_points(n) for n in (2, 9, 10, 29, 30, 99)] == [0, 0, 1, 1, 2, 2]
+
+
+def test_over_base_levels_up_before_the_overlay():
+    gains = [(20, 10)] * 60
+    base = {"level": 34, "exp": 2152, "sp": 2, "hp": 612, "mp": 402, "meso": 9, "main": {"0": 1}}
+    out = sd.over_base(base, {"level": 60, "meso": 50, "mp": 5}, gains)
+    assert out == {
+        "level": 60, "exp": 0, "sp": 2 + 26 * 2, "hp": 1200, "mp": 5, "meso": 50, "main": {"0": 1},
+    }  # fmt: skip
+    assert sd.over_base(base, {"meso": 1}, gains) == {**base, "meso": 1}
+
+
+def test_cli_build_over_a_base(tmp_path, capsys):
+    character, quest = valid_pair()
+    character = dataclasses.replace(character, area=0, map=0, level=12, sp=0)
+    saves = tmp_path / "part" / "data" / "Documents"
+    saves.mkdir(parents=True)
+    (saves / "theif0").write_bytes(sd.encode_character(character))
+    (saves / "quest0").write_bytes(sd.encode_quest(quest))
+    assert sd.find_pair(tmp_path / "part") == (saves / "theif0", saves / "quest0")
+    over = tmp_path / "over.json"
+    over.write_text('{"meso": 1234}', encoding="utf-8")
+    out = tmp_path / "out"
+    args = ["build", str(over), str(out), "--base", str(tmp_path / "part")]
+    assert sd.main(args) == 0
+    built = sd.parse_character((out / "theif0").read_bytes())
+    assert (built.meso, built.level) == (1234, 12)
+    assert sd.written_diff(
+        "theif0", sd.encode_character(dataclasses.replace(built, meso=character.meso)),
+        sd.encode_character(character),
+    ) == []  # fmt: skip
+    assert sd.written_diff("quest0", (out / "quest0").read_bytes(), sd.encode_quest(quest)) == []
+    # A level needs hero.dat (--app); without it the level up refuses.
+    over.write_text('{"level": 13}', encoding="utf-8")
+    assert sd.main(args) == 1
+    assert "level up" in capsys.readouterr().err
+    assert sd.main(["build", str(over), str(out), "--base", str(tmp_path / "none")]) == 1
+    assert "no theif0" in capsys.readouterr().err
