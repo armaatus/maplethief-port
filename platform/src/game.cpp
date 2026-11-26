@@ -85,6 +85,7 @@
 #include "save_tools.h"
 #include "scene_skip.h"
 #include "settings_menu.h"
+#include "speech.h"
 #include "update_check.h"
 
 namespace maplethief::frontend {
@@ -498,6 +499,7 @@ struct Game {
     ControlsCard card{&actions, &gamepads};          // the controls card (controls_card.h, #193)
     bool card_pending = false; // the preset picker's "Show controls": opens at a turn (#193)
     PadPointer pointer{&input, &actions}; // pad_pointer: the right stick's, touchpads (#185)
+    Speech speech; // text-to-speech (speech.h, #390): what #391-#393 feed; off by default
     // The settings in effect (options->settings at the start), which the settings menu and the
     // fullscreen hotkeys change (#89, ADR 0076; #145): every setting is read from here.
     Settings settings;
@@ -734,6 +736,7 @@ LiveTargets live_targets(Game &g) {
     t.vsync = &g.vsync;
     t.stats = &g.stats;
     t.lifecycle = &g.lifecycle;
+    t.speech = &g.speech;
     t.render_scale = [&g](std::uint32_t n) { return request_render_scale(g, n); };
     t.keypad_layout = [](const KeypadLayout &layout) {
         install_keypad_layout(layout);
@@ -1482,6 +1485,53 @@ void start_audio_pack(const GameOptions &o) {
             SDL_Log("audiopack: audio_pack %s: %d files", pack.c_str(), files);
         }
     }
+}
+
+// Text-to-speech (#390, ADR 0174, speech.h): the backend MAPLETHIEF_SPEECH names (the system
+// voice by default; none where the platform has no kCapSpeech), the voice in the game's language
+// or the open text pack's. After the text pack opens.
+void start_speech(Game &g, const GameOptions &options, const char *game_language) {
+    SpeechBackendChoice choice = SpeechBackendChoice::kNone;
+    if (platform_has(kCapSpeech)) {
+        const char *env = SDL_getenv("MAPLETHIEF_SPEECH");
+        const std::optional<SpeechBackendChoice> parsed = parse_speech_backend(env);
+        if (!parsed) {
+            SDL_Log("speech: MAPLETHIEF_SPEECH must be system, log or none, not %s: system", env);
+        }
+        choice = parsed.value_or(SpeechBackendChoice::kSystem);
+    }
+    const Settings &set = options.settings;
+    // Opened whether speech is on or not: the rows need to know whether a voice loads, and
+    // the menu can turn speech on. Speech Dispatcher connects (and may start its daemon) only at
+    // the first utterance.
+    g.speech.set_backend(open_speech_backend(choice));
+    const char *pack = mt_textpack_is_open() != 0 ? mt_textpack_manifest("language") : nullptr;
+    g.speech.set_voice(speech_voice(set, speech_language(game_language, pack)));
+    g.speech.set_enabled(set.speech);
+    if (set.speech || choice == SpeechBackendChoice::kLog) {
+        SDL_Log("speech: %s, %s, voice %s, rate %u%%, volume %u%%", set.speech ? "on" : "off",
+                g.speech.backend_name(), g.speech.voice().language.c_str(),
+                static_cast<unsigned>(g.speech.voice().rate),
+                static_cast<unsigned>(g.speech.voice().volume));
+    }
+    if (set.speech && !g.speech.available()) {
+        SDL_Log("speech: on, but this platform has no system voice: nothing is spoken");
+    }
+}
+
+void stop_speech(Game &g) {
+    const SpeechStats &st = g.speech.stats();
+    if (st.said != 0 || st.ignored != 0) {
+        SDL_Log("speech: %llu said, %llu spoken, %llu interrupted, %llu dropped, %llu ignored, "
+                "%llu failed",
+                static_cast<unsigned long long>(st.said),
+                static_cast<unsigned long long>(st.spoken),
+                static_cast<unsigned long long>(st.interrupted),
+                static_cast<unsigned long long>(st.dropped),
+                static_cast<unsigned long long>(st.ignored),
+                static_cast<unsigned long long>(st.failed));
+    }
+    g.speech.set_backend(nullptr);
 }
 
 // Text packs (#189, ADR 0108, maplethief/textpack.h): text_pack = DIR replaces the game's text
@@ -2844,9 +2894,10 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     follow_ui_animations(g);
     g.hints.turn(cpu, g.focus, mt_input_panel(), g.settings.button_prompts,
                  g.settings.focus_highlight); // prompts and markers (#146), as in effect now
-    g.rumble.turn();          // what the game's vibration and events asked for since the last turn
-    g.game_options.turn(now); // the settings menu's "Game options" (#89): one step a turn
-    g.file_dialogs.poll();    // a file dialog answered after the menu closed (#192)
+    g.rumble.turn(); // what the game's vibration and events asked for since the last turn
+    g.speech.turn(speech_clock()); // the next queued utterance, once the last is done (#390)
+    g.game_options.turn(now);      // the settings menu's "Game options" (#89): one step a turn
+    g.file_dialogs.poll();         // a file dialog answered after the menu closed (#192)
     deliver_taps(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
     g.keypad.turn(now, g.input.live());
@@ -3063,6 +3114,13 @@ void start_menu(Game &g, const GameOptions &options) {
     }
     if constexpr (platform_has(kCapPackFolders)) {
         offer_pack_folders(data_location().base);
+    }
+    // Text-to-speech (#390, ADR 0174): the rows say "not available" where no system voice loaded
+    // (Linux without libspeechd). The Switch's menu has no speech rows (kCapSpeech).
+    for (const char *key : {"speech", "speech_rate", "speech_volume"}) {
+        g.menu.set_setting_unavailable(key, [&g] {
+            return g.speech.available() ? std::string() : std::string(tr(Txt::speech_unavailable));
+        });
     }
 #if !defined(SDL_PLATFORM_IOS)
     // The data folder (#263, ADR 0127, data_switch.h): the Saves tab's note shows it, the Data
@@ -3502,6 +3560,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                                                                 : "the language setting");
     }
     mt_cf_configure(&cf);
+    start_speech(g, options, cf.language);
     mt_diag_configure_from_env();
     mt_gles_config gl{};
     gl.present = on_gl_present;
@@ -3860,6 +3919,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             static_cast<unsigned long long>(rs.no_pad), static_cast<unsigned long long>(rs.ignored),
             static_cast<unsigned long long>(rs.failed));
     }
+    stop_speech(g);
     g.applet.finish(); // the boost off, the peak's line (#240)
     g.lifecycle.unwatch();
     g.interp.stop(); // its target, before mt_gfx's backend goes

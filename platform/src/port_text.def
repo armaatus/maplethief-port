@@ -59,6 +59,11 @@ MT_TEXT(menu_own_values_as, "Your own values (as {0})")
 MT_TEXT(menu_yes, "Yes")
 MT_TEXT(menu_no, "No")
 MT_TEXT(menu_not_available, "not available")
+// Text-to-speech (#390, ADR 0174, speech.h): the sample a change of the speech rows speaks, and
+// the speech rows' help where no system voice loaded (Linux without libspeechd).
+MT_TEXT(speech_sample, "This is the voice that reads the game's text.")
+MT_TEXT(speech_unavailable,
+        "No system voice: on Linux, install speech-dispatcher (libspeechd), then restart")
 MT_TEXT(menu_preset_help,
         "Left / Right picks a preset: it sets every setting it controls. Custom keeps your own "
         "values.")

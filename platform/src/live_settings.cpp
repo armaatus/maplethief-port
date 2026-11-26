@@ -24,6 +24,7 @@
 #include "present.h"
 #include "rumble.h"
 #include "save_tools.h"
+#include "speech.h"
 
 namespace maplethief::frontend {
 
@@ -184,6 +185,20 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
     }
     if (is(row, "flashes")) {
         mt_hooks_install_flashes(s.flashes);
+        return true;
+    }
+    if (is(row, "speech") || is(row, "speech_rate") || is(row, "speech_volume")) {
+        if (t.speech == nullptr) {
+            return false;
+        }
+        // The voice as set, keeping its language; then a sample, so that the player hears
+        // what they chose (nothing while off, or without a voice).
+        t.speech->set_voice(speech_voice(s, t.speech->voice().language));
+        t.speech->set_enabled(s.speech);
+        t.speech->say(SpeechKind::kMenu, tr(Txt::speech_sample), speech_clock());
+        SDL_Log("speech: %s, rate %u%%, volume %u%% (%s)", s.speech ? "on" : "off",
+                static_cast<unsigned>(s.speech_rate), static_cast<unsigned>(s.speech_volume),
+                t.speech->backend_name());
         return true;
     }
     if (is(row, "auto_loot")) {

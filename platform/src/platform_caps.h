@@ -73,6 +73,10 @@ enum Capability : std::uint32_t {
     // import screen looks in <base> for MapleThief-1.5.ipa and then any other *.ipa, imports by
     // itself, and offers to delete the file afterwards (import_screen.h's SD-card route).
     kCapIpaOnSdCard = 1u << 13,
+    // A system voice a program can call without a screen reader (#390, ADR 0174, speech.h): the
+    // speech rows. The Switch has none open to homebrew. Where the voice does not load at run
+    // time (Linux without libspeechd, Android for now) the rows stay and say it is not available.
+    kCapSpeech = 1u << 14,
 };
 
 struct PlatformCaps {
@@ -83,7 +87,8 @@ struct PlatformCaps {
 
 inline constexpr std::uint32_t kDesktopCaps =
     kCapWindow | kCapDisplays | kCapCursor | kCapKeyboard | kCapFileDialogs | kCapOpenFolder |
-    kCapTypedValues | kCapDataLocationChoice | kCapAudioDevices | kCapQuit | kCapUpdateFetch;
+    kCapTypedValues | kCapDataLocationChoice | kCapAudioDevices | kCapQuit | kCapUpdateFetch |
+    kCapSpeech;
 
 // The table. The iOS row says what the iOS app (ADR 0136) has: the window is always the whole
 // screen (ADR 0055), an iPad's pointer clicks, a keyboard can be attached; the saves go through
@@ -92,7 +97,7 @@ inline constexpr PlatformCaps kPlatformCaps[] = {
     {SettingsPlatform::kDesktop, "desktop", kDesktopCaps},
     {SettingsPlatform::kIos, "ios",
      kCapCursor | kCapKeyboard | kCapTypedValues | kCapAudioDevices | kCapUpdateFetch |
-         kCapFilesApp},
+         kCapFilesApp | kCapSpeech},
     // The Homebrew Menu takes the player back after a quit.
     {SettingsPlatform::kSwitch, "switch", kCapQuit | kCapPackFolders | kCapIpaOnSdCard},
 };
@@ -130,6 +135,7 @@ constexpr const char *platform_name(SettingsPlatform platform) {
 
 static_assert(platform_has(kDesktopCaps, SettingsPlatform::kDesktop));
 static_assert(!platform_has(kCapWindow, SettingsPlatform::kSwitch));
+static_assert(!platform_has(kCapSpeech, SettingsPlatform::kSwitch));
 
 } // namespace maplethief::frontend
 
