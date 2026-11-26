@@ -328,6 +328,24 @@ def test_launcher_install_desktop(launcher_folder, tmp_path):
 
 
 @needs_sh
+def test_launcher_uninstall_desktop(launcher_folder, tmp_path):
+    data = tmp_path / "xdg"
+    entry = data / "applications" / "io.github.armaatus.maplethief.desktop"
+    out = launch(launcher_folder, "--install-desktop", XDG_DATA_HOME=str(data))
+    assert out.returncode == 0, out.stderr
+    assert entry.is_file()
+    out = launch(launcher_folder, "--uninstall-desktop", XDG_DATA_HOME=str(data))
+    assert out.returncode == 0, out.stderr
+    assert not entry.exists()
+    assert f"removed {entry}" in out.stdout
+    assert "args=" not in out.stdout  # the game never starts
+    # A second run, with nothing left to remove, still succeeds.
+    out = launch(launcher_folder, "--uninstall-desktop", XDG_DATA_HOME=str(data))
+    assert out.returncode == 0, out.stderr
+    assert "nothing to remove" in out.stdout
+
+
+@needs_sh
 def test_launcher_install_desktop_refuses_unquotable_path(tmp_path):
     folder = tmp_path / "a$b"
     folder.mkdir()
