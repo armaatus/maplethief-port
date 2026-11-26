@@ -65,7 +65,15 @@ Neither shows on a computer.
 
 ## Texture packs
 
-You can make HD versions of the game's graphics from your own copy, or edit them by hand. It's a few steps, explained in [ADR 0081](../adr/0081-texture-packs-and-nearest-texture-filter.md). Texture dumps and packs are made from the game's art: keep them to yourself.
+A texture pack is a folder of pictures that the game draws instead of its own: HD versions of the characters, monsters, maps and menus, made from your own copy, or textures you edited by hand. The game's files stay as they are. You make one in three steps ([ADR 0081](../adr/0081-texture-packs-and-nearest-texture-filter.md)):
+
+1. **Dump the textures.** Start the game with `--dump-textures` and a folder, for example `MapleThief --dump-textures ~/MapleThief-dump`, and play through the maps you want. Each picture the game draws is written once into the folder, named by its contents and size (`<hash>_<W>x<H>.png`), with the menus' images in its `ui` folder.
+2. **Make them larger.** From the project folder (a checkout of this repository and Python, as for [audio packs](#audio-packs)), run `python3 -m mtport.texpack build ~/MapleThief-dump ~/MyPack --scale 2` from its `tools/` folder. It writes every texture twice as large into `MyPack`; `--scale` takes 1 to 8, and `--scaler nearest` keeps plain blocky pixels instead of smoothing the edges. You can also edit a PNG from the dump in any image editor: keep its name, and make it the same size or a whole multiple of it (2, 3, … 8 times), or the game ignores it and logs why, once.
+3. **Play with it.** Set **Texture pack** (`texture_pack = /path/to/MyPack` in `settings.ini`, or start with `--texture-pack /path/to/MyPack`) and start the game again. When it quits, the log says how many textures the pack replaced.
+
+At a render scale above 1, **Texture filter** `nearest` (`texture_filter = nearest`, the sharp sprites of [Display](#display)) keeps a pack's pixels crisp. A texture the dump didn't see (a map you didn't visit) stays the game's own: dump again into the same folder and build again to add it. On the Nintendo Switch, copy the pack folder into `sdmc:/switch/maplethief/texture-packs/` and choose it in the menu ([below](#on-the-nintendo-switch)).
+
+Texture dumps and packs are made from the game's art: keep them to yourself, and don't share them ([Sharing packs](sharing-packs.md)).
 
 ## Audio packs
 
@@ -87,6 +95,14 @@ A text pack is a folder of translated text: the game's dialogue, the names and d
 3. Set **Text pack** (`text_pack = /path/to/MyPack` in `settings.ini`, or start with `--text-pack /path/to/MyPack`) and start the game again.
 
 The game's text is drawn with its own font, plus a second font for accented Latin, Greek and Cyrillic letters. Names and descriptions have a fixed room in the game's tables: a longer one is cut at a whole letter, and the log says so, once. The port's menus have plain letters only: their accents are dropped ("Pötion" shows as "Potion"). The format is described in [the text pack spec](../formats/text-pack.md). A text pack holds the game's text: keep packs made from it to yourself, and share only your own translations.
+
+## Language
+
+**Language** (`language`, in the **Other** tab) plays the game in English (`en`, the default) or in Korean (`ko`). Your IPA holds both: the Korean build has its own text, its two-page help and a terms screen on the first start. It applies the next time you start the game.
+
+From the command line, `--language ko` sets it for one run. The environment variable `MAPLETHIEF_LANGUAGE=ko` overrides the setting and the flag.
+
+The port's own menus, such as this settings menu, stay in English. To play in another language, use a [text pack](#text-packs) with a translation.
 
 ## Checking for new versions
 

@@ -10,7 +10,7 @@ Three different things are called "the Linux build":
 | **Port kit** | `MapleThief-kit-<version>-linux-x86_64.tar.gz`: the platform shell (no game code), the runtime, the tools ([ADR 0024](../adr/0024-release-contents-and-flow.md)) | `cmake --workflow --preset linux-release`, released by `scripts/release` | Yes, it is a release asset |
 | **Game folder** | `MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz`: the game, built from your IPA | `scripts/linux-game build`, into `build/linux-game/` | **No.** It contains the game. Keep it to your own machines |
 
-The player download and the game folder both have `MapleThief.sh`, `--install-desktop` and the Steam Deck notes below; the launcher uses the folder's `game/` copy when there is one. The rest of this page is about the game folder.
+The player download and the game folder both have `MapleThief.sh`, `--install-desktop` and `--uninstall-desktop`; the launcher uses the folder's `game/` copy when there is one. The [Steam Deck](#steam-deck) steps below use the player download. The build sections are about the game folder.
 
 ## Build it
 
@@ -57,23 +57,28 @@ tar -xzf MapleThief-game-0.0.1-linux-x86_64.tar.gz
 cd MapleThief-game-0.0.1-linux-x86_64
 ./MapleThief.sh                     # every MapleThief option works, e.g. --scale-mode sharp
 ./MapleThief.sh --install-desktop   # adds MapleThief to your application menu
+./MapleThief.sh --uninstall-desktop # removes it from the menu again
 ```
 
 Saves and `settings.ini` live in `data/` in the game folder, next to `MapleThief.sh` ([Saves](saves.md#where-your-saves-are)), or in `~/.local/share/MapleThief/` if you chose the user folder or the folder can't be written. The keyboard, mouse and gamepad controls are the usual ones ([Controls](controls.md)). SDL3 picks Wayland or X11, and PipeWire, PulseAudio or ALSA, by itself. `SDL_VIDEO_DRIVER=x11 ./MapleThief.sh` forces X11 if Wayland gives you trouble.
 
 ## Steam Deck
 
-The Deck runs the game folder natively, as a non-Steam game. No Proton is involved.
+The Deck runs MapleThief natively, as a non-Steam game. No Proton is involved. These steps use the player download; a game folder you built yourself works the same way, with its own folder name.
 
-1. **Copy the tarball** to the Deck in Desktop Mode, for example over the network or on a USB stick, and unpack it, for example to `~/Games/`: right-click → Extract in Dolphin, or `tar -xzf` in Konsole.
-2. **Menu entry**: in Konsole, `~/Games/MapleThief-game-<version>-linux-x86_64/MapleThief.sh --install-desktop`.
-3. **Add it to Steam**: Steam → Games → *Add a Non-Steam Game to My Library…* → tick **MapleThief**. If it isn't listed, use *Browse…* and pick `MapleThief.sh`. The shortcut then shows the game's icon.
-4. In the shortcut's **Properties → Compatibility**, leave *Force the use of a specific Steam Play compatibility tool* **off**. It's a native Linux program.
-5. Back in **Game Mode**, start MapleThief from the library.
+1. **Download** `MapleThief-<version>-linux-x86_64.tar.gz` in Desktop Mode (Steam button → Power → Switch to Desktop), from the [Releases page](https://github.com/armaatus/maplethief-port/releases) or the [itch.io page](https://armaatus.itch.io/maplethief). Copy your `MapleThief-1.5.ipa` to the Deck too, for example into `~/Downloads`, over the network or on a USB stick.
+2. **Unpack it**, for example to `~/Games/`: right-click → Extract in Dolphin, or in Konsole `mkdir -p ~/Games && tar -xzf ~/Downloads/MapleThief-<version>-linux-x86_64.tar.gz -C ~/Games`. You get the folder `~/Games/MapleThief-<version>-linux-x86_64/`.
+3. **Import your game file**, still in Desktop Mode: run `MapleThief.sh` in that folder (double-click it in Dolphin, or `~/Games/MapleThief-<version>-linux-x86_64/MapleThief.sh` in Konsole), choose your `MapleThief-1.5.ipa` in the file dialog, and close the game once it reaches the title screen (or run it once with `--import-ipa ~/Downloads/MapleThief-1.5.ipa`). The game is now in the folder's `game/`. Game Mode has no file dialog, so do this step here.
+4. **Menu entry**: in Konsole, `~/Games/MapleThief-<version>-linux-x86_64/MapleThief.sh --install-desktop`.
+5. **Add it to Steam**: Steam → Games → *Add a Non-Steam Game to My Library…* → tick **MapleThief**. If it isn't listed, use *Browse…* and pick `MapleThief.sh`. The shortcut then shows the game's icon.
+6. In the shortcut's **Properties → Compatibility**, leave *Force the use of a specific Steam Play compatibility tool* **off**. It's a native Linux program.
+7. Back in **Game Mode**, start MapleThief from the library.
+
+Your saves and settings are in `data/` in that folder. To update, unpack the new version next to the old one, move `data/` and `game/` into it, and point the Steam shortcut at the new `MapleThief.sh` (or run `--install-desktop` again from the new folder and add it again). Removing it: [Uninstall and reset](uninstall-and-reset.md#linux-and-steam-deck).
 
 ### Screen
 
-The Deck's screen is 1280 × 800. In Game Mode Steam runs the game under gamescope, and `MapleThief.sh` then opens a 1280 × 800 window. That way the game's own scaling fills the screen and gamescope doesn't scale it a second time. Pick the scaling in the settings menu or in `data/settings.ini` in the game folder, or as a launch option (Properties → Launch Options, e.g. `--scale-mode sharp`):
+The Deck's screen is 1280 × 800. In Game Mode Steam runs the game under gamescope, and `MapleThief.sh` then opens a 1280 × 800 window. That way the game's own scaling fills the screen and gamescope doesn't scale it a second time. Pick the scaling in the settings menu or in `data/settings.ini` in the game's folder, or as a launch option (Properties → Launch Options, e.g. `--scale-mode sharp`):
 
 | `scale_mode` | On 1280 × 800 |
 |---|---|
