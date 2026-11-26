@@ -1,6 +1,6 @@
 # Playthrough, review and release hand-offs
 
-The hand-offs that need play time and judgement rather than one device, then the release. Most are played on the Mac's game app (`scripts/build mac`, `dist/mac/MapleThief.app`); #92 repeats the playthrough on every platform. Do them in this order: the release comes last because it needs the others signed off. [How to report](README.md#how-to-report) says what to post.
+The hand-offs that need play time and judgement rather than one device, then the release. Most are played on the Mac's game app (`scripts/build mac`, `dist/mac/MapleThief.app`); #92 repeats the playthrough on every platform. Do them in this order: the release comes last because it needs the others signed off. The checks from closed issues sit beside the hand-off they go with: #67 and #72 after #132, and the two calls for Joris (#156, #162) after the playthrough they are made in ([Checks from closed issues](README.md#checks-from-closed-issues)). [How to report](README.md#how-to-report) says what to post.
 
 The compendium site is live at <https://armaatus.github.io/maplethief-port/>; the review steps link its pages there. The LAN address in the older comments is gone. To check a local build instead: `scripts/compendium serve`, then <http://127.0.0.1:8000/maplethief-port/>.
 
@@ -23,6 +23,28 @@ Closes [#132](https://github.com/armaatus/maplethief-port/issues/132). About an 
 6. Remap: F1 > Controls > Bindings, rebind one action, Save, quit and start again: it still works ([Remapping](../../controls/remapping.md); it is kept in `bindings.ini` in the data folder). Plug in the other pad type: the glyphs change.
 
 **Post back:** steps 2 to 4 confirmed, rumble OK (or a tuning issue filed), and the remap kept.
+
+## #67: Real pads: hot-plug, focus and the dead zone
+
+From closed [#67](https://github.com/armaatus/maplethief-port/issues/67). Its play steps moved to #132 above; these are the ones #132 doesn't ask. With `MAPLETHIEF_TRACE=input` as in #132 step 1:
+
+1. Unplug the pad while walking: the hero stops. Plug it back in: it plays again without a restart.
+2. Plug in the second pad: it takes over only once the first is idle and you press something on it.
+3. Cmd+Tab (Alt+Tab) away while holding a direction: the hero stops; back in the window, the pad works again after you let go and press.
+4. Stick diagonals near 45 degrees don't flicker between directions; letting the stick go stops the walk at once.
+5. Does the stick's dead zone (30 % to engage, 22 % to let go) feel right? Any button you would map differently?
+
+**Post back:** the pad models and the OS, pass or fail per step, and the `input:` log lines of anything that didn't behave.
+
+## #72: Rumble: the game's vibration option and the strength
+
+From closed [#72](https://github.com/armaatus/maplethief-port/issues/72). #132 step 5 checks the hit and level-up rumble and the flags; this is the rest.
+
+1. With the game's own vibration option on (its default), a hit gives the stronger 0.4 s buzz merged with the hit's thump.
+2. Toggle the vibration in the game's options: the preview buzzes once (0.4 s). With it off, hits still give the short thump.
+3. Is the default strength too strong or too weak, and for which effect (hit, vibration, level-up)? The exit line `game: N hits taken, M level-ups; rumble: ...` says what was sent.
+
+**Post back:** pass or fail of steps 1 and 2, and per effect "fine", "stronger" or "weaker". The agent retunes `platform/src/rumble.h` from that.
 
 ## #93: The build guide on a clean machine
 
@@ -66,6 +88,26 @@ Closes [#228](https://github.com/armaatus/maplethief-port/issues/228). Its 2026-
 5. Section 5: the port checks of #218 (the Yeti fight start), #220, #221, #222 and #223.
 
 **Post back:** each item ticked or annotated, then "signed off". The agent then fixes and redeploys, with `scripts/compendium check` green.
+
+## #156: A call for Joris: the cash-shop prices
+
+From closed [#156](https://github.com/armaatus/maplethief-port/issues/156). [ADR 0072](../../adr/0072-offline-cash-shop-and-revives.md) leaves the tuning of the prices to a playthrough (its Consequences: game feel). `cash_shop = meso` is an Assist, off in every preset: turn it on (Settings > Assists > **Cash shop**) for part of #79, or a second hero.
+
+1. `PYTHONPATH=tools python3 -m mtport.cashprice work/ipa/Payload/MapleThief.app/English/data` prints the price curve per level. The knobs and their defaults are in [the cash shop notes](../../re/cash-shop.md) and `runtime/src/cashshop/pricing.cpp`.
+2. Early on (below level 35): do the revives' 9,000 meso floor and the 100 meso minimum feel right?
+3. Dying or buying more than once at one level: is x1.5 a step, at most 4 steps, too harsh or too soft?
+4. The price line in the shop's and the death popup's corner: can it be read, is it in the way?
+
+**Post back:** keep the defaults, or the knobs to change and to what. Any value can change in a later release without touching a save.
+
+## #162: A call for Joris: main 20 never reaches done
+
+From closed [#162](https://github.com/armaatus/maplethief-port/issues/162). Chapter 1's main 20 (Master in Danger 2) is given by Stan and stays active until the trip to Orbis, whose `clearAll` sets every chapter 1 quest back to 0: no script ever rewards it ([chapter 1 quests](../chapter-1-quests.md), main 20). The port does what the game's scripts say; the call is whether that is the original's behaviour too.
+
+1. During #79, look at the quest list just before the trip: main 20 shows as active, not done.
+2. If you played the original to Orbis on the device and remember main 20 ending some other way (a reward, a message), say where.
+
+**Post back:** "accept: main 20 ends with the trip" (the playthrough checklist then ticks it at the trip), or what the original did instead.
 
 ## #92: The playthrough on every platform
 
