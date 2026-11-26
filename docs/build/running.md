@@ -264,6 +264,7 @@ Every game run logs at exit its tick rate and tick intervals (p50, p99, max, the
 | `MAPLETHIEF_DATA_DIR` | the data folder, beating every other rule ([The data folder](#the-data-folder)) |
 | `MAPLETHIEF_BUNDLE_DIR` | the game's bundle ([Finding the game](#finding-the-game)) |
 | `MAPLETHIEF_SETTINGS` | settings applied after the file and `--preset` ([All settings](#all-settings)) |
+| `MAPLETHIEF_SPEECH=system\|log\|none` | the text-to-speech backend (default `system`; `log` writes each utterance to the log instead of speaking, for tests; ADR 0174) |
 | `MAPLETHIEF_LANGUAGE` | `en` or `ko`, overriding the setting |
 | `MAPLETHIEF_GPU_DRIVER` | the SDL3 GPU driver, for example `vulkan` |
 | `MAPLETHIEF_GFX_GPU_TIMING=1` | logs the GPU time per frame at exit |
