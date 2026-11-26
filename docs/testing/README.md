@@ -9,6 +9,7 @@ Runs that check the real game: some scripted, which run as tests on your machine
 | [The scripted first-map run](first-map-run.md) | `play.first_map`: the real game played to its first hunting map for 15 game-minutes |
 | [Chapter 1's quests](chapter-1-quests.md) | The checks of chapter 1's NPCs, quests and scripts, played by a bot |
 | [The regression replay](regression-replay.md) | `scripts/regress`: recorded input replayed against recorded checkpoints |
+| [Built start states](start-states.md) | Play tests that start mid-game from a save built from a description, equal to the chained run's state |
 
 ## By hand
 
