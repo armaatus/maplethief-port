@@ -14,7 +14,16 @@ recipes (a ``--preset`` only on a line that runs CMake or one of our build scrip
 the game takes ``--preset`` as well). Links are left to ``tests/test_doc_links.py``. It needs
 no network, so CI runs it.
 
-The README's second list, between ``<!-- gates:begin -->`` and ``<!-- gates:end -->``, marks
+The README's list of checks from closed issues (#312), between ``<!-- closed:begin -->`` and
+``<!-- closed:end -->``, has the same form, or ``dropped`` with the reason in place of the pages::
+
+    - #59: mac (integer scaling on a Retina display)
+    - #99: dropped (covered by #131's run)
+
+Its issues are closed, so they need no gate mark; a kept one has a section like an open one, a
+dropped one none, and no issue is in both lists.
+
+The README's gate list, between ``<!-- gates:begin -->`` and ``<!-- gates:end -->``, marks
 each open hand-off for the v1.0 tag (ADR 0147)::
 
     - #79: gate (full playthrough)
@@ -22,7 +31,8 @@ each open hand-off for the v1.0 tag (ADR 0147)::
 
 ``--live`` also diffs both lists against GitHub's open ``needs-human`` issues through ``gh``: an
 open hand-off missing from the issue list, or without a gate mark, is an error; a listed issue
-that is closed or no longer labelled is reported as a note.
+that is closed or no longer labelled is reported as a note, and so is an issue of the closed list
+that is an open hand-off again.
 
 CLI::
 
@@ -47,6 +57,10 @@ DEVICES = ("windows", "mac", "iphone", "linux", "switch", "playthrough")
 BEGIN = "<!-- handoffs:begin -->"
 END = "<!-- handoffs:end -->"
 LIST_LINE = re.compile(r"^- #(\d+): ([a-z]+(?:, [a-z]+)*)\b")
+CLOSED_BEGIN = "<!-- closed:begin -->"
+CLOSED_END = "<!-- closed:end -->"
+DROPPED = "dropped"
+DROPPED_LINE = re.compile(r"^- #\d+: dropped \(.*\w.*\)$")
 GATES_BEGIN = "<!-- gates:begin -->"
 GATES_END = "<!-- gates:end -->"
 GATE_LINE = re.compile(r"^- #(\d+): (gate|preview|not a gate)(, agent work)? \(")
@@ -87,11 +101,10 @@ def device_page(device: str, root: Path = ROOT) -> Path:
     return root / HANDOFFS / f"{device}.md"
 
 
-def committed_list(readme: str) -> dict[int, tuple[str, ...]]:
-    """The README's issue list: issue number to the device pages that cover it."""
-    if BEGIN not in readme or END not in readme:
-        raise ValueError(f"the README has no {BEGIN} ... {END} list")
-    block = readme.split(BEGIN, 1)[1].split(END, 1)[0]
+def _issue_list(readme: str, begin: str, end: str) -> dict[int, tuple[str, ...]]:
+    if begin not in readme or end not in readme:
+        raise ValueError(f"the README has no {begin} ... {end} list")
+    block = readme.split(begin, 1)[1].split(end, 1)[0]
     out: dict[int, tuple[str, ...]] = {}
     for line in block.splitlines():
         if not line.strip():
@@ -103,6 +116,24 @@ def committed_list(readme: str) -> dict[int, tuple[str, ...]]:
         if n in out:
             raise ValueError(f"#{n} is listed twice")
         out[n] = tuple(m.group(2).split(", "))
+    return out
+
+
+def committed_list(readme: str) -> dict[int, tuple[str, ...]]:
+    """The README's issue list: issue number to the device pages that cover it."""
+    return _issue_list(readme, BEGIN, END)
+
+
+def closed_list(readme: str) -> dict[int, tuple[str, ...]]:
+    """The README's list of checks from closed issues (#312): issue number to the device pages
+    that cover it, or ``("dropped",)`` for one dropped with a reason."""
+    out = _issue_list(readme, CLOSED_BEGIN, CLOSED_END)
+    block = readme.split(CLOSED_BEGIN, 1)[1].split(CLOSED_END, 1)[0]
+    for line in block.splitlines():
+        m = LIST_LINE.match(line)
+        if m and DROPPED in m.group(2).split(", "):
+            if m.group(2) != DROPPED or not DROPPED_LINE.match(line):
+                raise ValueError(f"a dropped issue needs only its reason: {line!r}")
     return out
 
 
@@ -196,10 +227,15 @@ def check(root: Path = ROOT) -> list[str]:
     try:
         listed = committed_list(readme)
         marks = gate_marks(readme)
+        closed = closed_list(readme)
     except ValueError as e:
         return [f"README.md: {e}"]
     for n in sorted(set(listed) - set(marks)):
         errors.append(f"#{n}: listed, but has no v1.0 gate mark")
+    for n in sorted(set(listed) & set(closed)):
+        errors.append(f"#{n}: in both the hand-off list and the closed list")
+    listed = {**{n: d for n, d in closed.items() if d != (DROPPED,)}, **listed}
+    dropped = {n for n, d in closed.items() if d == (DROPPED,)}
     covered: dict[int, set[str]] = {}
     for device in DEVICES:
         page = device_page(device, root)
@@ -223,7 +259,8 @@ def check(root: Path = ROOT) -> list[str]:
                 f"sections are in {', '.join(sorted(got)) or 'no page'}"
             )
     for n in sorted(set(covered) - set(listed)):
-        errors.append(f"#{n}: has a section in {', '.join(sorted(covered[n]))} but isn't listed")
+        why = "is dropped" if n in dropped else "isn't listed"
+        errors.append(f"#{n}: has a section in {', '.join(sorted(covered[n]))} but {why}")
     for path in sorted((root / HANDOFFS).glob("*.md")):
         for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             for dash in "‒–—―":
@@ -259,10 +296,14 @@ def open_handoffs() -> set[int]:
 
 
 def live_diff(
-    listed: set[int], open_now: set[int], marked: set[int] | None = None
+    listed: set[int],
+    open_now: set[int],
+    marked: set[int] | None = None,
+    closed: set[int] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Errors (open hand-offs missing from the list, or from the gate marks when ``marked`` is
-    given) and notes (listed, but not open with the label)."""
+    given) and notes (listed, but not open with the label; or on the closed list, but open with
+    it)."""
     errors = [
         f"#{n}: open needs-human issue missing from the README" for n in sorted(open_now - listed)
     ]
@@ -271,6 +312,10 @@ def live_diff(
             f"#{n}: open needs-human issue has no v1.0 gate mark" for n in sorted(open_now - marked)
         ]
     notes = [f"#{n}: listed, but not an open needs-human issue" for n in sorted(listed - open_now)]
+    notes += [
+        f"#{n}: on the closed list, but an open needs-human issue"
+        for n in sorted((closed or set()) & open_now)
+    ]
     return errors, notes
 
 
@@ -287,7 +332,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"handoffs: gh failed: {e}", file=sys.stderr)
             return 2
         live_errors, notes = live_diff(
-            set(committed_list(readme)), open_now, set(gate_marks(readme))
+            set(committed_list(readme)),
+            open_now,
+            set(gate_marks(readme)),
+            set(closed_list(readme)),
         )
         errors += live_errors
         for note in notes:
