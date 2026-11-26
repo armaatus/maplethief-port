@@ -96,6 +96,14 @@ function(maplethief_target_defaults target)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT MSVC)
         target_compile_options(${target} PRIVATE -Wshadow -Wimplicit-int-float-conversion
                                                  -Wfloat-conversion)
+        # Linux's clang and GCC reject a designated initializer that leaves fields out
+        # (-Wextra there); Apple's clang has the warning but -Wextra doesn't turn it on.
+        include(CheckCXXCompilerFlag)
+        check_cxx_compiler_flag(-Wmissing-designated-field-initializers MT_HAS_WMDFI)
+        if(MT_HAS_WMDFI)
+            target_compile_options(
+                ${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wmissing-designated-field-initializers>)
+        endif()
     endif()
     # MSVC: the run-time checks taken out of the Debug flags above (ADR 0134), except for a
     # target with optimised code, where maplethief_debug_opt() places them per source.

@@ -2722,12 +2722,12 @@ bool run_quick_state(Game &g, mt_cpu *cpu, double now) {
 // The Switch in applet mode takes a point only with room for it beside the margin (ADR 0141).
 void run_recovery(Game &g, mt_cpu *cpu, double now, bool quick_ran) {
     if (!g.settings.crash_recovery && !g.recovery.armed()) {
-        g.recovery.turn(RecoveryOps{.where =
-                                        [cpu] {
-                                            const AutosaveCheck c = check_autosave(cpu);
-                                            return RecoveryWhere{c.mode, c.area, c.map, c.slot};
-                                        }},
-                        false, now, game_saves_seen());
+        RecoveryOps where_only;
+        where_only.where = [cpu] {
+            const AutosaveCheck c = check_autosave(cpu);
+            return RecoveryWhere{c.mode, c.area, c.map, c.slot};
+        };
+        g.recovery.turn(where_only, false, now, game_saves_seen());
         return;
     }
     if (!g.recovery_ops) {
