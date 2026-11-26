@@ -8,6 +8,7 @@
 #include "list_keys.h"
 #include "maplethief/cf.h"
 #include "maplethief/memory.h"
+#include "maplethief/runtape.h"
 
 namespace maplethief::frontend {
 
@@ -27,7 +28,7 @@ void runtime_forward(void *, std::uint32_t action, bool down) {
 
 std::int32_t runtime_panel(void *) { return mt_input_panel(); }
 std::int32_t runtime_popup(void *, mt_cpu *cpu) { return menu_popup_id(cpu); }
-double runtime_clock(void *) { return mt_cf_absolute_time(); }
+double runtime_clock(void *) { return mt_runtape_host_time(); }
 bool runtime_busy(void *) { return mt_input_get_stats().queued > 0; }
 bool runtime_page(void *, mt_cpu *cpu, std::int32_t panel, int dir, bool apply) {
     return list_page(cpu, panel, dir, apply);

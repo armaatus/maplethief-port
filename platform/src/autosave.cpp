@@ -10,6 +10,7 @@
 #include "maplethief/hooks.h"
 #include "maplethief/memory.h"
 #include "maplethief/objc/objc.h"
+#include "run_recorder.h"
 
 namespace maplethief::frontend {
 
@@ -88,6 +89,7 @@ bool readable(const mt_cpu *cpu, u32 addr) {
 
 // A guest call from the host with every register kept.
 u32 call(mt_cpu *cpu, u32 fn, u32 a0, u32 a1) {
+    run_refuse("autosave"); // a replay has no window to close (run_census.h)
     u32 saved[16];
     std::memcpy(saved, cpu->r, sizeof saved);
     const u32 args[2] = {a0, a1};

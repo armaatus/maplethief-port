@@ -149,6 +149,9 @@
 //   # once a day, ask github.com whether a newer version of the port is out (never in
 //   # Original; it downloads nothing): on | off
 //   update_check = off
+//   # record every session, from the start to quit, as a run file in runs/ that plays back
+//   # exactly (MapleThief --play-run FILE): on | off
+//   record_runs = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -715,6 +718,9 @@ struct Settings {
     // The opt-in update notice (#199, ADR 0137, update_check.h): off by default, in no preset,
     // and it never runs in the Original preset.
     bool update_check = false; // update_check, --update-check (on | off)
+    // Run recording (#405, ADR 0156, run_recorder.h): every session from the start to quit into
+    // <data dir>/runs/, off by default and in no preset.
+    bool record_runs = false; // record_runs, --record-runs (on | off)
 
     bool operator==(const Settings &) const = default;
 };

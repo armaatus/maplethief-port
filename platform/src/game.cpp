@@ -59,7 +59,9 @@
 #include "maplethief/input.h"
 #include "maplethief/memory.h"
 #include "maplethief/offline.h"
+#include "maplethief/runtape.h"
 #include "maplethief/saves.h"
+#include "maplethief/snapshot.h"
 #include "maplethief/stubs.h"
 #include "maplethief/texpack.h"
 #include "maplethief/textpack.h"
@@ -80,6 +82,7 @@
 #include "remap.h"
 #include "render_scale.h"
 #include "rumble.h"
+#include "run_recorder.h"
 #include "save_menu.h"
 #include "save_state_input.h"
 #include "save_tools.h"
@@ -168,7 +171,8 @@ bool scripted_run(const GameOptions &options) {
     return options.frames != 0 || options.seconds > 0 || !options.capture_dir.empty() ||
            !options.capture_at.empty() || !options.shots.empty() || !options.taps.empty() ||
            options.fixed_step_us != 0 || !options.audio_capture.empty() ||
-           !options.suspends.empty() || options.quit_at >= 0;
+           !options.suspends.empty() || options.quit_at >= 0 || options.run_file != nullptr ||
+           !options.pad_steps.empty();
 }
 
 bool valid_shot_name(const std::string &name) {
@@ -427,8 +431,14 @@ struct Game {
     std::uint64_t first_lit_present = 0;    // the first window present that is not black
     std::uint64_t first_lit_gl_present = 0; // the first that shows a GL frame that is not black
     std::size_t tap_index = 0;              // options->taps: the next one to deliver
+    SDL_Joystick *script_pad = nullptr;     // --pad's virtual pad (#405), or nullptr
+    std::size_t pad_index = 0;              // options->pad_steps: the next one to set
     std::uint32_t tap_phase = 0;            // and its next phase (0 down, drags, up)
     VirtualClock *clock = nullptr;          // the fixed-step mode's clock, or nullptr
+    // Run recording and playback (#405, ADR 0156, run_recorder.h). While a run file plays its
+    // tape is the clock and the turn hook never waits, as in the fixed-step mode.
+    RunRecorder runs;
+    bool replay = false;
     PacedClock *paced = nullptr;   // real time with pacing = display (pacing.h), or nullptr
     LaunchClock *launch = nullptr; // real time with pacing = wall (clock.h, #155), or nullptr
     // game_speed in guest memory (game_speed.h, #151): a change of g.settings' applies at the
@@ -743,7 +753,7 @@ LiveTargets live_targets(Game &g) {
         SDL_Log("input: keypad_layout %s", keypad_layout_text(layout).c_str());
     };
     t.turn_reads_settings = true; // menu_repeat, ..., autosave: on_turn reads g.settings
-    t.now = mt_cf_absolute_time();
+    t.now = mt_runtape_host_time();
     return t;
 }
 
@@ -1038,12 +1048,12 @@ void run_script(Game &g, double t) {
 // goes straight to the next scripted event (or --seconds), in whole steps, with the capture's
 // audio up to it; with nothing scripted to come, only a quit ends the wait.
 void wait_hidden(Game &g) {
-    const double from = mt_cf_absolute_time();
+    const double from = mt_runtape_host_time();
     SDL_Log("lifecycle: hidden at %.3f s: nothing is presented, the guest waits (window frame "
             "%llu, GL frame %u)",
             from - g.first_turn, static_cast<unsigned long long>(g.presents), gl_frame(g));
     while (g.lifecycle.hidden() && !g.lifecycle.terminating() && !g.quit && !g.failed) {
-        const double t = mt_cf_absolute_time() - g.first_turn;
+        const double t = mt_runtape_host_time() - g.first_turn;
         if (g.options->seconds > 0 && t >= g.options->seconds) {
             SDL_Log("game: --seconds %g: the run ends %.3f s after the first run-loop turn",
                     g.options->seconds, t);
@@ -1083,9 +1093,9 @@ void wait_hidden(Game &g) {
                 g.failed = true;
             }
         }
-        run_script(g, mt_cf_absolute_time() - g.first_turn);
+        run_script(g, mt_runtape_host_time() - g.first_turn);
     }
-    const double to = mt_cf_absolute_time();
+    const double to = mt_runtape_host_time();
     g.hidden_seconds += to - from;
     g.presenter.set_veil(0);
     g.stats.gap(SDL_GetTicksNS(), gfx_total_ns()); // a pause, not a slow frame
@@ -1093,6 +1103,55 @@ void wait_hidden(Game &g) {
             "%u)",
             g.lifecycle.hidden() ? "the wait ends" : "shown again", to - g.first_turn, to - from,
             static_cast<unsigned long long>(g.presents), gl_frame(g));
+}
+
+// --pad (#405): a virtual Xbox 360 pad, attached before the first turn, its buttons set when
+// they are due; SDL's next event pump sends them as a real pad's events.
+void attach_script_pad(Game &g) {
+    if (g.options->pad_steps.empty()) {
+        return;
+    }
+    SDL_VirtualJoystickDesc desc;
+    SDL_INIT_INTERFACE(&desc);
+    desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+    desc.vendor_id = 0x045E; // Microsoft: an Xbox 360 pad
+    desc.product_id = 0x028E;
+    desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
+    desc.nbuttons = SDL_GAMEPAD_BUTTON_DPAD_RIGHT + 1;
+    desc.button_mask = (1u << desc.nbuttons) - 1u;
+    desc.axis_mask = (1u << desc.naxes) - 1u;
+    desc.name = "MapleThief --pad";
+    const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
+    g.script_pad = id != 0 ? SDL_OpenJoystick(id) : nullptr;
+    if (g.script_pad == nullptr) {
+        SDL_Log("game: --pad: no virtual pad: %s", SDL_GetError());
+        return;
+    }
+    // A virtual axis starts at raw 0, a half-pulled trigger: released, as a real pad's rest.
+    SDL_SetJoystickVirtualAxis(g.script_pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, -32768);
+    SDL_SetJoystickVirtualAxis(g.script_pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, -32768);
+    SDL_Log("game: --pad: a virtual Xbox 360 pad, %zu button changes scripted",
+            g.options->pad_steps.size());
+}
+
+void detach_script_pad(Game &g) {
+    if (g.script_pad != nullptr) {
+        const SDL_JoystickID id = SDL_GetJoystickID(g.script_pad);
+        SDL_CloseJoystick(g.script_pad);
+        SDL_DetachVirtualJoystick(id);
+        g.script_pad = nullptr;
+    }
+}
+
+void deliver_pad(Game &g, double t) {
+    const std::vector<GameOptions::PadStep> &steps = g.options->pad_steps;
+    while (g.script_pad != nullptr && g.pad_index < steps.size() && steps[g.pad_index].at <= t) {
+        const GameOptions::PadStep &s = steps[g.pad_index++];
+        SDL_SetJoystickVirtualButton(g.script_pad, s.button, s.down);
+        SDL_Log("game: --pad %s %s at %.3f s",
+                SDL_GetGamepadStringForButton(static_cast<SDL_GamepadButton>(s.button)),
+                s.down ? "down" : "up", t);
+    }
 }
 
 // The scripted taps and swipes (--tap, --swipe) take real input's path (ADR 0047): a left-button
@@ -1815,7 +1874,7 @@ void follow_frame_rate(Game &g) {
 void smooth_tick(Game &g, mt_cpu *cpu, const mt_gles_frame &frame) {
     const std::int64_t ms = g.clock == nullptr ? g.tick_ms : game_tick_ms(cpu);
     const double interval = ms > 0 ? static_cast<double>(ms) / 1000.0 : 0.05;
-    double t = mt_cf_absolute_time();
+    double t = mt_runtape_host_time();
     if (g.locked && g.hold.pending()) {
         const std::uint64_t now_g = g.paced->guest_ns();
         const std::uint64_t woke = g.paced->guest_at(g.hold.start());
@@ -1838,7 +1897,7 @@ void smooth_tick(Game &g, mt_cpu *cpu, const mt_gles_frame &frame) {
 // refresh boundary it is held to; on the wall clock the next refresh (one period on, in guest
 // time: fast-forward's rate too); fixed-step, the next 60 Hz present.
 double smooth_shown_time(Game &g) {
-    const double now = mt_cf_absolute_time();
+    const double now = mt_runtape_host_time();
     if (g.clock != nullptr) {
         return now + kAnimationSeconds;
     }
@@ -2330,7 +2389,7 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
                 static_cast<double>(kQuitGraceNs) / 1e9);
         g.quit = true;
     }
-    return present_and_decide(g, cpu, mt_cf_absolute_time(), !ff_skip(g, cpu)) ? 1 : 0;
+    return present_and_decide(g, cpu, mt_runtape_host_time(), !ff_skip(g, cpu)) ? 1 : 0;
 }
 
 // The remap overlay (#70, ADR 0054), the settings menu (#89, ADR 0076) or the disconnect pause
@@ -2523,7 +2582,7 @@ void run_keypad_editor(Game &g, mt_cpu *cpu, double now) {
 void wait_locked(Game &g, double next, double cap) {
     const Uint64 start = SDL_GetTicksNS();
     Uint64 deadline = start;
-    const double guest_wait = next - mt_cf_absolute_time();
+    const double guest_wait = next - mt_runtape_host_time();
     if (guest_wait > 0) {
         // The guest reads whole microseconds. On a grid, a fire date a rounding past a whole
         // millisecond is that millisecond's (kGridFireTolerance, as the run loop sees it).
@@ -2627,7 +2686,7 @@ void follow_clock_rate(Game &g, double t) {
 // true if the run ends.
 bool present_smooth_locked(Game &g, mt_cpu *cpu, double next) {
     Uint64 deadline = SDL_GetTicksNS();
-    const double guest_wait = next - mt_cf_absolute_time();
+    const double guest_wait = next - mt_runtape_host_time();
     if (guest_wait > 0) {
         const std::uint64_t us = g.paced->guest_ns() / 1000u +
                                  static_cast<std::uint64_t>(std::ceil(guest_wait * 1e6 - 1e-3));
@@ -2639,7 +2698,7 @@ bool present_smooth_locked(Game &g, mt_cpu *cpu, double next) {
             break;
         }
         g.smooth_at = at;
-        const bool end = present_and_decide(g, cpu, mt_cf_absolute_time(), true);
+        const bool end = present_and_decide(g, cpu, mt_runtape_host_time(), true);
         g.smooth_at = 0;
         if (end) {
             return true;
@@ -2732,7 +2791,7 @@ void run_recovery(Game &g, mt_cpu *cpu, double now, bool quick_ran) {
     }
     if (!g.recovery_ops) {
         RecoveryOps ops = game_recovery_ops(
-            cpu, [&g] { release_layers(g, mt_cf_absolute_time() - g.first_turn); },
+            cpu, [&g] { release_layers(g, mt_runtape_host_time() - g.first_turn); },
             rebase_guest_clock, &g);
         if (g.applet.applet_mode()) {
             ops.heap_free = [&g]() -> std::optional<std::uint64_t> {
@@ -2775,6 +2834,11 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
+    // A run file that plays (#405): the settings changed at this turn of the recording, applied
+    // as the settings menu applies them.
+    for (const SettingInfo *row : g.runs.turn_begin(&g.settings)) {
+        apply_live_setting(live_targets(g), *row, g.settings);
+    }
     // --force-crash (#198): what a real crash does, on purpose.
     if (!g.options->force_crash.empty() && now - g.first_turn >= g.options->force_crash_at) {
         if (g.options->force_crash == "host") {
@@ -2830,7 +2894,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     g.lifecycle.deliver(cpu, now - g.first_turn);
     if (g.lifecycle.hidden() && !g.lifecycle.terminating() && !g.quit) {
         wait_hidden(g);
-        now = mt_cf_absolute_time();
+        now = mt_runtape_host_time();
         g.lifecycle.deliver(cpu, now - g.first_turn);
     }
     if (g.lifecycle.terminating()) {
@@ -2871,7 +2935,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     run_recovery(g, cpu, now, quick_ran);
     // stick_mode and direction_priority (#138, ADR 0128), as in effect now; the clock a menu's
     // diagonal is timed by.
-    g.actions.set_clock([](void *) { return mt_cf_absolute_time(); }, nullptr);
+    g.actions.set_clock([](void *) { return mt_runtape_host_time(); }, nullptr);
     g.gamepads.set_stick_mode(g.settings.stick_mode);
     g.actions.set_direction_priority(g.settings.direction_priority);
     g.gamepads.turn(now);   // a button held back for its hold (R3's pointer tap, ADR 0107)
@@ -2899,6 +2963,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     g.game_options.turn(now);      // the settings menu's "Game options" (#89): one step a turn
     g.file_dialogs.poll();         // a file dialog answered after the menu closed (#192)
     deliver_taps(g, now - g.first_turn);
+    deliver_pad(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
     g.keypad.turn(now, g.input.live());
     // The key pad's haptics (#194): taps only with the game pad shown and in use.
@@ -2955,7 +3020,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // composited) then depends only on the virtual clock.
     // Nor does a UIKit animation more often than about 60 times a virtual second (a turn is
     // then far shorter than a display frame).
-    const bool fixed = g.clock != nullptr;
+    const bool fixed = g.clock != nullptr || g.replay;
     const bool animation_due = (mt_uikit_animation_count(now) > 0 || g.keypad.fading(now)) &&
                                (!fixed || now - g.last_present >= kAnimationSeconds);
     // frame_rate = smooth (#87) between two ticks: fixed-step, a present about 60 times a
@@ -2979,9 +3044,20 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     if (due && g.grid && gl_frame(g) == g.shown_gl && g.last_present_host != 0) {
         due = SDL_GetTicksNS() - g.last_present_host + 500000 >= refresh_period_ns(g);
     }
+    // The run's recording or replay (#405): the guest's part of this turn is whole (a present
+    // runs no guest code); a replay ends with the recording's last whole turn.
+    g.runs.turn_end(cpu, g.settings);
+    if (g.runs.done()) {
+        g.quit = true;
+        g.host_ended = true;
+        return 1;
+    }
     due = due && !ff_skip(g, cpu); // fast-forward: a refresh apart, and before the gate
     if (present_and_decide(g, cpu, now, due)) {
         return 1;
+    }
+    if (g.replay) {
+        return 0; // the tape is the clock: no wait, as fast as the host goes
     }
     if (fixed) {
         // No wait: the next turn's time is one step later, however long this one took. The
@@ -3019,7 +3095,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         return 0;
     }
     // The guest's time to its next timer, on the host's clock (fast-forward runs it faster).
-    double guest_wait = next - mt_cf_absolute_time();
+    double guest_wait = next - mt_runtape_host_time();
     if (g.ff_rate > 1) {
         // Fast-forward: when the game's gate opens within a poll after that timer, the poll at
         // the timer would find it shut and the next one come a whole poll late (1 ms of the
@@ -3349,8 +3425,9 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
                                        std::chrono::system_clock::now().time_since_epoch())
                                        .count());
+    const bool playing = options.run_file != nullptr;
     const bool paced_run =
-        options.fixed_step_us == 0 && options.settings.pacing == PacingMode::kDisplay;
+        options.fixed_step_us == 0 && !playing && options.settings.pacing == PacingMode::kDisplay;
     PacedClock paced(host_now_ns, host_sleep_ns, nullptr,
                      paced_run ? paced_start_unix_us(wall_us) : wall_us);
     if (paced_run) {
@@ -3366,9 +3443,36 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                                    "rate is a multiple of the tick rate)"
                                  : ": the wall clock");
     LaunchClock launch_clock;
-    if (options.fixed_step_us == 0 && g.paced == nullptr) {
+    if (options.fixed_step_us == 0 && g.paced == nullptr && !playing) {
         launch_clock.install();
         g.launch = &launch_clock;
+    }
+    // Runs (#405, ADR 0156, run_recorder.h): a run file plays with its tape as the clock;
+    // record_runs = on records this session around the clocks installed above. Both before the
+    // process loads, as the clocks are.
+    set_run_recorder(&g.runs);
+    if (playing) {
+        std::array<std::uint8_t, 32> sha{};
+        mt_sha256(file.data() + offset, length, sha.data());
+        if (const std::string m = run_binding_mismatch(*options.run_file, sha); !m.empty()) {
+            SDL_Log("game: --play-run: this file cannot play here: %s", m.c_str());
+            set_run_recorder(nullptr);
+            return kExitNoGame;
+        }
+        if (!g.runs.play(*options.run_file, &why)) {
+            SDL_Log("game: --play-run: %s", why.c_str());
+            set_run_recorder(nullptr);
+            return kExitNoGame;
+        }
+        g.replay = true;
+        SDL_Log("game: --play-run: the tape is the clock (%llu turns, %zu events, %zu "
+                "checkpoints to compare)",
+                static_cast<unsigned long long>(options.run_file->turns),
+                options.run_file->events.size(), options.run_file->checkpoints.size());
+    } else if (options.settings.record_runs) {
+        std::array<std::uint8_t, 32> sha{};
+        mt_sha256(file.data() + offset, length, sha.data());
+        g.runs.start(sha, options.settings, saves.documents_dir);
     }
     // The Assists of #151 (game_speed.h, ADR 0087).
     SDL_Log("game: game_speed = %s, fast_forward = %s%s",
@@ -3379,7 +3483,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         SDL_Log("game: fast-forward does nothing in the fixed-step mode (its virtual clock is not "
                 "paced)");
     }
-    if (options.fixed_step_us == 0) {
+    if (options.fixed_step_us == 0 && !playing) {
         const std::uint64_t shift_us =
             g.paced != nullptr ? LaunchClock::shift_for(wall_us) : launch_clock.shift_us();
         const std::uint64_t guest_us =
@@ -3494,10 +3598,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     }
     SDL_Log("input: %zu binding rows, Nintendo face buttons by %s", options.bindings.table.size(),
             face_buttons_name(options.bindings.face));
+    attach_script_pad(g);
     g.gamepads.open_connected();
     // The lifecycle: the app events by SDL's event watch; in the fixed-step mode only the
     // script's (lifecycle.h).
-    g.lifecycle.set_real(g.clock == nullptr);
+    g.lifecycle.set_real(g.clock == nullptr && !g.replay);
     // The desktop conveniences (#145): the settings in effect, applied at once from here on
     // (the window's fullscreen and vsync are main.cpp's already; pause_unfocused here).
     g.desktop = options.desktop;
@@ -3505,7 +3610,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // autosave = on_quit at the exit to the main menu too (#179): Game_ExitToMainMenu's hook
     // reads the settings in effect at each call.
     g.autosaver.install_exit_to_menu(&g.settings.autosave,
-                                     [&g] { return mt_cf_absolute_time() - g.first_turn; });
+                                     [&g] { return mt_runtape_host_time() - g.first_turn; });
     follow_frame_rate(g); // frame_rate = smooth (#87): records from the first tick
     g.lifecycle.watch();
     g.applet.configure(options.applet_mode, options.applet_memory, options.applet_boost);
@@ -3824,6 +3929,32 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         } else {
             g.recovery.clean_exit();
         }
+        // The run's file (#405): written; or the replay's verdict.
+        if (g.runs.mode() == RunRecorder::Mode::kRecording) {
+            g.runs.finish(clean ? RunEnd::kQuit : RunEnd::kFailed,
+                          clean ? "" : outcome_name(outcome),
+                          path_utf8(utf8_path(saves.data_dir) / "runs"), mt_process_cpu(p));
+        } else if (g.runs.mode() == RunRecorder::Mode::kPlaying) {
+            const bool reached = g.runs.done();
+            g.runs.finish(RunEnd::kQuit, "", "", nullptr);
+            const std::uint64_t missed = g.runs.missed();
+            SDL_Log("game: --play-run: %s; %llu checkpoints compared, %s%s",
+                    reached ? "every recorded turn played" : "the replay ended early",
+                    static_cast<unsigned long long>(g.runs.compared()),
+                    g.runs.first_difference().empty()
+                        ? "all the same"
+                        : ("first difference at " + g.runs.first_difference()).c_str(),
+                    missed != 0 ? (", " + std::to_string(missed) + " not reached").c_str() : "");
+            const mt_runtape_stats ts = mt_runtape_get_stats();
+            if (ts.overrun != 0) {
+                SDL_Log("game: --play-run: %llu clock reads past the tape's end",
+                        static_cast<unsigned long long>(ts.overrun));
+            }
+            if (!reached || !g.runs.first_difference().empty() || missed != 0 || !clean) {
+                status = kExitRunDiffers;
+            }
+        }
+        set_run_recorder(nullptr);
         mt_process_destroy(p);
     }
     // How long the device stream ran, for the frames it pulled (a soak, #124: they should
@@ -3832,6 +3963,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         g.audio_start_ns != 0 ? static_cast<double>(SDL_GetTicksNS() - g.audio_start_ns) / 1e9 : 0;
     audio.close();
     g.rumble.uninstall();
+    detach_script_pad(g);
     g.rumble.stop();
     g.game_center.install(false); // its hook points at `g`
     mt_offline_ui_configure(0);

@@ -116,6 +116,7 @@ const Expected kExpected[] = {
     {"stick_mode", {"4way", "4way", "4way"}},
     {"direction_priority", {"game", "game", "last"}},
     {"update_check", {nullptr, nullptr, nullptr}}, // #199: opt-in, in no preset
+    {"record_runs", {nullptr, nullptr, nullptr}},  // #405: opt-in, in no preset
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 

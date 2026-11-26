@@ -45,6 +45,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -54,6 +55,7 @@
 #include "data_location.h"
 #include "maplethief/boot.h"
 #include "recovery.h"
+#include "run_file.h"
 #include "scaling.h"
 #include "settings.h"
 #include "switch_applet.h"
@@ -75,6 +77,7 @@ enum ExitStatus : int {
     kExitCheckMismatch = 3, // a read-back did not show what was presented
     kExitNoGame = 4,        // no generated code, no bundle, no slice, or the load failed
     kExitGuestEnded = 5,    // the guest trapped, stopped by itself or exited non-zero
+    kExitRunDiffers = 6,    // --play-run: a checkpoint differed, or the replay ended early
 };
 
 // The generated program and the reservation its memory model needs (MT_MEM_RESERVE_FOR_BUILD in
@@ -141,6 +144,15 @@ struct GameOptions {
     std::string capture_dir;               // --capture: read-back PNGs go here (empty: none)
     std::vector<std::uint64_t> capture_at; // --capture-at: window presents to capture
     std::vector<Tap> taps;                 // --tap and --swipe, by time
+    // --pad T,BUTTON,down|up (#405, a test aid): a virtual Xbox 360 pad attached at the start,
+    // its SDL gamepad button (SDL's names: a, b, dpup, start, ...) set at T seconds after the
+    // first run-loop turn, through SDL's events as a real pad's. In command-line order.
+    struct PadStep {
+        double at = 0;
+        int button = 0; // SDL_GamepadButton
+        bool down = false;
+    };
+    std::vector<PadStep> pad_steps;
     // --fixed-step: run on the virtual clock (clock.h, ADR 0044), advanced by this many
     // microseconds per run-loop turn and never waited for (0: the host's real clock).
     std::uint64_t fixed_step_us = 0;
@@ -204,6 +216,10 @@ struct GameOptions {
     // settings menu's Backups list's row N (1 = the newest) is chosen and confirmed, as a player
     // does (save_menu.h's backups_list: refused with a character loaded). Each is (T, N).
     std::vector<std::pair<double, int>> restore_backups;
+    // --play-run FILE (#405, ADR 0156): the run file read by main.cpp (its game files in a
+    // scratch data folder, its settings in `settings`), played with its tape as the clock.
+    // nullptr: a normal run.
+    std::shared_ptr<const RunFile> run_file;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must
