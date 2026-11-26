@@ -255,7 +255,9 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # on the GPU within ADR 0060's tolerance, internal scale 4, the sync points, batching and a busy
 # frame's GPU time, the present filters (#88) and GPU presentation (#130). Local only: without a GPU device (CI, the Linux container) and on GitHub
 # Actions every case prints "gfx_gpu: skipped", which CTest reports as skipped. One label only:
-# maplethief_doctest_discover flattens a list value into the property arguments.
+# maplethief_doctest_discover flattens a list value into the property arguments. The cases share
+# one RESOURCE_LOCK (#344): the time checks' fence waits also wait for other work on the GPU, so
+# no other case draws while one of them measures (the GPU's real-asset tests are RUN_SERIAL).
 add_executable(gfx_gpu_test cpp/gfx_gpu_test.cpp)
 target_link_libraries(gfx_gpu_test PRIVATE maplethief_doctest_main maplethief_gfx_gpu
                                            maplethief_golden maplethief_frontend)
@@ -268,7 +270,8 @@ maplethief_target_defaults(gfx_gpu_test)
 maplethief_doctest_discover(
     gfx_gpu_test
     PREFIX "gfx_gpu."
-    PROPERTIES LABELS gpu TIMEOUT 120 SKIP_REGULAR_EXPRESSION "gfx_gpu: skipped")
+    PROPERTIES LABELS gpu TIMEOUT 120 SKIP_REGULAR_EXPRESSION "gfx_gpu: skipped" RESOURCE_LOCK
+               gpu)
 
 # The GPU shaders' committed header is up to date with its HLSL sources (#120, ADR 0060):
 # scripts/build-shaders --check, without the container.
@@ -1642,13 +1645,14 @@ if(TARGET maplethief_gen)
     # Game speed and fast-forward (#151, ADR 0087): real-time runs on the dummy drivers with
     # fast_forward x2 and x3 held (paced clock) and x2 with pacing = wall (launch clock), and
     # game_speed 25: the switch is logged and the exit clock line's tick rate is near the
-    # option's (platform/game_speed_test.cmake; the 1 % is play.game_speed's).
+    # option's (platform/game_speed_test.cmake; the 1 % is play.game_speed's). A run outside the
+    # tolerance is run again, up to 3 times (#344): the timeout holds all of them.
     add_test(
         NAME platform.game_speed
         COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=game
                 "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/game_speed" -P
                 "${PROJECT_SOURCE_DIR}/platform/game_speed_test.cmake")
-    set_tests_properties(platform.game_speed PROPERTIES LABELS "real_assets" TIMEOUT 300
+    set_tests_properties(platform.game_speed PROPERTIES LABELS "real_assets" TIMEOUT 600
                                                         RUN_SERIAL TRUE)
 
     # Frame telemetry and the frame-time overlay (#137, ADR 0071): a real-time run's exit log
