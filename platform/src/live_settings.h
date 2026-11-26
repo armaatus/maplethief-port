@@ -32,6 +32,8 @@
 //                              the next upload or present, as the filter)
 //   screen_shake               mt_hooks_install_screen_shake (#158; the next CStateGame::Paint)
 //   flashes                    mt_hooks_install_flashes (#186; the next flash fill)
+//   speech, speech_rate, speech_volume   Speech::set_enabled and set_voice (#390, ADR 0174; the
+//                              next utterance), then a sample of the voice
 //   auto_loot                  install_auto_loot (#175; the next drop update)
 //   keypad_layout              install_keypad_layout (#159, ADR 0086; the next touch, GL frame
 //                              and composite)
@@ -74,6 +76,7 @@ class Rumble;
 class FocusMute;
 class AudioDevice;
 class PerfOverlay;
+class Speech;
 
 // The objects a live change reaches (any may be null: that row then waits for the next start).
 struct LiveTargets {
@@ -91,6 +94,7 @@ struct LiveTargets {
     bool *vsync = nullptr;          // Game::vsync, which follow_vsync keeps current
     FrameStats *stats = nullptr;    // ... and the telemetry's
     Lifecycle *lifecycle = nullptr; // pause_unfocused
+    Speech *speech = nullptr;       // speech, speech_rate, speech_volume
     // render_scale: the frontend's change to N times (0: auto), or empty (the next start).
     std::function<bool(std::uint32_t scale)> render_scale;
     // keypad_layout: installs a layout (install_keypad_layout), or empty (the next start).

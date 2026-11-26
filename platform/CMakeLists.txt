@@ -99,6 +99,7 @@ add_library(
     src/switch_applet.cpp
     src/settings.cpp
     src/settings_menu.cpp
+    src/speech.cpp
     src/start_question.cpp
     src/switch_pads.cpp
     src/pack_folders.cpp
@@ -161,6 +162,17 @@ if(APPLE)
     target_link_libraries(maplethief_frontend PRIVATE "-framework Foundation")
 elseif(WIN32)
     target_link_libraries(maplethief_frontend PRIVATE winhttp)
+endif()
+# Text-to-speech's system voice (#390, ADR 0174, speech.h): AVSpeechSynthesizer on macOS and iOS
+# (Objective-C++ with ARC), SAPI 5 on Windows; Linux loads libspeechd at run time
+# (speech.cpp), so it is no build dependency.
+if(APPLE)
+    target_sources(maplethief_frontend PRIVATE src/speech_apple.mm)
+    set_source_files_properties(src/speech_apple.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_link_libraries(maplethief_frontend PRIVATE "-framework AVFoundation")
+elseif(WIN32)
+    target_sources(maplethief_frontend PRIVATE src/speech_sapi.cpp)
+    target_link_libraries(maplethief_frontend PRIVATE sapi ole32)
 endif()
 # iOS (#83, ADR 0136): the frontend's Objective-C++ sources, with ARC, and the frameworks they
 # and SDL's backends need (#73's audit). A new iOS source goes in this list.

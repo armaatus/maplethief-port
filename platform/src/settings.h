@@ -498,6 +498,11 @@ const char *colorblind_filter_name(ColorblindFilter filter);
 inline constexpr std::uint32_t kMaxScreenShake = 100;
 // flashes' largest value (#186): the game's own full-screen flashes, in percent of their alpha.
 inline constexpr std::uint32_t kMaxFlashes = 100;
+// Text-to-speech (#390, ADR 0174, speech.h): speech_rate in percent of the voice's normal rate,
+// speech_volume in percent.
+inline constexpr std::uint32_t kSpeechRateMin = 50, kSpeechRateMax = 200, kSpeechRateStep = 10;
+inline constexpr std::uint32_t kSpeechRateDefault = 100;
+inline constexpr std::uint32_t kSpeechVolumeMax = 100, kSpeechVolumeStep = 10;
 // The picture adjustments (#187, ADR 0093's addendum, color_filter.h): brightness, contrast and
 // saturation in percent, gamma in hundredths (the file writes it as 0.80 ... 1.40). Video; not in
 // the presets (the player's screen, not the experience).
@@ -674,6 +679,10 @@ struct Settings {
     std::uint32_t screen_shake = kMaxScreenShake;                // --screen-shake (0 to 100)
     // The full-screen flashes' alpha in percent (#186; mt_hooks_install_flashes; 100: original).
     std::uint32_t flashes = kMaxFlashes; // --flashes (0 to 100)
+    // Text-to-speech (#390, ADR 0174, speech.h): the game's text read by the system voice.
+    bool speech = false;                            // speech, --speech (on | off)
+    std::uint32_t speech_rate = kSpeechRateDefault; // --speech-rate (50 to 200, percent)
+    std::uint32_t speech_volume = kSpeechVolumeMax; // --speech-volume (0 to 100, percent)
     // The picture adjustments (#187): the present stage's colour step with the filter.
     std::uint32_t brightness = kPictureDefault; // --brightness (50 to 150, percent)
     std::uint32_t contrast = kPictureDefault;   // --contrast (50 to 150, percent)

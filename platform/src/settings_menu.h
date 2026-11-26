@@ -236,6 +236,11 @@ class SettingsMenu {
     // of the tab's own.
     using NoteFn = std::function<std::string()>;
     void set_tab_note(SettingGroup group, NoteFn fn);
+    // A setting row the platform has but cannot serve now (#390: the speech rows where no system
+    // voice loaded): `fn` returns why ("" while it can), asked at each draw. Meanwhile the row
+    // shows "not available", its help says why, and changing it says why on the status line.
+    using UnavailableFn = std::function<std::string()>;
+    void set_setting_unavailable(const std::string &key, UnavailableFn fn);
     // The values this run started with (the "next start" marks compare with them).
     void set_started(const Settings &started) { started_ = started; }
     // The numbers frame_cost rows show (frame_cost_text): the game's last second, set by the
@@ -324,6 +329,7 @@ class SettingsMenu {
     bool hotkey(const SDL_Event &e) const;
     void page(int dir);
     std::optional<ActionView> action_view(const MenuActionInfo *a) const;
+    std::string unavailable(const SettingInfo *row) const; // "" if available
 
     std::span<const SettingInfo> rows_;
     SettingsPlatform platform_ = kSettingsPlatform;
@@ -331,6 +337,7 @@ class SettingsMenu {
     std::vector<std::pair<const MenuActionInfo *, ViewFn>> views_;
     std::vector<std::pair<const MenuActionInfo *, QuestionFn>> questions_;
     std::vector<std::pair<SettingGroup, NoteFn>> notes_;
+    std::vector<std::pair<const SettingInfo *, UnavailableFn>> unavailable_;
     std::string confirm_question_; // a QuestionFn's question while confirming_
     Actions *actions_;
     Gamepads *gamepads_;

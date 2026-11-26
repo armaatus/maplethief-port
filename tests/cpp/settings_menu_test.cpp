@@ -18,6 +18,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <set>
 #include <span>
 #include <string>
@@ -47,6 +48,7 @@
 #include "rumble.h"
 #include "settings.h"
 #include "settings_menu.h"
+#include "speech.h"
 #include "virtual_pad.h"
 
 namespace {
@@ -1285,6 +1287,9 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
         layouts.push_back(fe::keypad_layout_text(l));
     };
     t.turn_reads_settings = true;
+    // #390's speech rows: a Speech on the log backend.
+    fe::Speech speech(std::make_unique<fe::LogSpeechBackend>([](const std::string &) {}));
+    t.speech = &speech;
     // #195's output device: a stream on SDL's dummy driver, which audio_device reopens.
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
     fe::AudioDevice audio;
@@ -1757,6 +1762,9 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"colorblind_filter", true, ""},
     {"screen_shake", true, ""},
     {"flashes", true, ""},
+    {"speech", false, "no system voice open to homebrew (kCapSpeech, ADR 0174)"},
+    {"speech_rate", false, "kCapSpeech"},
+    {"speech_volume", false, "kCapSpeech"},
     {"brightness", true, ""},
     {"contrast", true, ""},
     {"saturation", true, ""},
@@ -2007,6 +2015,52 @@ TEST_CASE("platform caps: the desktop shows every row as before; iOS and the Swi
     // The build's own platform is the menu's default.
     const SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
     CHECK(menu.platform() == fe::kSettingsPlatform);
+}
+
+TEST_CASE("settings menu: a row the platform cannot serve now says so (#390: no system voice)") {
+    using fe::SettingsPlatform;
+    Settings live;
+    SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    menu.set_platform(SettingsPlatform::kDesktop);
+    menu.attach(&live);
+    bool voice = false;
+    const std::string why = "No system voice: install speech-dispatcher";
+    for (const char *key : {"speech", "speech_rate", "speech_volume"}) {
+        menu.set_setting_unavailable(key, [&voice, why] { return voice ? std::string() : why; });
+    }
+    Driver drv{menu, nullptr};
+    drv.button(SDL_GAMEPAD_BUTTON_GUIDE);
+    REQUIRE(menu.is_open());
+    for (std::size_t t = 0;
+         t < menu.tabs().size() && menu.tabs()[menu.tab()] != SettingGroup::kAccessibility; t++) {
+        drv.button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+    }
+    REQUIRE(menu.tabs()[menu.tab()] == SettingGroup::kAccessibility);
+    std::size_t row = 0;
+    for (std::size_t i = 1; i < menu.items().size(); i++) {
+        const SettingsMenu::Item &it = menu.items()[i];
+        if (it.kind == Kind::kSetting && std::string(it.setting->key) == "speech") {
+            row = i;
+        }
+    }
+    REQUIRE(row != 0);
+    while (menu.selected() < row) {
+        drv.button(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+    }
+    // Without a voice: "not available", the help says why, and Right changes nothing.
+    CHECK(menu.row_value(row) == "not available");
+    CHECK(menu.row_value(row + 1) == "not available"); // speech_rate
+    CHECK(menu.help() == why);
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    CHECK_FALSE(live.speech);
+    CHECK(menu.status() == why);
+    CHECK_FALSE(menu.changed());
+    // With one, the row is an ordinary on / off.
+    voice = true;
+    CHECK(menu.row_value(row) == "off");
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    CHECK(live.speech);
+    CHECK(menu.row_value(row) == "on");
 }
 
 TEST_CASE("settings menu: the pack rows offer their folders and show a pack by its name on the "

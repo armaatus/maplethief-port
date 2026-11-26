@@ -315,6 +315,26 @@ void SettingsMenu::set_tab_note(SettingGroup group, NoteFn fn) {
     dirty_ = true;
 }
 
+void SettingsMenu::set_setting_unavailable(const std::string &key, UnavailableFn fn) {
+    for (const SettingInfo &row : rows_) {
+        if (key == row.key) {
+            unavailable_.emplace_back(&row, std::move(fn));
+            dirty_ = true;
+            return;
+        }
+    }
+    SDL_Log("settings: menu: no setting row '%s'", key.c_str());
+}
+
+std::string SettingsMenu::unavailable(const SettingInfo *row) const {
+    for (auto it = unavailable_.rbegin(); it != unavailable_.rend(); ++it) {
+        if (it->first == row && it->second) {
+            return it->second();
+        }
+    }
+    return "";
+}
+
 std::optional<SettingsMenu::ActionView> SettingsMenu::action_view(const MenuActionInfo *a) const {
     for (auto it = views_.rbegin(); it != views_.rend(); ++it) {
         if (it->first == a && it->second) {
@@ -371,6 +391,9 @@ std::string SettingsMenu::row_value(std::size_t i) const {
         if (live_ == nullptr) {
             return "";
         }
+        if (!unavailable(it.setting).empty()) {
+            return tr(Txt::menu_not_available);
+        }
         const std::string text = setting_text(*live_, *it.setting);
         // A pack row on a platform that offers its folders (#241, pack_folders.h): the pack's
         // name rather than its whole path.
@@ -421,6 +444,9 @@ std::string SettingsMenu::help() const {
     }
     if (sel.kind == ItemKind::kListRow) {
         return confirming_ && list_.question ? list_.question(sel.row) : list_.help;
+    }
+    if (std::string why = unavailable(sel.setting); !why.empty()) {
+        return why;
     }
     std::string h = sel.setting->help_pad != nullptr && !shows_key_hints()
                         ? row_text(*sel.setting, "help_pad", sel.setting->help_pad)
@@ -714,6 +740,10 @@ void SettingsMenu::step(int delta) {
         return;
     }
     const SettingInfo &r = *it.setting;
+    if (std::string why = unavailable(&r); !why.empty()) {
+        say(std::move(why));
+        return;
+    }
     const Settings before = *live_;
     if (!step_setting(live_, r, delta)) {
         // A pack row with an empty folder (#241): where its packs go, not settings.ini.
