@@ -2,8 +2,14 @@
 # pull requests since the previous release, grouped by their labels. A pull request goes into
 # the first category that matches one of its labels; unlabelled ones go to "Other changes".
 # Label an epic PR with its epic's labels (gh pr edit N --add-label type:epic,area:...) so it
-# lands in the right group (docs/release-checklist.md).
+# lands in the right group (docs/release-checklist.md). `scripts/release notes TAG` (and
+# `start`) fails while any merged pull request since the last tag would land in "Other changes"
+# (python3 -m mtport.release notes-check, #313); keep that catch-all's title as it is.
 changelog:
+  # The release pull request itself ("Release vX.Y.Z", dev into main) is no change of its own;
+  # release.yml's title check makes it carry this label.
+  exclude:
+    labels: [type:release]
   categories:
     - title: Milestones (epics)
       labels: [type:epic]
@@ -12,9 +18,14 @@ changelog:
     - title: Runtime and HLE
       labels: [area:runtime, area:objc, area:audio, area:render, area:input, area:ui, area:save]
     - title: Platforms
-      labels: [area:platform-mac, area:platform-win, area:platform-linux, area:platform-ios]
+      labels: [area:platform-mac, area:platform-win, area:platform-linux, area:platform-ios,
+               area:platform-android]
+    - title: Nintendo Switch
+      labels: [area:platform-switch]
     - title: Reverse engineering, formats and assets
       labels: [area:re, area:formats, area:assets]
+    - title: Compendium
+      labels: [area:compendium]
     - title: Build, CI and releases
       labels: [area:infra, area:qa]
     - title: Enhancements

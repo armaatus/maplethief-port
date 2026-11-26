@@ -5,8 +5,13 @@
 # the player builds need work/gen, so they are built here and on the Windows PC
 # (scripts/release.ps1) with --players-only. Without it, every step runs here as before.
 #
+#   notes TAG    the notes pre-flight on its own (#313), before the release pull request is
+#                opened: asks GitHub for the notes it would generate for TAG (read only; the
+#                target is the local tag, else --target REF, else dev; the range starts at the
+#                latest release) and fails when a merged pull request since then lands in "Other changes" (no label of any
+#                category of .github/release.yml)
 #   start TAG    checks: docs/KNOWN_ISSUES.md cites no closed issue (also before publish),
-#                annotated tag vX.Y.Z[-rc.N], clean tree on main, tag on origin/main
+#                the notes pre-flight, annotated tag vX.Y.Z[-rc.N], clean tree on main, tag on origin/main
 #                and pushed, scripts/local-ci green on it; then creates the draft release
 #                with the committed header (.github/release-notes-header.md: what the downloads
 #                hold, bring your own IPA) above generated notes (.github/release.yml), a
@@ -32,9 +37,9 @@
 #                (python3 -m mtport.release itch; the key from BUTLER_API_KEY); Windows pushes
 #                its own with scripts\release.ps1 itch TAG
 #
-# Usage: scripts/release start|build|publish|itch TAG [--dry-run] [--replace] [--players-only]
+# Usage: scripts/release notes|start|build|publish|itch TAG [--dry-run] [--replace] [--players-only]
 #                                                     [--platforms LIST] [--build-arg NAME=VALUE]...
-#                                                     [--from DIR] [--out DIR]
+#                                                     [--from DIR] [--out DIR] [--target REF]
 # (the options are described in usage() below, printed by scripts/release --help)
 #
 # Everything lands in build/release/<TAG>/. --dry-run does every local step and prints the
@@ -47,12 +52,15 @@ cd "$REPO"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: scripts/release start|build|publish|itch TAG [--dry-run] [--replace] [--players-only]
+Usage: scripts/release notes|start|build|publish|itch TAG [--dry-run] [--replace] [--players-only]
                                                     [--platforms LIST] [--build-arg NAME=VALUE]...
-                                                    [--from DIR] [--out DIR]
+                                                    [--from DIR] [--out DIR] [--target REF]
 
-  start TAG        check that docs/KNOWN_ISSUES.md cites no closed issue, the tag and the
-                   tree, run scripts/local-ci on the tag, create the draft release with the
+  notes TAG        the notes pre-flight: fail when a merged pull request since the last
+                   release would land in "Other changes" of the generated notes (run it
+                   before opening the release pull request; start runs it too)
+  start TAG        check that docs/KNOWN_ISSUES.md cites no closed issue, the notes, the tag
+                   and the tree, run scripts/local-ci on the tag, create the draft release with the
                    notes header and generated notes
   build TAG        build, check, guard and checksum the kits and player builds of this Mac
                    (macOS universal, Linux x86_64; the Nintendo Switch's player zip) and
@@ -74,6 +82,8 @@ Usage: scripts/release start|build|publish|itch TAG [--dry-run] [--replace] [--p
   --build-arg A=B  build: passed to scripts/local-ci / scripts/test-linux for the image
   --from DIR       itch: take the files and SHA256SUMS from DIR, not the published release
   --out DIR        itch: download directory (default build/release/TAG/itch)
+  --target REF     notes: the branch or commit the release is cut from (default: the local
+                   tag's commit, else dev)
 
   itch --dry-run checks the files and prints the butler commands (no butler or key needed);
   itch --platforms is of mac,linux,windows,switch (default mac,linux,switch).
@@ -86,7 +96,7 @@ step() { echo; echo "== $*"; }
 
 [ "$#" -ge 1 ] || usage
 case "$1" in
-    start | build | publish | itch) cmd="$1"; shift ;;
+    notes | start | build | publish | itch) cmd="$1"; shift ;;
     -h | --help) usage 0 ;;
     *) echo "scripts/release: unknown command: $1" >&2; usage ;;
 esac
@@ -97,6 +107,7 @@ players_only=0
 platforms=""
 build_args=()
 itch_args=()
+target=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --dry-run) dry_run=1; shift ;;
@@ -110,6 +121,11 @@ while [ "$#" -gt 0 ]; do
         --build-arg)
             [ "$#" -ge 2 ] || usage
             build_args+=(--build-arg "$2")
+            shift 2
+            ;;
+        --target)
+            [ "$#" -ge 2 ] || usage
+            target="$2"
             shift 2
             ;;
         --from | --out)
@@ -207,10 +223,44 @@ check_known_issues() {
         die "docs/KNOWN_ISSUES.md cites a closed issue: remove or re-source the entry first"
 }
 
+# check_notes REF [PREVIOUS]: the notes pre-flight (#313). GitHub generates the notes for the tag from REF
+# with .github/release.yml (read only, also with --dry-run); a merged pull request with no label
+# of any category lands in "Other changes", and that fails. MAPLETHIEF_RELEASE_NOTES (a file of
+# generated notes) stands in for GitHub in the tests.
+check_notes() {
+    step "Release notes"
+    local args=(notes-check "$tag")
+    if [ -n "${MAPLETHIEF_RELEASE_NOTES:-}" ]; then
+        args+=(--notes "$MAPLETHIEF_RELEASE_NOTES")
+    else
+        args+=(--target "$1")
+        [ -z "${2:-}" ] || args+=(--previous "$2")
+    fi
+    mtrelease "${args[@]}" ||
+        die "a merged pull request has no category label: label it (docs/release-checklist.md)"
+}
+
+cmd_notes() {
+    local ref="$target"
+    if [ -z "$ref" ]; then
+        ref=dev
+        git rev-parse -q --verify "refs/tags/$tag" >/dev/null && ref="$(git rev-parse "$tag^{commit}")"
+    fi
+    # Before the release pull request merges, the last release's tag is not in dev's history
+    # (it sits on main's merge commit), so GitHub would pick an older one: name it.
+    local previous=""
+    [ -n "${MAPLETHIEF_RELEASE_NOTES:-}" ] ||
+        previous="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
+    check_notes "$ref" "$previous"
+}
+
 cmd_start() {
     check_known_issues
     step "Checks"
     check_tag
+    # The tag's commit; GitHub knows it once the tag (or main) is pushed.
+    check_notes "$commit"
+    step "Checks"
     [ -z "$(git status --porcelain --untracked-files=no)" ] || die "the working tree has changes"
     echo "   ok: clean working tree"
     [ "$dry_run" -eq 1 ] || git fetch --quiet origin main

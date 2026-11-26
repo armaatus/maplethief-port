@@ -25,13 +25,16 @@ A content guard (`python3 -m mtport.release guard`) checks every file before it'
 
 ## The flow
 
-Tags are annotated SemVer: `vX.Y.Z`, or `vX.Y.Z-rc.N` for a pre-release. A release starts as a pull request from `dev` into `main` ([ADR 0126](../adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md)):
+Tags are annotated SemVer: `vX.Y.Z`, or `vX.Y.Z-rc.N` for a pre-release. A release starts as a pull request from `dev` into `main` ([ADR 0126](../adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md)). Before opening it, check the notes:
 
 ```sh
-gh pr create --base main --head dev --title "Release TAG" --body "Release TAG"
+scripts/release notes TAG
+gh pr create --base main --head dev --title "Release TAG" --body "Release TAG" --label type:release
 ```
 
-CI runs every OS, Debug and Release, and packages the kits. A `release title` check fails unless the pull request comes from `dev`, its title is `Release vX.Y.Z[-rc.N]`, and that tag doesn't exist yet. Merge it with a merge commit when everything is green.
+The release notes are GitHub's, generated from the pull requests merged since the last release and grouped by their labels ([`.github/release.yml`](../../.github/release.yml): epics, recompiler, runtime, platforms, Nintendo Switch, reverse engineering, compendium, build and CI, enhancements, fixes, docs). A pull request with no label of any group lands in "Other changes". `scripts/release notes TAG` asks GitHub for the notes it would generate (it creates nothing) and fails, naming each one, while any pull request lands there (#313); `scripts/release start` runs the same check. Label an epic pull request with its epic's labels (`gh pr edit N --add-label type:epic,area:...`). The release pull request itself carries `type:release`, which keeps it out of the notes.
+
+CI runs every OS, Debug and Release, and packages the kits. A `release title` check fails unless the pull request comes from `dev`, its title is `Release vX.Y.Z[-rc.N]`, that tag doesn't exist yet, and it carries the `type:release` label. Merge it with a merge commit when everything is green.
 
 ## Branch rules
 
@@ -44,7 +47,7 @@ CI runs every OS, Debug and Release, and packages the kits. A `release title` ch
 
 A new or renamed CI job goes into the rulesets' JSON in the same pull request (`tests/test_rulesets.py` fails otherwise); run `scripts/rulesets apply` after it merges.
 
-The merge starts `release.yml`, which creates the annotated tag on the merge commit and the draft release, with the notes header ([`.github/release-notes-header.md`](../../.github/release-notes-header.md)) above GitHub's generated notes. It then builds the three kits from the tag on hosted runners, checks each, runs the guard, and uploads them to the draft.
+The merge starts `release.yml`, which creates the annotated tag on the merge commit and the draft release, with the notes header ([`.github/release-notes-header.md`](../../.github/release-notes-header.md): what's new for players, the downloads, going back to an older version) above GitHub's generated notes. It then builds the three kits from the tag on hosted runners, checks each, runs the guard, and uploads them to the draft.
 
 Then build the player builds on the two machines that have `work/gen` (`scripts/bootstrap`, then `python3 -m recomp all`), and publish:
 

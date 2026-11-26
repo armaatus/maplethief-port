@@ -1,3 +1,14 @@
+## What's new since 0.1.0
+
+- **Your saves and settings sit in one `data` folder next to the game.** Move or back up the game folder and everything comes along. Saves from 0.1.0 are copied in on the first start; the old ones stay where they were. If you'd rather keep them in your user account's folder, the settings menu → Saves → **Data location** switches ([Saves](https://github.com/armaatus/maplethief-port/blob/main/docs/play/saves.md)).
+- **Nintendo Switch.** A homebrew build for a Switch running custom firmware, as a preview ([Playing on the Nintendo Switch](https://github.com/armaatus/maplethief-port/blob/main/docs/play/switch.md)).
+- **iPhone.** You can build the game as an iPhone app on a Mac with Xcode and install it on your own phone; there is no download for iOS ([Playing on your iPhone](https://github.com/armaatus/maplethief-port/blob/main/docs/play/iphone.md)).
+- **Hear about new versions**, if you want to: the first launch asks once, and the game then checks GitHub once a day and shows one line on the title screen when a new version is out. It downloads nothing and is off unless you turn it on ([Settings](https://github.com/armaatus/maplethief-port/blob/main/docs/play/settings.md)).
+- **After a crash** a dialog names the crash report to attach to a bug report, and the next start offers safe settings for one run ([Troubleshooting](https://github.com/armaatus/maplethief-port/blob/main/docs/play/troubleshooting.md#a-crash-or-a-bug-to-report)).
+- **Play without touch.** Everything the touch screen does now works with a mouse, a keyboard or a gamepad, and you can switch between them at any time ([Controls](https://github.com/armaatus/maplethief-port/blob/main/docs/play/controls.md)).
+
+**Going back to an older version?** Versions before this one don't read the `data` folder, so they won't see what you saved since. Your saves from before the update are still where that version keeps them.
+
 ## Downloads
 
 **To play**, download the file for your system:
