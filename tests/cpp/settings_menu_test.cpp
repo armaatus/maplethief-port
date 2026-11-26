@@ -1784,6 +1784,8 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"stick_mode", true, ""},
     {"direction_priority", true, ""},
     {"update_check", false, "no HTTP fetcher on the console (update_fetch.cpp)"},
+    {"run_timer", true, ""},
+    {"run_category", true, ""},
 };
 constexpr SwitchDecision kSwitchActions[] = {
     {"bindings", true, "the remap screen takes the pad"},

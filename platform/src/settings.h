@@ -149,6 +149,10 @@
 //   # once a day, ask github.com whether a newer version of the port is out (never in
 //   # Original; it downloads nothing): on | off
 //   update_check = off
+//   # the speedrun timer over the picture (run_timer.h): on | off
+//   run_timer = off
+//   # the timer's category: any | chapter_1, or a file of your own in <data dir>/categories
+//   run_category = any
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -715,6 +719,10 @@ struct Settings {
     // The opt-in update notice (#199, ADR 0137, update_check.h): off by default, in no preset,
     // and it never runs in the Original preset.
     bool update_check = false; // update_check, --update-check (on | off)
+    // The speedrun timer (#406, ADR 0156, run_timer.h): its overlay and run logs, and the
+    // category it times (a category file's name, without .mtcat). Outside the presets.
+    bool run_timer = false;           // run_timer, --run-timer (on | off)
+    std::string run_category = "any"; // run_category, --run-category (NAME)
 
     bool operator==(const Settings &) const = default;
 };
@@ -962,6 +970,11 @@ inline constexpr const char *kFullscreenDisplayCurrent = "current";
 // (kCapPackFolders: the Switch; pack_folders.cpp's offer_pack_folders sets them at the start).
 // The menu then offers "" (none) and these; with none set it offers nothing, as before.
 void set_pack_choices(std::string_view key, std::vector<std::string> values);
+// run_category (#406, run_timer.h): the categories' names the settings menu offers (game.cpp
+// sets them from the shipped categories and the data folder's). Empty until then: the menu then
+// offers no values. A category's name is 1 to 32 of a-z, 0-9 and '_'.
+void set_run_category_choices(std::vector<std::string> names);
+inline constexpr std::size_t kMaxRunCategoryBytes = 32;
 
 // Every setting, in the order a new file lists them (after `preset`).
 std::span<const SettingInfo> settings_registry();

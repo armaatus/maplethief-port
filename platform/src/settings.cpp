@@ -323,6 +323,40 @@ constexpr SettingValue fullscreen_display_value() {
     return v;
 }
 
+// run_category (#406): a category's name, 1 to 32 of a-z, 0-9 and '_' (any case read, written
+// in lower case).
+bool parse_run_category(const SettingValue &, std::string_view text, Settings *s) {
+    if (text.empty() || text.size() > kMaxRunCategoryBytes) {
+        return false;
+    }
+    std::string name;
+    for (const char c : text) {
+        const char l = (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+        if (!((l >= 'a' && l <= 'z') || (l >= '0' && l <= '9') || l == '_')) {
+            return false;
+        }
+        name += l;
+    }
+    s->run_category = name;
+    return true;
+}
+
+std::string print_run_category(const SettingValue &, const Settings &s) { return s.run_category; }
+
+std::vector<std::string> &run_category_names() {
+    static std::vector<std::string> names;
+    return names;
+}
+
+std::vector<std::string> offer_run_categories() { return run_category_names(); }
+
+constexpr SettingValue run_category_value() {
+    SettingValue v = custom_value(&parse_run_category, &print_run_category,
+                                  "a category's name (a-z, 0-9 and _, at most 32)");
+    v.offer = &offer_run_categories;
+    return v;
+}
+
 constexpr SettingValue audio_device_value() {
     SettingValue v = custom_value(&parse_audio_device, &print_audio_device,
                                   "default or an output device's name");
@@ -1182,6 +1216,27 @@ constexpr SettingInfo kRegistry[] = {
      .help = "Asks github.com once a day whether a newer version of the port is out; downloads "
              "nothing. Never in the Original preset",
      .needs = kCapUpdateFetch},
+    // The speedrun timer (#406, ADR 0156, run_timer.h): read live by game.cpp's turn.
+    {.key = "run_timer",
+     .group = SettingGroup::kOther,
+     .comment = "# the speedrun timer over the picture (run_timer.h): on | off",
+     .value = on_off<&Settings::run_timer>(),
+     .flag = "--run-timer",
+     .game_only = true,
+     .label = "Speedrun timer",
+     .help = "Times a run from a new character, with splits and a personal best; says whether "
+             "an Assist was on",
+     .applies = Applies::kAtOnce},
+    {.key = "run_category",
+     .group = SettingGroup::kOther,
+     .comment = "# the timer's category: any | chapter_1, or a file of your own in <data "
+                "dir>/categories",
+     .value = run_category_value(),
+     .flag = "--run-category",
+     .game_only = true,
+     .label = "Speedrun category",
+     .help = "What the timer times: Any% (to the last boss) or Chapter 1 (to the trip to Orbis)",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -1490,6 +1545,10 @@ void set_audio_device_choices(std::vector<std::string> names) {
 }
 
 void set_display_choices(std::vector<std::string> names) { display_names() = std::move(names); }
+
+void set_run_category_choices(std::vector<std::string> names) {
+    run_category_names() = std::move(names);
+}
 
 void set_pack_choices(std::string_view key, std::vector<std::string> values) {
     for (std::size_t i = 0; i < std::size(kPackRowKeys); i++) {

@@ -378,6 +378,10 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # The opt-in update notice (#199, ADR 0137, update_check_test.cpp): SemVer, the once-a-day gate,
 # canned release JSON, the state file, and a counting fetcher: zero calls when off, in the
 # Original preset or a scripted run, one log line per failure.
+# The speedrun timer (#406, ADR 0156, run_timer_test.cpp): synthetic run events and a fake clock
+# (start, splits, end, reset, the personal best), an Assist set and reset mid-run, every Assists
+# row of the registry, the run variables, the category parser's refusals by line, the shipped
+# categories, the run log's round trip.
 # The first-launch IPA import (#182, ipa_import_test.cpp): synthetic IPAs refused with each
 # reason, unsafe entries writing nothing, an interrupted import leaving no game/, a re-import,
 # the bundle lookup's order, and the import screen's input and loop on a dummy-driver window.
@@ -430,6 +434,7 @@ maplethief_add_cpp_test(
             cpp/start_question_test.cpp
             cpp/switch_input_test.cpp
             cpp/gfx_dksh_test.cpp
+            cpp/run_timer_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
