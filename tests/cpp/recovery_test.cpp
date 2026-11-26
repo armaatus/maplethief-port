@@ -77,10 +77,10 @@ Bytes state_file(u32 slot, const char *version, u8 fill = 0x11) {
 // real (write_quick_state into a temporary directory).
 struct Fake {
     fe::RecoveryWhere where{0, 2, 8, 0};
-    std::string unsafe;  // "" safe; else mt_snapshot_safe's reason
-    std::string bad;     // "" the armed point checks; else check's reason
+    std::string unsafe; // "" safe; else mt_snapshot_safe's reason
+    std::string bad;    // "" the armed point checks; else check's reason
     std::string no_restore;
-    u8 next = 1;         // the stored save's content: a counter
+    u8 next = 1; // the stored save's content: a counter
     std::vector<std::string> calls;
     std::optional<std::uint64_t> free_bytes;
     // The worker's deflate waits while `hold` is set.
@@ -447,13 +447,12 @@ TEST_CASE("recovery: #198's box with a point: Resume, Resume with default settin
     };
     for (const Case &c : cases) {
         int asked = 0;
-        fe::set_recovery_prompt_for_test(
-            [&](const std::string &file, const fe::RecoveryOffer &o) {
-                asked++;
-                CHECK(file == "crashes/x.txt");
-                CHECK(o.offered);
-                return c.choice;
-            });
+        fe::set_recovery_prompt_for_test([&](const std::string &file, const fe::RecoveryOffer &o) {
+            asked++;
+            CHECK(file == "crashes/x.txt");
+            CHECK(o.offered);
+            return c.choice;
+        });
         const fe::StartDecision d = fe::decide_start(false, last, true, offer);
         CHECK(asked == 1);
         CHECK(d.safe_start == c.safe);
