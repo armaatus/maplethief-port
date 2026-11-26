@@ -5,7 +5,8 @@
 # the player builds need work/gen, so they are built here and on the Windows PC
 # (scripts/release.ps1) with --players-only. Without it, every step runs here as before.
 #
-#   start TAG    checks: annotated tag vX.Y.Z[-rc.N], clean tree on main, tag on origin/main
+#   start TAG    checks: docs/KNOWN_ISSUES.md cites no closed issue (also before publish),
+#                annotated tag vX.Y.Z[-rc.N], clean tree on main, tag on origin/main
 #                and pushed, scripts/local-ci green on it; then creates the draft release
 #                with the committed header (.github/release-notes-header.md: what the downloads
 #                hold, bring your own IPA) above generated notes (.github/release.yml), a
@@ -50,13 +51,14 @@ Usage: scripts/release start|build|publish|itch TAG [--dry-run] [--replace] [--p
                                                     [--platforms LIST] [--build-arg NAME=VALUE]...
                                                     [--from DIR] [--out DIR]
 
-  start TAG        check the tag and the tree, run scripts/local-ci on the tag, create the
-                   draft release with the notes header and generated notes
+  start TAG        check that docs/KNOWN_ISSUES.md cites no closed issue, the tag and the
+                   tree, run scripts/local-ci on the tag, create the draft release with the
+                   notes header and generated notes
   build TAG        build, check, guard and checksum the kits and player builds of this Mac
                    (macOS universal, Linux x86_64; the Nintendo Switch's player zip) and
                    upload them to the draft
-  publish TAG      check every platform's kit and player build is on the draft, write
-                   SHA256SUMS, publish
+  publish TAG      check KNOWN_ISSUES again, and that every platform's kit and player build
+                   is on the draft, write SHA256SUMS, publish
   itch TAG         push the published release's player builds (macOS, Linux, Switch) to itch.io
                    with butler, after checking them against SHA256SUMS and the guard; needs
                    BUTLER_API_KEY; pre-releases are not pushed (ADR 0146)
@@ -189,7 +191,24 @@ check_draft() {
     fi
 }
 
+# check_known_issues: docs/KNOWN_ISSUES.md at the tag (this checkout's when there is no local
+# tag yet) cites no closed issue (#309): an entry holds only while its issue is open. The
+# closed issues come from gh, read-only, also with --dry-run. MAPLETHIEF_KNOWN_ISSUES (a file)
+# and MAPLETHIEF_CLOSED_ISSUES (a JSON list of numbers) stand in for both in the tests.
+check_known_issues() {
+    step "Known issues"
+    local file="${MAPLETHIEF_KNOWN_ISSUES:-}" args=()
+    if [ -z "$file" ]; then
+        file="$out/KNOWN_ISSUES.md"
+        git show "$tag:docs/KNOWN_ISSUES.md" >"$file" 2>/dev/null || cp docs/KNOWN_ISSUES.md "$file"
+    fi
+    [ -n "${MAPLETHIEF_CLOSED_ISSUES:-}" ] && args+=(--closed "$MAPLETHIEF_CLOSED_ISSUES")
+    mtrelease known-issues "$file" ${args[@]+"${args[@]}"} ||
+        die "docs/KNOWN_ISSUES.md cites a closed issue: remove or re-source the entry first"
+}
+
 cmd_start() {
+    check_known_issues
     step "Checks"
     check_tag
     [ -z "$(git status --porcelain --untracked-files=no)" ] || die "the working tree has changes"
@@ -415,6 +434,7 @@ cmd_publish() {
     # build only (#243).
     local want="${platforms:-mac,linux,windows,switch}" names=() kits=() players=() kit_all player_all p
     local key name
+    check_known_issues
     kit_all="$(mtrelease kits "$version")"
     player_all="$(mtrelease players "$version")"
     IFS=, read -r -a plist <<<"$want"

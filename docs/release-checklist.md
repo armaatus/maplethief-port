@@ -14,6 +14,7 @@ Tags are annotated SemVer: `vX.Y.Z`, or `vX.Y.Z-rc.N` for a pre-release. Below, 
 - [ ] Everything for the release is merged into `dev`, each PR with green CI.
 - [ ] The epic PRs since the last release carry their epic's labels (`gh pr edit N --add-label type:epic,area:...`), so the generated notes group them ([`.github/release.yml`](../.github/release.yml)). Unlabelled PRs land in "Other changes".
 - [ ] [`.github/release-notes-header.md`](../.github/release-notes-header.md), the text above the generated notes, still says the right thing.
+- [ ] [Known issues](KNOWN_ISSUES.md) cites no closed issue: `python3 -m mtport.release known-issues` (with `tools/` on `PYTHONPATH`) says OK. `scripts/release start` and `publish` stop when it doesn't.
 - [ ] On both machines: `gh auth status` is logged in with access to `armaatus/maplethief-port`. The checkout has `work/` (`scripts/bootstrap`, then `python3 -m recomp all` for `work/gen/`), up to date with the tag's recompiler. The player builds link `work/gen/`, and the guard checks the IPA's hashes and the dispatch table. Docker (OrbStack) runs on the Mac: the Linux and Switch player builds use it.
 - [ ] Optional rehearsal, with nothing sent to GitHub: `git tag -a v0.0.0-rc.99 -m rehearsal`, then `scripts/release build v0.0.0-rc.99 --dry-run` and `scripts/release publish v0.0.0-rc.99 --dry-run --platforms mac,linux,switch` on the Mac, or `scripts\release.ps1 build v0.0.0-rc.99 -DryRun` on Windows. Then `git tag -d v0.0.0-rc.99`.
 
@@ -72,7 +73,7 @@ Last, it runs the content guard (kits in kit mode, player builds in player mode)
 scripts/release publish TAG
 ```
 
-It checks that the draft has all seven files and their `.sha256`: the macOS, Linux and Windows kits and player builds, and the Switch zip. It downloads them to `build/release/TAG/download/` and checks each against its `.sha256`. It runs the guard again (each file in its mode; the Switch zip in player mode, its NRO split into code, icon and NACP), writes `SHA256SUMS` over all seven and checks it with `shasum -a 256 -c`. Then it uploads `SHA256SUMS` and publishes the release.
+It checks first that [Known issues](KNOWN_ISSUES.md) at the tag cites no closed issue, then that the draft has all seven files and their `.sha256`: the macOS, Linux and Windows kits and player builds, and the Switch zip. It downloads them to `build/release/TAG/download/` and checks each against its `.sha256`. It runs the guard again (each file in its mode; the Switch zip in player mode, its NRO split into code, icon and NACP), writes `SHA256SUMS` over all seven and checks it with `shasum -a 256 -c`. Then it uploads `SHA256SUMS` and publishes the release.
 
 ## 5. itch.io
 

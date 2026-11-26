@@ -59,9 +59,18 @@ CLI::
     python3 -m mtport.release sha256 FILE...            writes FILE.sha256 next to each FILE
     python3 -m mtport.release sums OUT FILE.sha256...   merges them into OUT (SHA256SUMS)
     python3 -m mtport.release check SUMS                checks the files next to SUMS
+    python3 -m mtport.release known-issues [FILE] [--closed FILE]
+                                                        fails if FILE (docs/KNOWN_ISSUES.md)
+                                                        cites a closed issue (#309)
     python3 -m mtport.release itch TAG [--dry-run] [--platforms LIST] [--from DIR]
                                                         pushes the published release's player
                                                         builds to itch.io (mtport.itch, ADR 0146)
+
+The **known-issues pre-flight** reads ``docs/KNOWN_ISSUES.md``, whose rule is that an entry
+holds only while the issue it cites is open, and fails when it cites a closed issue: a
+``#N`` or a link to ``.../issues/N`` of this repository. The closed issues come from
+``gh issue list --state closed``, or from ``--closed FILE`` (a JSON list of numbers) in the
+tests.
 
 Checksum files use the ``sha256sum``/``shasum -a 256`` format, ``<hex>  <name>``, so
 ``sha256sum -c`` and ``shasum -a 256 -c`` read them.
@@ -71,8 +80,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import stat
+import subprocess
 import sys
 import tarfile
 import zipfile
@@ -639,6 +650,76 @@ def check_sums(sums_path: Path) -> list[str]:
     return failures
 
 
+# --- Known issues ---------------------------------------------------------------------------
+
+GITHUB_REPO = "armaatus/maplethief-port"
+KNOWN_ISSUES = REPO / "docs" / "KNOWN_ISSUES.md"
+# A link to an issue of this repository, or a bare #N (not part of a word or a URL fragment).
+_ISSUE_LINK = re.compile(rf"github\.com/{re.escape(GITHUB_REPO)}/issues/(\d+)")
+_ISSUE_REF = re.compile(r"(?<![\w/#&])#(\d+)\b")
+
+
+def cited_issues(text: str) -> list[int]:
+    """The issue numbers ``text`` cites, sorted, each once."""
+    found = {int(n) for n in _ISSUE_LINK.findall(text)}
+    found |= {int(n) for n in _ISSUE_REF.findall(text)}
+    return sorted(found)
+
+
+def closed_issues_from_gh(repo: str = GITHUB_REPO) -> set[int]:
+    """Every closed issue of ``repo``, through the GitHub CLI."""
+    out = subprocess.run(
+        [
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            repo,
+            "--state",
+            "closed",
+            "--limit",
+            "10000",
+            "--json",
+            "number",
+            "--jq",
+            ".[].number",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    if out.returncode != 0:
+        raise OSError(f"gh issue list failed: {out.stderr.strip() or out.returncode}")
+    return {int(line) for line in out.stdout.split()}
+
+
+def closed_citations(text: str, closed: set[int]) -> list[int]:
+    """The issues ``text`` cites that are in ``closed``."""
+    return [n for n in cited_issues(text) if n in closed]
+
+
+def _cmd_known_issues(args: argparse.Namespace) -> int:
+    path = Path(args.file)
+    text = path.read_text(encoding="utf-8")
+    if args.closed:
+        closed = {int(n) for n in json.loads(Path(args.closed).read_text(encoding="utf-8"))}
+    else:
+        closed = closed_issues_from_gh()
+    cited = cited_issues(text)
+    stale = closed_citations(text, closed)
+    if stale:
+        print(
+            f"known issues: {path} cites {len(stale)} closed issue(s): "
+            f"{', '.join(f'#{n}' for n in stale)}. Remove each entry, or cite the open issue "
+            "that tracks it now.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"known issues: OK {path}: {len(cited)} cited issues, none closed")
+    return 0
+
+
 # --- CLI -----------------------------------------------------------------------------------
 
 
@@ -713,6 +794,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("files", nargs="+", metavar="FILE.sha256")
     p = sub.add_parser("check", help="check the files next to SUMS (like sha256sum -c)")
     p.add_argument("sums")
+    p = sub.add_parser("known-issues", help="fail if KNOWN_ISSUES.md cites a closed issue")
+    p.add_argument("file", nargs="?", default=str(KNOWN_ISSUES), metavar="FILE")
+    p.add_argument(
+        "--closed", metavar="FILE", help="a JSON list of the closed issues (default: ask gh)"
+    )
     from mtport import itch  # imports this module
 
     itch.add_parser(sub)
@@ -724,6 +810,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd == "guard":
             return _cmd_guard(args)
+        if args.cmd == "known-issues":
+            return _cmd_known_issues(args)
         if args.cmd == "tag":
             version, pre = parse_tag(args.tag)
             print(version)
