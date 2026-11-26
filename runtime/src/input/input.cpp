@@ -14,6 +14,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
+#include "maplethief/runtape.h"
 #include "snapshot/snapshot_internal.h"
 #include "uikit/uikit_internal.h"
 
@@ -119,6 +120,15 @@ State g;
 bool valid_action(u32 a) { return a > MT_ACTION_NONE && a < MT_ACTION_COUNT; }
 // An action the guest gets (not one of the port's own, which the frontend handles).
 bool guest_action(u32 a) { return a > MT_ACTION_NONE && a < MT_ACTION_FIRST_PORT; }
+
+// The run tape's check of a call from the host (maplethief/runtape.h): recorded, or dropped while
+// a tape plays.
+bool admit(u32 kind, u32 action) {
+    mt_runtape_event e{};
+    e.kind = kind;
+    e.a = action;
+    return mt_runtape_admit(&e) != 0;
+}
 
 // Whether [addr, addr + size) is guest memory that is there: an image segment or the committed
 // heap. The game's globals are in its image; a synthetic guest (a test) may have no image, and
@@ -530,7 +540,7 @@ extern "C" uint32_t mt_input_action_named(const char *name) noexcept {
 }
 
 extern "C" void mt_input_press(uint32_t action) noexcept {
-    if (!guest_action(action)) {
+    if (!guest_action(action) || !admit(MT_RUNTAPE_PRESS, action)) {
         return;
     }
     if (g.held[action]++ == 0) {
@@ -539,7 +549,7 @@ extern "C" void mt_input_press(uint32_t action) noexcept {
 }
 
 extern "C" void mt_input_release(uint32_t action) noexcept {
-    if (!guest_action(action) || g.held[action] == 0) {
+    if (!guest_action(action) || g.held[action] == 0 || !admit(MT_RUNTAPE_RELEASE, action)) {
         return;
     }
     if (--g.held[action] == 0) {
@@ -552,6 +562,9 @@ extern "C" uint32_t mt_input_held(uint32_t action) noexcept {
 }
 
 extern "C" void mt_input_release_all(void) noexcept {
+    if (!admit(MT_RUNTAPE_RELEASE_ALL, 0)) {
+        return;
+    }
     for (u32 a = 1; a < MT_ACTION_COUNT; a++) {
         if (g.held[a] != 0) {
             g.held[a] = 0;
