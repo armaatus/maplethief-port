@@ -63,3 +63,18 @@ For the platform side:
 ## Addendum (#156, ADR 0072): more observed functions, listeners
 
 The offline cash shop's counters ([ADR 0072](0072-offline-cash-shop-and-revives.md)) take three more observed entries and four event kinds: `Popup_Open` `0x3EAA1` with id `0x68` is `MT_GAME_EVENT_DEATH_POPUP`, the revive `0x6140D` is `MT_GAME_EVENT_REVIVED`, and `CDataMgr::LoadSaveData` `0x39989` is `MT_GAME_EVENT_LOAD_CHARACTER` or, when the slot has no cached `theif<slot>` buffer (`CDataMgr+0x4DC[slot]` is 0), `MT_GAME_EVENT_NEW_CHARACTER` (`value` the slot). Other ids, slots past 2 and an unreadable `CDataMgr` are ignored. Besides the one host hook, up to `MT_GAME_EVENTS_MAX_LISTENERS` (4) listeners (`mt_game_events_add_listener`) hear every event after it, so Rumble and the cash shop share the events. `rumble_test.cpp` covers the new kinds and the listeners.
+
+## Addendum (#403, ADR 0156): run events
+
+The speedrun kit's splits ([ADR 0156](0156-speedrun-kit-splits-clean-runs-and-verifiable-replays.md)) take four more observed entries and four event kinds. Each reads only; the guest runs as before.
+
+| Entry | Event | Value | Guard |
+| --- | --- | --- | --- |
+| `ScriptNative_clearAll` `0x996ED` (vm) | `MT_GAME_EVENT_CHAPTER_END` | the chapter that ends: the quest manager's `+0x04`, reached as vm `+0x04` (the `CStateGame`) → `+0x58` | the chain of pointers reads |
+| `CHero::SetClassUp` `0x655AD` (hero, branch, tier) | `MT_GAME_EVENT_JOB_ADVANCE` | the branch; `more[0]` the tier | the hero reads |
+| `CMob::Die` `0x73349` (mob, hero) | `MT_GAME_EVENT_BOSS_KILLED` | the mob id (`+0xA0`) | bosses only: 64 and 66 to 69 |
+| `CMapleWorld::changeMap` `0x81369` (world, area, map, portal) | `MT_GAME_EVENT_MAP_CHANGE` | the area; `more[0]` the map, `more[1]` the portal | not while a warp is pending (the byte `world+0xB4`), where the function does nothing |
+
+- **Job advancement.** The observer sits on `CHero::SetClassUp` rather than on the native `setClassUp` `0x997E1`: the native is its only caller (one `bl`, at `0x99852`), no pointer to it is stored in the image, and its registers are the values the native popped off the script stack.
+- **The event** gains `more[2]` for a run event's second and third values (0 for the other kinds); run events carry no HP. `mt_game_events_stats` counts `chapter_ends`, `job_advances`, `boss_kills` and `map_changes`, and the exit log prints them.
+- **Tests.** `rumble_test.cpp` covers each kind on synthetic guest memory (its guard, bad pointers, no write to the guest, the value). On real assets chapter 1's parts G, K and L (`play.chapter_1_g`, `_k`, `_l`) check that the 2nd job, portal371 to 3.8, Malady's death and the trip to Orbis are each heard.
