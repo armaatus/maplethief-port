@@ -183,7 +183,7 @@ HOOKED: dict[int, Hooked] = {
     0x8D4C9: Hooked(
         "CStateGame::OnKeyPressed",
         "(this, key): the field's keys and its popups, among them the death popup 0x68 and its "
-        "\"Go to main menu\" popup 0x6D, which leaves without a save; autosave = on_quit (#336) "
+        '"Go to main menu" popup 0x6D, which leaves without a save; autosave = on_quit (#336) '
         "checks its guards when Yes on 0x6D is confirmed, and finds the hero dead "
         "(docs/re/autosave.md)",
     ),
