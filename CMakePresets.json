@@ -266,6 +266,40 @@
       "cacheVariables": {
         "MAPLETHIEF_PLAYER_BUILD": "ON"
       }
+    },
+    {
+      "name": "android-base",
+      "hidden": true,
+      "inherits": "base",
+      "description": "Android 8.0+ arm64 APK: the NDK r28c of tools/containers/android/pins.env (build/_android-sdk/ on the Mac, scripts/android-sdk; /opt/android-sdk in the container, scripts/build-android). libmain.so with SDL3 linked statically, packaged by Gradle; memory model checked (ADR 0025, ADR 0150, ADR 0163)",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "toolchainFile": "${sourceDir}/cmake/AndroidToolchain.cmake",
+      "cacheVariables": {
+        "ANDROID_ABI": "arm64-v8a",
+        "ANDROID_PLATFORM": "26",
+        "ANDROID_STL": "c++_static",
+        "MAPLETHIEF_MEM_MODEL": "checked"
+      }
+    },
+    {
+      "name": "android-debug",
+      "displayName": "Android Debug: MapleThief.apk, arm64-v8a, debuggable (pinned SDK and NDK)",
+      "inherits": "android-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "android-release",
+      "displayName": "Android Release: MapleThief.apk, arm64-v8a, signed with the build tree's debug key (pinned SDK and NDK)",
+      "inherits": "android-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [
@@ -288,7 +322,9 @@
     { "name": "linux-player", "configurePreset": "linux-player", "targets": ["MapleThief"] },
     { "name": "switch-debug", "configurePreset": "switch-debug" },
     { "name": "switch-release", "configurePreset": "switch-release" },
-    { "name": "switch-player", "configurePreset": "switch-player", "targets": ["MapleThief_nro"] }
+    { "name": "switch-player", "configurePreset": "switch-player", "targets": ["MapleThief_nro"] },
+    { "name": "android-debug", "configurePreset": "android-debug", "targets": ["MapleThief_apk"] },
+    { "name": "android-release", "configurePreset": "android-release", "targets": ["MapleThief_apk"] }
   ],
   "testPresets": [
     {
@@ -349,7 +385,16 @@
       "configurePreset": "switch-player",
       "description": "The NRO's host-side checks (its version, the guard's player mode) and the player build's own",
       "filter": { "include": { "name": "^platform\\.(switch_nro|switch_guard|player_contents)$" } }
-    }
+    },
+    {
+      "name": "android-checks",
+      "hidden": true,
+      "inherits": "test-base",
+      "description": "The host-side checks of the APK only; the emulator runs are scripts/android-run's (#356)",
+      "filter": { "include": { "name": "^platform\\.android_" } }
+    },
+    { "name": "android-debug", "inherits": "android-checks", "configurePreset": "android-debug" },
+    { "name": "android-release", "inherits": "android-checks", "configurePreset": "android-release" }
   ],
   "packagePresets": [
     { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
@@ -359,7 +404,8 @@
     { "name": "linux-release", "configurePreset": "linux-release" },
     { "name": "linux-player", "configurePreset": "linux-player" },
     { "name": "switch-release", "configurePreset": "switch-release" },
-    { "name": "switch-player", "configurePreset": "switch-player" }
+    { "name": "switch-player", "configurePreset": "switch-player" },
+    { "name": "android-release", "configurePreset": "android-release" }
   ],
   "workflowPresets": [
     {
@@ -503,6 +549,23 @@
         { "type": "build", "name": "switch-player" },
         { "type": "test", "name": "switch-player" },
         { "type": "package", "name": "switch-player" }
+      ]
+    },
+    {
+      "name": "android-debug",
+      "steps": [
+        { "type": "configure", "name": "android-debug" },
+        { "type": "build", "name": "android-debug" },
+        { "type": "test", "name": "android-debug" }
+      ]
+    },
+    {
+      "name": "android-release",
+      "steps": [
+        { "type": "configure", "name": "android-release" },
+        { "type": "build", "name": "android-release" },
+        { "type": "test", "name": "android-release" },
+        { "type": "package", "name": "android-release" }
       ]
     }
   ]

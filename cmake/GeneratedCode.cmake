@@ -91,6 +91,15 @@ function(maplethief_mem_checked out_var)
         endif()
         set(model checked)
     endif()
+    # Android: the arena alone too; the low-memory killer, not the address space, is the limit
+    # (ADR 0150).
+    if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+        if(model STREQUAL "reserved")
+            message(FATAL_ERROR "MAPLETHIEF_MEM_MODEL reserved: Android builds use the checked "
+                                "arena (ADR 0025, ADR 0150)")
+        endif()
+        set(model checked)
+    endif()
     if(model STREQUAL "checked")
         set(${out_var} 1 PARENT_SCOPE)
     elseif(model STREQUAL "reserved")

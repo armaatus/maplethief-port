@@ -19,7 +19,10 @@ the constants below with signed distances, anti-aliased over one pixel. It uses 
 and, not committed, the Nintendo Switch's icon (ADR 0138): the iOS icon's full-bleed square at
 256 px as a baseline JPEG (mtport.jpeg, integer arithmetic only), which the Switch build writes
 into its build tree (``switch-icon OUT``, platform/switch/switch.cmake) and elf2nro puts in the
-NRO. Its SHA-256 is in the allowlist too, and tests/test_appicon.py checks it.
+NRO. Its SHA-256 is in the allowlist too, and tests/test_appicon.py checks it. Not committed
+either, Android's launcher icons (ADR 0150, #356): the rounded plate of :func:`render` at the five
+launcher densities, ``res/mipmap-<density>/ic_launcher.png``, which the Android build writes into
+its build tree (``android-icons DIR``, platform/android/android.cmake) and Gradle packs.
 
 The derived files are committed (ADR 0125). The content guard allowlists them by path and
 SHA-256 (``mtport.release.ICON_ALLOWLIST``), and compressed PNG bytes can differ between zlib
@@ -32,6 +35,7 @@ CLI::
     python3 -m mtport.appicon write [--out DIR]   (default platform/icon/)
     python3 -m mtport.appicon check [--out DIR]   exit 1 if a committed file's pixels differ
     python3 -m mtport.appicon switch-icon FILE    writes the Switch's 256 px JPEG to FILE
+    python3 -m mtport.appicon android-icons DIR   writes Android's launcher icons below DIR
 """
 
 from __future__ import annotations
@@ -74,6 +78,8 @@ IOS_CHECK_STEP = 37  # check() compares this grid of the 1024 px icon, not all m
 # The Nintendo Switch's icon (ADR 0138): the Homebrew Menu shows a 256 x 256 JPEG.
 SWITCH_ICON_SIZE = 256
 SWITCH_ICON_QUALITY = 92
+# Android's legacy launcher icon (ADR 0150) at each density: 48 dp.
+ANDROID_ICON_SIZES = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 
 _D = STAR_INNER / sqrt(2.0)  # the inner corners' x and y offsets
 STAR_POINTS = (
@@ -312,6 +318,15 @@ def switch_icon() -> bytes:
     return jpeg.encode_rgb(img.width, img.height, bytes(rgb), SWITCH_ICON_QUALITY)
 
 
+def android_icons() -> dict[str, bytes]:
+    """Android's launcher icons, by path below the resource folder (mipmap-<density>/...)."""
+    out = {}
+    for density, size in ANDROID_ICON_SIZES.items():
+        img = render(size)
+        out[f"mipmap-{density}/ic_launcher.png"] = png.encode_rgba(img.width, img.height, img.rgba)
+    return out
+
+
 def check_ios(catalog: Path) -> list[str]:
     """The iOS catalog's files that aren't what this script writes (or are missing)."""
     problems = []
@@ -381,8 +396,13 @@ def check(out: Path) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python3 -m mtport.appicon", description=__doc__)
-    parser.add_argument("cmd", choices=("write", "check", "switch-icon"))
-    parser.add_argument("file", nargs="?", type=Path, help="switch-icon: the JPEG to write")
+    parser.add_argument("cmd", choices=("write", "check", "switch-icon", "android-icons"))
+    parser.add_argument(
+        "file",
+        nargs="?",
+        type=Path,
+        help="switch-icon: the JPEG to write; android-icons: the resource folder",
+    )
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = parser.parse_args(argv)
     if args.cmd == "switch-icon":
@@ -392,6 +412,15 @@ def main(argv: list[str] | None = None) -> int:
         args.file.parent.mkdir(parents=True, exist_ok=True)
         args.file.write_bytes(data)
         print(f"appicon: {args.file} ({len(data)} bytes)")
+        return 0
+    if args.cmd == "android-icons":
+        if args.file is None:
+            parser.error("android-icons needs the resource folder DIR")
+        for name, data in android_icons().items():
+            path = args.file / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            print(f"appicon: {path} ({len(data)} bytes)")
         return 0
     if args.cmd == "write":
         args.out.mkdir(parents=True, exist_ok=True)

@@ -76,6 +76,18 @@ def test_switch_icon_cli_writes_the_file(tmp_path):
     assert out.read_bytes() == appicon.switch_icon()
 
 
+def test_android_icons_are_the_plate_at_each_launcher_density(tmp_path):
+    icons = appicon.android_icons()
+    assert set(icons) == {f"mipmap-{d}/ic_launcher.png" for d in appicon.ANDROID_ICON_SIZES}
+    for density, size in appicon.ANDROID_ICON_SIZES.items():
+        img = png.decode(icons[f"mipmap-{density}/ic_launcher.png"])
+        assert (img.width, img.height) == (size, size)
+        assert img.rgba == appicon.render(size).rgba
+    assert appicon.main(["android-icons", str(tmp_path / "res")]) == 0
+    for name, data in icons.items():
+        assert (tmp_path / "res" / name).read_bytes() == data
+
+
 def test_render_shapes():
     img = appicon.render(64)
     assert (img.width, img.height) == (64, 64)

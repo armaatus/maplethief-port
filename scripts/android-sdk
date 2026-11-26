@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# The Android toolchain on the Mac (ADR 0150, ADR 0163, issue #356): installs the pins of
+# tools/containers/android/pins.env natively into build/_android-sdk/ (git-ignored), with the
+# same installer as the container, so `cmake --workflow --preset android-release` builds here and
+# scripts/android-run can start the emulator.
+#
+# Usage: scripts/android-sdk install [--emulator] [--image 4k|16k]...
+#        scripts/android-sdk remove-image 4k|16k
+#        scripts/android-sdk path
+#
+#   install          the build's packages: the NDK, platform 35, build tools, platform-tools
+#                    (adb), the JDK and Gradle (about 3.6 GB)
+#   --emulator       also the emulator (about 1 GB)
+#   --image 4k|16k   also the arm64 API 35 system image with 4 KiB or 16 KiB pages (each about
+#                    5 GB unpacked); implies --emulator
+#   remove-image     deletes an image (and its AVD), to make room for the other one
+#   path             prints the SDK root
+#
+# MAPLETHIEF_ANDROID_SDK overrides the SDK root (cmake/AndroidToolchain.cmake reads it too). Each
+# archive is checked against its pinned SHA-256; a package already at its pin is skipped. The
+# Android toolchain has no Windows path (ADR 0150): build the APK on a Mac or in the container.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SDK="${MAPLETHIEF_ANDROID_SDK:-$REPO/build/_android-sdk}"
+
+usage() {
+    sed -n '/^# Usage:/,/^# MAPLETHIEF/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//' >&2
+    exit "${1:-2}"
+}
+
+[ "$#" -ge 1 ] || usage
+cmd="$1"
+shift
+case "$(uname -s)" in
+    Darwin) host=darwin ;;
+    Linux) host=linux ;;
+    *) echo "scripts/android-sdk: macOS or Linux only (ADR 0150)" >&2; exit 2 ;;
+esac
+
+image_package() {
+    case "$1" in
+        4k) echo image ;;
+        16k) echo image-ps16k ;;
+        *) echo "scripts/android-sdk: the image is 4k or 16k, not $1" >&2; exit 2 ;;
+    esac
+}
+
+case "$cmd" in
+    install)
+        packages=(ndk platform build-tools jdk gradle)
+        [ "$host" = linux ] || packages+=(platform-tools)
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --emulator) packages+=(emulator); shift ;;
+                --image)
+                    [ "$#" -ge 2 ] || usage
+                    packages+=(emulator "$(image_package "$2")")
+                    shift 2
+                    ;;
+                -h | --help) usage 0 ;;
+                *) echo "scripts/android-sdk: unknown option: $1" >&2; usage ;;
+            esac
+        done
+        if [ "$host" = linux ] && [[ " ${packages[*]} " == *" emulator "* ]]; then
+            echo "scripts/android-sdk: the emulator is pinned for the Mac only (ADR 0150)" >&2
+            exit 2
+        fi
+        # Each package once, in order.
+        unique=()
+        for p in "${packages[@]}"; do
+            [[ " ${unique[*]:-} " == *" $p "* ]] || unique+=("$p")
+        done
+        exec "$REPO/tools/containers/android/install-sdk.sh" "$SDK" "$host" "${unique[@]}"
+        ;;
+    remove-image)
+        [ "$#" -eq 1 ] || usage
+        package="$(image_package "$1")"
+        key="$(printf '%s' "$package" | tr 'a-z-' 'A-Z_')"
+        path="$(sed -n "s/^ANDROID_${key}_PATH=//p" "$REPO/tools/containers/android/pins.env")"
+        rm -rf "${SDK:?}/$path" "$SDK/avd/maplethief-$1.avd" "$SDK/avd/maplethief-$1.ini"
+        echo "scripts/android-sdk: removed $path and its AVD"
+        ;;
+    path) echo "$SDK" ;;
+    -h | --help) usage 0 ;;
+    *) echo "scripts/android-sdk: unknown command: $cmd" >&2; usage ;;
+esac

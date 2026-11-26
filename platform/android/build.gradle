@@ -1,0 +1,99 @@
+// The APK (ADR 0150, ADR 0163, issue #356): our manifest, activity and icon, SDL's Java sources
+// from the pinned archive, and the libmain.so that CMake built, as a prebuilt library. Run by
+// platform/android/android.cmake, which passes everything that lives in the build tree:
+//
+//   -Pmaplethief.buildDir    Gradle's own output (build/<preset>/android/gradle)
+//   -Pmaplethief.jniLibs     the folder holding arm64-v8a/libmain.so
+//   -Pmaplethief.res         the generated resources (the icon's mipmap-*/ic_launcher.png)
+//   -Pmaplethief.sdlJava     SDL's android-project/app/src/main/java from the pinned archive
+//   -Pmaplethief.keystore    the build tree's debug key (CI and development builds, ADR 0150)
+//   -Pmaplethief.version     MAPLETHIEF_VERSION, the versionName (ADR 0024)
+
+plugins {
+    id 'com.android.application'
+}
+
+def pins = gradle.ext.maplethiefPins
+def agp = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION
+if (agp != pins['ANDROID_AGP_VERSION']) {
+    throw new GradleException("settings.gradle applies AGP ${agp}, but pins.env pins ${pins['ANDROID_AGP_VERSION']}")
+}
+def prop = { String name ->
+    if (!project.hasProperty(name)) {
+        throw new GradleException("-P${name} is missing: build the APK through CMake (an android-* preset)")
+    }
+    return project.property(name)
+}
+
+layout.buildDirectory = file(prop('maplethief.buildDir'))
+
+android {
+    namespace 'io.github.armaatus.maplethief'
+    compileSdk pins['ANDROID_COMPILE_API'] as int
+    buildToolsVersion pins['ANDROID_BUILD_TOOLS_VERSION']
+
+    defaultConfig {
+        applicationId 'io.github.armaatus.maplethief'
+        minSdk pins['ANDROID_MIN_API'] as int
+        targetSdk pins['ANDROID_COMPILE_API'] as int
+        // #361 derives it from the release version; every build until then is 1.
+        versionCode 1
+        versionName prop('maplethief.version')
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    signingConfigs {
+        // The build tree's debug key, never a release key (ADR 0150): scripts/release signs the
+        // player's APK with Joris's key (#361).
+        buildTree {
+            storeFile file(prop('maplethief.keystore'))
+            storePassword 'android'
+            keyAlias 'maplethief-debug'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.buildTree
+        }
+        release {
+            signingConfig signingConfigs.buildTree
+            minifyEnabled false
+        }
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ['src', prop('maplethief.sdlJava')]
+            res.srcDirs = [prop('maplethief.res')]
+            jniLibs.srcDirs = [prop('maplethief.jniLibs')]
+            assets.srcDirs = []
+            resources.srcDirs = []
+            aidl.srcDirs = []
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Stored uncompressed and 16 KiB-aligned in the APK, loaded in place (no copy).
+            useLegacyPackaging false
+            // CMake strips it already (not in Debug); Gradle's stripping would need the NDK
+            // inside Gradle, which never sees it (ADR 0163).
+            keepDebugSymbols += ['**/libmain.so']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}
