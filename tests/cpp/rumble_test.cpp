@@ -211,6 +211,150 @@ TEST_CASE("events: the death popup, the revive, a slot's character, and listener
     CHECK(g_events.size() == 5);
 }
 
+namespace {
+// The run events' guest objects beside the hero: a script VM whose +0x04 is the game state
+// (CStateGame: hero +0x30, quest manager +0x58, pending warp byte +0xB4), the quest manager
+// (chapter +0x04) and a mob (id +0xA0).
+struct RunGuest {
+    Hero &h;
+    u32 vm = 0, world = 0, quests = 0, mob = 0;
+
+    explicit RunGuest(Hero &hero) : h(hero) {
+        vm = mt_heap_calloc(h.mem, 1, 0x40);
+        world = mt_heap_calloc(h.mem, 1, 0x100);
+        quests = mt_heap_calloc(h.mem, 1, 0x340);
+        mob = mt_heap_calloc(h.mem, 1, 0x164);
+        REQUIRE((vm != 0 && world != 0 && quests != 0 && mob != 0));
+        put(vm + 0x04, world);
+        put(world + 0x30, h.addr);
+        put(world + 0x58, quests);
+    }
+    void put(u32 addr, u32 v) { std::memcpy(h.cpu.mem + addr, &v, 4); }
+    std::vector<std::uint8_t> bytes() const {
+        std::vector<std::uint8_t> all = h.bytes();
+        for (const auto &[at, n] :
+             {std::pair<u32, u32>{vm, 0x40u}, {world, 0x100u}, {quests, 0x340u}, {mob, 0x164u}}) {
+            all.insert(all.end(), h.cpu.mem + at, h.cpu.mem + at + n);
+        }
+        return all;
+    }
+    void enter(u32 fn, u32 r0, u32 r1 = 0, u32 r2 = 0, u32 r3 = 0) {
+        h.cpu.r[0] = r0;
+        h.cpu.r[1] = r1;
+        h.cpu.r[2] = r2;
+        h.cpu.r[3] = r3;
+        mt_observe_entry(&h.cpu, fn);
+    }
+};
+constexpr u32 k_bad_pointers[] = {0u, 4u, 0x00800000u, 0xFFFFFFF0u};
+} // namespace
+
+TEST_CASE("events: clearAll's entry is a chapter end with the chapter that ends (#403)") {
+    Hero h;
+    RunGuest g(h);
+    g.put(g.quests + 0x04, 1);
+    const std::vector<std::uint8_t> before = g.bytes();
+    g.enter(MT_EVENTS_FN_CLEAR_ALL, g.vm);
+    REQUIRE(g_events.size() == 1);
+    CHECK(g_events[0].kind == MT_GAME_EVENT_CHAPTER_END);
+    CHECK(g_events[0].value == 1);
+    CHECK(g_events[0].hero == h.addr);
+    // A bad VM, a VM without a game state, a game state without a quest manager.
+    for (const u32 bad : k_bad_pointers) {
+        g.enter(MT_EVENTS_FN_CLEAR_ALL, bad);
+    }
+    g.put(g.world + 0x58, 0);
+    g.enter(MT_EVENTS_FN_CLEAR_ALL, g.vm);
+    g.put(g.vm + 0x04, 0x00800000u);
+    g.enter(MT_EVENTS_FN_CLEAR_ALL, g.vm);
+    CHECK(g_events.size() == 1);
+    // The observer reads, never writes.
+    g.put(g.vm + 0x04, g.world);
+    g.put(g.world + 0x58, g.quests);
+    CHECK(g.bytes() == before);
+    const mt_game_events_stats st = mt_game_events_get_stats();
+    CHECK(st.chapter_ends == 1);
+    CHECK(st.ignored == 6);
+}
+
+TEST_CASE("events: CHero::SetClassUp's entry is a job advance with branch and tier (#403)") {
+    Hero h;
+    RunGuest g(h);
+    const std::vector<std::uint8_t> before = g.bytes();
+    g.enter(MT_EVENTS_FN_SET_CLASS_UP, h.addr, 2, 2);
+    REQUIRE(g_events.size() == 1);
+    CHECK(g_events[0].kind == MT_GAME_EVENT_JOB_ADVANCE);
+    CHECK(g_events[0].hero == h.addr);
+    CHECK(g_events[0].value == 2);
+    CHECK(g_events[0].more[0] == 2);
+    CHECK(g_events[0].more[1] == 0);
+    for (const u32 bad : k_bad_pointers) {
+        g.enter(MT_EVENTS_FN_SET_CLASS_UP, bad, 1, 3);
+    }
+    CHECK(g_events.size() == 1);
+    CHECK(g.bytes() == before);
+    CHECK(mt_game_events_get_stats().job_advances == 1);
+    CHECK(mt_game_events_get_stats().ignored == 4);
+}
+
+TEST_CASE("events: CMob::Die's entry is a boss kill for the bosses only (#403)") {
+    Hero h;
+    RunGuest g(h);
+    const std::vector<std::uint8_t> before_any = g.bytes();
+    std::vector<i32> seen;
+    for (i32 id = 0; id < 80; id++) {
+        g.put(g.mob + 0xA0, static_cast<u32>(id));
+        g.enter(MT_EVENTS_FN_MOB_DIE, g.mob, h.addr);
+    }
+    for (const mt_game_event &e : g_events) {
+        CHECK(e.kind == MT_GAME_EVENT_BOSS_KILLED);
+        CHECK(e.hero == h.addr);
+        seen.push_back(e.value);
+    }
+    CHECK(seen == std::vector<i32>{64, 66, 67, 68, 69});
+    for (const u32 bad : k_bad_pointers) {
+        g.enter(MT_EVENTS_FN_MOB_DIE, bad, h.addr);
+    }
+    CHECK(g_events.size() == 5);
+    g.put(g.mob + 0xA0, 0);
+    CHECK(g.bytes() == before_any);
+    CHECK(mt_game_events_get_stats().boss_kills == 5);
+    CHECK(mt_game_events_get_stats().ignored == 75 + 4);
+}
+
+TEST_CASE("events: changeMap's entry is a map change, not while a warp is pending (#403)") {
+    Hero h;
+    RunGuest g(h);
+    const std::vector<std::uint8_t> before = g.bytes();
+    g.enter(MT_EVENTS_FN_CHANGE_MAP, g.world, 3, 8, 1);
+    REQUIRE(g_events.size() == 1);
+    CHECK(g_events[0].kind == MT_GAME_EVENT_MAP_CHANGE);
+    CHECK(g_events[0].hero == h.addr);
+    CHECK(g_events[0].value == 3);
+    CHECK(g_events[0].more[0] == 8);
+    CHECK(g_events[0].more[1] == 1);
+    CHECK(g.bytes() == before);
+    // A warp pending (the byte +0xB4): changeMap does nothing, and there is no event. The
+    // bytes after it are not the flag.
+    h.cpu.mem[g.world + 0xB4] = 1;
+    g.enter(MT_EVENTS_FN_CHANGE_MAP, g.world, 4, 1, 0);
+    h.cpu.mem[g.world + 0xB4] = 0;
+    h.cpu.mem[g.world + 0xB5] = 1;
+    g.enter(MT_EVENTS_FN_CHANGE_MAP, g.world, 4, 1, 0);
+    h.cpu.mem[g.world + 0xB5] = 0;
+    for (const u32 bad : k_bad_pointers) {
+        g.enter(MT_EVENTS_FN_CHANGE_MAP, bad, 2, 0, 0);
+    }
+    REQUIRE(g_events.size() == 2);
+    CHECK(g_events[1].value == 4);
+    CHECK(g_events[1].more[0] == 1);
+    CHECK(g.bytes() == before);
+    const mt_game_events_stats st = mt_game_events_get_stats();
+    CHECK(st.map_changes == 2);
+    CHECK(st.ignored == 5);
+    CHECK(st.entries == 7);
+}
+
 // --- the frontend: Rumble on virtual pads -----------------------------------------------------
 
 namespace {
@@ -278,8 +422,8 @@ TEST_CASE("rumble: the game's vibration, a hit and a level-up rumble the active 
     };
     const Case cases[] = {
         {"vibrate", fe::kRumbleVibrate, {}},
-        {"hero damage", fe::kRumbleDamage, {MT_GAME_EVENT_HERO_DAMAGE, 0x1000000u, 12, 50, 60}},
-        {"level-up", fe::kRumbleLevelUp, {MT_GAME_EVENT_LEVEL_UP, 0x1000000u, 3, 60, 60}},
+        {"hero damage", fe::kRumbleDamage, {MT_GAME_EVENT_HERO_DAMAGE, 0x1000000u, 12, 50, 60, {}}},
+        {"level-up", fe::kRumbleLevelUp, {MT_GAME_EVENT_LEVEL_UP, 0x1000000u, 3, 60, 60, {}}},
     };
     for (const u32 strength : {100u, 50u, 1u}) {
         r.rumble.configure(true, strength);
@@ -308,9 +452,9 @@ TEST_CASE("rumble: the game's vibration, a hit and a level-up rumble the active 
     // strongest of each motor.
     r.rumble.configure(true, 100);
     pad.rumbles.clear();
-    r.rumble.on_event({MT_GAME_EVENT_HERO_DAMAGE, 0x1000000u, 5, 10, 10});
+    r.rumble.on_event({MT_GAME_EVENT_HERO_DAMAGE, 0x1000000u, 5, 10, 10, {}});
     r.rumble.on_vibrate();
-    r.rumble.on_event({MT_GAME_EVENT_LEVEL_UP, 0x1000000u, 4, 10, 10});
+    r.rumble.on_event({MT_GAME_EVENT_LEVEL_UP, 0x1000000u, 4, 10, 10, {}});
     r.rumble.turn();
     REQUIRE(pad.rumbles.size() == 1);
     CHECK(pad.rumbles[0].low == amp(std::fmax(fe::kRumbleVibrate.low, fe::kRumbleDamage.low), 100));
@@ -326,8 +470,8 @@ TEST_CASE("rumble: off, or at strength 0, never rumbles") {
         r.rumble.configure(on, on ? 0u : 100u);
         for (int i = 0; i < 3; i++) {
             r.rumble.on_vibrate();
-            r.rumble.on_event({MT_GAME_EVENT_HERO_DAMAGE, 0x1000000u, 5, 10, 10});
-            r.rumble.on_event({MT_GAME_EVENT_LEVEL_UP, 0x1000000u, 2, 10, 10});
+            r.rumble.on_event({MT_GAME_EVENT_HERO_DAMAGE, 0x1000000u, 5, 10, 10, {}});
+            r.rumble.on_event({MT_GAME_EVENT_LEVEL_UP, 0x1000000u, 2, 10, 10, {}});
             r.rumble.turn();
         }
     }
@@ -416,7 +560,7 @@ TEST_CASE("rumble: no pad, a pad not yet active, a pad gone and a pad without mo
     idle.detach();
     r.pump();
     CHECK(r.gamepads.active() == nullptr);
-    r.rumble.on_event({MT_GAME_EVENT_HERO_DAMAGE, 0x1000000u, 5, 10, 10});
+    r.rumble.on_event({MT_GAME_EVENT_HERO_DAMAGE, 0x1000000u, 5, 10, 10, {}});
     r.rumble.turn();
     r.rumble.stop();
     CHECK(r.rumble.stats().no_pad == 3);

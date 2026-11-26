@@ -3918,6 +3918,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             static_cast<unsigned long long>(rs.requests), static_cast<unsigned long long>(rs.sent),
             static_cast<unsigned long long>(rs.no_pad), static_cast<unsigned long long>(rs.ignored),
             static_cast<unsigned long long>(rs.failed));
+        SDL_Log("game: run events: %llu chapter ends, %llu job advances, %llu bosses killed, "
+                "%llu map changes",
+                static_cast<unsigned long long>(ev.chapter_ends),
+                static_cast<unsigned long long>(ev.job_advances),
+                static_cast<unsigned long long>(ev.boss_kills),
+                static_cast<unsigned long long>(ev.map_changes));
     }
     stop_speech(g);
     g.applet.finish(); // the boost off, the peak's line (#240)

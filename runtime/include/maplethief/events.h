@@ -23,6 +23,24 @@
  *                 (CDataMgr+0x4DC[slot] == 0, docs/formats/save.md), else the slot's
  *                 character. `value` is the slot (0-2), `hero` 0.
  *
+ * Run events (#403, ADR 0156): what a speedrun splits on.
+ *   chapter end   the script native clearAll 0x996ED(vm), from the three scripts that end a
+ *                 chapter (the tutorial's last portal, the trip to Orbis, chapter 2's end). The
+ *                 natives reach the game state (CStateGame) at vm +0x04, and through it the
+ *                 quest manager (+0x58), whose chapter (+0x04) clearAll then raises by one.
+ *                 `value` is the chapter that ends; `hero` is CStateGame +0x30.
+ *   job advance   CHero::SetClassUp(hero, branch, tier) 0x655AD, whose only caller is the
+ *                 script native setClassUp 0x997E1. `value` is the branch (+0x88), `more[0]`
+ *                 the tier (+0x8C).
+ *   boss killed   CMob::Die(mob, hero) 0x73349, every mob's death; only the bosses (mob id
+ *                 +0xA0 64 and 66 to 69, those whose death queues a scene) are reported.
+ *                 `value` is the mob id, `hero` r1.
+ *   map change    CMapleWorld::changeMap(world, area, map, portal, ...) 0x81369, every warp
+ *                 (a portal, a script's changeMap). It does nothing while a warp is pending
+ *                 (the byte world +0xB4), and neither does the event. `value` is the area,
+ *                 `more[0]` the map, `more[1]` the portal; `hero` is world +0x30.
+ * The run events carry no HP (`hp` and `max_hp` 0).
+ *
  * The recompiler reports the entry of these functions (recomp/observe.py, MT_FN_OBSERVE in
  * maplethief/recomp/calls.h) to mt_observe_entry, which only reads the registers and guest
  * memory: the guest runs exactly as without it. The game's own vibration (CMSoundPlayer::Vibrate
@@ -49,14 +67,19 @@ typedef enum mt_game_event_kind {
     MT_GAME_EVENT_REVIVED = 4,        /* the hero is revived (value 0) */
     MT_GAME_EVENT_LOAD_CHARACTER = 5, /* a slot's saved character is chosen (value: the slot) */
     MT_GAME_EVENT_NEW_CHARACTER = 6,  /* a new character in a slot (value: the slot) */
+    MT_GAME_EVENT_CHAPTER_END = 7,    /* value: the chapter that ends (0 the tutorial) */
+    MT_GAME_EVENT_JOB_ADVANCE = 8,    /* value: the branch; more[0]: the tier */
+    MT_GAME_EVENT_BOSS_KILLED = 9,    /* value: the boss's mob id (64, 66-69) */
+    MT_GAME_EVENT_MAP_CHANGE = 10,    /* value: the area; more[0]: the map; more[1]: the portal */
 } mt_game_event_kind;
 
 typedef struct mt_game_event {
-    uint32_t kind;  /* mt_game_event_kind */
-    uint32_t hero;  /* the CHero (guest address) */
-    int32_t value;  /* see the kind */
-    int32_t hp;     /* the hero's HP (+0x94) at the entry */
-    int32_t max_hp; /* the hero's max HP (+0x9C) at the entry */
+    uint32_t kind;   /* mt_game_event_kind */
+    uint32_t hero;   /* the CHero (guest address) */
+    int32_t value;   /* see the kind */
+    int32_t hp;      /* the hero's HP (+0x94) at the entry */
+    int32_t max_hp;  /* the hero's max HP (+0x9C) at the entry */
+    int32_t more[2]; /* a run event's second and third values (see the kind), else 0 */
 } mt_game_event;
 
 typedef void (*mt_game_event_fn)(void *user, const mt_game_event *event);
@@ -79,7 +102,12 @@ typedef struct mt_game_events_stats {
     uint64_t death_popups; /* death popup events */
     uint64_t revives;      /* revived events */
     uint64_t loads;        /* load-character and new-character events */
-    uint64_t ignored;      /* entries the function's guard turns away (a miss, a dead hero, 99) */
+    uint64_t chapter_ends; /* chapter-end events */
+    uint64_t job_advances; /* job-advance events */
+    uint64_t boss_kills;   /* boss-killed events */
+    uint64_t map_changes;  /* map-change events */
+    uint64_t ignored;      /* entries the function's guard turns away (a miss, a dead hero, 99,
+                              a mob that is no boss, a pending warp, a bad pointer) */
 } mt_game_events_stats;
 
 /* The numbers since the start of the host process (or the last reset). */
@@ -92,6 +120,10 @@ void mt_game_events_reset_stats(void) MT_NOEXCEPT;
 #define MT_EVENTS_FN_POPUP_OPEN 0x3EAA1u
 #define MT_EVENTS_FN_REVIVE 0x6140Du
 #define MT_EVENTS_FN_LOAD_SAVE_DATA 0x39989u
+#define MT_EVENTS_FN_CLEAR_ALL 0x996EDu
+#define MT_EVENTS_FN_SET_CLASS_UP 0x655ADu
+#define MT_EVENTS_FN_MOB_DIE 0x73349u
+#define MT_EVENTS_FN_CHANGE_MAP 0x81369u
 
 /* mt_observe_entry(cpu, fn) is declared in maplethief/recomp/calls.h: the generated code's ABI.
  * Tests call it as the generated code does. */
