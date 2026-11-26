@@ -46,6 +46,7 @@ def test_compendium_and_docs_only_skip_the_build():
             "tests/test_prose_lint.py",
             "tests/test_doc_links.py",
             "tests/test_platform_docs.py",
+            "tests/test_play_coverage.py",
             "tools/mtport/handoffs.py",
             "tests/test_handoff_checklists.py",
             "tests/fixtures/compendium/kb/monster.json",

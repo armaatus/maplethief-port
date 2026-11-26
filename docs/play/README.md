@@ -90,10 +90,24 @@ Before the game starts, the port asks how you want to play:
 
 Choose with the arrow keys and Enter, a gamepad, or the mouse. You can change it later in the settings menu (**F1**).
 
+## Your system, page by page
+
+Where to find each step for your system: installing, the controls, fixing a problem, resetting or removing the game, and moving your saves.
+
+| Platform | Install | Controls | Troubleshooting | Reset and uninstall | Save transfer |
+|---|---|---|---|---|---|
+| Windows | [Windows](#windows) | [Controls](controls.md) | [Troubleshooting](troubleshooting.md#windows-windows-protected-your-pc) | [Windows](uninstall-and-reset.md#windows) | [Saves](saves.md#moving-saves-to-another-computer) |
+| Mac | [Mac](#mac) | [Controls](controls.md) | [Troubleshooting](troubleshooting.md#mac-apple-could-not-verify-maplethief-is-free-of-malware) | [Mac](uninstall-and-reset.md#mac) | [Saves](saves.md#moving-saves-to-another-computer) |
+| Linux | [Linux](#linux-and-steam-deck) | [Controls](controls.md) | [Linux](linux-and-steam-deck.md#if-it-doesnt-start) | [Linux](uninstall-and-reset.md#linux-and-steam-deck) | [Saves](saves.md#moving-saves-to-another-computer) |
+| Steam Deck | [Steam Deck](linux-and-steam-deck.md#steam-deck) | [Steam Deck controls](linux-and-steam-deck.md#controls) | [Linux and Steam Deck](linux-and-steam-deck.md#if-it-doesnt-start) | [Steam Deck](uninstall-and-reset.md#linux-and-steam-deck) | [Saves](saves.md#moving-saves-to-another-computer) |
+| iPhone | [Playing on your iPhone](iphone.md) | [iPhone controls](iphone-controls.md) | [On the iPhone](troubleshooting.md#on-the-iphone) | [iPhone](uninstall-and-reset.md#iphone) | [The Files app](iphone.md#saves), [from the original game](iphone-saves.md) |
+| Nintendo Switch | [Playing on the Nintendo Switch](switch.md) | [Switch controls](../controls/switch.md) | [On the Nintendo Switch](troubleshooting.md#on-the-nintendo-switch) | [Nintendo Switch](uninstall-and-reset.md#nintendo-switch) | [Saves](saves.md#on-the-nintendo-switch) |
+
 ## Next
 
-- [Controls](controls.md): keyboard, mouse, gamepad, Steam Deck
+- [Controls](controls.md): keyboard, mouse, gamepad, Steam Deck; [iPhone controls](iphone-controls.md) for the phone
 - [Playing on the Nintendo Switch](switch.md): copying it to the SD card, the import on the console, saves
-- [Settings](settings.md): the settings menu, display, sound, graphics and gameplay options
+- [Settings](settings.md): the settings menu, display, sound, graphics, gameplay options, the language and packs
 - [Saves](saves.md): where they are, backups, moving them between computers, bringing your iPhone save over
+- [Uninstall and reset](uninstall-and-reset.md): putting the settings back, starting over, removing the game
 - [Troubleshooting](troubleshooting.md): when something doesn't work, and common questions

@@ -70,6 +70,7 @@ Everything is on the SD card, in `sdmc:/switch/maplethief/` ([ADR 0127](../adr/0
 - **Back up** by copying `data/` to a computer. To restore, put it back while MapleThief is closed.
 - **Move saves between the Switch and a computer:** the settings menu's Saves tab exports a zip into `data/exports/`; copy it to the computer and import it there. The other way, put a zip of saves in the Switch's `data/import/` and choose **Import saves…** in the Saves tab, from the title screen. [Saves](saves.md#moving-saves-to-another-computer) has the details.
 - **Updating to a new version:** copy the new `MapleThief.nro` over the old one. `data/` and `game/` stay.
+- **Resetting or removing it:** [Uninstall and reset](uninstall-and-reset.md#nintendo-switch).
 
 ## Troubleshooting
 

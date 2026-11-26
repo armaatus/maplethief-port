@@ -51,6 +51,44 @@ The game keeps your saves and settings in a `data` folder next to itself ([Saves
 
 **The menus have buttons that do nothing (More Games, the banner).** Those opened Nexon's web pages, which are gone. `hide_online_ui = on` hides them (part of the Original + controller and Enhanced presets).
 
+## On the iPhone
+
+**The app stopped opening after a week.** With a free Apple account the app is signed for 7 days. Build and install it again ([Playing on your iPhone](iphone.md#3-install-it-with-xcode)); your saves stay as long as you don't delete the app.
+
+**"Untrusted Developer" when it starts.** On the iPhone open Settings > General > VPN & Device Management, tap your account under Developer App and choose **Trust**.
+
+**The build or Xcode's signing fails.** [Playing on your iPhone](iphone.md#when-something-goes-wrong) lists each message and its fix.
+
+**No sound.** The Ring/Silent switch silences the game, as it did the original. Turn the switch to ring, or set **Audio session** to `own` in the settings menu's Audio tab and start the game again ([Settings](settings.md#sound)).
+
+**The on-screen buttons disappeared.** They fade while a controller is used. Touch the screen and they come back. If they stay away, check Controls → **Hide the key pad** in the settings menu ([iPhone controls](iphone-controls.md#a-controller)).
+
+**The key pad is in an odd place.** Settings menu → Controls → **Edit the touch key pad**, then **Reset all** and **Save** ([iPhone controls](iphone-controls.md#moving-the-key-pad)).
+
+**The controller does nothing.** Pair it in the iPhone's Settings → Bluetooth first, then press a button on it while the game runs.
+
+**My saves are gone.** Deleting the app deletes its saves. Copy them out with the Files app before you delete it ([Uninstall and reset](uninstall-and-reset.md#iphone)).
+
+**Seeing the log.** Start the game from Xcode with your iPhone connected ([step 3](iphone.md#3-install-it-with-xcode)): the game's log shows in Xcode's debug area at the bottom. Copy it into your report.
+
+## On the Nintendo Switch
+
+**"Running short of memory", or it closes on a map.** You started the Homebrew Menu from the Album. Start it through a game instead: hold R while you start one ([Playing on the Nintendo Switch](switch.md#start)).
+
+**"No IPA found".** The file isn't in `sdmc:/switch/maplethief/`. Copy it there, next to `MapleThief.nro`, and press A to look again.
+
+**"That file cannot be used".** The line below says why: not an IPA, another version, an encrypted copy, or a damaged one. Check its SHA-256 on a computer ([Your game file](your-ipa.md)).
+
+**The import screen comes back on every start.** The import didn't finish, or `game/` was deleted. Let it run to the end with MapleThief open and the console awake.
+
+**The touch screen does nothing.** It works in handheld mode only; docked there is no touch screen.
+
+**The wrong button jumps.** Buttons go by their Nintendo labels: B jumps and A confirms. Settings menu (`+`) → Controls → **Bindings** → **Reset to defaults** brings back the defaults ([Nintendo Switch controls](../controls/switch.md)).
+
+**The settings menu is missing a row.** The console's menu leaves out what doesn't work there, such as fullscreen and the output device ([Settings](settings.md#on-the-nintendo-switch)).
+
+**Seeing the log.** Each run's log is in `sdmc:/switch/maplethief/data/logs/`, and a crash report in `sdmc:/switch/maplethief/crash.txt` and `data/crashes/`. Put the card in a computer to copy them. More in [Playing on the Nintendo Switch](switch.md#troubleshooting).
+
 ## Seeing what went wrong
 
 The game writes a log of each run to `logs/` in its data folder: settings menu → Saves → **Open logs folder**. Each file is named by the date and time the run started, so the newest is the latest run. You don't need a terminal for it.

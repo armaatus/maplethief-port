@@ -73,7 +73,7 @@ The game keeps its saves in the app's own folder. To copy them off the phone or 
 
 ## Playing
 
-The game runs in landscape, either way round, and the status bar stays hidden. You can play with the on-screen key pad or with a controller paired in the iPhone's Bluetooth settings. See [Controls](controls.md).
+The game runs in landscape, either way round, and the status bar stays hidden. You can play with the on-screen key pad or with a controller paired in the iPhone's Bluetooth settings. See [iPhone controls](iphone-controls.md): the touch key pad, the gear for the settings menu, moving the key pad, and controllers.
 
 ## Sound
 
@@ -89,4 +89,4 @@ A call, Siri or an alarm stops the sound, and it comes back when they're done. N
 - **A signing error in Xcode:** check that your Apple account is added and your team is selected. With a free account, use a bundle identifier of your own, and remove an older app of yours if you already have three.
 - **The iPhone refuses the app:** turn on Developer Mode, and trust your account under VPN & Device Management.
 
-For anything else, see [Troubleshooting](troubleshooting.md).
+For problems while playing, see [Troubleshooting → On the iPhone](troubleshooting.md#on-the-iphone). To reset the game or remove it, see [Uninstall and reset](uninstall-and-reset.md#iphone).

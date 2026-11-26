@@ -7,7 +7,8 @@
     MapleThief-game-<version>-linux-<arch>/
         MapleThief.sh        the launcher (platform/linux/MapleThief.sh): sets
                              MAPLETHIEF_BUNDLE_DIR to game/, a 1280x800 window under gamescope,
-                             --install-desktop writes a .desktop entry
+                             --install-desktop writes a .desktop entry,
+                             --uninstall-desktop removes it
         bin/MapleThief       the executable, linked with the generated code
         game/MapleThief.app/ a copy of your extracted bundle (work/ipa/Payload/MapleThief.app)
         icon.png             the bundle's Icon@2x.png as a standard PNG (mtport.cgbi), for the
@@ -63,7 +64,7 @@ This folder was built on your machine from your own copy of MapleStory Thief Edi
 never share or upload it.
 
 Run it:            ./MapleThief.sh
-Menu entry:        ./MapleThief.sh --install-desktop
+Menu entry:        ./MapleThief.sh --install-desktop (--uninstall-desktop removes it)
 Saves, settings:   data/ in this folder (settings.ini: scale_mode, volumes, ...); back it up
                    by copying it. ~/.local/share/MapleThief/ instead when this folder can't
                    be written, or after the settings menu's Saves > Data location > User folder

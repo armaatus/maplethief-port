@@ -5,6 +5,7 @@
 #   ./MapleThief.sh [MapleThief options...]   start the game (the options: README.md, Build)
 #   ./MapleThief.sh --install-desktop         add MapleThief to the desktop's application menu
 #                                             (and so to Steam's "Add a Non-Steam Game" list)
+#   ./MapleThief.sh --uninstall-desktop       remove that menu entry again (#332)
 #
 # It runs the game from the copy of your bundle in game/ (MAPLETHIEF_BUNDLE_DIR, unless you set
 # it), if the folder has one: the player download doesn't (ADR 0125), and its game imports your
@@ -18,6 +19,18 @@ set -eu
 
 here="$(cd "$(dirname "$0")" && pwd -P)"
 
+desktop="${XDG_DATA_HOME:-$HOME/.local/share}/applications/io.github.armaatus.maplethief.desktop"
+
+if [ "${1:-}" = "--uninstall-desktop" ]; then
+    if [ -f "$desktop" ]; then
+        rm -f "$desktop"
+        echo "MapleThief.sh: removed $desktop"
+    else
+        echo "MapleThief.sh: no menu entry at $desktop; nothing to remove"
+    fi
+    exit 0
+fi
+
 if [ "${1:-}" = "--install-desktop" ]; then
     case "$here" in
         *[\"\`\$\\%]*)
@@ -26,9 +39,7 @@ if [ "${1:-}" = "--install-desktop" ]; then
             exit 1
             ;;
     esac
-    apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-    mkdir -p "$apps"
-    desktop="$apps/io.github.armaatus.maplethief.desktop"
+    mkdir -p "$(dirname "$desktop")"
     {
         echo "[Desktop Entry]"
         echo "Type=Application"
