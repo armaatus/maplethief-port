@@ -27,6 +27,13 @@
 # draft releases at all (ADR 0121, "Can the deploy workflow read a draft-release asset?"); the
 # job only reads with it.
 #
+# The Pages deployment gets one retry: GitHub Pages sometimes times out while syncing files
+# (the push run of 2026-11-07 did, and nobody noticed for weeks, #319). The site carries a
+# build.json stamp (commit, run, bundle SHA-256) so the live build can be checked. When the run
+# still fails, the report job opens the issue "Compendium deploy failed", or comments on the
+# one already open. A dispatch with test_failure fails on purpose, without touching Pages, to
+# exercise that report on any branch.
+#
 # Third-party actions are pinned to full commit SHAs (the tag is in the comment), as in ci.yml.
 
 name: Compendium
@@ -49,6 +56,10 @@ on:
         description: "SHA-256 of compendium-site.tar.gz (scripts/compendium deploy prints it)"
         type: string
         required: true
+      test_failure:
+        description: "Fail on purpose without deploying, to test the failure report"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -68,12 +79,13 @@ env:
 jobs:
   deploy:
     name: deploy to GitHub Pages
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !inputs.test_failure
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # two Pages attempts of up to ten minutes each, after the build
+    timeout-minutes: 30
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment_retry.outputs.page_url || steps.deployment.outputs.page_url }}
     steps:
       - name: Check out the generator and the prose (push only, without Git LFS objects)
         if: github.event_name == 'push'
@@ -220,6 +232,13 @@ jobs:
           mkdir "$RUNNER_TEMP/site"
           tar -xzf "$RUNNER_TEMP/$ASSET" -C "$RUNNER_TEMP/site" --no-same-owner --no-same-permissions
           echo "$(wc -l < "$RUNNER_TEMP/names.txt") files, $(du -sh "$RUNNER_TEMP/site" | cut -f1)"
+          # The build stamp: which commit and run deployed which bundle (#319).
+          jq -n --arg commit "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" \
+            --arg run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg sha256 "$got" --arg deployed "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{commit: $commit, event: $event, run: $run, sha256: $sha256, deployed: $deployed}' \
+            > "$RUNNER_TEMP/site/build.json"
+          cat "$RUNNER_TEMP/site/build.json"
         env:
           # dispatch: what the deploy printed; push: the bundle the build step just packed
           WANT: ${{ inputs.sha256 || steps.build.outputs.sha256 }}
@@ -234,4 +253,60 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         if: steps.build.outputs.deploy != 'false' && steps.find.outputs.inputs != 'missing'
+        # a Pages timeout here gets one retry below
+        continue-on-error: true
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+      - name: Retry the Pages deployment
+        id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+  test-failure:
+    name: forced failure (test dispatch)
+    if: github.event_name == 'workflow_dispatch' && inputs.test_failure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Fail on purpose
+        shell: bash
+        run: |
+          echo "::error::test_failure was set: failing on purpose to test the failure report"
+          exit 1
+
+  report:
+    name: report a failed deploy
+    needs: [deploy, test-failure]
+    if: always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the issue
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="Compendium deploy failed"
+          run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ "$TEST_FAILURE" = true ]; then
+            what="A test dispatch on \`$GITHUB_REF_NAME\` failed on purpose (\`test_failure\`); nothing was deployed. Close this issue."
+          else
+            what="The $GITHUB_EVENT_NAME run for \`$GITHUB_SHA\` failed, so the live site may be older than \`main\`. Read the run, then re-run it with \`gh run rerun $GITHUB_RUN_ID --failed\` (or run \`scripts/compendium deploy\`), check the live \`build.json\`, and close this issue."
+          fi
+          body="$what
+
+          Run: $run (attempt $GITHUB_RUN_ATTEMPT). Steps: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/main/docs/compendium/README.md#deploy"
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label area:compendium \
+            --limit 200 --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$body"
+            echo "commented on #$number"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+              --label area:compendium --label type:bug --body "$body"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TEST_FAILURE: ${{ inputs.test_failure || false }}
