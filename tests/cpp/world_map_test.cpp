@@ -162,3 +162,49 @@ TEST_CASE("a ledge beside a rope is reached by a rope jump") {
     REQUIRE(path.size() == 1);
     CHECK(path[0].edge.move == wm::Move::rope_jump);
 }
+
+// A rope hanging from a high platform, 64 px above the floor (too high to grab from it) and
+// 11 px beside a ledge 48 px below the top (too high to jump), like 5.1's rope to portal510: the
+// ledge reaches the top by a rope grab (a jump toward the rope, up in the air), and the top comes
+// back down by a rope jump.
+TEST_CASE("a rope beside a ledge is caught in a jump from it") {
+    namespace wm = world_map;
+    wm::Map m;
+    m.w = 30;
+    m.h = 20;
+    m.att.assign(static_cast<std::size_t>(m.w * m.h), wm::k_air);
+    auto set = [&m](int c, int r, wm::u8 v) { m.att[static_cast<std::size_t>(r * m.w + c)] = v; };
+    for (int c = 0; c < m.w; c++) {
+        set(c, 18, wm::k_foothold); // the floor: y 143
+    }
+    for (int c = 12; c <= 20; c++) {
+        set(c, 3, wm::k_foothold); // the top: y 23, x 96..167
+    }
+    for (int c = 2; c <= 10; c++) {
+        set(c, 9, wm::k_foothold); // the ledge: y 71, x 16..87
+    }
+    for (int r = 3; r <= 9; r++) { // the rope: x 104, y 24..79, from the top's surface
+        const auto v = static_cast<wm::u8>(r == 3 ? wm::k_ladder | wm::k_foothold : wm::k_ladder);
+        set(12, r, v);
+        set(13, r, v);
+    }
+    wm::build(m);
+    REQUIRE(m.platforms.size() == 3);
+    REQUIRE(m.ladders.size() == 1);
+    int top = -1, ledge = -1, floor = -1;
+    for (std::size_t i = 0; i < m.platforms.size(); i++) {
+        const int row = m.platforms[i].row;
+        (row == 3 ? top : row == 9 ? ledge : floor) = static_cast<int>(i);
+    }
+    bool down = false;
+    for (const wm::Edge &e : m.edges[static_cast<std::size_t>(top)]) {
+        down = down || (e.move == wm::Move::rope_jump && e.to == ledge);
+    }
+    CHECK(down);
+    const std::vector<wm::Step> up = wm::route(m, ledge, 40, top);
+    REQUIRE(up.size() == 1);
+    CHECK(up[0].edge.move == wm::Move::rope_grab);
+    CHECK(up[0].edge.dir > 0);
+    CHECK(up[0].edge.x == 84); // 3 px in from the ledge's near end
+    CHECK(wm::route(m, floor, 40, top).empty());
+}

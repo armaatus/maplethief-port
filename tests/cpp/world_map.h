@@ -63,7 +63,7 @@ struct Ladder {
 };
 
 // A move from one platform to another: how and from where.
-enum class Move { walk, jump, fall, climb_up, climb_down, rope_jump };
+enum class Move { walk, jump, fall, climb_up, climb_down, rope_jump, rope_grab };
 inline const char *move_name(Move m) {
     switch (m) {
     case Move::walk:
@@ -78,6 +78,8 @@ inline const char *move_name(Move m) {
         return "climb down";
     case Move::rope_jump:
         return "rope jump";
+    case Move::rope_grab:
+        return "rope grab";
     }
     return "?";
 }
@@ -262,6 +264,37 @@ inline void build(Map &m) {
                 if (top >= 0) {
                     add(top, {to, Move::rope_jump, l.x(), dir, static_cast<int>(li), cost});
                 }
+            }
+        }
+    }
+    // Rope grabs, the other way: from a platform beside a rope that hangs too high to grab from
+    // the floor, a jump toward it with up held catches it in the air (up looks for a ladder cell
+    // above the feet, as from the floor), then up to its top (5.1: the rope to portal510 hangs
+    // 72 px above the floor and 19 px beside platform 2). The edge's x is the platform's near end.
+    for (std::size_t li = 0; li < m.ladders.size(); li++) {
+        const Ladder &l = m.ladders[li];
+        const int top = (m.at(l.c, l.r0) & k_foothold) != 0
+                            ? m.platform_at(l.x(), l.r0 * k_cell - 1, 0)
+                            : m.platform_at(l.x(), l.r0 * k_cell - 1, 3 * k_cell);
+        if (top < 0) {
+            continue;
+        }
+        for (std::size_t qi = 0; qi < m.platforms.size(); qi++) {
+            const Platform &q = m.platforms[qi];
+            if (static_cast<int>(qi) == top || q.y() - k_cell < l.top() ||
+                q.y() > l.bottom() + k_ladder_reach) {
+                continue;
+            }
+            for (const int dir : {-1, 1}) {
+                const int gap = dir < 0 ? l.x() - 6 - q.x1() : q.x0() - (l.x() + 6);
+                // dir is the side q lies on: the hero jumps the other way, from its near end.
+                const int end = dir < 0 ? q.x1() : q.x0();
+                if (gap < 0 || gap > k_rope_hop) {
+                    continue;
+                }
+                const int cost = (q.y() - l.top()) / k_cell * 3 + 40;
+                add(static_cast<int>(qi),
+                    {top, Move::rope_grab, end + dir * 3, -dir, static_cast<int>(li), cost});
             }
         }
     }
@@ -452,6 +485,8 @@ inline std::vector<Step> route(const Map &m, int from, int from_x, int to) {
                 int land = e.x;
                 if (e.move == Move::climb_up || e.move == Move::climb_down) {
                     land = e.x;
+                } else if (e.move == Move::rope_grab) {
+                    land = m.ladders[static_cast<std::size_t>(e.ladder)].x();
                 } else if (e.move == Move::rope_jump) {
                     land = e.x + e.dir * (k_rope_hop + 6);
                 } else if (e.move == Move::fall) {
@@ -661,6 +696,12 @@ inline std::string describe(const Map &m) {
             s += buf;
         }
         s += "\n";
+    }
+    for (std::size_t i = 0; i < m.ladders.size(); i++) {
+        const Ladder &l = m.ladders[i];
+        std::snprintf(buf, sizeof buf, "ladder %zu: x %d y %d..%d\n", i, l.x(), l.top(),
+                      l.bottom());
+        s += buf;
     }
     return s;
 }

@@ -279,6 +279,37 @@ inline void act(Run &r, Nav &n, const wm::Map &m, const Hero &h, double el, int 
         }
         break;
     }
+    case wm::Move::rope_grab: {
+        // A jump toward the rope, the direction held until the hero is over it, then up alone
+        // (the pad sends one key a tick and a direction outranks up: keypad.md): up in the air
+        // catches the rope. Then up it as a climb.
+        const int lx = m.ladders[static_cast<std::size_t>(n.edge.ladder)].x();
+        if (h.y != n.last_y) {
+            n.last_y = h.y;
+            n.still = el;
+        }
+        if (on_ladder(h)) {
+            const bool again = el - n.still > 0.3 && std::fmod(el - n.still, 0.6) < 0.1;
+            hold(r, LEFT, false);
+            hold(r, RIGHT, false);
+            hold(r, A, false);
+            hold(r, UP, !again);
+        } else if (t < 0.12) {
+            hold(r, LEFT, n.edge.dir < 0);
+            hold(r, RIGHT, n.edge.dir > 0);
+            hold(r, A, true);
+        } else {
+            const bool short_of = (lx - h.x) * n.edge.dir > 4;
+            hold(r, A, false);
+            hold(r, LEFT, short_of && n.edge.dir < 0);
+            hold(r, RIGHT, short_of && n.edge.dir > 0);
+            hold(r, UP, !short_of);
+        }
+        if ((stand && !on_ladder(h) && t > 0.3) || t > 15) {
+            end_move(r, n, m, h, key);
+        }
+        break;
+    }
     case wm::Move::walk: // up a stair step: on in the edge's direction
         hold(r, LEFT, n.edge.dir < 0);
         hold(r, RIGHT, n.edge.dir > 0);
@@ -440,7 +471,7 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
         return false;
     }
     const bool ladder = e.move == wm::Move::climb_up || e.move == wm::Move::climb_down ||
-                        e.move == wm::Move::rope_jump;
+                        e.move == wm::Move::rope_jump || e.move == wm::Move::rope_grab;
     const int step_tol = ladder ? 2 : 4;
     const int d = e.x - h.x;
     if (trace_on()) {
