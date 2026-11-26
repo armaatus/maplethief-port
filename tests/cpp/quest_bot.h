@@ -94,7 +94,7 @@ struct Nav {
     int idle_x = INT32_MIN, idle_y = INT32_MIN;
     double idle = 0;
     u64 tick = 0, tap = 0;
-    int tick_x = INT32_MIN, vx = 0;
+    int tick_x = INT32_MIN, vx = 0, prev_vx = 0;
     bool ice = false;                                    // the hero slid while standing on this map
     std::map<std::tuple<int, int, int, int>, int> fails; // (map, from, to, move) -> count
     std::set<std::tuple<int, int, int, int>> banned;
@@ -336,6 +336,13 @@ inline void act(Run &r, Nav &n, const wm::Map &m, const Hero &h, double el, int 
 // between 345 and 374). So the approach coasts when the slide reaches near the spot, then taps
 // the d-pad for single ticks from rest. One turn of it toward d px away: false once the hero
 // rests within tol, true while it is still on the way.
+// With the d-pad let go the slide only slows; a slide that still speeds up means the game still
+// walks (a tap's release was lost: 9.0's portal900, the hero ran on into the wall). Then the
+// other direction for a tick, which the game takes as a new key and so a release (keypad.md).
+inline int brake(const Nav &n) {
+    return std::abs(n.vx) > std::abs(n.prev_vx) && n.vx != 0 ? (n.vx > 0 ? -1 : 1) : 0;
+}
+
 inline bool ice_approach(Run &r, Nav &n, const Hero &h, double el, int d, int tol) {
     const int toward = n.vx * (d > 0 ? 1 : -1);
     if (std::abs(d) > tol) {
@@ -345,12 +352,12 @@ inline bool ice_approach(Run &r, Nav &n, const Hero &h, double el, int d, int to
         }
         press = press || r.ticks == n.tap;
         n.stuck_since = -1;
-        walk_toward(r, n, h, el, press ? (d > 0 ? 1 : -1) : 0);
+        walk_toward(r, n, h, el, press ? (d > 0 ? 1 : -1) : brake(n));
         hold(r, A, false);
         return true;
     }
     if (n.vx != 0) {
-        walk_toward(r, n, h, el, 0);
+        walk_toward(r, n, h, el, brake(n));
         hold(r, A, false);
         return true;
     }
@@ -399,6 +406,7 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     // The hero's speed a tick. Area 9's ground is ice (mechanics.md, Movement); the bot wears no
     // Snowshoes.
     if (r.ticks != n.tick) {
+        n.prev_vx = n.vx;
         n.vx = n.tick_x == INT32_MIN ? 0 : h.x - n.tick_x;
         n.tick_x = h.x;
         n.tick = r.ticks;
