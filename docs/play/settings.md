@@ -59,7 +59,7 @@ Neither shows on a computer.
 
 ## Gameplay and assists
 
-- **Save on quit** (`autosave = on_quit`, part of Enhanced): saves wherever the game's own Save would when you quit or minimise.
+- **Save on quit** (`autosave = on_quit`, part of Enhanced): saves wherever the game's own Save would when you quit, minimise or pick the menu's exit to the main menu. Going to the main menu from the death popup never saves: the hero is dead there, and the game never lets a fallen hero save, so you go back to your last save (and skip the fall's penalty, as in the original).
 - **Crash recovery** (`crash_recovery = on`, part of Enhanced): keeps a recovery point of your game, so that after a crash the next start can put you back a few minutes before it. See [Saves](saves.md#after-a-crash-recovery-points).
 - **Cash shop for meso** (`cash_shop = meso`, an Assist, off in every preset): the original's cash shop needed real money and an online server. With this on, its items and revives cost in-game meso instead, at a price that grows with your level.
 - **Hide online buttons** (`hide_online_ui`) and **local Game Center** (`local_game_center`): hide the menu buttons whose web pages are gone, and turn Game Center's button into a leaderboard of your own save slots, with a few achievements.
