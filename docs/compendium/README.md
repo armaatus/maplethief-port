@@ -66,6 +66,8 @@ scripts/compendium deploy
 
 The workflow checks nothing out and builds nothing. It downloads the archive by its asset id, checks it against the SHA-256, refuses any path outside the site and any file type the site does not publish, and deploys it with `actions/upload-pages-artifact` (kept one day) and `actions/deploy-pages`. Follow it with `gh run watch` or on the Actions tab.
 
+A failed deploy does not go unnoticed (#319): the Pages step gets one retry, and a run that still fails opens the issue *Compendium deploy failed* (or comments on the open one) with the run and the command to re-run it. The live site's `build.json` names the commit, run and archive SHA-256 it was deployed from (`curl -s https://armaatus.github.io/maplethief-port/build.json`). `gh workflow run compendium.yml --ref <branch> -f sha256=test -f test_failure=true` fails on purpose, without deploying, to test that report.
+
 `--dry-run` stops before `gh` is called and prints the commands it would run. `MTPORT_GH` names another `gh`, which is how the tests stub it.
 
 Deploy from a clean checkout of `main` (or of the branch about to merge): the fingerprint is taken from the files on disk, so uncommitted edits to the extraction code make later push runs skip.
