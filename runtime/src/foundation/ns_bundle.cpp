@@ -168,6 +168,9 @@ void bundle_info_object(mt_cpu *cpu) {
     cpu->r[0] = v != nullptr ? autoreleased(cpu, to_object(cpu, *v)) : 0u;
 }
 
+// mt_cf_set_missing_key_fallback (original bug 15).
+bool g_missing_key_fallback = false;
+
 // -localizedStringForKey:value:table: the string of `key` in <language>.lproj/<table>.strings
 // (table nil or empty: Localizable); else `value` if it is not empty, else `key`.
 void bundle_localized_string(mt_cpu *cpu) {
@@ -194,6 +197,11 @@ void bundle_localized_string(mt_cpu *cpu) {
     }
     const std::string rel = mt_cf::bundle_find(cpu, t, "strings", "", "");
     const PlistValue *found = rel.empty() ? nullptr : plist(cpu, rel).find(*k);
+    // A key the language's table lacks, from the English table (original bug 15).
+    if (found == nullptr && g_missing_key_fallback && mt_cf::config().language != "en") {
+        const std::string en = mt_cf::bundle_find(cpu, t, "strings", "", "en");
+        found = en.empty() ? nullptr : plist(cpu, en).find(*k);
+    }
     if (found != nullptr && found->kind == PlistValue::string) {
         cpu->r[0] = autoreleased(cpu, mt_cf::string_create(cpu, found->s, false));
         return;
@@ -288,3 +296,7 @@ std::string home_guest_path() {
 }
 
 } // namespace mt_ns
+
+extern "C" void mt_cf_set_missing_key_fallback(int on) noexcept {
+    mt_ns::g_missing_key_fallback = on != 0;
+}

@@ -294,6 +294,7 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     run_tasks(r, cpu);
     r.assists.turn(cpu, r.settings, r.actions, r.t);
     r.scene_skip.turn(cpu, r.settings, r.t);
+    mt_cf_set_missing_key_fallback(r.settings.fix_original_bugs ? 1 : 0); // as game.cpp
     mt_uikit_set_animation_scale(fe::ui_animation_scale(r.settings.ui_animations));
     std::int64_t frame = 0;
     std::memcpy(&frame, cpu->mem + k_last_frame, sizeof frame);
