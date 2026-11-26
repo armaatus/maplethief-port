@@ -198,7 +198,7 @@ The list covers every open `needs-human` issue, including those of later milesto
 - #318: not a gate (Joris approves the takedown runbook: legal wording)
 - #326: not a gate (Joris approves the SECURITY.md wording; private vulnerability reporting is a repository setting, agent work)
 - #329: not a gate, agent work (branch rulesets are a repository setting)
-- #330: not a gate, agent work (Discussions is a repository setting)
+- #330: not a gate, agent work (Discussions is on; the API cannot pin a discussion, so Joris pins the FAQ, discussion #418, with one click)
 - #331: not a gate (Joris approves the one legal paragraph; description and topics are repository settings, agent work)
 - #334: not a gate, agent work (an ADR on traps)
 - #338: not a gate (iOS crash notice on a device)
