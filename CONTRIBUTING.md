@@ -32,7 +32,7 @@ These rules keep the repository shareable. The reasoning is in [ADR 0100](docs/a
 - **New file formats** get a spec in `docs/formats/` plus a parser with tests on synthetic fixtures.
 - **Guest addresses** are written as armv7 VM addresses in hex. Function pointers carry the Thumb bit (`0x2A3C1`), code ranges don't (`0x2A3C0`).
 - **Pull requests target `dev`.** `main` moves only through a release pull request ([Releases](docs/build/releases.md)).
-- **Run the quick check before you push:** `scripts/lint` and `scripts/test`. CI is the gate: a pull request into `dev` runs the linters, the Python tests, the Linux build with its sanitizer run, the Switch NRO and the Android APK, and the release pull request runs every OS ([Testing and CI](docs/build/testing.md#github-ci)).
+- **Run the quick check before you push:** `scripts/lint` and `scripts/test`. CI is the gate: a pull request into `dev` runs the linters, the Python tests, the Linux build with its sanitizer run, the Switch NRO and the Android APK, and the release pull request runs every OS ([Testing and CI](docs/build/testing.md#github-ci)). Branch rulesets enforce it: a pull request merges only when CI is green, and always with a merge commit ([Branch rules](docs/build/releases.md#branch-rules)).
 
 The maintainer works with an AI coding agent. Its rules are in [CLAUDE.md](CLAUDE.md) (also `AGENTS.md`), and they double as a detailed description of the workflow.
 

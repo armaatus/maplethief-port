@@ -33,6 +33,17 @@ gh pr create --base main --head dev --title "Release TAG" --body "Release TAG"
 
 CI runs every OS, Debug and Release, and packages the kits. A `release title` check fails unless the pull request comes from `dev`, its title is `Release vX.Y.Z[-rc.N]`, and that tag doesn't exist yet. Merge it with a merge commit when everything is green.
 
+## Branch rules
+
+`dev` and `main` carry repository rulesets ([ADR 0173](../adr/0173-branch-rulesets-ci-result-gate-and-merge-commits-only.md)), kept in [`.github/rulesets/`](../../.github/rulesets/) and applied with `scripts/rulesets apply` (`scripts/rulesets check` compares them with GitHub's):
+
+- Every change reaches either branch through a pull request. No force-push, no deletion, and nobody bypasses the rules, the owner included.
+- Pull requests are merged with a **merge commit**. Squash and rebase merging are off, so an epic's children stay visible in history and the release tag sits on the merge commit.
+- Into `dev`: `scope`, `lint + Python min/latest` and `CI result` must pass. `CI result` waits for every other CI job and fails if any failed or was cancelled; the jobs `scripts/ci-scope` skips on a documentation-only pull request count as passing.
+- Into `main`: every job of the full profile must pass by name (the six Debug and Release builds, ASan/UBSan, iOS, Switch, Android, clang-tidy, lint + Python, `CI result`), and `release title`, which fails unless the pull request comes from `dev`. On a pull request into `main` CI never skips a job.
+
+A new or renamed CI job goes into the rulesets' JSON in the same pull request (`tests/test_rulesets.py` fails otherwise); run `scripts/rulesets apply` after it merges.
+
 The merge starts `release.yml`, which creates the annotated tag on the merge commit and the draft release, with the notes header ([`.github/release-notes-header.md`](../../.github/release-notes-header.md)) above GitHub's generated notes. It then builds the three kits from the tag on hosted runners, checks each, runs the guard, and uploads them to the draft.
 
 Then build the player builds on the two machines that have `work/gen` (`scripts/bootstrap`, then `python3 -m recomp all`), and publish:
