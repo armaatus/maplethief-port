@@ -1,0 +1,12 @@
+{
+ "level": 10,
+ "hp": 110,
+ "mp": 110,
+ "meso": 20000,
+ "map": [0, 0],
+ "position": [-1, -1],
+ "etc_inventory": [[3, 50]],
+ "chapter": 3,
+ "main": {},
+ "side": {}
+}

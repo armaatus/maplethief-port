@@ -80,6 +80,7 @@
 
 #if defined(MT_HAVE_GENERATED_CODE)
 
+#include <array>
 #include <chrono>
 #include <fstream>
 #include <iterator>
@@ -120,6 +121,7 @@
 #include "save_state_input.h"
 #include "save_tools.h"
 #include "settings.h"
+#include "skill_rules.h"
 
 namespace {
 
@@ -8763,6 +8765,765 @@ void mechanics_checks(Run &, u64) {
               (m.drop_first_bad.empty() ? "" : "; first: " + m.drop_first_bad) + ")");
 }
 
+// --- job advancements from built saves (#302) ---------------------------------------------------
+//
+// The Dark Lord (NPC 3 on 0.0) gives every job advancement, by the script of the hero's chapter
+// (the knowledge base's 11 paths, docs/testing/skills-and-jobs.md). Each mode starts from a
+// built save at one advancement point (tests/starts/jobs_*.json, MT_FROM_SAVE), talks to him by
+// play and picks the branch in his list (classUp2: 6 the Assassin, 7 the Bandit; chapter 1's
+// main quest 21 is row 2 of his quest list), then checks the job (hero +0x88 branch, +0x8C
+// job_tier) in guest memory and in the theif0 it saves, and the reward weapon in the bag. The
+// starts equal no chained state, so every mode's test is named synthetic (start-states.md).
+struct JobStep {
+    std::vector<int> choices;
+    i32 branch = 0, tier = 0;
+    i32 reward = -1; // the equip id the advancement gives, -1 none
+    std::vector<std::tuple<u32, u32, i32>> quests = {}; // {sort, number, state} after it
+};
+
+Pred job_at(i32 branch, i32 tier) {
+    return [branch, tier](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return h.addr != 0 && rdi(cpu, h.addr + 0x88) == branch && rdi(cpu, h.addr + 0x8C) == tier;
+    };
+}
+
+void job_path(Run &r, const std::vector<JobStep> &steps) {
+    using namespace quest_bot;
+    from_save(r);
+    for (const JobStep &s : steps) {
+        const std::string what =
+            "branch " + std::to_string(s.branch) + " job_tier " + std::to_string(s.tier);
+        then_talk_to(r, "Dark Lord: the advancement to " + what, 0, 0, "Darklord", s.choices,
+                     job_at(s.branch, s.tier), 600);
+        if (s.reward >= 0) {
+            then_check(
+                r, "the advancement's weapon (equip " + std::to_string(s.reward) + ") in the bag",
+                [id = s.reward](mt_cpu *cpu) {
+                    return quest_bot::equip_owned(cpu, hero(cpu), id) > 0;
+                });
+        }
+        if (!s.quests.empty()) {
+            then_quests_are(r, "the quests the advancement hands in", s.quests);
+        }
+        then_save(r);
+        then_job_is(r, s.branch, s.tier);
+    }
+    then_do(r, "the hero after the advancements", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::printf("jobs: %s, branch %d job_tier %d\n", hero_text(cpu, h).c_str(),
+                    rdi(cpu, h.addr + 0x88), rdi(cpu, h.addr + 0x8C));
+    });
+    then_finish(r);
+}
+void jobs_checks(Run &, u64) {}
+
+// 1-1-0: chapter 1's first advancement, main quest 21 handed in (row 2), from a level-10 hero.
+void jobs_1_1(Run &r, u64) { job_path(r, {{{2}, 0, 1, 24, {{0, 21, 2}, {0, 9, 1}}}}); }
+// 1-2-1 and 1-2-2: chapter 1's second, from a level-30 Rogue with main quest 21 done.
+void jobs_1_2_assassin(Run &r, u64) { job_path(r, {{{6}, 1, 2, 40}}); }
+void jobs_1_2_bandit(Run &r, u64) { job_path(r, {{{7}, 2, 2, 28}}); }
+// 2-2-1, 2-2-2, 2-3-same: chapter 2's script.
+void jobs_2_2_assassin(Run &r, u64) { job_path(r, {{{6}, 1, 2, 40}}); }
+void jobs_2_2_bandit(Run &r, u64) { job_path(r, {{{7}, 2, 2, 28}}); }
+void jobs_2_3_assassin(Run &r, u64) { job_path(r, {{{-1}, 1, 3, -1}}); }
+void jobs_2_3_bandit(Run &r, u64) { job_path(r, {{{-1}, 2, 3, -1}}); }
+// 3-1-0, 3-2-1, 3-2-2, then 3-3-same and 3-4-same in one run (side quest 25 active from the
+// start: the script offers the 4th job only once the 3rd is taken, and hands side 25 in).
+void jobs_3_1(Run &r, u64) { job_path(r, {{{-1}, 0, 1, 36}}); }
+void jobs_3_2_assassin(Run &r, u64) { job_path(r, {{{6}, 1, 2, 40}}); }
+void jobs_3_2_bandit(Run &r, u64) { job_path(r, {{{7}, 2, 2, 28}}); }
+void jobs_3_4_assassin(Run &r, u64) {
+    job_path(r, {{{-1}, 1, 3, -1}, {{-1}, 1, 4, -1, {{1, 25, 2}}}});
+}
+void jobs_3_4_bandit(Run &r, u64) {
+    job_path(r, {{{-1}, 2, 3, -1}, {{-1}, 2, 4, -1, {{1, 25, 2}}}});
+}
+
+// --- every skill from built saves (#302) ---------------------------------------------------------
+//
+// A tier-4 Assassin (claw, stars) and a tier-4 Bandit (dagger), level 50 with free SP and every
+// skill at 0, on 1.3 (mobs 12 and 16; tests/starts/skills_*.json, MT_FROM_SAVE). Each skill is
+// learned to level 2 on the skill tab, a passive's stat checked on learning, every other skill
+// put on quick slot 3 (LB) and used on the mobs. A watcher (skill_tick) checks every turn against
+// docs/re/mechanics.md and skill_rules.h: the MP paid, each mob's HP loss as k hits of the skill
+// in use (normal or critical, the star's ATT for star hits; a claw's punch does 1), the stars
+// taken, Drain's heal, Shadow Web's bind and no damage, each buff's lifetime against its duration,
+// Dark Sight's harmless contact, Meso Guard's meso paid, Pickpocket's meso drops. The other
+// branch's weapon skill (Double Step for the claw, Lucky Seven for the dagger) is refused. The
+// starts equal no chained state: the tests are named synthetic.
+struct SkillStats {
+    u64 casts = 0, mp_bad = 0, hits = 0, exact = 0, punches = 0, hit_bad = 0;
+    u64 star_ok = 0, star_bad = 0, stars = 0, heals = 0, heal_bad = 0, binds = 0, max_bind = 0;
+    u64 near = 0, harm = 0, guard_ok = 0, guard_bad = 0, picks = 0, pick_bad = 0;
+    i32 lifetime = -1; // a buff's ticks on (its counter's last value)
+    std::string first_bad, example;
+    void bad(const std::string &s) {
+        if (first_bad.empty()) {
+            first_bad = s;
+        }
+    }
+};
+struct SkillRun {
+    std::map<i32, skill_rules::SkillRow> rows;
+    std::map<i32, i32> hp_sum, mp_sum; // hero.dat: level -> the HP and MP sums to it
+    std::map<i32, MechMob> mob;
+    i32 star = 12, star_attack = 0;
+    bool thrower = false; // the Assassin's run: the bot keeps throwing distance
+    bool claw = false;    // the weapon is a claw (item +0x8C = 1): an attack on a mob right next
+                          // to the hero is a punch, also from a skill's key
+    // The phase: the skill pressed (MP, stats) and the skill whose hits land (the basic attack
+    // while a buff is on), the stats' key (+100 with Shadow Partner on).
+    i32 use = -1, hit = -1;
+    bool was = false;
+    Hero last{};
+    i32 last_attack = 0, last_stars = 0, last_potions = 0;
+    std::map<u32, std::pair<i32, i32>> mob_hp;
+    std::set<u32> drop_addrs;
+    std::map<i32, i32> buff_on; // a buff's id -> its counter's last value
+    std::map<i32, SkillStats> stats;
+    // Snapshots of the hero's stats (attack, defense, accuracy, avoid, critical, max HP, max MP).
+    std::array<i32, 7> before{};
+};
+std::shared_ptr<SkillRun> g_skills;
+
+std::array<i32, 7> hero_stats(mt_cpu *cpu, const Hero &h) {
+    return {rdi(cpu, h.addr + 0xA4),
+            rdi(cpu, h.addr + 0xA8),
+            rdi(cpu, h.addr + 0xB0),
+            rdi(cpu, h.addr + 0xAC),
+            rdi(cpu, h.addr + 0xB4),
+            h.max_hp,
+            h.max_mp};
+}
+
+// The hero's buffs: the list at skills +0xD64 (CSkill::TickBuffs 0x7F669), each {skill id +0x00,
+// ticks since the cast +0x04}.
+std::map<i32, i32> buffs(const mt_cpu *cpu, const Hero &h) {
+    std::map<i32, i32> out;
+    const u32 skills = h.addr != 0 ? rd(cpu, h.addr + 0x114) : 0;
+    for (const u32 b : list_items(cpu, skills != 0 ? rd(cpu, skills + 0xD64) : 0, 16)) {
+        if (b != 0) {
+            out[rdi(cpu, b)] = rdi(cpu, b + 4);
+        }
+    }
+    return out;
+}
+
+void skill_tables(SkillRun &k) {
+    const fs::path dir = fs::path(MT_BUNDLE_DIR) / "English" / "data";
+    k.rows = skill_rules::parse_skills(world_map::read_bytes(dir / "skill.dat"));
+    MechRun m;
+    mech_tables(m);
+    k.mob = m.mob;
+    const std::vector<std::uint8_t> hero = world_map::read_bytes(dir / "hero.dat");
+    i32 hp = 0, mp = 0;
+    for (std::size_t o = 6; o + 18 <= hero.size(); o += 18) {
+        hp += static_cast<std::int16_t>(hero[o + 5] | (hero[o + 6] << 8));
+        mp += static_cast<std::int16_t>(hero[o + 7] | (hero[o + 8] << 8));
+        k.hp_sum[hero[o]] = hp;
+        k.mp_sum[hero[o]] = mp;
+    }
+    // item_etc (the stride from its header): a star's ATT, i16 +0x46 (docs/formats/data-tables.md).
+    const std::vector<std::uint8_t> etc = world_map::read_bytes(dir / "item_etc.dat");
+    const std::size_t stride =
+        etc.size() >= 6 ? static_cast<std::size_t>(etc[4] | (etc[5] << 8)) : 0;
+    const std::size_t at = 6 + stride * static_cast<std::size_t>(k.star);
+    if (stride != 0 && at + 0x48 <= etc.size() && etc[at] == k.star) {
+        k.star_attack = static_cast<std::int16_t>(etc[at + 0x46] | (etc[at + 0x47] << 8));
+    }
+}
+
+void skill_tick(Run &r, mt_cpu *cpu) {
+    using skill_rules::SkillRow;
+    SkillRun &k = *g_skills;
+    const Hero h = hero(cpu);
+    if (!field(cpu) || h.addr == 0) {
+        k.was = false;
+        return;
+    }
+    const i32 attack = rdi(cpu, h.addr + 0xA4);
+    const u32 weapon = rd(cpu, rd(cpu, h.addr + 0xDC) + 4);
+    k.claw = weapon != 0 && rdi(cpu, weapon + 0x8C) == 1;
+    const i32 stars = item_count(cpu, h, k.star);
+    const i32 potions = item_count(cpu, h, 5) + item_count(cpu, h, 8);
+    const std::map<i32, i32> on = buffs(cpu, h);
+    // Each buff's lifetime: its counter counts the ticks it is on (not while a menu is open) and
+    // the buff ends when the counter reaches the duration.
+    for (auto it = k.buff_on.begin(); it != k.buff_on.end();) {
+        if (on.count(it->first) == 0) {
+            k.stats[it->first].lifetime = it->second;
+            it = k.buff_on.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (const auto &[id, elapsed] : on) {
+        k.buff_on[id] = elapsed;
+    }
+    const bool same = k.was && k.last.addr == h.addr && h.on(k.last.area, k.last.map);
+    const bool partner = on.count(14) != 0;
+    std::map<u32, std::pair<i32, i32>> now;
+    std::vector<const Mob *> hit_mobs;
+    const std::vector<Mob> all = mobs(cpu);
+    for (const Mob &m : all) {
+        now[m.addr] = {m.id, m.hp};
+    }
+    if (same && k.use >= 0 && k.rows.count(k.use) != 0) {
+        const SkillRow &use = k.rows.at(k.use);
+        const SkillRow &hit = k.rows.count(k.hit) != 0 ? k.rows.at(k.hit) : use;
+        const i32 use_level = quest_bot::skill_level(cpu, h, k.use),
+                  hit_level = quest_bot::skill_level(cpu, h, k.hit);
+        SkillStats &st = k.stats[k.use + (partner && k.use != 14 ? 100 : 0)];
+        const std::string at = " (" + std::to_string(r.ticks) + ")";
+        // MP: each drop is the cost of the skill pressed.
+        if (h.mp < k.last.mp && potions == k.last_potions && use.type >= 2) {
+            const i32 drop = k.last.mp - h.mp, cost = skill_rules::mp_cost(use, use_level);
+            if (drop == cost) {
+                st.casts++;
+            } else {
+                st.mp_bad++;
+                st.bad("MP " + std::to_string(k.last.mp) + " -> " + std::to_string(h.mp) +
+                       ", the rule's cost " + std::to_string(cost) + at);
+            }
+        }
+        // Each mob's HP loss.
+        i32 heal_max = 0, heal_cap = 0; // the heal of the HP lost; a kill's heal comes from the
+        u64 kills = 0;                  // rolled damage, which can pass the mob's HP
+        for (const Mob &m : all) {
+            const auto it = k.mob_hp.find(m.addr);
+            if (it == k.mob_hp.end() || it->second.first != m.id || it->second.second <= 0 ||
+                m.hp >= it->second.second) {
+                continue;
+            }
+            const i32 dealt = it->second.second - m.hp;
+            const bool killed = m.hp <= 0;
+            kills += killed ? 1 : 0;
+            hit_mobs.push_back(&m);
+            st.hits++;
+            if (k.claw && (dealt == 1 || dealt == 2)) { // a punch, or a critical punch
+                st.punches++;
+                continue;
+            }
+            if (k.hit == 13) { // Shadow Web binds and does no damage
+                st.hit_bad++;
+                st.bad("mob " + std::to_string(m.id) + " lost " + std::to_string(dealt) +
+                       " HP under Shadow Web" + at);
+                continue;
+            }
+            const i32 hits = skill_rules::hits_on_one(hit, hit_level, partner);
+            bool ok = false;
+            for (const i32 a : {k.last_attack, attack}) {
+                const i32 x = skill_rules::hit_x(hit, hit_level, a, k.star_attack);
+                ok = ok || skill_rules::loss_fits(dealt, x, hits, killed);
+                const skill_rules::Range one = skill_rules::hit_range(x);
+                if (!killed && dealt >= one.lo && dealt <= one.hi) {
+                    st.exact++;
+                    if (st.example.empty()) {
+                        st.example = "mob " + std::to_string(m.id) + " lost " +
+                                     std::to_string(dealt) + " at A " + std::to_string(a) + ": x " +
+                                     std::to_string(x) + ", one hit " + std::to_string(one.lo) +
+                                     "-" + std::to_string(one.hi);
+                    }
+                    break;
+                }
+            }
+            if (!ok) {
+                st.hit_bad++;
+                const i32 x = skill_rules::hit_x(hit, hit_level, attack, k.star_attack);
+                const skill_rules::Range one = skill_rules::hit_range(x);
+                st.bad("mob " + std::to_string(m.id) + " lost " + std::to_string(dealt) + " (" +
+                       std::to_string(it->second.second) + " -> " + std::to_string(m.hp) +
+                       ") at A " + std::to_string(attack) + ", skill " + std::to_string(k.hit) +
+                       " level " + std::to_string(hit_level) + ": up to " + std::to_string(hits) +
+                       " hits of " + std::to_string(one.lo) + "-" + std::to_string(one.hi) + at);
+            }
+            const i32 most =
+                killed ? skill_rules::hits_on_one(hit, hit_level, partner) * 2 *
+                             skill_rules::hit_range(
+                                 skill_rules::hit_x(hit, hit_level, attack, k.star_attack))
+                                 .hi
+                       : dealt;
+            heal_max += dealt * skill_rules::etc_value(hit, hit_level) / 100;
+            heal_cap += most * skill_rules::etc_value(hit, hit_level) / 100;
+        }
+        // Stars: a use's stars leave over a few ticks, never more than a use's worth in one; the
+        // phase's total is checked against its casts (skill_report).
+        if (stars < k.last_stars) {
+            const i32 used = k.last_stars - stars;
+            const i32 per = skill_rules::stars_used(k.hit, partner);
+            st.stars += static_cast<u64>(used);
+            if (per > 0 && used <= per) {
+                st.star_ok++;
+            } else {
+                st.star_bad++;
+                st.bad(std::to_string(used) + " stars taken in a turn, " + std::to_string(per) +
+                       " a use" + at);
+            }
+        }
+        // Drain heals a share of the damage, up to max HP.
+        if (k.hit == 7 && h.hp > k.last.hp && potions == k.last_potions) {
+            const i32 healed = h.hp - k.last.hp;
+            const i32 room = h.max_hp - k.last.hp;
+            const i32 want = std::min(heal_max, room), cap = std::min(heal_cap, room);
+            if (healed <= cap && healed >= want - static_cast<i32>(hit_mobs.size())) {
+                st.heals++;
+            } else {
+                st.heal_bad++;
+                st.bad("Drain healed " + std::to_string(healed) + ", the rule " +
+                       std::to_string(want) + "-" + std::to_string(cap) + at);
+            }
+        }
+        // Shadow Web (CSkill::ShadowWeb 0x7EB8D) sets a caught mob's bind state (+0xD4) to 1, which
+        // the mob's tick moves on to 2, and its bind ticks (+0xD8) to @etc.
+        if (k.use == 13) {
+            for (const Mob &m : all) {
+                const i32 flag = rdi(cpu, m.addr + 0xD4);
+                const u64 ticks = static_cast<u64>(std::max(0, rdi(cpu, m.addr + 0xD8)));
+                if (flag != 0) {
+                    st.max_bind = std::max(st.max_bind, ticks);
+                    st.binds++;
+                }
+            }
+        }
+        // Contact under Dark Sight (5) and Meso Guard (22).
+        const i32 lost = k.last.hp - h.hp;
+        if (on.count(5) != 0) {
+            SkillStats &ds = k.stats[5];
+            for (const Mob &m : all) {
+                if (m.hp > 0 && std::abs(m.x - h.x) <= 20 && std::abs(m.y - h.y) <= 6) {
+                    ds.near++;
+                    break;
+                }
+            }
+            if (lost > 0 && potions == k.last_potions) {
+                ds.harm++;
+                ds.bad("the hero lost " + std::to_string(lost) + " HP under Dark Sight" + at);
+            }
+        }
+        if (on.count(22) != 0 && lost > 0 && potions == k.last_potions && h.hp > 0) {
+            SkillStats &mg = k.stats[22];
+            const i32 pct =
+                skill_rules::etc_value(k.rows.at(22), quest_bot::skill_level(cpu, h, 22));
+            const i32 paid = k.last.meso - h.meso;
+            // The blow D was halved (lost = D / 2, or D - D / 2) and (D / 2) x @etc / 100 paid.
+            if (paid == lost * pct / 100 || paid == (lost - 1) * pct / 100) {
+                mg.guard_ok++;
+                if (mg.example.empty()) {
+                    mg.example = "lost " + std::to_string(lost) + " HP, paid " +
+                                 std::to_string(paid) + " meso at " + std::to_string(pct) + " %";
+                }
+            } else {
+                mg.guard_bad++;
+                mg.bad("lost " + std::to_string(lost) + " HP, paid " + std::to_string(paid) +
+                       " meso at " + std::to_string(pct) + " %" + at);
+            }
+        }
+        // Pickpocket (19): meso a hit drops, on turns without a kill (a kill's drops are its own).
+        if (on.count(19) != 0 && kills == 0) {
+            SkillStats &pp = k.stats[19];
+            for (const Drop &d : drops(cpu)) {
+                if (k.drop_addrs.count(d.addr) != 0 || rdi(cpu, d.addr + 0x84) == 0 || d.id > 2) {
+                    continue;
+                }
+                const i32 count = rdi(cpu, d.addr + 0x100);
+                bool ok = false;
+                for (const Mob *m : hit_mobs) {
+                    const i32 meso = k.mob.count(m->id) != 0 ? k.mob.at(m->id).meso : 0;
+                    ok = ok || (count >= std::max(1, meso / 18 - 5) && count <= meso / 18);
+                }
+                (ok ? pp.picks : pp.pick_bad)++;
+                if (!ok) {
+                    pp.bad("a meso drop of " + std::to_string(count) + " under Pickpocket" + at);
+                } else if (pp.example.empty()) {
+                    pp.example = "a hit dropped " + std::to_string(count) + " meso";
+                }
+            }
+        }
+    }
+    std::set<u32> drop_now;
+    for (const Drop &d : drops(cpu)) {
+        drop_now.insert(d.addr);
+    }
+    k.drop_addrs = drop_now;
+    k.mob_hp = now;
+    k.last = h;
+    k.last_attack = attack;
+    k.last_stars = stars;
+    k.last_potions = potions;
+    k.was = true;
+}
+
+// The skill phase: `use` pressed, `hit` the skill whose hits land.
+void then_phase(Run &r, i32 use, i32 hit) {
+    then_do(r, "skills: phase " + std::to_string(use) + " (hits of " + std::to_string(hit) + ")",
+            [use, hit](mt_cpu *) {
+                g_skills->use = use;
+                g_skills->hit = hit;
+            });
+}
+
+quest_bot::FarmStyle skill_style(bool skill) {
+    quest_bot::FarmStyle s;
+    s.skill = skill ? quest_bot::LB : SDL_GAMEPAD_BUTTON_INVALID;
+    s.hp_pct = 30;
+    s.mp_pct = 30;
+    s.restock = {};
+    s.keep = g_skills->thrower ? 50 : 0;
+    return s;
+}
+
+// Learns `id` to level 2 and checks the stat it adds (passives, CSkill::LearnLevels 0x7F99D):
+// stat index i of hero_stats grows by `gain` (from the snapshot taken before).
+void then_learn(Run &r, i32 id, std::function<std::array<i32, 7>(mt_cpu *, const Hero &)> want) {
+    then_do(r, "skills: the stats before skill " + std::to_string(id),
+            [](mt_cpu *cpu) { g_skills->before = hero_stats(cpu, hero(cpu)); });
+    quest_bot::then_spend_sp(r, "skill " + std::to_string(id) + " to level 2", {{id, 2}});
+    then_do(r, "skills: skill " + std::to_string(id) + " learned", [id, want](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        check(quest_bot::skill_level(cpu, h, id) == 2,
+              "skill " + std::to_string(id) + " is at level 2 (" +
+                  std::to_string(quest_bot::skill_level(cpu, h, id)) + ")");
+        if (want) {
+            const std::array<i32, 7> got = hero_stats(cpu, h), w = want(cpu, h);
+            std::string text;
+            for (std::size_t i = 0; i < got.size(); i++) {
+                text += " " + std::to_string(g_skills->before[i]) + "->" + std::to_string(got[i]) +
+                        (got[i] == w[i] ? "" : " (rule " + std::to_string(w[i]) + ")");
+            }
+            check(got == w, "skill " + std::to_string(id) +
+                                ": ATT DEF ACC AVOID crit maxHP maxMP as the rule:" + text);
+        }
+    });
+}
+
+// The rule for a passive at level 2: the snapshot with its stat raised.
+std::function<std::array<i32, 7>(mt_cpu *, const Hero &)> passive(i32 id) {
+    return [id](mt_cpu *, const Hero &h) {
+        const SkillRun &k = *g_skills;
+        std::array<i32, 7> w = k.before;
+        const i32 etc = skill_rules::etc_value(k.rows.at(id), 2);
+        switch (id) {
+        case 4: // Nimble Body: accuracy and avoid
+            w[2] += etc;
+            w[3] += etc;
+            break;
+        case 6:
+        case 15:
+            w[4] += etc;
+            break; // Critical Throw / Stab
+        case 8:
+        case 17:
+            w[5] += k.hp_sum.at(h.level) * etc / 100;
+            break; // HP Mastery
+        case 9:
+        case 18:
+            w[6] += k.mp_sum.at(h.level) * etc / 100;
+            break; // MP Mastery
+        case 11:
+        case 20:
+            w[0] += etc;
+            break; // Weapon Mastery
+        default:
+            break;
+        }
+        return w;
+    };
+}
+
+// Uses the attack skill on LB until `casts` MP drops and a hit in one hit's range.
+void then_attack_with(Run &r, i32 id, u64 casts, i32 key = -1) {
+    then_phase(r, id, id);
+    quest_bot::then_farm(
+        r, "skill " + std::to_string(id) + " on the mobs of 1.3", 1, 3, {12, 16},
+        [id, casts, key](mt_cpu *) {
+            const SkillStats &s = g_skills->stats[key >= 0 ? key : id];
+            return s.casts >= casts && s.exact > 0;
+        },
+        600, skill_style(true));
+}
+
+// Casts the buff on LB once (MP paid, the buff on), the snapshot taken first.
+void then_cast(Run &r, i32 id) {
+    then_phase(r, id, id);
+    then_do(r, "skills: the stats before casting " + std::to_string(id),
+            [](mt_cpu *cpu) { g_skills->before = hero_stats(cpu, hero(cpu)); });
+    then(r, "skills: cast " + std::to_string(id), 30, [&r, id](mt_cpu *cpu, double el) {
+        release_all(r);
+        hold(r, quest_bot::LB,
+             std::fmod(el, 2.0) >= 0.5 && std::fmod(el, 2.0) < 0.6 &&
+                 buffs(cpu, hero(cpu)).count(id) == 0);
+        return buffs(cpu, hero(cpu)).count(id) != 0 && el >= 0.7;
+    });
+}
+
+// Walks among the mobs of 1.3 without attacking: until one is next to the hero (`cast` false),
+// or until Dark Sight ends (`cast` true; they touch the hero and do no harm).
+void then_among_mobs(Run &r, bool cast) {
+    quest_bot::FarmStyle s = skill_style(false);
+    s.no_attack = true;
+    quest_bot::then_farm(
+        r, cast ? "Dark Sight among the mobs of 1.3" : "walk to a mob of 1.3", 1, 3, {12, 16},
+        [cast](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            if (cast) {
+                return buffs(cpu, h).count(5) == 0;
+            }
+            for (const Mob &m : mobs(cpu)) {
+                if (m.hp > 0 && std::abs(m.x - h.x) <= 20 && std::abs(m.y - h.y) <= 6) {
+                    return true;
+                }
+            }
+            return false;
+        },
+        120, s);
+}
+
+// The other branch's weapon skill on LB: no MP paid, no attack (CSkill::setActiveSkill 0x7EFF1).
+void then_refused(Run &r, i32 id) {
+    then_phase(r, id, id);
+    auto mp = std::make_shared<i32>(0);
+    then_do(r, "skills: MP before " + std::to_string(id),
+            [mp](mt_cpu *cpu) { *mp = hero(cpu).mp; });
+    then(r, "skills: press " + std::to_string(id) + " three times", 6, [&r](mt_cpu *, double el) {
+        release_all(r);
+        hold(r, quest_bot::LB, std::fmod(el, 1.5) < 0.1);
+        return el >= 4.6;
+    });
+    then_wait_field(r);
+    then_do(r, "skills: " + std::to_string(id) + " refused", [mp, id](mt_cpu *cpu) {
+        check(hero(cpu).mp == *mp && g_skills->stats[id].casts == 0,
+              "skill " + std::to_string(id) + " is refused with this weapon: MP " +
+                  std::to_string(*mp) + " -> " + std::to_string(hero(cpu).mp));
+    });
+}
+
+void skills_common(Run &r, bool thrower) {
+    attach_pad(r);
+    g_skills = std::make_shared<SkillRun>();
+    g_skills->thrower = thrower;
+    skill_tables(*g_skills);
+    from_save(r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        skill_tick(r, cpu);
+    };
+}
+
+void skills_assassin(Run &r, u64) {
+    using quest_bot::then_quick_slot;
+    skills_common(r, true);
+    then_phase(r, 1, 1);
+    quest_bot::then_farm(
+        r, "the basic throw on the mobs of 1.3", 1, 3, {12, 16},
+        [](mt_cpu *) { return g_skills->stats[1].exact >= 3 && g_skills->stats[1].star_ok > 0; },
+        600, skill_style(false));
+    for (const i32 id : {4, 6, 8, 9, 11}) {
+        then_learn(r, id, passive(id));
+    }
+    then_learn(r, 2, nullptr);
+    then_quick_slot(r, "Lucky Seven on LB", 2, 3);
+    then_attack_with(r, 2, 6);
+    then_learn(r, 3, nullptr);
+    then_quick_slot(r, "Double Step on LB", 3, 3);
+    then_refused(r, 3);
+    then_learn(r, 7, nullptr);
+    then_quick_slot(r, "Drain on LB", 7, 3);
+    then_attack_with(r, 7, 6);
+    then_learn(r, 10, nullptr);
+    then_quick_slot(r, "Avenger on LB", 10, 3);
+    then_attack_with(r, 10, 6);
+    then_learn(r, 13, nullptr);
+    then_quick_slot(r, "Shadow Web on LB", 13, 3);
+    then_phase(r, 13, 13);
+    quest_bot::then_farm(
+        r, "Shadow Web on the mobs of 1.3", 1, 3, {12, 16},
+        [](mt_cpu *) { return g_skills->stats[13].casts >= 3 && g_skills->stats[13].binds > 0; },
+        600, skill_style(true));
+    then_learn(r, 12, nullptr);
+    then_quick_slot(r, "Concentration on LB", 12, 3);
+    then_cast(r, 12);
+    then_do(r, "skills: Concentration's ATT and ACC", [](mt_cpu *cpu) {
+        const SkillRun &k = *g_skills;
+        const std::array<i32, 7> got = hero_stats(cpu, hero(cpu));
+        const skill_rules::SkillRow &c = k.rows.at(12);
+        check(got[0] == k.before[0] + skill_rules::window_damage(c, 2) &&
+                  got[2] == k.before[2] + skill_rules::etc_value(c, 2),
+              "Concentration: ATT " + std::to_string(k.before[0]) + " -> " +
+                  std::to_string(got[0]) + ", ACC " + std::to_string(k.before[2]) + " -> " +
+                  std::to_string(got[2]) + " (rule +" +
+                  std::to_string(skill_rules::window_damage(c, 2)) + ", +" +
+                  std::to_string(skill_rules::etc_value(c, 2)) + ")");
+    });
+    then_learn(r, 5, nullptr);
+    then_quick_slot(r, "Dark Sight on LB", 5, 3);
+    then_among_mobs(r, false);
+    then_cast(r, 5);
+    then_among_mobs(r, true);
+    then_learn(r, 14, nullptr);
+    then_quick_slot(r, "Shadow Partner on LB", 14, 3);
+    then_cast(r, 14);
+    then_quick_slot(r, "Lucky Seven on LB, with Shadow Partner", 2, 3);
+    then_attack_with(r, 2, 3, 102);
+    then_wait_for(r, "every buff ends", 120,
+                  [](mt_cpu *cpu) { return buffs(cpu, hero(cpu)).empty(); });
+    then_finish(r);
+}
+
+void skills_bandit(Run &r, u64) {
+    using quest_bot::then_quick_slot;
+    skills_common(r, false);
+    then_phase(r, 0, 0);
+    quest_bot::then_farm(
+        r, "the dagger swing on the mobs of 1.3", 1, 3, {12, 16},
+        [](mt_cpu *) { return g_skills->stats[0].exact >= 3; }, 600, skill_style(false));
+    for (const i32 id : {4, 15, 17, 18, 20}) {
+        then_learn(r, id, passive(id));
+    }
+    then_learn(r, 3, nullptr);
+    then_quick_slot(r, "Double Step on LB", 3, 3);
+    then_attack_with(r, 3, 6);
+    then_learn(r, 2, nullptr);
+    then_quick_slot(r, "Lucky Seven on LB", 2, 3);
+    then_refused(r, 2);
+    then_learn(r, 16, nullptr);
+    then_quick_slot(r, "Savage Blow on LB", 16, 3);
+    then_attack_with(r, 16, 6);
+    then_learn(r, 23, nullptr);
+    then_quick_slot(r, "Boomerang Stab on LB", 23, 3);
+    then_attack_with(r, 23, 6);
+    then_learn(r, 21, nullptr);
+    then_quick_slot(r, "Concentration on LB", 21, 3);
+    then_cast(r, 21);
+    then_do(r, "skills: Concentration's ATT and ACC", [](mt_cpu *cpu) {
+        const SkillRun &k = *g_skills;
+        const std::array<i32, 7> got = hero_stats(cpu, hero(cpu));
+        const skill_rules::SkillRow &c = k.rows.at(21);
+        check(got[0] == k.before[0] + skill_rules::window_damage(c, 2) &&
+                  got[2] == k.before[2] + skill_rules::etc_value(c, 2),
+              "Concentration: ATT " + std::to_string(k.before[0]) + " -> " +
+                  std::to_string(got[0]) + ", ACC " + std::to_string(k.before[2]) + " -> " +
+                  std::to_string(got[2]));
+    });
+    then_learn(r, 5, nullptr);
+    then_quick_slot(r, "Dark Sight on LB", 5, 3);
+    then_among_mobs(r, false);
+    then_cast(r, 5);
+    then_among_mobs(r, true);
+    then_learn(r, 19, nullptr);
+    then_quick_slot(r, "Pickpocket on LB", 19, 3);
+    then_cast(r, 19);
+    then_phase(r, 19, 0);
+    quest_bot::then_farm(
+        r, "the dagger swing under Pickpocket", 1, 3, {12, 16},
+        [](mt_cpu *cpu) {
+            return g_skills->stats[19].picks > 0 || buffs(cpu, hero(cpu)).count(19) == 0;
+        },
+        600, skill_style(false));
+    then_learn(r, 22, nullptr);
+    then_quick_slot(r, "Meso Guard on LB", 22, 3);
+    then_cast(r, 22);
+    then_phase(r, 22, 0);
+    quest_bot::then_farm(
+        r, "the dagger swing under Meso Guard", 1, 3, {12, 16},
+        [](mt_cpu *cpu) {
+            return g_skills->stats[22].guard_ok >= 2 || buffs(cpu, hero(cpu)).count(22) == 0;
+        },
+        600, skill_style(false));
+    then_wait_for(r, "every buff ends", 120,
+                  [](mt_cpu *cpu) { return buffs(cpu, hero(cpu)).empty(); });
+    then_finish(r);
+}
+
+// The checks of one skill's stats: attacks (casts, hits, stars, Drain), buffs (cast, lifetime).
+void skill_report(i32 key, const std::string &name) {
+    const SkillRun &k = *g_skills;
+    const auto it = k.stats.find(key);
+    const SkillStats s = it != k.stats.end() ? it->second : SkillStats{};
+    const i32 id = key % 100;
+    const skill_rules::SkillRow &row = k.rows.at(id);
+    std::printf(
+        "skills: %s (%d): %llu casts (%llu off the MP rule), %llu hits (%llu in one hit's "
+        "range, %llu punches, %llu off), stars %llu ok %llu off, heals %llu ok %llu off, "
+        "binds up to %llu, lifetime %d, near %llu harm %llu, guard %llu ok %llu off, "
+        "pickpocket %llu ok %llu off, %llu stars; e.g. %s%s%s\n",
+        name.c_str(), key, static_cast<unsigned long long>(s.casts),
+        static_cast<unsigned long long>(s.mp_bad), static_cast<unsigned long long>(s.hits),
+        static_cast<unsigned long long>(s.exact), static_cast<unsigned long long>(s.punches),
+        static_cast<unsigned long long>(s.hit_bad), static_cast<unsigned long long>(s.star_ok),
+        static_cast<unsigned long long>(s.star_bad), static_cast<unsigned long long>(s.heals),
+        static_cast<unsigned long long>(s.heal_bad), static_cast<unsigned long long>(s.max_bind),
+        s.lifetime, static_cast<unsigned long long>(s.near),
+        static_cast<unsigned long long>(s.harm), static_cast<unsigned long long>(s.guard_ok),
+        static_cast<unsigned long long>(s.guard_bad), static_cast<unsigned long long>(s.picks),
+        static_cast<unsigned long long>(s.pick_bad), static_cast<unsigned long long>(s.stars),
+        s.example.c_str(), s.first_bad.empty() ? "" : "; first off: ", s.first_bad.c_str());
+    const bool no_bad = s.mp_bad == 0 && s.hit_bad == 0 && s.star_bad == 0 && s.heal_bad == 0 &&
+                        s.harm == 0 && s.guard_bad == 0 && s.pick_bad == 0;
+    check(no_bad, name + ": nothing off the rules" +
+                      (s.first_bad.empty() ? "" : " (first: " + s.first_bad + ")"));
+    if (row.type == 0) {
+        check(s.exact > 0, name + ": hits in one hit's range");
+    } else if (row.type == 3 && id != 13) {
+        check(s.casts > 0 && s.exact > 0, name + ": casts at the MP cost and hits in range");
+    } else if (id == 13) {
+        check(s.casts > 0 && s.binds > 0 &&
+                  s.max_bind >= static_cast<u64>(skill_rules::etc_value(row, 2) - 1) &&
+                  s.max_bind <= static_cast<u64>(skill_rules::etc_value(row, 2)),
+              name + ": casts bind mobs for @etc ticks (" + std::to_string(s.max_bind) + ", rule " +
+                  std::to_string(skill_rules::etc_value(row, 2)) + ") and hurt none");
+    } else if (row.type == 2) {
+        const i32 d = skill_rules::duration(row, 2);
+        check(s.casts == 1 && std::abs(s.lifetime - d) <= 1,
+              name + ": one cast at the MP cost, on for its duration (" +
+                  std::to_string(s.lifetime) + " ticks, rule " + std::to_string(d) + ")");
+    }
+    if (const i32 per = skill_rules::stars_used(id, key >= 100); per > 0) {
+        const bool total = row.type == 0
+                               ? s.stars > 0
+                               : std::abs(static_cast<std::int64_t>(s.stars) -
+                                          static_cast<std::int64_t>(s.casts) * per) <= per;
+        check(s.star_ok > 0 && total, name + ": " + std::to_string(s.stars) + " stars for " +
+                                          std::to_string(s.casts) + " casts, " +
+                                          std::to_string(per) + " a use, never more in one tick");
+    }
+    if (id == 7) {
+        check(s.heals > 0, name + ": heals @etc % of its damage");
+    }
+}
+
+void skills_assassin_checks(Run &, u64) {
+    for (const auto &[key, name] :
+         std::vector<std::pair<i32, std::string>>{{1, "the throw"},
+                                                  {2, "Lucky Seven"},
+                                                  {7, "Drain"},
+                                                  {10, "Avenger"},
+                                                  {13, "Shadow Web"},
+                                                  {12, "Concentration"},
+                                                  {5, "Dark Sight"},
+                                                  {14, "Shadow Partner"},
+                                                  {102, "Lucky Seven with Shadow Partner"}}) {
+        skill_report(key, name);
+    }
+    check(g_skills->stats[5].near > 0, "Dark Sight: mobs touched the hero while it was on");
+}
+
+void skills_bandit_checks(Run &, u64) {
+    for (const auto &[key, name] : std::vector<std::pair<i32, std::string>>{{0, "the dagger swing"},
+                                                                            {3, "Double Step"},
+                                                                            {16, "Savage Blow"},
+                                                                            {23, "Boomerang Stab"},
+                                                                            {21, "Concentration"},
+                                                                            {5, "Dark Sight"},
+                                                                            {19, "Pickpocket"},
+                                                                            {22, "Meso Guard"}}) {
+        skill_report(key, name);
+    }
+    check(g_skills->stats[5].near > 0, "Dark Sight: mobs touched the hero while it was on");
+    check(g_skills->stats[19].picks > 0, "Pickpocket: hits dropped meso");
+    check(g_skills->stats[22].guard_ok > 0, "Meso Guard: blows paid in meso");
+}
+
 constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
     {"regress_record", regress_record, regress_record_checks, 1, false, regress_record_setup},
@@ -8837,6 +9598,20 @@ constexpr Mode k_modes[] = {
     {"auto_run", auto_run, auto_run_checks, 1},
     {"hud_extras", hud_extras, hud_extras_checks, 600},
     {"mechanics", mechanics, mechanics_checks, 3000},
+    {"jobs_1_1", jobs_1_1, jobs_checks, 1},
+    {"jobs_1_2_assassin", jobs_1_2_assassin, jobs_checks, 1},
+    {"jobs_1_2_bandit", jobs_1_2_bandit, jobs_checks, 1},
+    {"jobs_2_2_assassin", jobs_2_2_assassin, jobs_checks, 1},
+    {"jobs_2_2_bandit", jobs_2_2_bandit, jobs_checks, 1},
+    {"jobs_2_3_assassin", jobs_2_3_assassin, jobs_checks, 1},
+    {"jobs_2_3_bandit", jobs_2_3_bandit, jobs_checks, 1},
+    {"jobs_3_1", jobs_3_1, jobs_checks, 1},
+    {"jobs_3_2_assassin", jobs_3_2_assassin, jobs_checks, 1},
+    {"jobs_3_2_bandit", jobs_3_2_bandit, jobs_checks, 1},
+    {"jobs_3_4_assassin", jobs_3_4_assassin, jobs_checks, 1},
+    {"jobs_3_4_bandit", jobs_3_4_bandit, jobs_checks, 1},
+    {"skills_assassin", skills_assassin, skills_assassin_checks, 1},
+    {"skills_bandit", skills_bandit, skills_bandit_checks, 1},
 };
 
 int usage() {

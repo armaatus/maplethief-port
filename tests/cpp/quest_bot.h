@@ -1001,9 +1001,13 @@ struct Restock {
 // A flying boss (`reach_up` above 6): a mob counts as on the hero's floor while its anchor is up
 // to `reach_up` px above the hero's feet (its body is that tall), and the hero follows it along
 // the floor it stands on instead of over the platforms.
+// A thrower (`keep` above 0) stands between `keep` and `keep` + 90 px from its mob: a claw's
+// attack on a mob right next to the hero is a punch. `no_attack` walks to the mobs and stands
+// among them without attacking (a Dark Sight check).
 struct FarmStyle {
     SDL_GamepadButton skill = SDL_GAMEPAD_BUTTON_INVALID;
-    i32 min_mp = 0, hp_pct = 33, mp_pct = 25, reach_up = 6;
+    i32 min_mp = 0, hp_pct = 33, mp_pct = 25, reach_up = 6, keep = 0;
+    bool no_attack = false;
     std::vector<Restock> restock{Restock{}};
 };
 
@@ -1139,9 +1143,12 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
              }
              if (target != nullptr) {
                  const int dx = target->x - h.x;
+                 const int reach = style.keep > 0 ? style.keep + 90 : 30;
                  int go = 0;
-                 if (std::abs(dx) > 30) {
+                 if (std::abs(dx) > reach) {
                      go = dx > 0 ? 1 : -1;
+                 } else if (std::abs(dx) < style.keep) {
+                     go = dx > 0 ? -1 : 1; // back off to throwing distance
                  } else if (s->facing != (dx >= 0 ? 1 : -1) && el - s->turn > 0.6) {
                      s->turn = el; // a short step to face it
                      s->facing = dx >= 0 ? 1 : -1;
@@ -1157,7 +1164,7 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
                  }
                  const bool skill =
                      style.skill != SDL_GAMEPAD_BUTTON_INVALID && h.mp >= style.min_mp;
-                 hold(r, X, go == 0 && !skill && el - s->attack < 0.1);
+                 hold(r, X, go == 0 && !skill && !style.no_attack && el - s->attack < 0.1);
                  if (style.skill != SDL_GAMEPAD_BUTTON_INVALID) {
                      hold(r, style.skill, go == 0 && skill && el - s->attack < 0.1);
                  }
