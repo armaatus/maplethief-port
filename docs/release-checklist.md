@@ -12,8 +12,8 @@ Tags are annotated SemVer: `vX.Y.Z`, or `vX.Y.Z-rc.N` for a pre-release. Below, 
 ## Before
 
 - [ ] Everything for the release is merged into `dev`, each PR with green CI.
-- [ ] The epic PRs since the last release carry their epic's labels (`gh pr edit N --add-label type:epic,area:...`), so the generated notes group them ([`.github/release.yml`](../.github/release.yml)). Unlabelled PRs land in "Other changes".
-- [ ] [`.github/release-notes-header.md`](../.github/release-notes-header.md), the text above the generated notes, still says the right thing.
+- [ ] The epic PRs since the last release carry their epic's labels (`gh pr edit N --add-label type:epic,area:...`), so the generated notes group them ([`.github/release.yml`](../.github/release.yml)). Unlabelled PRs land in "Other changes": `scripts/release notes TAG` asks GitHub for the notes it would generate and fails, naming each PR, while any does (#313). Label them until it says OK. `scripts/release start` runs the same check.
+- [ ] [`.github/release-notes-header.md`](../.github/release-notes-header.md), the text above the generated notes, still says the right thing: **What's new** names, for players, what changed since the last release (rewrite it for each release), the downloads table has a row per player build, and the note on going back to an older version still holds.
 - [ ] [Known issues](KNOWN_ISSUES.md) cites no closed issue: `python3 -m mtport.release known-issues` (with `tools/` on `PYTHONPATH`) says OK. `scripts/release start` and `publish` stop when it doesn't.
 - [ ] On both machines: `gh auth status` is logged in with access to `armaatus/maplethief-port`. The checkout has `work/` (`scripts/bootstrap`, then `python3 -m recomp all` for `work/gen/`), up to date with the tag's recompiler. The player builds link `work/gen/`, and the guard checks the IPA's hashes and the dispatch table. Docker (OrbStack) runs on the Mac: the Linux and Switch player builds use it.
 - [ ] Optional rehearsal, with nothing sent to GitHub: `git tag -a v0.0.0-rc.99 -m rehearsal`, then `scripts/release build v0.0.0-rc.99 --dry-run` and `scripts/release publish v0.0.0-rc.99 --dry-run --platforms mac,linux,switch` on the Mac, or `scripts\release.ps1 build v0.0.0-rc.99 -DryRun` on Windows. Then `git tag -d v0.0.0-rc.99`.
@@ -21,14 +21,14 @@ Tags are annotated SemVer: `vX.Y.Z`, or `vX.Y.Z-rc.N` for a pre-release. Below, 
 ## 1. Release pull request
 
 ```sh
-gh pr create --base main --head dev --title "Release TAG" --body "Release TAG"
+gh pr create --base main --head dev --title "Release TAG" --body "Release TAG" --label type:release
 ```
 
-The `release title` check requires the title `Release vX.Y.Z` or `Release vX.Y.Z-rc.N`, the source branch `dev`, and a tag that doesn't exist yet. CI runs every OS, Debug and Release, and packages the kits. Merge it with a merge commit when everything is green.
+The `release title` check requires the title `Release vX.Y.Z` or `Release vX.Y.Z-rc.N`, the source branch `dev`, a tag that doesn't exist yet, and the `type:release` label, which keeps the release PR itself out of the notes. CI runs every OS, Debug and Release, and packages the kits. Merge it with a merge commit when everything is green.
 
 ## 2. Tag, draft and kits (GitHub Actions)
 
-The merge starts `release.yml`. It creates the annotated tag on the merge commit and the draft release, a pre-release for `-rc.N`. The draft's notes start with the header (what each download holds, and that players need their own IPA), followed by GitHub's generated notes. Read them on the draft and edit them on GitHub if needed. Then it builds the three kits from the tag on hosted runners (the Linux kit in the pinned container), checks each (`--version`; on macOS `lipo` and `codesign`), runs the guard in kit mode, and uploads each kit and its `.sha256` to the draft. Watch it with `gh run watch`.
+The merge starts `release.yml`. It creates the annotated tag on the merge commit and the draft release, a pre-release for `-rc.N`. The draft's notes start with the header (what's new, what each download holds, that players need their own IPA, going back to an older version), followed by GitHub's generated notes. Read them on the draft and edit them on GitHub if needed. Then it builds the three kits from the tag on hosted runners (the Linux kit in the pinned container), checks each (`--version`; on macOS `lipo` and `codesign`), runs the guard in kit mode, and uploads each kit and its `.sha256` to the draft. Watch it with `gh run watch`.
 
 (By hand, without the pull request: tag `main` with `git tag -a TAG -m "MapleThief TAG"`, push the tag, run `scripts/release start TAG`, then use `build` without `--players-only` below.)
 
