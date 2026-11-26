@@ -284,3 +284,13 @@ Closes [#411](https://github.com/armaatus/maplethief-port/issues/411). Needs no 
 3. The same on a MacBook Pro with ProMotion, and on a VRR (Adaptive-Sync) monitor if one is at hand.
 
 **Post back:** `vblank-probe.txt` for each display, with the Mac model and the display.
+
+## #342: The self-hosted runner for the nightly run
+
+Closes [#342](https://github.com/armaatus/maplethief-port/issues/342)'s runner criterion. **Waits on** the agent's part of #342: the ADR 0006 addendum, the nightly workflow and its set-up page. Registering a runner needs your GitHub account, so it is yours:
+
+1. Read the set-up page and the addendum: the runner runs on schedule and dispatch only, never for a pull request, and uploads nothing but logs and counts.
+2. In the repository's Settings > Actions > Runners, *New self-hosted runner* (macOS, ARM64), and follow its commands in a folder of its own, with the labels the set-up page names. Run it as a service if the page says so.
+3. Ask the agent to dispatch the nightly workflow on `dev`, or start it from the Actions tab.
+
+**Post back:** the run's address, and that the runner shows as idle afterwards. Never paste the registration token.

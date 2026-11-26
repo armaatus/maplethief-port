@@ -52,7 +52,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 HANDOFFS = Path("docs") / "testing" / "handoffs"
-DEVICES = ("windows", "mac", "iphone", "linux", "switch", "playthrough")
+DEVICES = ("windows", "mac", "iphone", "linux", "switch", "android", "playthrough")
 
 BEGIN = "<!-- handoffs:begin -->"
 END = "<!-- handoffs:end -->"

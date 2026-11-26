@@ -61,6 +61,16 @@ Covers the Deck part of [#142](https://github.com/armaatus/maplethief-port/issue
 
 **Post back:** those two lines.
 
+## #353: The Deck layout template in Game Mode
+
+Closes [#353](https://github.com/armaatus/maplethief-port/issues/353)'s hardware criterion. **Waits on** the agent's part of #353 (the Steam Input template in the download and its notes in [Linux and Steam Deck](../../play/linux-and-steam-deck.md)) and on #84 above. In Game Mode, with the shortcut of #84:
+
+1. Apply the template as the notes say, and the launch options they give.
+2. Start the game: the layout is in use (the controller settings name it), and the picture is integer scaled.
+3. Play the first map: walk, jump, attack, a quick slot, the menu and the map buttons.
+
+**Post back:** pass or fail per step, the SteamOS version, and anything the notes got wrong.
+
 ## #146: Button prompts and focus on a TV or the Deck
 
 From closed [#146](https://github.com/armaatus/maplethief-port/issues/146) (PR #178's hand-offs). Every screen's focus and prompts are tested by hash; only reading them from a couch is left. In Game Mode (or the Deck docked to a TV), the launch option `%command% --preset original_controller` (it turns **Button prompts** on):

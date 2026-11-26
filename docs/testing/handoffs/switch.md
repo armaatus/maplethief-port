@@ -1,6 +1,6 @@
 # Nintendo Switch hand-offs
 
-The Switch epic (#233) is merged into `dev`. Its hardware sign-off is one session on the console, written up in the [Switch sign-off checklist](../switch-checklist.md); this page does not repeat it. It says which rows sign off which issue, and adds what the checklist doesn't cover: the hello NRO (#235), the runtime's test NRO (#236), the GPU comparison (#242), a desktop comparison (#238), the emulator decision (#237) and the tuning issue (#279). [How to report](README.md#how-to-report) says what to post.
+The Switch epic (#233) is merged into `dev`. Its hardware sign-off is one session on the console, written up in the [Switch sign-off checklist](../switch-checklist.md); this page does not repeat it. It says which rows sign off which issue, and adds what the checklist doesn't cover: the hello NRO (#235), the runtime's test NRO (#236), the GPU comparison (#242), a desktop comparison (#238), the emulator decision (#237), the tuning issue (#279), a recovery point's stall (#417), and two things to approve and submit (#345, #351). [How to report](README.md#how-to-report) says what to post.
 
 #234 (ADR 0138) is done: accepted on 2026-11-10 and closed.
 
@@ -102,6 +102,35 @@ Closes [#245](https://github.com/armaatus/maplethief-port/issues/245): the whole
 [#279](https://github.com/armaatus/maplethief-port/issues/279) waits on F1. If both screens pass with headroom (the busiest second under about 70 %), the agent closes it; otherwise the agent prepares builds with other optimisation flags and you run `scripts/switch-perf` on each.
 
 **Post back:** nothing now; later, the `perfsession:` lines of each build the agent asks for.
+
+## #417: A recovery point's stall on the console
+
+Closes [#417](https://github.com/armaatus/maplethief-port/issues/417)'s console run; the agent then updates ADR 0151 and decides the Switch's row. **Waits on** #335's crash recovery being in `dev` (the `--crash-recovery` option). The game NRO from *Setup*, sent with NetLoader so the log streams to the Mac, at render scale 1 and stock clocks:
+
+1. Title takeover (hold R while starting a game), Y, then `scripts/switch-run --ip <IP> build/switch-player/MapleThief.nro -- --crash-recovery on --render-scale 1`.
+2. Load a hero, pass two map loads (portals), save once, then quit to the Homebrew Menu.
+3. The same in applet mode (the Homebrew Menu from the Album).
+4. Copy `sdmc:/switch/maplethief/data/logs/` to the Mac.
+
+**Post back:** the two runs' logs, attached, or at least every `recovery:` line and AppletWatch's memory lines, with the console model.
+
+## #345: Upstream patches for the SDL fork
+
+Covers [#345](https://github.com/armaatus/maplethief-port/issues/345)'s human part. No console. The agent prepares the three patches from `cmake/patches/` as pull requests against the fork, with the text; posting them under your account is yours.
+
+1. Read the prepared text the agent posts on #345.
+2. Approve, and either open the pull requests yourself or tell the agent to (from your `gh` login), or say why they should not be sent.
+
+**Post back:** the pull request links, or the reason they were not sent.
+
+## #351: The Homebrew App Store submission
+
+Closes [#351](https://github.com/armaatus/maplethief-port/issues/351). **Waits on** #245's sign-off and the agent's package (our own icon, screenshots of the port's own screens only, never the game's) and submission text.
+
+1. Check the package and the text the agent posts on #351.
+2. Submit it through the store's process, under your account.
+
+**Post back:** the submission's link, and later whether it was listed.
 
 ## #237: The emulator decision
 
