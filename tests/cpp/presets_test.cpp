@@ -88,6 +88,7 @@ const Expected kExpected[] = {
     {"game_speed", {"game", "game", "game"}},
     {"fast_forward", {"off", "off", "off"}},
     {"autosave", {"off", "off", "on_quit"}},
+    {"crash_recovery", {"off", "off", "on"}},
     {"widescreen", {"off", "off", "auto"}},
     {"widescreen_hud", {"edges", "edges", "edges"}},
     {"colorblind_filter", {nullptr, nullptr, nullptr}},
@@ -458,6 +459,17 @@ TEST_CASE("presets: platform rows set the Switch's defaults and its preset colum
     CHECK(std::string(fe::preset_column(*fullscreen, Preset::kEnhanced,
                                         SettingsPlatform::kDesktop)) == "on");
     CHECK(fe::preset_column(*scale, Preset::kCustom, SettingsPlatform::kSwitch) == nullptr);
+    // #335 (ADR 0151): crash_recovery is off on the Switch in every column, Enhanced's on
+    // included, until a console run measures a point's stall; the desktop keeps Enhanced's on.
+    static_assert(!fe::platform_switch("crash_recovery", true, SettingsPlatform::kSwitch));
+    const SettingInfo *recovery = fe::find_setting("crash_recovery");
+    REQUIRE(recovery != nullptr);
+    for (const Preset p : kColumns) {
+        CAPTURE(fe::preset_name(p));
+        CHECK(std::string(fe::preset_column(*recovery, p, SettingsPlatform::kSwitch)) == "off");
+    }
+    CHECK(std::string(
+              fe::preset_column(*recovery, Preset::kEnhanced, SettingsPlatform::kDesktop)) == "on");
     // This build: Settings{} has its platform's values, and every preset keeps them.
     const Settings defaults;
     CHECK(defaults.scale_mode ==

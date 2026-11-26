@@ -191,6 +191,8 @@ struct Run {
     // The outcome of the run, for a flow's last checks (boot() fills them).
     std::uint32_t outcome = 0;
     mt_process_result result{};
+    // The run ends in a trap on purpose (#335's forced crash): boot() checks for it instead.
+    bool expect_trap = false;
 
     Run() {
         focus.set_forward(fe::MenuInput::sink, &menu);
@@ -1201,9 +1203,14 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
         std::printf("trap kind %u at pc 0x%08X detail 0x%08X\n", res->trap_kind, res->trap_pc,
                     res->trap_detail);
     }
-    check(outcome == MT_PROCESS_STOPPED && r.done,
-          "the run went through its script and ended from the turn hook (" +
-              std::to_string(r.turns) + " turns)");
+    if (r.expect_trap) {
+        check(outcome == MT_PROCESS_TRAPPED,
+              "the run ended in the forced trap (" + std::to_string(r.turns) + " turns)");
+    } else {
+        check(outcome == MT_PROCESS_STOPPED && r.done,
+              "the run went through its script and ended from the turn hook (" +
+                  std::to_string(r.turns) + " turns)");
+    }
     check(!logged(r, 0, "uncaught NSException"), "no exception was raised");
     r.pad.reset();
     mt_process_destroy(p);

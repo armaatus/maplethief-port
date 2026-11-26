@@ -1751,6 +1751,7 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"game_speed", true, ""},
     {"fast_forward", true, ""},
     {"autosave", true, ""},
+    {"crash_recovery", true, "off by default (kPlatformDefaults); the applet keeps a heap margin"},
     {"widescreen", true, ""},
     {"widescreen_hud", true, ""},
     {"colorblind_filter", true, ""},

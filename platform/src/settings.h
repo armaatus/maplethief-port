@@ -108,6 +108,9 @@
 //   fast_forward = off
 //   # save the game when it quits or goes to the background, where the game's own Save ...
 //   autosave = off
+//   # keep a recovery point of the game at map loads, saves and every five minutes, offered
+//   # at the next start after a crash: on | off
+//   crash_recovery = off
 //   # how often the window shows the game: original (each game tick's frame, 20 a second) | ...
 //   frame_rate = original
 //   # how fast the menus' UIKit animations run: normal | fast | instant
@@ -337,6 +340,11 @@ inline constexpr PlatformDefault kPlatformDefaults[] = {
     // on deko3d leaves out the GPU's own time; 1 holds the pace with headroom on both screens.
     {SettingsPlatform::kSwitch, "render_scale", "1",
      "auto's budget sees the CPU's time only, not the Switch GPU's"},
+    // #335 (ADR 0151): a point stalls play for an unmeasured 0.25 to 1.2 s on the Cortex-A57 and
+    // holds about 28 MB beside the game in applet mode. A console run measures it.
+    {SettingsPlatform::kSwitch, "crash_recovery", "off",
+     "a recovery point stalls play for an unmeasured 0.25 to 1.2 s on the Cortex-A57 and holds "
+     "about 28 MB in applet mode"},
 };
 // The value of `key` in `platform`'s rows; nullptr if it has none.
 constexpr const char *platform_value(std::string_view key,
@@ -652,6 +660,9 @@ struct Settings {
     GameSpeed game_speed = GameSpeed::kGame;      // game_speed, --game-speed
     FastForward fast_forward = FastForward::kOff; // fast_forward, --fast-forward (off | x2 | x3)
     Autosave autosave = Autosave::kOff;           // autosave, --autosave (off | on_quit; #150)
+    // Crash recovery points (#335, ADR 0151, recovery.h): crash_recovery, --crash-recovery
+    // (on | off; off on the Switch: kPlatformDefaults).
+    bool crash_recovery = platform_switch("crash_recovery", false);
     // The wider field (#86, ADR 0090): widescreen, --widescreen (off | auto).
     Widescreen widescreen = Widescreen::kOff;
     // Where the HUD and the key pad go in the wide view (#168): widescreen_hud, --widescreen-hud.

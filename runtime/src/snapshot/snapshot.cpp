@@ -1168,6 +1168,40 @@ extern "C" int mt_snapshot_read_header(const std::uint8_t *bytes, std::size_t si
     return 0;
 }
 
+extern "C" int mt_snapshot_deflate(const std::uint8_t *bytes, std::size_t size, std::uint8_t **out,
+                                   std::size_t *out_size, char *why,
+                                   std::size_t why_size) noexcept {
+    *out = nullptr;
+    *out_size = 0;
+    std::string reason;
+    try {
+        mt_snapshot_header h{};
+        std::vector<Section> sections;
+        if (!read_state_file(bytes, size, nullptr, &h, &sections, &reason)) {
+            set_why(why, why_size, reason);
+            return -1;
+        }
+        h.flags &= ~MT_SNAPSHOT_STORE;
+        std::vector<std::uint8_t> file;
+        if (!write_state_file(h, sections, false, &file, &reason)) {
+            set_why(why, why_size, reason);
+            return -1;
+        }
+        auto *packed = static_cast<std::uint8_t *>(std::malloc(file.size()));
+        if (packed == nullptr) {
+            set_why(why, why_size, "out of memory");
+            return -1;
+        }
+        std::memcpy(packed, file.data(), file.size());
+        *out = packed;
+        *out_size = file.size();
+        return 0;
+    } catch (const std::bad_alloc &) {
+        set_why(why, why_size, "out of memory");
+        return -1;
+    }
+}
+
 extern "C" int mt_snapshot_restore(mt_cpu *cpu, const std::uint8_t *bytes, std::size_t size,
                                    const mt_snapshot_expect *expect, mt_snapshot_header *header,
                                    char *why, std::size_t why_size) noexcept {

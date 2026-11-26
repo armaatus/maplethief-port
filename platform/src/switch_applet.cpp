@@ -153,6 +153,7 @@ std::optional<std::string> AppletWatch::on_turn(std::int32_t game_mode, std::int
         return std::nullopt;
     }
     samples_++;
+    last_ = s;
     if (new_map) {
         area_ = area;
         map_ = map;

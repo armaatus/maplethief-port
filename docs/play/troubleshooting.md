@@ -111,4 +111,4 @@ When you [report a problem](https://github.com/armaatus/maplethief-port/issues/n
 
 ## A crash or a bug to report
 
-The game writes a log to `logs/` in the data folder (settings menu → Saves → **Open logs folder**) and, after a crash, a report in `crashes/`; a dialog names the file. Attach both to a [bug report](https://github.com/armaatus/maplethief-port/issues/new?template=bug.yml). After a crash the next start offers to use default settings for one run (no texture or audio packs, the software renderer); your settings file is not changed.
+The game writes a log to `logs/` in the data folder (settings menu → Saves → **Open logs folder**) and, after a crash, a report in `crashes/`; a dialog names the file. Attach both to a [bug report](https://github.com/armaatus/maplethief-port/issues/new?template=bug.yml). After a crash the next start offers to use default settings for one run (no texture or audio packs, the software renderer); your settings file is not changed. With **Crash recovery** on, it also offers to resume from a recovery point taken a few minutes before the crash ([Saves](saves.md#after-a-crash-recovery-points)).

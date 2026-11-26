@@ -204,7 +204,8 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
                             "auto_potion",         "skip_intros",    "minimap",
                             "exp_percent",         "auto_run",       "hold_toggle",
                             "pause_on_disconnect", "keypad_haptics", "pad_pointer",
-                            "save_states",         "stick_mode",     "direction_priority"}) {
+                            "save_states",         "stick_mode",     "direction_priority",
+                            "crash_recovery"}) {
         if (is(row, key)) {
             return t.turn_reads_settings;
         }

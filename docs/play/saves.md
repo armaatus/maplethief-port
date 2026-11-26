@@ -45,6 +45,23 @@ On a Mac, an app dragged alone into Applications uses the user folder (the game 
 
 In a protected folder (`C:\Program Files`), on a read-only disk, or on a Mac when the freshly downloaded app runs from a temporary read-only copy, the game uses the user folder for the time being. It says so once at the start, and the Saves tab's **Data location** says why and what to do. See [Troubleshooting](troubleshooting.md#the-game-keeps-its-data-in-the-user-folder).
 
+## After a crash: recovery points
+
+With **Crash recovery** on (settings menu → Gameplay, or `crash_recovery = on`; part of the Enhanced preset), the port keeps a recovery point of the game while you play: after each map loads, after each save, and every five minutes of play. Play pauses for a moment while it takes one (a tick or two). The two newest points are in `states` (`recovery-1.state`, `recovery-2.state`), beside the game's saves, which they never change. Quitting normally deletes them.
+
+If the game crashes, the next start says so and offers four choices:
+
+| Button | What happens |
+|---|---|
+| **Resume** (Enter) | Your settings. Load the same character as usual; once it is in the field, the game goes on from the recovery point. |
+| **Resume with default settings** | The same, with default settings for this run (no texture or audio packs, the software renderer). For a crash that a pack or a setting might have caused. |
+| **Start with default settings** | Default settings for this run; the recovery point is deleted. |
+| **Start normally** (Esc) | Your settings; the recovery point is deleted. |
+
+A point is used once. If the resumed game crashes again before the next point, the following start offers the older one. A point is not offered when it is older than that character's last save (it would undo progress already saved), when it was made by another version of the port, or when its file is damaged. If you load a different character first, the point is dropped and the game says so.
+
+Crash recovery is off on the Nintendo Switch until its pause has been measured on a console.
+
 ## Backups
 
 After every save, the port keeps a copy of that character in `backups`: the newest 10 per slot. Change the number in the settings menu (Saves) or with `save_backups = 20` (0 turns backups off).

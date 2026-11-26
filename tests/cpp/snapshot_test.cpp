@@ -863,6 +863,69 @@ TEST_CASE("snapshot: a state round-trips through a second restore unchanged") {
     }
 }
 
+TEST_CASE("snapshot: a stored state re-packed deflated is the deflated save's file (#335)") {
+    World w;
+    mt_cpu &cpu = w.cpu;
+    const u32 items[1] = {mt_cf::string_create(&cpu, u"two", false)};
+    mt_ns::array_create(&cpu, items, 1, false);
+    std::memset(cpu.mem + k_segment + 0x200, 0x3C, 0x4000);
+    const Bytes stored = save(w, MT_SNAPSHOT_STORE, 2);
+    const Bytes deflated = save(w, 0, 2);
+    const auto repack = [](const Bytes &in, std::string *why_out) {
+        u8 *bytes = nullptr;
+        std::size_t n = 0;
+        char why[256] = {};
+        const int rc = mt_snapshot_deflate(in.data(), in.size(), &bytes, &n, why, sizeof why);
+        *why_out = why;
+        Bytes out;
+        if (rc == 0) {
+            out.assign(bytes, bytes + n);
+            std::free(bytes);
+        } else {
+            CHECK(bytes == nullptr);
+            CHECK(n == 0);
+        }
+        return out;
+    };
+    std::string why;
+    const Bytes packed = repack(stored, &why);
+    INFO(why);
+    REQUIRE(!packed.empty());
+    CHECK(packed.size() < stored.size());
+    // The same header as the deflated save (but for the guest's time) and the same sections.
+    mt_snapshot_header a{}, b{};
+    REQUIRE(mt_snapshot_read_header(packed.data(), packed.size(), nullptr, &a, nullptr, 0) == 0);
+    REQUIRE(mt_snapshot_read_header(deflated.data(), deflated.size(), nullptr, &b, nullptr, 0) ==
+            0);
+    CHECK((a.flags & MT_SNAPSHOT_STORE) == 0u);
+    CHECK(a.flags == b.flags);
+    CHECK(a.slot == 2u);
+    CHECK(a.sections == b.sections);
+    CHECK(std::string(a.port_version) == b.port_version);
+    CHECK(std::memcmp(a.binary_sha256, b.binary_sha256, 32) == 0);
+    const std::vector<mt_snap::Section> sa = sections_of(packed), sb = sections_of(deflated),
+                                        ss = sections_of(stored);
+    REQUIRE(sa.size() == sb.size());
+    for (std::size_t i = 0; i < sa.size(); i++) {
+        CAPTURE(sa[i].name);
+        CHECK(sa[i].name == sb[i].name);
+        CHECK(sa[i].bytes == sb[i].bytes);
+        CHECK(sa[i].bytes == ss[i].bytes);
+    }
+    // Byte for byte: a deflated file re-packed is itself (the writer is deterministic).
+    CHECK(repack(packed, &why) == packed);
+    CHECK(repack(deflated, &why) == deflated);
+    // It restores.
+    CHECK(restore_why(w, packed).empty());
+    // A damaged file is refused with the reader's reason, and nothing is made.
+    Bytes bad = stored;
+    bad[bad.size() - 10] ^= 0xFF;
+    CHECK(repack(bad, &why).empty());
+    CHECK(why.find("CRC") != std::string::npos);
+    CHECK(repack(Bytes{1, 2, 3}, &why).empty());
+    CHECK(why == "not a save state (wrong magic)");
+}
+
 // --- #203: the graphics, audio and UIKit host state ----------------------------------------------
 
 TEST_CASE("snapshot: a restore lets go of the input the present holds") {

@@ -88,6 +88,7 @@
 #include <tuple>
 
 #include "autosave.h"
+#include "crash_report.h"
 #include "data_copy.h"
 #include "data_notice.h"
 #include "exp_percent.h"
@@ -115,6 +116,7 @@
 #include "price_line.h"
 #include "quest_bot.h"
 #include "quick_state.h"
+#include "recovery.h"
 #include "save_state_input.h"
 #include "save_tools.h"
 #include "settings.h"
@@ -655,8 +657,12 @@ bool error_line(const std::string &line) {
 void common_checks(Run &r, u64 goal) {
     const Play &p = g_play;
     std::printf("play: %s\n", play_text(p).c_str());
-    check(r.outcome == MT_PROCESS_STOPPED && r.done && r.result.trap_kind == 0,
-          "the run ended from the script, no trap");
+    if (r.expect_trap) {
+        check(r.outcome == MT_PROCESS_TRAPPED, "the run ended in the forced trap");
+    } else {
+        check(r.outcome == MT_PROCESS_STOPPED && r.done && r.result.trap_kind == 0,
+              "the run ended from the script, no trap");
+    }
     check(p.started && p.play_ticks >= goal,
           std::to_string(p.play_ticks) + " game ticks of play from the first field (" +
               std::to_string(goal) + " wanted: " +
@@ -675,6 +681,11 @@ void common_checks(Run &r, u64 goal) {
               std::to_string(gfx.total.invalid) + " invalid draws");
     std::map<std::string, int> errors;
     for (const std::string &line : r.log) {
+        // The forced trap's own report (#335) is the run's point, not an error of it.
+        if (r.expect_trap &&
+            (line.find("guest crash") != std::string::npos || line.rfind("boot: trap: ", 0) == 0)) {
+            continue;
+        }
         if (error_line(line)) {
             errors[std::regex_replace(line, std::regex("0x[0-9A-Fa-f]+|[0-9]+"), "#")]++;
         }
@@ -7387,6 +7398,415 @@ void quick_state_checks(Run &r, u64) {
 
 // --- the save-state census (#202, ADR 0105, docs/re/save-states.md) -----------------------------
 //
+// --- crash recovery points across two processes (#335, ADR 0151, recovery.h) -------------------
+//
+// recovery_crash: the replay MT_REPLAY with crash_recovery on through the frontend's
+// RecoveryPoints (the game's ops, the game-save hook, the timer at kRecoveryTestInterval), from a
+// fresh data directory with #198's marker set. Points are taken at the replay's map loads and
+// every 20 guest seconds; the first one at or after step 46,000 (the tutorial's map 2.8) whose
+// turn has the replay's pad free is the point the test resumes. Taking it is the last point:
+// 200 game ticks follow with a checkpoint after each (the uninterrupted run, OUT_DIR/
+// uninterrupted.txt), the harness's own counters at the point go to OUT_DIR/harness.txt (and its
+// last GL frame to harness_gl.rgba), then the write finishes and the run traps on purpose (as
+// --force-crash trap): the marker stays, the points stay.
+// recovery_resume: a new process on the same OUT_DIR. The marker says the last run crashed;
+// find_recovery_point offers the newest point; #198's box (the test's prompt) answers Resume; the
+// point is armed. The replay plays from its start until the character is in the field at a safe
+// turn: the point is restored there (the frontend's input let go, the virtual clock re-based),
+// the harness's counters from harness.txt, and 200 ticks run with a checkpoint after each: their
+// log (OUT_DIR/resumed.txt) and digest must equal recovery_crash's.
+constexpr double kRecoveryTestInterval = 20;
+constexpr u64 kRecoveryFrom = 46000;
+struct RecoveryRun {
+    fe::RecoveryPoints points;
+    std::optional<fe::RecoveryOps> ops;
+    bool chosen = false, resumed = false, crashed = false;
+    u64 point_step = 0, ticks_seen = 0, last_tick = 0, end = 0;
+    std::size_t first_index = 0;
+    std::uint64_t taken = 0;
+    fe::RecoveryOffer offer;
+    std::string drop;
+    fe::CheckpointLog window;
+    // The harness at the newest point.
+    std::map<std::string, u64> harness;
+    std::vector<std::uint8_t> gl;
+    std::map<u32, i32> mob_hp;
+};
+RecoveryRun g_recovery;
+
+fs::path recovery_crashes(const Run &r) { return r.data / "crashes"; }
+
+// RecoveryOps on the game, made once (it hashes the binary): the replay's pad must be free at a
+// point too (as save_state's), and a restore lets go of it and of the frontend's layers.
+const fe::RecoveryOps &recovery_ops(Run &r, mt_cpu *cpu) {
+    RecoveryRun &g = g_recovery;
+    if (!g.ops) {
+        fe::RecoveryOps ops = fe::game_recovery_ops(
+            cpu,
+            [&r] {
+                if (r.pad != nullptr) {
+                    for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) {
+                        r.pad->button(static_cast<SDL_GamepadButton>(b), false);
+                    }
+                    pump(r);
+                }
+                fe::RestoreInput layers;
+                layers.input = &r.input;
+                layers.actions = &r.actions;
+                layers.gamepads = &r.gamepads;
+                layers.pointer = &r.pointer;
+                layers.menu = &r.menu;
+                layers.assists = &r.assists;
+                layers.scene_skip = &r.scene_skip;
+                fe::release_for_restore(layers, r.t);
+            },
+            guest_rebase, &r.clock);
+        ops.safe = [&r, safe = ops.safe](std::string *why) {
+            if (!replay_pad_free(r.step())) {
+                *why = "a key is held (the replay's pad)";
+                return false;
+            }
+            return safe(why);
+        };
+        g.ops = std::move(ops);
+    }
+    return *g.ops;
+}
+
+// The harness at a point: what the next checkpoints depend on besides the game.
+void recovery_keep_harness(Run &r) {
+    RecoveryRun &g = g_recovery;
+    g.harness = {{"step", r.step()},
+                 {"turns", r.turns},
+                 {"ticks", r.ticks},
+                 {"last_frame", static_cast<u64>(r.last_frame)},
+                 {"gl_frames", r.gl_frames},
+                 {"clock_ns", r.clock.elapsed_ns()},
+                 {"audio_hash", r.audio->hash()},
+                 {"audio_frames", r.audio->frames()},
+                 {"kills", g_play.kills},
+                 {"gl_index", r.screen.gl_frame()},
+                 {"gl_width", r.screen.gl_width()},
+                 {"gl_height", r.screen.gl_height()},
+                 {"gl_view", r.screen.gl_view()}};
+    g.gl = r.screen.gl_pixels();
+    g.mob_hp = g_play.mob_hp;
+}
+
+void recovery_write_harness(Run &r) {
+    const RecoveryRun &g = g_recovery;
+    std::ofstream out(r.out / "harness.txt", std::ios::binary);
+    for (const auto &[k, v] : g.harness) {
+        out << k << " " << v << "\n";
+    }
+    for (const auto &[addr, hp] : g.mob_hp) {
+        out << "mob " << addr << " " << hp << "\n";
+    }
+    std::ofstream(r.out / "harness_gl.rgba", std::ios::binary)
+        .write(reinterpret_cast<const char *>(g.gl.data()),
+               static_cast<std::streamsize>(g.gl.size()));
+}
+
+bool recovery_read_harness(Run &r) {
+    RecoveryRun &g = g_recovery;
+    std::ifstream in(r.out / "harness.txt", std::ios::binary);
+    std::string key;
+    while (in >> key) {
+        if (key == "mob") {
+            u32 addr = 0;
+            i32 hp = 0;
+            in >> addr >> hp;
+            g.mob_hp[addr] = hp;
+        } else {
+            u64 v = 0;
+            in >> v;
+            g.harness[key] = v;
+        }
+    }
+    g.gl = read_file(r.out / "harness_gl.rgba");
+    return g.harness.count("turns") != 0 &&
+           g.gl.size() == g.harness["gl_width"] * g.harness["gl_height"] * 4;
+}
+
+int recovery_setup(Run &r) {
+    if (const int rc = regress_setup(r); rc != 0) {
+        return rc;
+    }
+    r.plan = fe::CheckpointPlan(); // only the window's checkpoints, one after each tick
+    r.end_step = UINT64_MAX;       // recovery_crash's trap or recovery_resume's window ends it
+    fe::install_game_save_counter();
+    g_recovery.points.set_data_dir(r.data.string());
+    g_recovery.points.set_interval(kRecoveryTestInterval);
+    return 0;
+}
+
+int recovery_crash_setup(Run &r) {
+    if (const int rc = recovery_setup(r); rc != 0) {
+        return rc;
+    }
+    r.settings.crash_recovery = true;
+    r.expect_trap = true;
+    // #198's marker, as main.cpp sets it at a game's start; nothing ends it.
+    const fe::LastRun last = fe::crash_marker_begin(recovery_crashes(r).string());
+    check(!last.crashed, "a fresh data directory: no crash before");
+    return 0;
+}
+
+void recovery_crash(Run &r, u64) {
+    regress_common(r);
+    r.on_turn = [&r, monitor_turn = r.on_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        RecoveryRun &g = g_recovery;
+        if (g.crashed) {
+            return;
+        }
+        const u64 step = r.step();
+        if (g.end != 0 && step > g.end) {
+            // The forced crash: the write done (as the run's end after a trap), then a guest trap.
+            g.points.wait();
+            recovery_write_harness(r);
+            std::ofstream(r.out / "uninterrupted.txt", std::ios::binary) << [&r] {
+                fe::CheckpointLog log;
+                const std::vector<fe::Checkpoint> &all = r.checkpoints.points();
+                for (std::size_t i = g.first_index; i < all.size(); i++) {
+                    log.add(all[i]);
+                }
+                g_recovery.window = log;
+                return log.text();
+            }();
+            g.crashed = true;
+            std::printf("recovery: the forced trap at step %llu\n",
+                        static_cast<unsigned long long>(step));
+            mt_trap(cpu, MT_TRAP_UDF, cpu->r[MT_LR], 0x7E57u);
+            return;
+        }
+        if (g.chosen) {
+            if (r.ticks != g.last_tick) {
+                g.last_tick = r.ticks;
+                r.plan.add(step, "recovery_t" + std::to_string(++g.ticks_seen));
+                if (g.ticks_seen == k_save_ticks) {
+                    g.end = step;
+                }
+            }
+            return;
+        }
+        const fe::RecoveryTurn t =
+            g.points.turn(recovery_ops(r, cpu), r.settings.crash_recovery,
+                          static_cast<double>(r.clock.elapsed_ns()) / 1e9, fe::game_saves_seen());
+        if (!t.taken) {
+            return;
+        }
+        g.taken++;
+        recovery_keep_harness(r);
+        std::printf("recovery: point %llu at step %llu (%s, %s)\n",
+                    static_cast<unsigned long long>(g.taken), static_cast<unsigned long long>(step),
+                    fe::recovery_trigger_name(t.trigger), regress_state(cpu).c_str());
+        if (step >= kRecoveryFrom) {
+            g.chosen = true;
+            g.point_step = step;
+            g.last_tick = r.ticks;
+            g.first_index = r.checkpoints.points().size();
+            r.plan.add(step, "recovery_t0");
+        }
+    };
+}
+
+void recovery_crash_checks(Run &r, u64) {
+    const RecoveryRun &g = g_recovery;
+    check(g.taken >= 2, "points were taken before the chosen one (" + std::to_string(g.taken) +
+                            ", so recovery-2 holds one)");
+    check(g.chosen, "a point at or after step " + std::to_string(kRecoveryFrom) + " (step " +
+                        std::to_string(g.point_step) + ")");
+    check(g.crashed && g.window.points().size() == k_save_ticks + 1,
+          "the window's " + std::to_string(k_save_ticks + 1) + " checkpoints, then the trap (" +
+              std::to_string(g.window.points().size()) + ")");
+    const fe::RecoveryPoints::Stats s = g_recovery.points.stats();
+    check(s.written == s.taken && s.failed == 0, "every point written (" +
+                                                     std::to_string(s.written) + " of " +
+                                                     std::to_string(s.taken) + ")");
+    check(fs::is_regular_file(r.data / "states" / "recovery-1.state") &&
+              fs::is_regular_file(r.data / "states" / "recovery-2.state"),
+          "recovery-1.state and recovery-2.state are kept after the crash");
+    check(fs::exists(recovery_crashes(r) / fe::kCrashMarkerName), "#198's marker is kept");
+    if (!g.window.points().empty()) {
+        std::printf("recovery: uninterrupted window from step %llu, digest %s, %zu bytes raw, %zu "
+                    "written\n",
+                    static_cast<unsigned long long>(g.point_step), g.window.digest().c_str(),
+                    s.last_raw, s.last_written);
+    }
+}
+
+int recovery_resume_setup(Run &r) {
+    if (const int rc = recovery_setup(r); rc != 0) {
+        return rc;
+    }
+    RecoveryRun &g = g_recovery;
+    if (!fs::is_regular_file(r.out / "uninterrupted.txt") || !recovery_read_harness(r)) {
+        std::printf("skipped: no recovery_crash run in %s\n", r.out.string().c_str());
+        return 77;
+    }
+    r.settings.crash_recovery = false; // the resume only: no new point in the window
+    // The start, as main.cpp: the marker, the offer, #198's box answered Resume.
+    const fe::LastRun last = fe::crash_marker_begin(recovery_crashes(r).string());
+    check(last.crashed, "the marker says the last run crashed");
+    const fe::DataLocation loc = fe::data_location_at(r.data.string());
+    g.offer = fe::find_recovery_point(r.data.string(), loc.saves, last.crashed, last.crash_file);
+    check(g.offer.offered && g.offer.slot == 0 &&
+              g.offer.path == fe::recovery_path(r.data.string(), 1),
+          "the newest point is offered (" + (g.offer.offered ? g.offer.path : g.offer.why) + ")");
+    int asked = 0;
+    fe::set_recovery_prompt_for_test([&asked](const std::string &, const fe::RecoveryOffer &) {
+        asked++;
+        return fe::RecoveryChoice::kResume;
+    });
+    const fe::StartDecision d = fe::decide_start(false, last, false, g.offer);
+    fe::set_recovery_prompt_for_test(nullptr);
+    check(asked == 1 && d.resume && !d.safe_start, "#198's box asked once and Resume was chosen");
+    if (d.resume) {
+        g.points.arm(g.offer);
+    }
+    return 0;
+}
+
+void recovery_resume(Run &r, u64) {
+    regress_common(r);
+    r.on_turn = [&r, monitor_turn = r.on_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        RecoveryRun &g = g_recovery;
+        const u64 step = r.step();
+        if (g.resumed) {
+            if (r.ticks != g.last_tick) {
+                g.last_tick = r.ticks;
+                r.plan.add(step, "recovery_t" + std::to_string(++g.ticks_seen));
+                if (g.ticks_seen == k_save_ticks) {
+                    r.end_step = step;
+                }
+            }
+            return;
+        }
+        if (!g.points.armed()) {
+            return;
+        }
+        const fe::RecoveryTurn t =
+            g.points.turn(recovery_ops(r, cpu), false,
+                          static_cast<double>(r.clock.elapsed_ns()) / 1e9, fe::game_saves_seen());
+        if (t.dropped) {
+            g.drop = t.notice;
+            r.end_step = step;
+            return;
+        }
+        if (!t.resumed) {
+            return;
+        }
+        // The harness as it was at the point, in recovery_crash's process.
+        std::map<std::string, u64> &h = g.harness;
+        std::printf("recovery: resumed at step %llu (%s) to step %llu\n",
+                    static_cast<unsigned long long>(step), regress_state(cpu).c_str(),
+                    static_cast<unsigned long long>(h["step"]));
+        check(r.clock.elapsed_ns() == h["clock_ns"],
+              "the clock is back at the point's time (" + std::to_string(r.clock.elapsed_ns()) +
+                  " ns, saved " + std::to_string(h["clock_ns"]) + ")");
+        r.turns = h["turns"];
+        r.ticks = h["ticks"];
+        r.last_frame = static_cast<std::int64_t>(h["last_frame"]);
+        r.gl_frames = h["gl_frames"];
+        r.cursor = std::make_unique<fe::ReplayCursor>(r.replay);
+        while (r.cursor->next(h["step"]) != nullptr) {
+        }
+        r.audio->resume(h["audio_hash"], h["audio_frames"]);
+        r.screen.set_gl_frame(static_cast<std::uint32_t>(h["gl_index"]), g.gl.data(),
+                              static_cast<std::uint32_t>(h["gl_width"]),
+                              static_cast<std::uint32_t>(h["gl_height"]),
+                              static_cast<std::uint32_t>(h["gl_view"]));
+        g_play.kills = h["kills"];
+        g_play.mob_hp = g.mob_hp;
+        g.resumed = true;
+        g.last_tick = r.ticks;
+        g.first_index = r.checkpoints.points().size();
+        r.plan.add(r.step(), "recovery_t0");
+    };
+}
+
+void recovery_resume_checks(Run &r, u64) {
+    RecoveryRun &g = g_recovery;
+    check(g.resumed, "the armed point is restored once the character is in the field" +
+                         (g.drop.empty() ? std::string() : " (dropped: " + g.drop + ")"));
+    check(!fs::exists(r.data / "states" / "recovery-2.state") &&
+              fs::is_regular_file(r.data / "states" / "recovery-1.state"),
+          "the restored point's file is gone and the older point is the newest");
+    std::ifstream in(r.out / "uninterrupted.txt", std::ios::binary);
+    const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    fe::CheckpointLog before, after;
+    std::string error;
+    check(fe::CheckpointLog::parse(text, &before, &error), "uninterrupted.txt reads " + error);
+    const std::vector<fe::Checkpoint> &all = r.checkpoints.points();
+    for (std::size_t i = g.first_index; i < all.size(); i++) {
+        after.add(all[i]);
+    }
+    std::ofstream(r.out / "resumed.txt", std::ios::binary) << after.text();
+    check(before.points().size() == k_save_ticks + 1 && after.points().size() == k_save_ticks + 1,
+          "both windows took " + std::to_string(k_save_ticks + 1) + " checkpoints (" +
+              std::to_string(before.points().size()) + ", " +
+              std::to_string(after.points().size()) + ")");
+    const fe::LogDifference d = fe::compare_logs(before, after);
+    check(d.same, "the resumed run's " + std::to_string(after.points().size()) +
+                      " checkpoints equal the uninterrupted run's" +
+                      (d.same ? std::string()
+                              : " (first difference at " + std::to_string(d.index) + ":\n  " + d.a +
+                                    "\n  " + d.b + ")"));
+    std::printf("recovery: uninterrupted digest %s, resumed digest %s\n", before.digest().c_str(),
+                after.digest().c_str());
+}
+
+// recovery_off: the whole replay as `regress` plays it, with the frontend's recovery points
+// running every turn as game.cpp runs them and crash_recovery as the settings have it (off by
+// default and in both Original presets): no point is taken, no file is written in states/, and
+// the checkpoint log equals play.regress's (MT_RECOVERY_BASE: that run's checkpoints.txt).
+int recovery_off_setup(Run &r) {
+    if (const int rc = regress_setup(r); rc != 0) {
+        return rc;
+    }
+    fe::install_game_save_counter();
+    g_recovery.points.set_data_dir(r.data.string());
+    return 0;
+}
+
+void recovery_off(Run &r, u64) {
+    regress_common(r);
+    r.on_turn = [&r, regress_turn = r.on_turn](mt_cpu *cpu) {
+        regress_turn(cpu);
+        g_recovery.points.turn(recovery_ops(r, cpu), r.settings.crash_recovery,
+                               static_cast<double>(r.clock.elapsed_ns()) / 1e9,
+                               fe::game_saves_seen());
+    };
+}
+
+void recovery_off_checks(Run &r, u64 goal) {
+    regress_checks(r, goal);
+    g_recovery.points.wait();
+    check(!r.settings.crash_recovery, "crash_recovery is off");
+    check(g_recovery.points.stats().taken == 0, "no recovery point is taken");
+    std::error_code ec;
+    check(!fs::exists(r.data / "states", ec) || fs::is_empty(r.data / "states", ec),
+          "no file is written in states/");
+    const char *base = std::getenv("MT_RECOVERY_BASE");
+    if (base == nullptr || !fs::is_regular_file(base)) {
+        std::printf("recovery_off: no MT_RECOVERY_BASE to compare with\n");
+        return;
+    }
+    std::ifstream in(base, std::ios::binary);
+    const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    fe::CheckpointLog before;
+    std::string error;
+    check(fe::CheckpointLog::parse(text, &before, &error), std::string(base) + " reads " + error);
+    const fe::LogDifference d = fe::compare_logs(before, r.checkpoints);
+    check(d.same, "the checkpoints equal play.regress's (digest " + before.digest() +
+                      ", this run " + r.checkpoints.digest() + ")" +
+                      (d.same ? std::string()
+                              : " (first difference at " + std::to_string(d.index) + ":\n  " + d.a +
+                                    "\n  " + d.b + ")"));
+}
+
 // save_state_census: the replay MT_REPLAY from step MT_SNAPSHOT_STEP (default 46,000, near the
 // fork prototype's point: map 2.8, the field) to the first turn where mt_snapshot_safe holds with
 // the game's own words (game mode, popup, key pad panel) and no key held (the replay's hero walks
@@ -8351,6 +8771,9 @@ constexpr Mode k_modes[] = {
     {"save_state_census", save_state_census, save_state_census_checks, 1, false,
      save_state_census_setup},
     {"quick_state", quick_state, quick_state_checks, 1, false, quick_state_setup},
+    {"recovery_crash", recovery_crash, recovery_crash_checks, 1, false, recovery_crash_setup},
+    {"recovery_resume", recovery_resume, recovery_resume_checks, 1, true, recovery_resume_setup},
+    {"recovery_off", recovery_off, recovery_off_checks, 1, false, recovery_off_setup},
     {"save_quit", save_quit, save_quit_checks, 1},
     {"save_relaunch", save_relaunch, save_relaunch_checks, 1, true},
     {"save_migrate", save_relaunch, save_migrate_checks, 1, false, save_migrate_setup},

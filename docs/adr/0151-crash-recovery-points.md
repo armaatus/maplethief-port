@@ -106,3 +106,18 @@ Without a recovery point, the box is #198's as it is. On a target where an SDL m
 - Players notice the stall: the five-minute timer goes first, then the stored save gets cheaper (copy-on-write pages, or the texels skipped and re-read from the bundle).
 - A console run shows the stall under about two ticks at scale 1: the Switch row goes, and the Switch follows the presets.
 - Resumed runs crash again at the same place most of the time: then the points are taken too late, and the older point should be offered first.
+
+## Addendum: the implementation (#335, 2026-11-26)
+
+#335 built the decision in `platform/src/recovery.{h,cpp}` (`RecoveryPoints`, `find_recovery_point`, `game_recovery_ops`), `mt_snapshot_deflate` (`maplethief/snapshot.h`: a stored state re-packed as the deflated file `mt_snapshot_save` makes, run on the worker thread), and `decide_start` with the four buttons (`crash_report.h`). The game-save trigger is a wrapper on `SaveQuestData` (`mt_hook_wrap`, beside the backups' handler). The turn hook runs the points after a quick-save or quick-load, never in the same turn.
+
+**The restore in a new process is exact.** `play.recovery_crash` plays the regression replay with `crash_recovery` on (the timer at 20 guest seconds for the test). It takes a point at the map load of 2.8 (step 33,055) and one on the timer (step 53,055), runs 200 ticks with a checkpoint after each, then traps on purpose. The marker and both files stay. `play.recovery_resume` is a new process on the same data directory: the marker, the offer of `recovery-1`, Resume, and the restore at its first safe turn in the field (its own step 37,066). Its 200 ticks' checkpoints (frame and audio hashes, the state line) equal the first process's: digest `57ebffb441f41197` in both, and the two logs are byte for byte the same (Apple M4, Debug, render scale 1, local real assets). So "How we'd know this was wrong"'s first point does not hold. In the Debug build a point's stored save took about 970 ms for 24.1 MB, and the worker's deflate and write about 810 ms for 4.7 MB. The Release numbers are the table's.
+
+**With the setting off,** `play.recovery_off` runs the frontend's points every turn of the whole replay: nothing taken, nothing in `states/`, and the checkpoints equal `play.regress`'s (digest `8a2f05733c8d4603`, the same as `dev`'s before #335).
+
+Where the build differs from the decision above:
+
+- **The binary's hash is checked at the restore, not at the start.** #198's box shows before the game's slice is loaded. The start checks the header, every CRC, the port version, the slot and the slot's last save. A point of another copy of the game is found by the restore's check (`check_quick_state`) and dropped, with a notice.
+- **The next start finds the newest point by its file** (`recovery-1`, else `recovery-2`); the marker stays #198's. A file that is refused is deleted and the next one is tried. A start without a crash deletes both.
+- **The in-window question** for targets where an SDL message box cannot be answered with every input method is split to #416. The Switch's stall measurement (needs-human) is #417. Until #416, the Switch's start goes on as "Start normally" (its row keeps `crash_recovery` off anyway), and a pad-only desktop player needs a key or the mouse for the box.
+- **The timer counts the run loop's guest time** (the `now` of the turn hook, which a restore re-bases). The timer then advances exactly as the guest's clock does over a minimised window or the HOME menu. #335 did not measure that case separately.
