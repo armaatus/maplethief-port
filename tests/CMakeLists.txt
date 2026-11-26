@@ -362,6 +362,10 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # the layer on a software renderer. UI scaling (ADR 0103, ui_scaling_test.cpp): the picture, the mapping, the gear and the
 # window text over 2304 window sizes, densities, modes, widescreen, render scales and safe
 # areas; the window text's scale and boxes; the notice and the price line drawn; the veil.
+# Run recording (#405, ADR 0156): the .mtrun file's round trip, malformed files refused with
+# their byte, mutations refused or read, the census's table (run_file_test.cpp); the run tape's
+# clocks recorded and played back, boundary calls recorded at their turn and dropped in play,
+# the music's state, guest writes (runtape_test.cpp).
 # The regression run's replay and checkpoints (#91, ADR 0104, replay_test.cpp): the file's round
 # trip and every malformed line refused, SDL's pad names, the cursor, the frame hash, checkpoint
 # lines, digests and the first difference, the plan, the expects. The controls card (#193, ADR
@@ -414,6 +418,8 @@ maplethief_add_cpp_test(
             cpp/controls_card_test.cpp
             cpp/ui_scaling_test.cpp
             cpp/replay_test.cpp
+            cpp/run_file_test.cpp
+            cpp/runtape_test.cpp
             cpp/pad_pointer_test.cpp
             cpp/file_dialog_test.cpp
             cpp/keypad_haptics_test.cpp
