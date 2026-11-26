@@ -1,6 +1,6 @@
 # iPhone hand-offs
 
-The hand-offs that need an iPhone: the port on a modern iPhone (#73, #128, #194, #197, and the checks from closed issues #83, #144, #89, #159 and #168), and the original 2010 game on an old 32-bit device (#149, #60, #118, and closed #76, the feel side by side). One iOS build covers the first group; every setting they switch is in the settings menu, so nothing is rebuilt in between. [How to report](README.md#how-to-report) says what to post.
+The hand-offs that need an iPhone: the port on a modern iPhone (#73, #128, #194, #197, the checks from closed issues #83, #144, #89, #159 and #168, and #338's crash notice), and the original 2010 game on an old 32-bit device (#149, #60, #118, and closed #76, the feel side by side). One iOS build covers the first group; every setting they switch is in the settings menu, so nothing is rebuilt in between. [How to report](README.md#how-to-report) says what to post.
 
 The baseline is done: #83 (closed 2026-11-10) built the app with Xcode and reached the first map by touch on an iPhone 12 with iOS 26.6.1. That build already held the code of #128, #194 and #197.
 
@@ -130,6 +130,17 @@ From closed [#168](https://github.com/armaatus/maplethief-port/issues/168) (PR #
 3. Settings > Video > **Widescreen HUD** `narrow`: the HUD and the pad stay at their 3:2 places in the middle. Which do you prefer?
 
 **Post back:** pass or fail of step 1, the finger feel, and edges or narrow.
+
+## #338: The crash notice at the next start
+
+Closes [#338](https://github.com/armaatus/maplethief-port/issues/338)'s device criterion. **Waits on** the agent's part of #338 (the next-start notice under test); build from `dev` after it merges. On the modern iPhone, with Xcode's console open:
+
+1. Start the game from Xcode with the launch argument `--force-crash host` (Product > Scheme > Edit Scheme > Arguments), so it crashes at once.
+2. Remove the argument and start again: a notice names the crash report file, and it can be dismissed by touch and with a controller.
+3. Start once more: no notice.
+4. The Files app, On My iPhone > MapleThief: the report the notice named is there.
+
+**Post back:** pass or fail per step, the notice's text, and the console lines of step 2.
 
 ## #149: Import saves from a device backup
 

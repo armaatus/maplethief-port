@@ -29,6 +29,13 @@ def test_the_shared_hand_offs_are_on_two_pages():
     assert set(listed[264]) == {"windows", "mac", "linux"}
 
 
+def test_the_android_hand_offs_have_their_own_page():
+    # #395 chose a page over waiting for the Android epic (#292) to finish.
+    listed = handoffs.committed_list(readme_text())
+    assert "android" in handoffs.DEVICES
+    assert {n for n, d in listed.items() if "android" in d} == {358, 360, 361}
+
+
 @pytest.mark.skipif(
     os.environ.get("MAPLETHIEF_LIVE_GH") != "1" or shutil.which("gh") is None,
     reason="live check: set MAPLETHIEF_LIVE_GH=1 with gh logged in",

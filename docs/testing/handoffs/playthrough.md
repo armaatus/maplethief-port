@@ -1,6 +1,6 @@
 # Playthrough, review and release hand-offs
 
-The hand-offs that need play time and judgement rather than one device, then the release. Most are played on the Mac's game app (`scripts/build mac`, `dist/mac/MapleThief.app`); #92 repeats the playthrough on every platform. Do them in this order: the release comes last because it needs the others signed off. The checks from closed issues sit beside the hand-off they go with: #67 and #72 after #132, and the two calls for Joris (#156, #162) after the playthrough they are made in ([Checks from closed issues](README.md#checks-from-closed-issues)). [How to report](README.md#how-to-report) says what to post.
+The hand-offs that need play time and judgement rather than one device, then the release. Most are played on the Mac's game app (`scripts/build mac`, `dist/mac/MapleThief.app`); #92 repeats the playthrough on every platform. Do them in this order: the approvals of legal wording (#326, #331, #318), then the release rehearsal and its parts (#354, #343, #317), and the release last because it needs the others signed off. The checks from closed issues sit beside the hand-off they go with: #67 and #72 after #132, and the two calls for Joris (#156, #162) after the playthrough they are made in ([Checks from closed issues](README.md#checks-from-closed-issues)). [How to report](README.md#how-to-report) says what to post.
 
 The compendium site is live at <https://armaatus.github.io/maplethief-port/>; the review steps link its pages there. The LAN address in the older comments is gone. To check a local build instead: `scripts/compendium serve`, then <http://127.0.0.1:8000/maplethief-port/>.
 
@@ -120,6 +120,62 @@ Closes [#92](https://github.com/armaatus/maplethief-port/issues/92). The templat
 5. Switch: the [Switch checklist](../switch-checklist.md), signed off on #245.
 
 **Post back:** one signed-off comment per platform.
+
+## #326: The SECURITY.md wording
+
+Covers [#326](https://github.com/armaatus/maplethief-port/issues/326)'s human part: approving legal wording. **Waits on** the agent's SECURITY.md and code of conduct. Switching on private vulnerability reporting is a repository setting, so the agent applies it and lists it in its pull request.
+
+1. Read SECURITY.md (the private route, what is in scope) and the code of conduct's rules on game files and links in the pull request the agent names on #326.
+2. Approve, or say what to change.
+
+**Post back:** approved, or the changes.
+
+## #331: One legal paragraph
+
+Covers [#331](https://github.com/armaatus/maplethief-port/issues/331)'s human part: approving legal wording. **Waits on** the agent's paragraph, kept in one place and reused in the README, [docs/legal.md](../../legal.md) and [Your game file](../../play/your-ipa.md). The repository's description and topics are settings, so the agent applies them and lists them in its pull request.
+
+1. Read the paragraph in the pull request the agent names on #331.
+2. Approve, or say what to change.
+
+**Post back:** approved, or the changes.
+
+## #318: The takedown runbook
+
+Closes [#318](https://github.com/armaatus/maplethief-port/issues/318)'s approval. **Waits on** the agent's runbook (what comes down in which order, what stays, and the rule that no counter-notice is sent without legal advice) and its private contact route in [docs/legal.md](../../legal.md) and SECURITY.md (#326).
+
+1. Read the runbook in the pull request the agent names on #318, and the dry run it records on the issue.
+2. Approve, or say what to change.
+
+**Post back:** approved, or the changes.
+
+## #354: The signing key for checksums
+
+Closes [#354](https://github.com/armaatus/maplethief-port/issues/354)'s key criterion. **Waits on** the agent's part of #354 (the ADR 0024 addendum and the signing step in `scripts/release publish`). The key is yours and never enters the repository or CI.
+
+1. Install minisign on the Mac and generate a key pair as the addendum says, with a passphrase. Keep the secret key outside the repository, with a backup.
+2. Give the agent the **public** key (it goes in the repository).
+3. At the next pre-release (#317), `scripts/release publish` signs `SHA256SUMS`; then, in an empty folder, download the release and run the verify command from the play docs.
+
+**Post back:** the verify command's output. Never post the secret key or its passphrase.
+
+## #343: One release command on both machines
+
+Closes [#343](https://github.com/armaatus/maplethief-port/issues/343)'s release criterion. **Waits on** the agent's part of #343 (the one resumable command and the maintainer runbook). At the next pre-release (#317 or later):
+
+1. On the Mac, the one command the runbook names, with the tag.
+2. When it stops at the step for the PC, the one command it prints, on the PC; then the Mac command again, which resumes.
+
+**Post back:** the release's address, and where the runbook was unclear.
+
+## #317: The `v1.0.0-rc.1` rehearsal
+
+Closes [#317](https://github.com/armaatus/maplethief-port/issues/317)'s human part. **Waits on** #308, #313 and #316; #354 and #343 can ride on it. The same flow as [#94](#94-release-v100) with the tag `v1.0.0-rc.1`, published as a pre-release:
+
+1. The release PR from `dev` titled `Release v1.0.0-rc.1`; merge it when every OS is green.
+2. Mac: `git fetch origin --tags && scripts/release build v1.0.0-rc.1 --players-only`. PC: `powershell -ExecutionPolicy Bypass -File scripts\release.ps1 build v1.0.0-rc.1 -PlayersOnly`. Then on the Mac `scripts/release publish v1.0.0-rc.1`.
+3. Per system, on a clean user account or VM, from the downloaded files: unpack, the system's warning as the play docs describe it, import, the preset picker, the first map, save, quit, start again.
+
+**Post back:** the release's address, `shasum -a 256 -c SHA256SUMS`, and a smoke table: one row per system (Windows, macOS, Linux), pass or the step that differed from the docs.
 
 ## #94: Release v1.0.0
 

@@ -4,14 +4,19 @@ Everything that waits on Joris's hands (the `needs-human` issues), one page per 
 
 | Device | Page | Issues | Checks from closed issues |
 |---|---|---|---|
-| Windows PC | [windows.md](windows.md) | #113, #131, #141, #198, #142, #264, #192, #82, #85, #114 | #145 |
-| Mac | [mac.md](mac.md) | #179, #196, #192, #198, #124, #142, #272, #264, #263, #411 | #59, #64, #145, #144, #89, #88, #170, #157, #87, #151, #153, #81, optional #174, #175, #204 |
-| iPhone (and an old iPod or iPhone with the original game) | [iphone.md](iphone.md) | #194, #197, #128, #73, #149, #60, #118 | #83, #144, #89, #159, #168, #76 |
-| Linux and Steam Deck | [linux.md](linux.md) | #264, #84, #185, #142 | #146, #145 |
-| Nintendo Switch | [switch.md](switch.md), with the [Switch sign-off checklist](../switch-checklist.md) | #235, #236, #243, #240, #239, #238, #241, #242, #244, #245, #279, #237 | |
-| Playthrough, review and release | [playthrough.md](playthrough.md) | #132, #93, #79, #223, #228, #92, #94, #208 | #67, #72, calls for Joris on #156 and #162 |
+| Windows PC | [windows.md](windows.md) | #113, #131, #141, #198, #142, #264, #192, #82, #85, #114, #314, #315, #368, #316, #352 | #145 |
+| Mac | [mac.md](mac.md) | #179, #196, #192, #198, #124, #142, #272, #264, #263, #411, #342 | #59, #64, #145, #144, #89, #88, #170, #157, #87, #151, #153, #81, optional #174, #175, #204 |
+| iPhone (and an old iPod or iPhone with the original game) | [iphone.md](iphone.md) | #194, #197, #128, #73, #338, #149, #60, #118 | #83, #144, #89, #159, #168, #76 |
+| Linux and Steam Deck | [linux.md](linux.md) | #264, #84, #185, #142, #353 | #146, #145 |
+| Nintendo Switch | [switch.md](switch.md), with the [Switch sign-off checklist](../switch-checklist.md) | #235, #236, #243, #240, #239, #238, #241, #242, #244, #245, #279, #417, #345, #351, #237 | |
+| Android phone | [android.md](android.md) | #358, #360, #361 | |
+| Playthrough, review and release | [playthrough.md](playthrough.md) | #132, #93, #79, #223, #228, #92, #326, #331, #318, #354, #343, #317, #94, #208 | #67, #72, calls for Joris on #156 and #162 |
 
-Which of these hold up the v1.0 tag is in [v1.0 gates](#v10-gates) below ([ADR 0147](../../adr/0147-what-v1-is-and-what-gates-it.md)). Already done or obsolete, so their sections say how to close them: #114 (the v0.1.0 release went through the flow), #234 (ADR 0138 accepted and closed). Waiting on something else first: #279 (on the Switch's F1 row), #208 (on its child in epic #106), #94 (on the playthrough and review).
+Which of these hold up the v1.0 tag is in [v1.0 gates](#v10-gates) below ([ADR 0147](../../adr/0147-what-v1-is-and-what-gates-it.md)). Already done or obsolete, so their sections say how to close them: #114 (the v0.1.0 release went through the flow), #234 (ADR 0138 accepted and closed). Waiting on something else first: #279 (on the Switch's F1 row), #208 (on its child in epic #106), #94 (on the playthrough and review), and most hand-offs filed on 2026-11-13 (#314 to #373) and #417, on the agent's part of the same issue; their sections say which.
+
+The Android hand-offs (#358, #360, #361) have their own page now rather than waiting for the Android epic (#292) to finish: the epic has started (#356 merged the toolchain), the three issues are open hand-offs already, and a page lets `--live` hold them like the others ([#395](https://github.com/armaatus/maplethief-port/issues/395)). Their sections wait on the emulator half of each issue.
+
+Not on a page, since 2026-11-26: #329, #330, #367 and #373 lost `needs-human`, as they are agent work only (a repository setting, a look the agent checks, a judgement call); see [v1.0 gates](#v10-gates). #326 and #331 keep it only for approving their legal wording; their settings are agent work.
 
 ## How to report
 
@@ -69,7 +74,27 @@ The committed list of hand-off issues and the pages that cover them. `tests/test
 - #264: windows, mac, linux (data folder sign-off)
 - #272: mac (1 ms grid pacing on a 144 Hz panel)
 - #279: switch (profile and tune)
+- #314: windows (the update notice on Windows)
+- #315: windows (the Windows parity run)
+- #316: windows (release verify on the PC)
+- #317: playthrough (the v1.0.0-rc.1 rehearsal)
+- #318: playthrough (the takedown runbook)
+- #326: playthrough (the SECURITY.md wording)
+- #331: playthrough (one legal paragraph)
+- #338: iphone (the crash notice at the next start)
+- #342: mac (the self-hosted runner for the nightly run)
+- #343: playthrough (one release command on both machines)
+- #345: switch (upstream patches for the SDL fork)
+- #351: switch (the Homebrew App Store submission)
+- #352: windows (Scoop and winget on a clean PC)
+- #353: linux (the Deck layout template in Game Mode)
+- #354: playthrough (the signing key for checksums)
+- #358: android (the first map on a real phone)
+- #360: android (a controller and the vibrator)
+- #361: android (the signed release APK)
+- #368: windows (fast-forward on D3D and GL)
 - #411: mac (where presents land against a 120 Hz or VRR display's vblanks)
+- #417: switch (a recovery point's stall on the console)
 <!-- handoffs:end -->
 
 ## Checks from closed issues
@@ -165,15 +190,16 @@ The list covers every open `needs-human` issue, including those of later milesto
 - #279: not a gate (Switch profile and tune)
 - #308: not a gate (this decision, ADR 0147)
 - #411: not a gate (vblank measurement on a 120 Hz or VRR display; Joris)
+- #417: not a gate (a recovery point's stall on a Switch console; the Switch is preview)
 - #314: not a gate (update notice on a real system)
 - #315: not a gate (Windows parity run)
 - #316: not a gate (release verify on the PC)
 - #317: not a gate (the release candidate rehearsal; #94 runs the same flow)
 - #318: not a gate (Joris approves the takedown runbook: legal wording)
-- #326: not a gate, agent work (private vulnerability reporting is a repository setting)
+- #326: not a gate (Joris approves the SECURITY.md wording; private vulnerability reporting is a repository setting, agent work)
 - #329: not a gate, agent work (branch rulesets are a repository setting)
 - #330: not a gate, agent work (Discussions is a repository setting)
-- #331: not a gate, agent work (description and topics are repository settings)
+- #331: not a gate (Joris approves the one legal paragraph; description and topics are repository settings, agent work)
 - #334: not a gate, agent work (an ADR on traps)
 - #338: not a gate (iOS crash notice on a device)
 - #342: not a gate (the self-hosted runner on the Mac)
