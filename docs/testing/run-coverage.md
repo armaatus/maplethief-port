@@ -29,6 +29,19 @@ By hand: configure and build `mac-coverage` (`cmake --preset mac-coverage && cma
 
 [re/coverage-gaps.md](../re/coverage-gaps.md) gives every game function no run enters a class and the evidence (ADR 0232). To make it, collect the coverage of the whole real-asset suite into one directory (`MAPLETHIEF_COVERAGE=<dir>/coverage-%p.txt`; the suite takes about 1.5 h on the coverage build split into three fixture-connected partitions run in parallel, `ctest -R <partition> -FA '.*'`), then `python3 -m mtport.coveragegaps generate --coverage <dir>`. `python3 -m mtport.coveragegaps check` (and `tests/test_coveragegaps_real.py`) regenerates the doc from its own list and the current `work/`, so it fails when a re-analysis or a difftest change moved a class.
 
+### Host-driven tests
+
+The functions no play can enter (teardown, the system's events, a coupon) are entered by `play.host_events` ([#432](https://github.com/armaatus/maplethief-port/issues/432), [ADR 0242](../adr/0242-host-driven-tests-for-unreachable-functions.md)), about 30 s. To add its coverage (or any one run's) to the doc without the whole suite:
+
+```sh
+cmake --preset mac-coverage && cmake --build --preset mac-coverage --target play_real_test
+MAPLETHIEF_COVERAGE=<dir>/coverage-%p.txt SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy \
+  build/mac-coverage/tests/play_real_test host_events <out dir> 1
+PYTHONPATH=tools python3 -m mtport.coveragegaps update --coverage <dir>
+```
+
+On 2026-11-27 it entered 113 of the 124 `unreachable` functions; the other 11 have no sender and are `dead` rules. The teardown ran 86 destructors: 46 on live objects, 1 on an object made by its constructor (`CAniManager`) and 39 on zeroed objects with the class's vtables. It also ran 14 `dealloc`s, one on a new object (`TermsView`).
+
 ## The baseline
 
 2026-11-26, branch `armaatus/295-run-coverage` at `3c6e8ad3` (on `dev` after #415), Apple M4, macOS 26.6.2, `mac-coverage` build, `python3 -m mtport.runcoverage run` with its default tests: `play.chapter_1_a` to `play.chapter_1_m`, `play.regress`, every `menus.*` and every `input.*` (53 tests, all real-asset, 0 failed). `play.regress` gave its usual digest `8a2f05733c8d4603` with the recorders on.
