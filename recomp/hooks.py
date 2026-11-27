@@ -52,9 +52,10 @@ HOOKED: dict[int, Hooked] = {
     ),
     0xD259: Hooked(
         "CMMap::LoadObj",
-        "(map, area, map): reads the map's .obj into its object list; restored_content (#427) "
-        "adds Monster Carnival's NPC (kind 42, a Spiegelman script) to Kerning City, Orbis and "
-        "Magatia's first maps after it, in memory",
+        "(map, area, map): reads the map's .obj into its object list; restored_content adds "
+        "Monster Carnival's NPC (kind 42, a Spiegelman script) to Kerning City, Orbis and "
+        "Magatia's first maps after it (#427), and a portal into the unreached 4.5 to 4.3 "
+        "(#428), in memory",
     ),
     0x23D1D: Hooked(
         "Canvas_FillRect",

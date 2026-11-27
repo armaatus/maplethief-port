@@ -3,12 +3,11 @@
 //
 // CMMap::LoadObj 0xD259 (map, area, map) reads /map/<area><map>.obj into the CMMap
 // (docs/formats/obj.md): the object count +0x44, the Obj* array +0x48 with its count +0x4C and
-// 6 at +0x50, the name array +0x54 with its count +0x58. Each Obj is 12 bytes: cell +0, kind +2,
-// quest marker +4 (-1 none), visible +6, facing +8, frame +0xA. The wrapper runs the original,
-// then for a town of the table below builds both arrays again one longer with the guest's new[]
-// (0xF0E30, the loader's own allocator), adds the NPC's Obj and its name last, and frees the
-// old arrays with delete[] (0xF0E28). Everything that reads the list later (the sprites of
-// 0x86289, the draw 0x8572D, the talk 0x63191, the NPC state pass 0x839BD) runs after it.
+// 6 at +0x50, the name array +0x54 with its count +0x58 (map_objects.h). The wrapper runs the
+// original, then for a town of the table below builds both arrays again one longer, the NPC's
+// Obj and its name last (mt_map_objects_detail::insert). Everything that reads the list later (the
+// sprites of 0x86289, the draw 0x8572D, the talk 0x63191, the NPC state pass 0x839BD) runs after
+// it.
 //
 // Kind 42 is NPC 38 (npc.dat), the sprite /sprite/mob/42.sprprj; the talk runs the script the
 // object names, from script/chapter<c>/ or script/common/. CStateGame::StartMonsterCarnival
@@ -30,6 +29,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "map_objects.h"
 #include "maplethief/diag.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/hooks.h"
@@ -39,19 +39,6 @@ namespace {
 using u32 = std::uint32_t;
 using i32 = std::int32_t;
 
-constexpr u32 k_new_array = 0xF0E30u;    // operator new[]'s import stub
-constexpr u32 k_delete_array = 0xF0E28u; // operator delete[]'s
-constexpr u32 k_map_count = 0x44u;       // CMMap: the objects
-constexpr u32 k_map_objs = 0x48u;
-constexpr u32 k_map_objs_count = 0x4Cu;
-constexpr u32 k_map_objs_step = 0x50u;
-constexpr u32 k_map_names = 0x54u;
-constexpr u32 k_map_names_count = 0x58u;
-constexpr u32 k_array_step = 6u; // the loader's +0x50
-constexpr u32 k_obj_size = 12u;
-constexpr u32 k_obj_kind = 2u;
-constexpr u32 k_obj_marker = 4u;
-constexpr u32 k_obj_visible = 6u;
 constexpr std::uint16_t k_carnival_kind = 42u; // NPC 38, the carnival's way back
 constexpr u32 k_canvas_global = 0x11A950u;     // SkyCanvas: the engine's current state +0xC
 constexpr u32 k_canvas_state = 0xCu;
@@ -89,12 +76,6 @@ u32 read_word(const mt_cpu *cpu, u32 addr) {
 }
 
 void write_word(mt_cpu *cpu, u32 addr, u32 v) { std::memcpy(cpu->mem + addr, &v, 4); }
-
-void write_half(mt_cpu *cpu, u32 addr, std::uint16_t v) { std::memcpy(cpu->mem + addr, &v, 2); }
-
-u32 call(mt_cpu *cpu, u32 fn, u32 arg) {
-    return mt_call_guest(cpu, fn, &arg, 1u, MT_HOOK_FN_MAP_LOAD_OBJ);
-}
 
 // Each ticket on an unused row of the guest's market.dat, unless a row lists it already.
 void list_tickets(mt_cpu *cpu) {
@@ -146,58 +127,19 @@ void zero_first_score(mt_cpu *cpu) {
     g_scores.fetch_add(1, std::memory_order_relaxed);
 }
 
-// The map's object list one longer, `npc` last.
+// The map's object list one longer, `npc` last, unless the map has a kind-42 object already
+// (the carnival takes the first).
 void add_npc(mt_cpu *cpu, u32 map, const mt_restored_carnival_npc &npc) {
-    const u32 count = read_word(cpu, map + k_map_count);
-    const u32 objs = read_word(cpu, map + k_map_objs);
-    const u32 names = read_word(cpu, map + k_map_names);
-    if (count > 0xFFu ||
-        (count > 0u && (!in_guest(cpu, objs, 4u * count) || !in_guest(cpu, names, 4u * count)))) {
-        return; // not a list the loader built
-    }
+    const u32 count = mt_map_objects_detail::count(cpu, map);
     for (u32 i = 0; i < count; i++) {
-        const u32 obj = read_word(cpu, objs + 4u * i);
-        std::uint16_t kind = 0;
-        if (in_guest(cpu, obj, k_obj_size)) {
-            std::memcpy(&kind, cpu->mem + obj + k_obj_kind, 2);
-        }
-        if (kind == k_carnival_kind) {
-            return; // the map has one: the carnival takes the first
+        if (mt_map_objects_detail::kind_at(cpu, map, i) == k_carnival_kind) {
+            return;
         }
     }
-    const u32 len = static_cast<u32>(std::strlen(npc.script));
-    const u32 new_objs = call(cpu, k_new_array, 4u * (count + 1u));
-    const u32 new_names = call(cpu, k_new_array, 4u * (count + 1u));
-    const u32 obj = call(cpu, k_new_array, k_obj_size);
-    const u32 name = call(cpu, k_new_array, len + 1u);
-    if (!in_guest(cpu, new_objs, 4u * (count + 1u)) ||
-        !in_guest(cpu, new_names, 4u * (count + 1u)) || !in_guest(cpu, obj, k_obj_size) ||
-        !in_guest(cpu, name, len + 1u)) {
-        return;
+    if (mt_map_objects_detail::insert(cpu, map, count, static_cast<std::uint16_t>(npc.cell),
+                                      k_carnival_kind, npc.script, MT_HOOK_FN_MAP_LOAD_OBJ)) {
+        g_npcs.fetch_add(1, std::memory_order_relaxed);
     }
-    if (count > 0u) {
-        std::memcpy(cpu->mem + new_objs, cpu->mem + objs, 4u * count);
-        std::memcpy(cpu->mem + new_names, cpu->mem + names, 4u * count);
-    }
-    std::memset(cpu->mem + obj, 0, k_obj_size); // facing 0, frame 0
-    write_half(cpu, obj, static_cast<std::uint16_t>(npc.cell));
-    write_half(cpu, obj + k_obj_kind, k_carnival_kind);
-    write_half(cpu, obj + k_obj_marker, 0xFFFFu);
-    write_half(cpu, obj + k_obj_visible, 1u);
-    std::memcpy(cpu->mem + name, npc.script, len + 1u);
-    write_word(cpu, new_objs + 4u * count, obj);
-    write_word(cpu, new_names + 4u * count, name);
-    write_word(cpu, map + k_map_count, count + 1u);
-    write_word(cpu, map + k_map_objs, new_objs);
-    write_word(cpu, map + k_map_objs_count, count + 1u);
-    write_word(cpu, map + k_map_objs_step, k_array_step);
-    write_word(cpu, map + k_map_names, new_names);
-    write_word(cpu, map + k_map_names_count, count + 1u);
-    if (count > 0u) {
-        call(cpu, k_delete_array, objs);
-        call(cpu, k_delete_array, names);
-    }
-    g_npcs.fetch_add(1, std::memory_order_relaxed);
 }
 
 int load_obj(mt_cpu *cpu, const mt_hook_call *hook) {
@@ -208,11 +150,9 @@ int load_obj(mt_cpu *cpu, const mt_hook_call *hook) {
     list_tickets(cpu);
     zero_first_score(cpu);
     if (const mt_restored_carnival_npc *npc = mt_restored_carnival_npc_on(area, number)) {
-        if (in_guest(cpu, map, k_map_names_count + 4u)) {
-            add_npc(cpu, map, *npc);
-            mt_tracef("hooks", "CMMap::LoadObj(%d, %d): %s at cell %d", area, number, npc->script,
-                      npc->cell);
-        }
+        add_npc(cpu, map, *npc);
+        mt_tracef("hooks", "CMMap::LoadObj(%d, %d): %s at cell %d", area, number, npc->script,
+                  npc->cell);
     }
     return MT_HOOK_HANDLED; // void: nothing to return
 }
