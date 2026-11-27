@@ -266,7 +266,11 @@ FLOW_NAMES: tuple[tuple[int, str, str], ...] = (
     (0x7BEB1, "CQuestList::Complete", "state 2, removes the record"),
     (0x7BD75, "CQuestList::Remove", "state 0; a main quest's previous one back to 1"),
     (0x7C7ED, "CQuestList::StartPrepared", "adds +0x330 to the list, state 1"),
-    (0x7C61D, "CQuestList::ClearAll", "clearAll: zeroes both state arrays, chapter + 1"),
+    (
+        0x7C61D,
+        "CQuestList::ClearAll",
+        "clearAll: zeroes both state arrays, keeps the main quest at 1 as main 40, chapter + 1",
+    ),
     (0x7BFC5, "CQuestList::GiveReward", "getReward: rewards, then Complete"),
     (0x7BA0D, "CQuestList::Prepare", "new CQuest into +0x330"),
     (0x7B921, "CQuestList::DebugDump", "printf dump of the quest list"),
