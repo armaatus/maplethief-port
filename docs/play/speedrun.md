@@ -106,7 +106,21 @@ A practice is never a run: it writes no run log and makes no personal best. Star
 
 A **segment** is the time from one split to the next (from the start, for the first). The port keeps the **best segment** of each split, from your runs and your practice alike, in `runs/<category>.segments`. A segment counts only when no Assist other than save states was on during it, and the run variables stayed inside the category. The **sum of best** adds up every split's best segment once each has one. It shows what a run could be at best, not a run you made.
 
+## LiveSplit
+
+On a computer (macOS, Windows, Linux) the timer can drive [LiveSplit](https://livesplit.org/), so you keep your own layout and splits there. The port sends LiveSplit its start, each split and each reset; LiveSplit does the timing and the comparisons.
+
+1. In LiveSplit, right-click, **Control**, **Start TCP Server** (each time you start LiveSplit, unless its server settings start it by themselves). The default port is 16834.
+2. In the port, turn on **Speedrun timer** and set `livesplit = localhost` in `settings.ini` (or `localhost:PORT` for another port), or start it with `--run-timer on --livesplit localhost`. The **LiveSplit server** row in the **Other** tab shows the value.
+3. Give LiveSplit as many splits as your category has, in the same order (Any% has six, Chapter 1 three).
+
+The link is off by default. It connects to LiveSplit's own server only: `localhost`, or an IP address (another computer on your network, as `192.168.1.20:16834` or `[fe80::1]:16834`), never a name to look up. If LiveSplit isn't there, the game plays on as usual, the log says so once and the port tries again every few seconds without a word. A run that starts before LiveSplit connects is not in LiveSplit. A practice ([Practice from a split](#practice-from-a-split)) is never a run, so LiveSplit hears nothing of it; loading a practice state during a run resets LiveSplit's.
+
+**Game time.** With **LiveSplit game time** on (`livesplit_game_time = on`, the default), LiveSplit's game time is the game's own ticks, 50 ms each: compare against *Game Time* in LiveSplit to rank by it. The port pauses LiveSplit's own game time and sets it on every tick. Turn it off to keep LiveSplit's game time as LiveSplit runs it.
+
+No LiveSplit auto-splitter script is needed or offered: such scripts read the game's memory, which moves with every build of the port.
+
 ## Not yet
 
-- A link to LiveSplit ([#407](https://github.com/armaatus/maplethief-port/issues/407)) and replays that can be checked ([#405](https://github.com/armaatus/maplethief-port/issues/405), [#408](https://github.com/armaatus/maplethief-port/issues/408)) are planned.
+- Replays that can be checked ([#405](https://github.com/armaatus/maplethief-port/issues/405), [#408](https://github.com/armaatus/maplethief-port/issues/408)) are planned.
 - No full Any% run has been timed in the port yet: the last boss has not been reached in the port's own tests.

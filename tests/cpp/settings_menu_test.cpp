@@ -1788,6 +1788,8 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"run_timer", true, ""},
     {"run_category", true, ""},
     {"record_runs", true, "run files go in the data folder (#405)"},
+    {"livesplit", false, "LiveSplit runs on a desktop (kCapLiveSplit)"},
+    {"livesplit_game_time", false, "LiveSplit runs on a desktop (kCapLiveSplit)"},
 };
 constexpr SwitchDecision kSwitchActions[] = {
     {"bindings", true, "the remap screen takes the pad"},
@@ -2003,9 +2005,11 @@ TEST_CASE("platform caps: the desktop shows every row as before; iOS and the Swi
             ios_hidden.emplace_back(row.key);
         }
     }
-    // iOS: the window is always the whole screen (ADR 0055), so its rows are gone; nothing else.
-    CHECK(ios_hidden ==
-          std::vector<std::string>{"fullscreen", "fullscreen_mode", "fullscreen_display"});
+    // iOS: the window is always the whole screen (ADR 0055), so its rows are gone; and LiveSplit
+    // runs on a desktop (#407). Nothing else.
+    CHECK(ios_hidden == std::vector<std::string>{"fullscreen", "fullscreen_mode",
+                                                 "fullscreen_display", "livesplit",
+                                                 "livesplit_game_time"});
     std::vector<std::string> ios_actions_hidden;
     for (const MenuActionInfo &a : fe::menu_actions()) {
         CHECK(fe::action_shown(a, SettingsPlatform::kDesktop));

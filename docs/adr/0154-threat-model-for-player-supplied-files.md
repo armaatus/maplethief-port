@@ -11,7 +11,7 @@ The port and its frontend are C++ with hand-written parsers (zip and inflate, NI
 
 The original game trusts its files ([docs/re/original-bugs.md](../re/original-bugs.md), bugs 6 and 7). Its save loaders take ids, skill levels and the map from `theif` and `quest` as they are, and its loaders for `.map`, `.att`, `.mapprj` and the sprite bundles have no bounds. The port runs the game's code as recompiled guest code inside guest memory (ADR 0025): every guest access lands in the guest's own address range, a 4 GiB reservation or a checked 512 MiB arena, so a wild guest access hits a guest page or traps (`runtime/src/boot/trap.c`, the crash file of #198). It does not reach host memory. The host side (the HLE runtime and the frontend) is where a hostile file could do harm.
 
-The game is offline. The only network use is the opt-in update check (ADR 0137).
+The game is offline. The only network use is the opt-in update check (ADR 0137) and, since #407, the opt-in LiveSplit link, which only sends (ADR 0156's addendum).
 
 A read of every parser on 2026-11-13 (for this ADR) found them bounded for the most part, with a few gaps; the table below records what holds today, at `4b6456be`.
 

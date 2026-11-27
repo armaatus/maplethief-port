@@ -156,6 +156,11 @@
 //   # record every session, from the start to quit, as a run file in runs/ that plays back
 //   # exactly (MapleThief --play-run FILE): on | off
 //   record_runs = off
+//   # send the run timer's start, splits and resets to LiveSplit's TCP server
+//   # (livesplit.h): off | HOST:PORT (localhost:16834)
+//   livesplit = off
+//   # with livesplit, LiveSplit's game time is the game's ticks (50 ms each): on | off
+//   livesplit_game_time = on
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -731,6 +736,10 @@ struct Settings {
     // Run recording (#405, ADR 0156, run_recorder.h): every session from the start to quit into
     // <data dir>/runs/, off by default and in no preset.
     bool record_runs = false; // record_runs, --record-runs (on | off)
+    // The LiveSplit link (#407, ADR 0156, livesplit.h): HOST:PORT of LiveSplit's TCP server, empty
+    // for off; and whether it gets the game time. Desktop only, outside the presets.
+    std::string livesplit;           // livesplit, --livesplit (off | HOST:PORT)
+    bool livesplit_game_time = true; // livesplit_game_time, --livesplit-game-time (on | off)
 
     bool operator==(const Settings &) const = default;
 };

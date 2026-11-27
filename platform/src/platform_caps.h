@@ -82,6 +82,9 @@ enum Capability : std::uint32_t {
     // speech rows. The Switch has none open to homebrew. Where the voice does not load at run
     // time (Linux without libspeechd, Android for now) the rows stay and say it is not available.
     kCapSpeech = 1u << 15,
+    // A TCP link to LiveSplit's server on the player's machine (#407, livesplit.h): livesplit and
+    // livesplit_game_time. LiveSplit runs on a desktop; iOS and the Switch have none beside them.
+    kCapLiveSplit = 1u << 16,
 };
 
 struct PlatformCaps {
@@ -93,7 +96,7 @@ struct PlatformCaps {
 inline constexpr std::uint32_t kDesktopCaps =
     kCapWindow | kCapDisplays | kCapCursor | kCapKeyboard | kCapFileDialogs | kCapOpenFolder |
     kCapTypedValues | kCapDataLocationChoice | kCapAudioDevices | kCapQuit | kCapUpdateFetch |
-    kCapMessageBox | kCapSpeech;
+    kCapMessageBox | kCapSpeech | kCapLiveSplit;
 
 // The table. The iOS row says what the iOS app (ADR 0136) has: the window is always the whole
 // screen (ADR 0055), an iPad's pointer clicks, a keyboard can be attached; the saves go through

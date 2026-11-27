@@ -91,6 +91,7 @@ add_library(
     src/run_file.cpp
     src/run_recorder.cpp
     src/run_timer.cpp
+    src/livesplit.cpp
     src/file_dialog.cpp
     src/save_menu.cpp
     src/save_state_input.cpp
@@ -192,6 +193,10 @@ if(APPLE)
     target_link_libraries(maplethief_frontend PRIVATE "-framework Foundation")
 elseif(WIN32)
     target_link_libraries(maplethief_frontend PRIVATE winhttp)
+endif()
+# The LiveSplit link's TCP socket (#407, livesplit.h): Winsock on Windows.
+if(WIN32)
+    target_link_libraries(maplethief_frontend PRIVATE ws2_32)
 endif()
 # Text-to-speech's system voice (#390, ADR 0174, speech.h): AVSpeechSynthesizer on macOS and iOS
 # (Objective-C++ with ARC), SAPI 5 on Windows; Linux loads libspeechd at run time

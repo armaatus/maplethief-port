@@ -115,7 +115,7 @@ GitHub sees your IP address and the port's version, as it would for any visit to
 
 ## Speedrun timer
 
-**Speedrun timer** and **Speedrun category** in the **Other** tab (`run_timer`, `run_category`) time a run from a new character with automatic splits. [Speedrun timer](speedrun.md) explains them.
+**Speedrun timer** and **Speedrun category** in the **Other** tab (`run_timer`, `run_category`) time a run from a new character with automatic splits. On a computer, **LiveSplit server** and **LiveSplit game time** (`livesplit = off | HOST:PORT`, `livesplit_game_time`) send the run to LiveSplit. [Speedrun timer](speedrun.md) explains them.
 
 ## Recording runs
 

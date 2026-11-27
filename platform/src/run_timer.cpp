@@ -863,6 +863,7 @@ void RunTimer::set_category(RunCategory category, std::optional<RunRecord> best,
     if (state_ == State::kRunning && !practice_) {
         end_run(false, clock_.now());
     }
+    clear_finished();
     category_ = std::move(category);
     best_ = std::move(best);
     state_ = State::kWaiting;
@@ -877,6 +878,20 @@ void RunTimer::set_category(RunCategory category, std::optional<RunRecord> best,
         segments_ = std::move(*segments);
     } else {
         segments_ = run_segments_for(category_);
+    }
+}
+
+void RunTimer::signal(RunSignal s, const RunTime &t) const {
+    if (listener_) {
+        listener_(s, t);
+    }
+}
+
+void RunTimer::clear_finished() {
+    if (state_ == State::kFinished) {
+        state_ = State::kWaiting;
+        times_.clear();
+        signal(RunSignal::kReset, end_);
     }
 }
 
@@ -900,6 +915,7 @@ void RunTimer::on_event(const mt_game_event &e) {
     const std::size_t i = times_.size() - 1;
     offer_segment(i, i == 0 ? times_[0] : minus(times_[i], times_[i - 1]));
     reached_ = times_.size();
+    signal(RunSignal::kSplit, times_.back());
     if (times_.size() == category_.splits.size()) {
         end_run(true, now);
     }
@@ -935,6 +951,7 @@ bool RunTimer::start_practice(std::size_t split) {
     if (state_ == State::kRunning && !practice_) {
         end_run(false, now);
     }
+    clear_finished();
     state_ = State::kRunning;
     practice_ = true;
     practice_from_ = split;
@@ -980,6 +997,7 @@ void RunTimer::start() {
     if (state_ == State::kRunning && !practice_) {
         end_run(false, now);
     }
+    clear_finished();
     practice_ = false;
     last_segment_.reset();
     segment_counts_ = true;
@@ -996,6 +1014,7 @@ void RunTimer::start() {
     }
     in_category_ = true;
     check();
+    signal(RunSignal::kStart, RunTime{});
 }
 
 void RunTimer::reset() {
@@ -1007,6 +1026,7 @@ void RunTimer::reset() {
     } else if (state_ == State::kRunning) {
         end_run(false, clock_.now());
     } else {
+        clear_finished();
         state_ = State::kWaiting;
         times_.clear();
     }
@@ -1068,6 +1088,7 @@ void RunTimer::end_run(bool finished, const RunInstant &now) {
     } else {
         state_ = State::kWaiting;
         times_.clear();
+        signal(RunSignal::kReset, end_);
     }
 }
 

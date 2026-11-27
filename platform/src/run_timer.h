@@ -226,6 +226,11 @@ struct RunClock {
     std::function<std::string()> stamp;
 };
 
+// What a run did, for a listener that mirrors it (the LiveSplit link, #407): a run started, the
+// next split was reached (its time), or a run ended as reset or a finished run was cleared.
+enum class RunSignal { kStart, kSplit, kReset };
+using RunListener = std::function<void(RunSignal, const RunTime &)>;
+
 class RunTimer {
   public:
     enum class State { kWaiting, kRunning, kFinished };
@@ -244,6 +249,9 @@ class RunTimer {
     const std::optional<RunRecord> &best() const { return best_; }
     // A new personal best made by this timer's last run (write_run said so).
     void set_best(RunRecord best) { best_ = std::move(best); }
+    // Told of every start, split and reset (none: nobody). A start after a finished run is a
+    // reset, then the start.
+    void set_listener(RunListener listener) { listener_ = std::move(listener); }
 
     // A game event (the listener's body): a new character starts a run, the next split's event
     // splits.
@@ -302,12 +310,16 @@ class RunTimer {
     RunTime since_start(const RunInstant &now) const;
     void check();
     void end_run(bool finished, const RunInstant &now);
+    void signal(RunSignal s, const RunTime &t) const;
+    // A finished run back to waiting (its display cleared): a reset to the listener.
+    void clear_finished();
     void practice_split(const RunInstant &now);
     // Split `i`'s segment `t`, as a best if the segment counts; then a new segment starts.
     void offer_segment(std::size_t i, const RunTime &t);
     std::vector<std::string> practice_lines() const;
 
     RunClock clock_;
+    RunListener listener_;
     const Settings *settings_ = nullptr;
     RunCategory category_;
     std::optional<RunRecord> best_;

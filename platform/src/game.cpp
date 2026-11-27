@@ -45,6 +45,7 @@
 #include "lifecycle.h"
 #include "list_keys.h"
 #include "live_settings.h"
+#include "livesplit.h"
 #include "local_game_center.h"
 #include "maplethief/audio.h"
 #include "maplethief/cashshop.h"
@@ -593,6 +594,10 @@ struct Game {
     RunTimer run_timer{RunClock{run_clock_now, run_clock_stamp}};
     std::vector<RunCategory> run_categories;
     std::string run_category_loaded;
+    // The LiveSplit link (#407, livesplit.h): the timer's starts, splits and resets, and the game
+    // time, to LiveSplit's TCP server while livesplit names one.
+    LiveSplitLink livesplit{[](const std::string &line) { SDL_Log("%s", line.c_str()); },
+                            [] { return static_cast<double>(SDL_GetTicksNS()) / 1e9; }};
     PracticeStates practice; // its practice states, with save_states (#409, practice_state.h)
     // --perf-session (#244, perf_session.h): a line per second; the scene and the screen as of
     // the last run-loop turn.
@@ -2846,8 +2851,14 @@ void write_run_records(Game &g) {
 }
 
 // run_timer and run_category as in effect now (#406): another category (or the timer turned
-// off) ends a run in progress as reset; then the clean check of this turn.
+// off) ends a run in progress as reset; then the clean check of this turn. livesplit and
+// livesplit_game_time (#407) too: the link follows its address, then sends the game time.
 void follow_run_timer(Game &g) {
+    std::optional<LiveSplitAddress> livesplit;
+    if (platform_has(kCapLiveSplit) && !g.settings.livesplit.empty()) {
+        livesplit = parse_livesplit_address(g.settings.livesplit);
+    }
+    g.livesplit.configure(livesplit, g.settings.livesplit_game_time);
     if (!g.settings.run_timer) {
         if (g.run_timer.state() != RunTimer::State::kWaiting) {
             g.run_timer.reset();
@@ -2871,6 +2882,9 @@ void follow_run_timer(Game &g) {
         }
     }
     g.run_timer.turn();
+    // A practice (#409) is never a run: LiveSplit hears nothing of it.
+    g.livesplit.turn(g.run_timer.state() == RunTimer::State::kRunning && !g.run_timer.practice(),
+                     g.run_timer.elapsed());
     write_run_records(g);
 }
 
@@ -3897,6 +3911,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         }
         set_run_category_choices(std::move(names));
         g.run_timer.attach(&g.settings);
+        g.run_timer.set_listener(
+            [&g](RunSignal signal, const RunTime &t) { g.livesplit.on_signal(signal, t); });
         if (mt_game_events_add_listener(run_timer_event, &g) != 0) {
             SDL_Log("run: no room for the timer's game-event listener: it never starts");
         }
@@ -4184,6 +4200,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // A run in progress ends as reset with the game (#406).
     mt_game_events_remove_listener(run_timer_event, &g);
     g.run_timer.reset();
+    g.livesplit.pump(); // the reset, if the socket takes it now
     write_run_records(g);
     detach_script_pad(g);
     g.rumble.stop();
