@@ -61,8 +61,9 @@ const mt_input_action_info k_actions[MT_ACTION_COUNT] = {
 // EAGLView's ivars (objc.json): touchKeyPadView, statusOfTouchKeyPad.
 constexpr u32 k_eagl_touch_keypad = 84;
 constexpr u32 k_eagl_status = 92;
-// TouchKeyPadView's touchKeyPadEnable.
+// TouchKeyPadView's touchKeyPadEnable and isJoyPad.
 constexpr u32 k_pad_enable = 228;
+constexpr u32 k_pad_joypad = 96;
 // SkyCanvas's pending press and release; -1000 = none (program-flow.md, SkyCanvas::Tick).
 constexpr u32 k_canvas_press = 0xD8;
 constexpr u32 k_canvas_release = 0xE8;
@@ -236,6 +237,15 @@ void refresh(mt_cpu *cpu) {
     g.live = g.pad != 0 && rd8(cpu, g.pad + k_pad_enable) != 0;
     if (g.panel == -1 && g.pad != 0 && mt_objc_current() == g.rt) {
         g.panel = shown_panel(g.pad);
+    }
+    // A script's alert from the NPC chat (invenFullNotify's popup 8: the bag is full) is closed
+    // by disableAlertKey: status -1, panel 7 hidden, and nothing enables a panel again. The game
+    // pad stays live (enableAlertKey leaves touchKeyPadEnable and isJoyPad set), so on the device
+    // the hidden pad still walks the hero, and the screen is the field (#299).
+    const mt_ui::View *pad = g.panel == -1 && g.live ? mt_ui::view_of(nullptr, g.pad) : nullptr;
+    if (pad != nullptr && !pad->hidden && pad->model.alpha >= 0.01 &&
+        rd8(cpu, g.pad + k_pad_joypad) != 0) {
+        g.panel = 0;
     }
 }
 

@@ -34,8 +34,9 @@
  * The context: mt_input_panel() is the key pad's panel (EAGLView.statusOfTouchKeyPad, ivar
  * +92: -1 none, 0 the game pad, 1 popup menu, 3 cut scene, 5 NPC chat, 6 shop, 7 popup, 8 map,
  * 9 cash shop, 10 help), read at every turn. Where the status is -1 while the key pad still
- * shows a panel (a popup over the shop, closed by disableAlertKey, #127), it is that panel. The
- * platform's bindings switch on it (field: 0; menus and popups: everything else).
+ * shows a panel (a popup over the shop, closed by disableAlertKey, #127), it is that panel; where
+ * it shows none but the game pad is still live (a script's alert from the NPC chat, #299), it is
+ * 0. The platform's bindings switch on it (field: 0; menus and popups: everything else).
  *
  * Single guest thread: every function runs on the guest's main thread (the frontend's turn
  * hook and its event pump), never on another. Trace: MAPLETHIEF_TRACE=input. C17 that also
