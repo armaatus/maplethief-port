@@ -294,6 +294,7 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     run_tasks(r, cpu);
     r.assists.turn(cpu, r.settings, r.actions, r.t);
     r.scene_skip.turn(cpu, r.settings, r.t);
+    mt_cf_set_missing_key_fallback(r.settings.fix_original_bugs ? 1 : 0); // as game.cpp
     mt_uikit_set_animation_scale(fe::ui_animation_scale(r.settings.ui_animations));
     std::int64_t frame = 0;
     std::memcpy(&frame, cpu->mem + k_last_frame, sizeof frame);
@@ -426,6 +427,14 @@ inline bool logged(const Run &r, std::size_t from, const std::string &needle) {
         }
     }
     return false;
+}
+
+inline int count_logged(const Run &r, std::size_t from, const std::string &needle) {
+    int n = 0;
+    for (std::size_t i = from; i < r.log.size(); i++) {
+        n += r.log[i].find(needle) != std::string::npos ? 1 : 0;
+    }
+    return n;
 }
 
 inline std::uintmax_t file_size(const Run &r, const char *name) {
@@ -969,7 +978,8 @@ inline void then_new_game(Run &r) {
         r, "the focus on Play", 5, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
     then_press(r, A);
 }
-inline void then_load_slot0(Run &r) {
+// `ready` ends it (default: the field), for a save that opens a popup over the field at once.
+inline void then_load_slot0(Run &r, Pred ready = nullptr) {
     then_wait_for(
         r, "the focus on Play", 15, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
     then_press(r, A);
@@ -981,7 +991,7 @@ inline void then_load_slot0(Run &r) {
     // load follow the game's random numbers, and so the run's clock.
     then_wait(r, 1.5);
     then_press(r, A);
-    then_wait_for(r, "the game", 30, field, 1.0);
+    then_wait_for(r, "the game", 30, ready != nullptr ? ready : Pred(field), 1.0);
 }
 
 inline void then_finish(Run &r) {

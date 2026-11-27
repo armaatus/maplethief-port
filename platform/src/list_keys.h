@@ -150,8 +150,9 @@ bool grid_key(mt_cpu *cpu, std::uint32_t mgr, std::int32_t tab, std::int32_t key
 void install_grid_keys(bool on = true);
 void uninstall_grid_keys();
 struct GridStats {
-    std::uint64_t keys = 0;    // directions handled
-    std::uint64_t scrolls = 0; // of them, the drag moved
+    std::uint64_t keys = 0;       // directions handled
+    std::uint64_t scrolls = 0;    // of them, the drag moved
+    std::uint64_t selections = 0; // OK on an item question: the cursor's cell selected (#304)
 };
 GridStats grid_stats();
 

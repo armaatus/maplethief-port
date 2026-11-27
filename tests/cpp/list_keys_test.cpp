@@ -337,6 +337,40 @@ TEST_CASE("list keys: the hooks on the shop's and the grids' handlers") {
     mt_hook_reset();
 }
 
+TEST_CASE("list keys: OK on an item question selects the keys' cell when no touch did (#304)") {
+    mt_hook_reset();
+    fe::install_grid_keys();
+    GridGuest g(14);
+    const auto ok = [&g](i32 popup) {
+        g.put(0x108C64, static_cast<u32>(popup));
+        g.cpu.r[0] = GridGuest::kMgr;
+        g.cpu.r[1] = static_cast<u32>(kOk);
+        return mt_hook_entry(&g.cpu, MT_HOOK_FN_POPUP_MENU_ITEM_TAB_ON_KEY, fake_original);
+    };
+    const fe::GridStats before = fe::grid_stats();
+    g.put(GridGuest::kMgr + 0xD8, 2);
+    g.put(GridGuest::kScroll + 4, 1); // the handlers' cursor 2 on the second key scroll row: 8
+    g.put(GridGuest::kWidget + 0x14, static_cast<u32>(-1));
+    CHECK(ok(0x65) == 0); // an upgrade scroll's question: left to the original, the cell selected
+    CHECK(g.get(GridGuest::kWidget + 0x14) == 8);
+    CHECK(fe::grid_stats().selections == before.selections + 1);
+
+    // A touch's selection stays; no question, or a cursor past the cells, selects nothing.
+    g.put(GridGuest::kWidget + 0x14, 3);
+    CHECK(ok(100) == 0);
+    CHECK(g.get(GridGuest::kWidget + 0x14) == 3);
+    g.put(GridGuest::kWidget + 0x14, static_cast<u32>(-1));
+    CHECK(ok(-1) == 0);
+    CHECK(ok(0x14) == 0); // throw away: the original's own path
+    g.put(GridGuest::kScroll + 4, 0);
+    g.put(GridGuest::kMgr + 0xD8, 20);
+    CHECK(ok(0x1A) == 0);
+    CHECK(g.get(GridGuest::kWidget + 0x14) == -1);
+    CHECK(fe::grid_stats().selections == before.selections + 1);
+    fe::uninstall_grid_keys();
+    mt_hook_reset();
+}
+
 TEST_CASE("list keys: a page moves the shop's cursor by the rows in view, kept in view") {
     // Twelve rows, five shown: the drag runs from -266 to 0.
     fe::ShopListView v = fe::shop_list_page(12, {0, 0}, 1);
