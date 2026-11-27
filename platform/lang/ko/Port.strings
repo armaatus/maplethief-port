@@ -285,6 +285,12 @@
 "disconnect_other_pad" = "또는 다른 패드의 버튼:";
 "glyph_hold" = "{0} 누르고 있기";
 "hud_exp" = "EXP";
+"input_jump" = "점프";
+"input_attack" = "공격";
+"input_ok" = "확인";
+"input_back" = "뒤로";
+"input_menu" = "메뉴";
+"input_map" = "지도";
 "price_shop" = "캐시샵 가격 (메소, 보유 {0})";
 "price_revive" = "부활 가격 (메소, 보유 {0})";
 "price_packs_not_sold" = "메소 패키지: 판매 안 함";
@@ -588,6 +594,8 @@
 "setting.minimap.help" = "맵의 발판과 내 위치: 화면 옆이나 위쪽에 겹쳐서";
 "setting.exp_percent.label" = "경험치 퍼센트";
 "setting.exp_percent.help" = "다음 레벨까지의 경험치를 HUD 막대 옆에 \"EXP 42.17%\"처럼 표시";
+"setting.input_display.label" = "입력 표시";
+"setting.input_display.help" = "방향, 점프, 공격, 퀵슬롯, 메뉴 키를 표시하고 누르는 동안 켜집니다";
 "setting.auto_run.label" = "자동 달리기";
 "setting.auto_run.help" = "그 키(R, L3)를 누르면 다시 누르거나 메뉴, 사망, 새 맵까지 계속 걷습니다. 그동안 공격과 물약은 기다립니다";
 "setting.hold_toggle.label" = "누르기 또는 전환";

@@ -283,6 +283,12 @@
 "disconnect_other_pad" = "Of een knop op een andere pad:";
 "glyph_hold" = "Houd {0} vast";
 "hud_exp" = "EXP";
+"input_jump" = "SPRING";
+"input_attack" = "AANV";
+"input_ok" = "OK";
+"input_back" = "TERUG";
+"input_menu" = "MENU";
+"input_map" = "KAART";
 "price_shop" = "Cash-shopprijzen in meso (je hebt {0})";
 "price_revive" = "Herleefprijzen in meso (je hebt {0})";
 "price_packs_not_sold" = "mesopakketten: niet te koop";
@@ -586,6 +592,8 @@
 "setting.minimap.help" = "De platforms van de kaart en waar je bent: naast het beeld, of bovenin eroverheen";
 "setting.exp_percent.label" = "EXP-percentage";
 "setting.exp_percent.help" = "Je EXP tot het volgende level, als \"EXP 42.17%\" naast de balk van de HUD";
+"setting.input_display.label" = "Invoerweergave";
+"setting.input_display.help" = "Toont de richtingen, springen, aanvallen, de snelvakken en de menutoetsen, verlicht zolang ingedrukt";
 "setting.auto_run.label" = "Automatisch lopen";
 "setting.auto_run.help" = "De toets ervan (R, L3) laat de held lopen tot je opnieuw drukt, een menu, de dood of een nieuwe kaart. Aanvallen en potions wachten zolang";
 "setting.hold_toggle.label" = "Vasthouden of schakelen";
