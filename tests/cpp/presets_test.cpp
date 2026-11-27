@@ -71,6 +71,7 @@ const Expected kExpected[] = {
     {"vsync", {"on", "on", "on"}},
     {"pause_unfocused", {"off", "on", "on"}},
     {"language", {nullptr, nullptr, nullptr}},
+    {"menu_language", {nullptr, nullptr, nullptr}},
     {"text_pack", {nullptr, nullptr, nullptr}},
     {"fix_original_bugs", {"off", "off", "on"}},
     {"restored_content", {"off", "off", "off"}}, // #389: never a fix, off in Enhanced too
