@@ -20,6 +20,9 @@
  * Trace: with the channel on, every opcode (function, pc, name, operand, stack depth) and every
  * native call (index, name, arguments) is logged.
  *
+ * Step observer: mt_scriptvm_set_step_observer gets every opcode the loop runs, as the script
+ * corpus test (#431) compares it with the recompiled loop's opcode fetches.
+ *
  * Off by default: the developer switch --native-script-vm on|off (platform) registers the hook
  * on or off. C17 that also compiles as C++20; the implementation is runtime/src/scriptvm/. */
 #ifndef MAPLETHIEF_SCRIPTVM_H
@@ -38,6 +41,12 @@ void mt_hooks_install_native_script_vm(int enabled) MT_NOEXCEPT;
  * first result's stack index). The guest's sp is the caller's: the loop keeps its scratch (the
  * original's frame size) below it and restores sp, r4-r11 and lr. */
 uint32_t mt_scriptvm_execute(mt_cpu *cpu, uint32_t lua, uint32_t tfunc, uint32_t base) MT_NOEXCEPT;
+
+/* Called before each opcode the host loop runs: the TFunc, the pc it was read at (the TFunc's
+ * count +0x1C before the read) and the opcode byte. Any thread the loop runs on. */
+typedef void (*mt_scriptvm_step_fn)(void *user, uint32_t tfunc, uint32_t pc, uint32_t op);
+/* Sets the step observer (NULL: none, the default). Set it while no script runs. */
+void mt_scriptvm_set_step_observer(mt_scriptvm_step_fn fn, void *user) MT_NOEXCEPT;
 
 typedef struct mt_scriptvm_stats {
     uint64_t calls;   /* Lua::execute calls the host ran */
