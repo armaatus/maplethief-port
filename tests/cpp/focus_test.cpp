@@ -1130,6 +1130,26 @@ struct Guest {
         c.resize(n);
         return c;
     }
+    // What the walk in focus.cpp sees of `obj`, for a failure's message: its state, its corners
+    // on the landscape screen and what the hit test finds at its centre.
+    std::string describe(u32 obj) {
+        const mt_ui::View *v = mt_ui::view_of(&cpu, obj);
+        if (v == nullptr) {
+            return "no view";
+        }
+        const mt_cg::Affine m = mt_ui::local_to_screen(&cpu, *v).then(mt_ui::screen_from_window());
+        const mt_cg::Rect &b = v->model.bounds;
+        const mt_cg::Point p0 = m.apply({b.x, b.y}), p1 = m.apply({b.x + b.w, b.y + b.h});
+        const mt_cg::Point mid = m.apply({b.x + b.w / 2, b.y + b.h / 2});
+        char line[400];
+        std::snprintf(line, sizeof line,
+                      "view 0x%X: kind %d hidden %d interaction %d alpha %g actions %zu subviews "
+                      "%zu, screen (%g, %g)-(%g, %g), hit at the centre 0x%X",
+                      obj, static_cast<int>(v->kind), v->hidden, v->interaction, v->model.alpha,
+                      v->actions.size(), v->subviews.size(), p0.x, p0.y, p1.x, p1.y,
+                      mt_ui::hit_test_screen(&cpu, mt_cg::Point{mid.y, 480.0 - mid.x}));
+        return line;
+    }
     void turn(double dt = 1.0 / 60) {
         g_now += dt;
         mt_uikit_turn(&cpu, g_now);
@@ -1156,6 +1176,10 @@ TEST_CASE("focus: mt_uikit_controls lists what a tap reaches, as the hit test do
     const u32 edge = g.button(menu, 440, 10, 80, 40, menu, "closeHelp:");
 
     std::vector<mt_uikit_control> c = g.controls();
+    INFO(g.describe(mt_ui::state(&g.cpu).windows.at(0)));
+    INFO(g.describe(g.root));
+    INFO(g.describe(menu));
+    INFO(g.describe(play));
     REQUIRE(c.size() == 3);
     const mt_uikit_control *p = find(c, play);
     REQUIRE(p != nullptr);
