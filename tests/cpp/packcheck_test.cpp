@@ -212,7 +212,8 @@ TEST_CASE("packcheck: a texture pack's symbolic link is ignored, never followed 
     CHECK(Lines::has(l.ignored, "no texture files: the pack replaces nothing"));
 }
 
-TEST_CASE("packcheck: pack.strings by ADR 0149's rules, each refusal with its reason (#371)") {
+TEST_CASE("packcheck: pack.strings by the manifest reader's rules (#370), each refusal with its "
+          "reason (#371)") {
     struct Case {
         std::string manifest;
         const char *reason; // nullptr: the pack opens
@@ -222,20 +223,19 @@ TEST_CASE("packcheck: pack.strings by ADR 0149's rules, each refusal with its re
         {"\"format\" = \"1\";\n" + kind_id, nullptr},
         {kind_id, "it has no \"format\""},
         {"\"format\" = \"2\";\n" + kind_id, "pack format 2 needs a newer port"},
-        {"\"format\" = \"one\";\n" + kind_id, "its \"format\" is not \"1\""},
+        {"\"format\" = \"one\";\n" + kind_id, "its \"format\" is not a number"},
         {"\"format\" = \"1\";\n\"kind\" = \"audio\";\n\"id\" = \"a\";\n\"name\" = \"A\";\n",
-         "a audio pack, opened as a texture pack"},
+         "it is an audio pack, not a texture pack"},
         {"\"format\" = \"1\";\n\"kind\" = \"music\";\n\"id\" = \"a\";\n\"name\" = \"A\";\n",
          "its \"kind\" is not texture, audio or text"},
         {"\"format\" = \"1\";\n\"kind\" = \"texture\";\n\"id\" = \"-a\";\n\"name\" = \"A\";\n",
          "its \"id\" is not 1 to 64"},
         {"\"format\" = \"1\";\n\"kind\" = \"texture\";\n\"id\" = \"Big\";\n\"name\" = \"A\";\n",
          "its \"id\" is not 1 to 64"},
-        {"\"format\" = \"1\";\n\"kind\" = \"texture\";\n\"id\" = \"a\";\n",
-         "its \"name\" is missing or longer than 64 characters"},
+        {"\"format\" = \"1\";\n\"kind\" = \"texture\";\n\"id\" = \"a\";\n", "it has no \"name\""},
         {"\"format\" = \"1\";\n\"kind\" = \"texture\";\n\"id\" = \"a\";\n\"name\" = \"" +
              std::string(65, 'n') + "\";\n",
-         "its \"name\" is missing or longer than 64 characters"},
+         "its \"name\" is longer than 64 characters"},
         // 64 characters of two bytes each: characters count, not bytes.
         {"\"format\" = \"1\";\n" + kind_id.substr(0, kind_id.find("\"name\"")) + "\"name\" = \"" +
              [] {
@@ -256,9 +256,9 @@ TEST_CASE("packcheck: pack.strings by ADR 0149's rules, each refusal with its re
          "needs port 999.0.0 or later; this is " MT_VERSION},
         {"\"format\" = \"1\";\n" + kind_id + "\"port_min\" = \"0.0.0\";\n", nullptr},
         {"\"format\" = \"1\";\n" + kind_id + "\"port_min\" = \"soon\";\n",
-         "its \"port_min\" is not a version X.Y.Z"},
-        {"\"format\" = \"1\";\n" + kind_id + "\"language\" = \"de de\";\n",
-         "its \"language\" is not a language tag"},
+         "its \"port_min\" is not a version (X.Y.Z)"},
+        // Only a text pack's language is read.
+        {"\"format\" = \"1\";\n" + kind_id + "\"language\" = \"de de\";\n", nullptr},
         {"\"format\" = \"1\";\n" + kind_id + "\"broken\n", "line "},
     };
     for (const Case &c : cases) {

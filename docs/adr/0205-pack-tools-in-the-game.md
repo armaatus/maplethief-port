@@ -31,19 +31,19 @@ The game binary already holds everything the tools need: the PNG codec and the t
 
 **Where the menu's tools write.**
 
-1. **Beside `game/`**, in ADR 0149's pack folders (`DataLocation::bundle_parent()`: the game folder on a desktop that keeps its data there, the data folder otherwise, the app's Files folder on iOS, `sdmc:/switch/maplethief` on the Switch), with the dump in `texture-dumps/dump`. The packs screen (#370) lists the same folders, so a pack the menu made shows up there. Chosen.
+1. **In the pack folders the packs screen (#370) lists**, ADR 0149's `texture-packs/`, `audio-packs/` and `text-packs/` in `game.cpp`'s `packs_base()`: `<base>` (the program's folder, the folder around the `.app` on a Mac, `sdmc:/switch/maplethief` on the Switch), or where there is none (iOS) the folder that holds `game/` (the app's Files folder); the dump goes in `texture-dumps/dump` there. A pack the menu made shows up in the packs screen at once. Chosen.
 2. A file dialog for each tool. No dialog on the Switch, and a dump chosen anywhere would not be found by Make texture pack.
 
 **The dump from the menu.** The dump hook can be opened while the game runs: the menu runs between the guest's turns, with the game paused, so no upload meets a half-installed hook. Textures already on screen are written the next time the game uploads them (a map change), which the row's help says. `--dump-textures` stays for a dump from the very first frame.
 
-**`pack.strings` in the exports.** ADR 0149 kept `textpack.strings` "until #371 moves the tools to `pack.strings`". Both exports (the game's and `mtport.textpack`) now write `pack.strings` with `kind = text`, an `id` and `content = derived`, so `mt_textpack_open` reads `pack.strings` as the manifest when it is there (ADR 0149's rule, ahead of the rest of #370's runtime work), and `textpack.strings` otherwise.
+**`pack.strings` in the exports.** ADR 0149 kept `textpack.strings` "until #371 moves the tools to `pack.strings`". Both exports (the game's and `mtport.textpack`) now write `pack.strings` with `kind = text`, an `id` and `content = derived`, which `mt_textpack_open` takes as the manifest when it is there (#370), and `textpack.strings` otherwise.
 
 ## Decision
 
 - **Runtime** (`maplethief/packcheck.h`):
   - `mt_texpack_check(dir, bundle, fn, user)`, `mt_audio_pack_check(...)`, `mt_textpack_check(dir, fn, user)` and `mt_pack_check(dir, kind, bundle, fn, user)` (the kind from `pack.strings`, else the files: `mt_pack_kind`). Each line has a level: **rejected** (a file the game rejects, or, with `opens` 0, the whole pack refused), **ignored** (a name or entry it passes over), **note**. The report counts what the game uses (`good`), rejects and ignores.
   - The game's bundle, when given, sizes the `ui/` images (k times the game's own image) and tells effects (the game's `.wav`) from tracks (`.mp3`), with their limits (60 s, 30 minutes). Without it, a `ui/` image is checked as itself and every sound as a track, each with a note.
-  - `pack.strings` is checked by ADR 0149's table in `runtime/src/textpack/pack_manifest.cpp`, for every kind: a broken one refuses the pack, as ADR 0149 says the game will.
+  - `pack.strings` is checked by #370's manifest reader (`mt_pack_manifest_read`, `maplethief/pack_manifest.h`), the one the packs screen and the start use, for every kind: a pack it refuses, the check refuses with the same reason. The check adds what the reader passes over in silence: keys given twice, keys format 1 lacks, a `content` that is neither `own` nor `derived` (`runtime/src/textpack/packcheck.cpp`).
   - `mt_packcheck_set_port_text`: the frontend hands its own text to the text check, which then passes over `Port.strings` keys the port lacks and translations whose `{0}` places differ, as `port_text.cpp` does at run time.
   - `mt_texpack_build(dump, pack, k, scaler, ui, fn, user)` (`maplethief/texpack.h`): `mtport.texpack build`'s rules (manifest lines with a bad name, a size that disagrees with the name or an unsafe `ui/` path skipped; Scale2x and Scale3x composed for 4x, 6x and 8x, nearest otherwise or on request), PNGs written atomically. `mt_texpack_dump_is_open` for the menu.
   - `mt_textpack_export(bundle, language, dir, fn, user)`: `pack.strings`, `Scripts.strings` and `ScriptExtra.strings` from the bundle's binary plists, `Tables.strings` from the text columns of the language's data tables (CP949 to UTF-8, each with its room), as `mtport.textpack export` lays them out.
@@ -57,9 +57,9 @@ The game binary already holds everything the tools need: the PNG codec and the t
 Made by the agent under Joris's delegation of 2026-11-13; Joris can veto any of them on the PR.
 
 1. The texture pack builder goes into the game binary; no separate tools download.
-2. The menu's tools write beside `game/` in fixed folders (`texture-dumps/dump`, `texture-packs/dump-2x`, `text-packs/text-<language>`), with no dialog; Make texture pack is 2x Scale2x, other factors on the command line.
+2. The menu's tools write in the packs screen's folders, at fixed paths (`texture-dumps/dump`, `texture-packs/dump-2x`, `text-packs/text-<language>`), with no dialog; Make texture pack is 2x Scale2x, other factors on the command line.
 3. The tools sit in the **Other** tab until the packs screen (#370) gives packs a tab of their own.
-4. The exports write `pack.strings`, and `mt_textpack_open` reads it as the manifest now.
+4. The exports write `pack.strings` (kind text, an id, content derived), not `textpack.strings`.
 
 ## Evidence
 

@@ -3,7 +3,9 @@
  * touching the game's files.
  *
  *   DIR/textpack.strings    the manifest (required): format "1", name, language (a tag such as
- *                           "de" or "pt-BR"); version, game_version, author optional
+ *                           "de" or "pt-BR"); version, game_version, author optional; or
+ *   DIR/pack.strings        ADR 0149's manifest for every pack kind (maplethief/pack_manifest.h),
+ *                           which counts when both are there
  *   DIR/Scripts.strings     the game's dialogue and quest text, by the keys of the bundle's
  *   DIR/ScriptExtra.strings   <language>.lproj files (-[NSBundle localizedStringForKey:...])
  *   DIR/Tables.strings      the data tables' text: "<table>.<row>.<column>" (item_etc.0.name),

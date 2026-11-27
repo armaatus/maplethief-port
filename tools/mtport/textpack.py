@@ -455,8 +455,8 @@ def export(pack: Path, bundle: Path, language: str = "en") -> dict[str, int]:
     port = port_english()
     _write(
         pack / "Port.strings",
-        "Port: the port's menus. Keep each {0}, {1}, ... (the menus show plain letters only: "
-        "accents are dropped).",
+        "Port: the port's menus. Keep each {0}, {1}, ... The menus show Latin with accents "
+        "and Hangul; a text longer than its room is cut with '...' (ADR 0206).",
         [(k, v, "") for k, v in port.items()],
     )
     counts["Port"] = len(port)

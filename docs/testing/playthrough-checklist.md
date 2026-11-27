@@ -21,7 +21,7 @@ It prints the counts: 138 quests, 5 bosses, 11 job advancements and 3 climbs in 
 - **Both job branches**: each branch's advancements and skills, for a second pass from the save before the second advancement.
 - **The three climbs** and **save and load** (the menu save, the import, save states, the autosave, and the maps where the game refuses to save).
 
-Each row ends with *Automated*: the CTest that already plays it to the end and checks it in guest memory, or `none yet`. The map is `RUNS` in the generator, from [chapter-1-quests.md](chapter-1-quests.md); [#295](https://github.com/armaatus/maplethief-port/issues/295)'s run coverage report can extend it.
+Each row ends with *Automated*: the CTest that already plays it to the end and checks it in guest memory, or `none yet`. The map is `RUNS` in the generator, from [chapter-1-quests.md](chapter-1-quests.md) and [chapter-2-quests.md](chapter-2-quests.md); [#295](https://github.com/armaatus/maplethief-port/issues/295)'s run coverage report can extend it.
 
 **`build/checklists/platforms.md`** (#92): a sign-off table with one row per platform (the Switch row points at the [Switch checklist](switch-checklist.md) and #245), then per platform the shorter pass (the bosses, job advancements, climbs, scenes, endings and save and load) with a column per preset (Original, Original + controller, Enhanced), and a controller-first section.
 

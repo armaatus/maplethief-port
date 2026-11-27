@@ -4,7 +4,8 @@
 // frontend's side: the folders, the port's own text, the report's words, the menu's rows and
 // the command line.
 //
-// Where the tools write, beside game/ (ADR 0149's pack folders; DataLocation::bundle_parent()):
+// Where the tools write: the pack folders the packs screen lists (packs.h; game.cpp's
+// packs_base(): <base>, or the folder that holds game/ where there is none):
 //
 //   <parent>/texture-dumps/dump/        Dump textures (the menu) writes here
 //   <parent>/texture-packs/dump-<k>x/   Make texture pack builds the dump k times larger here

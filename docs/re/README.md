@@ -25,6 +25,7 @@ The pages marked *generated* are written by a tool from your own copy of the gam
 | Page | What |
 |---|---|
 | [The game's rules](mechanics.md) | Damage, hits, drops, EXP, items, skills and death |
+| [Boss fights](boss-fights.md) | What starts and ends each boss fight: the map's spawn, the map script's entrance scene (the Yeti's map has none), and the end scene the program plays |
 | [Audio](audio.md) | Sound ids, files, and the code that plays them (*partly generated*) |
 | [Text](text.md) | Where the game's words come from, their encoding, wrapping and drawing |
 | [Map and area names](map-names.md) | How a map's name is picked |

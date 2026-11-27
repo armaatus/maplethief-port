@@ -1,8 +1,8 @@
-// The pack manifest, pack.strings (ADR 0149), as the checks read it, and the check that tells a
-// pack's kind (#371, ADR 0205, maplethief/packcheck.h). The manifest is untrusted data in ADR
-// 0108's .strings syntax: strings_file.cpp parses it with its limits.
+// The pack manifest (#370, ADR 0149, maplethief/pack_manifest.h): pack.strings (or a text
+// pack's textpack.strings) through strings_file.cpp's strict parser, then ADR 0149's rules.
+#include "maplethief/pack_manifest.h"
+
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -11,64 +11,97 @@
 #include <system_error>
 #include <vector>
 
-#include "maplethief/packcheck.h"
 #include "maplethief/textpack.h"
-#include "textpack/packcheck_internal.h"
 #include "textpack/strings_file.h"
 
-namespace mt_packcheck {
+namespace {
 
 namespace fs = std::filesystem;
+using Entries = std::map<std::string, std::string>;
 
 fs::path host_path(const std::string &utf8) {
     return fs::path(std::u8string(utf8.begin(), utf8.end()));
 }
 
 std::string utf8_of(const fs::path &p) {
-    const std::u8string s = p.generic_u8string();
+    const std::u8string s = p.u8string();
     return std::string(s.begin(), s.end());
 }
 
-bool parse_version(const std::string &v, unsigned out[3]) {
-    std::size_t at = 0;
-    for (int part = 0; part < 3; ++part) {
-        const std::size_t start = at;
-        unsigned n = 0;
-        while (at < v.size() && v[at] >= '0' && v[at] <= '9' && at - start < 6) {
-            n = n * 10u + static_cast<unsigned>(v[at] - '0');
-            ++at;
-        }
-        if (at == start) {
-            return false;
-        }
-        out[part] = n;
-        if (part < 2) {
-            if (at >= v.size() || v[at] != '.') {
-                return false;
-            }
-            ++at;
-        }
-    }
-    // A release candidate counts as its version: "-rc.N" and nothing else may follow.
-    return at == v.size() || v.compare(at, 4, "-rc.") == 0;
+template <std::size_t N> void put(char (&field)[N], const std::string &value) {
+    const std::string cut = mt_textpack::utf8_cut(value, N - 1);
+    std::memcpy(field, cut.data(), cut.size());
+    field[cut.size()] = 0;
 }
 
-namespace {
-
-// The characters (not bytes) of UTF-8 text the parser has checked.
-std::size_t chars(const std::string &s) {
+// Characters (code points) of valid UTF-8.
+std::size_t characters(const std::string &s) {
     std::size_t n = 0;
     for (const char c : s) {
-        n += (static_cast<unsigned char>(c) & 0xC0u) != 0x80u ? 1u : 0u;
+        n += (static_cast<unsigned char>(c) & 0xC0) != 0x80 ? 1 : 0;
     }
     return n;
 }
 
-bool valid_id(const std::string &id) {
-    if (id.empty() || id.size() > 64) {
+// The folder's own name: the last part of `dir`, without a trailing separator.
+std::string folder_name(const std::string &dir) {
+    std::string d = dir;
+    while (d.size() > 1 && (d.back() == '/' || d.back() == '\\')) {
+        d.pop_back();
+    }
+    const std::size_t cut = d.find_last_of("/\\");
+    return cut == std::string::npos ? d : d.substr(cut + 1);
+}
+
+// The manifest file in `root` named `want` (any case), not a symbolic link; empty if none.
+fs::path find_file(const fs::path &root, const char *want) {
+    std::error_code ec;
+    for (const auto &entry : fs::directory_iterator(root, ec)) {
+        std::string name = utf8_of(entry.path().filename());
+        for (char &c : name) {
+            c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+        }
+        std::error_code fe;
+        const fs::file_status status = entry.symlink_status(fe);
+        if (name == want && !fe && fs::is_regular_file(status)) {
+            return entry.path();
+        }
+    }
+    return {};
+}
+
+// Reads and parses the .strings file at `path`; false with `*why` ("line 3: ...").
+bool read_strings(const fs::path &path, Entries *out, std::string *why) {
+    std::error_code ec;
+    const std::uintmax_t size = fs::file_size(path, ec);
+    if (ec) {
+        *why = "cannot be read";
         return false;
     }
-    for (std::size_t i = 0; i < id.size(); ++i) {
+    if (size > MT_TEXTPACK_MAX_FILE) {
+        *why = "larger than " + std::to_string(MT_TEXTPACK_MAX_FILE >> 20) + " MiB";
+        return false;
+    }
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+    std::ifstream in(path, std::ios::binary);
+    if (!in || (size > 0 && !in.read(reinterpret_cast<char *>(bytes.data()),
+                                     static_cast<std::streamsize>(size)))) {
+        *why = "cannot be read";
+        return false;
+    }
+    mt_textpack::StringsFile file;
+    if (!mt_textpack::parse_strings(bytes.data(), bytes.size(), &file, why)) {
+        return false;
+    }
+    *out = std::move(file.entries);
+    return true;
+}
+
+bool valid_id(const std::string &id) {
+    if (id.empty() || id.size() > MT_PACK_MAX_ID) {
+        return false;
+    }
+    for (std::size_t i = 0; i < id.size(); i++) {
         const char c = id[i];
         const bool alnum = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
         if (!alnum && (i == 0 || (c != '.' && c != '_' && c != '-'))) {
@@ -78,7 +111,6 @@ bool valid_id(const std::string &id) {
     return true;
 }
 
-// ADR 0108's rule: letters, digits, '-' and '_', at most 35.
 bool valid_language(const std::string &tag) {
     if (tag.empty() || tag.size() > 35) {
         return false;
@@ -93,247 +125,203 @@ bool valid_language(const std::string &tag) {
     return true;
 }
 
-constexpr const char *k_game_version = "1.5";
-
-// The keys ADR 0149 names: unknown ones are ignored, so a later format 1 may add some.
-constexpr const char *k_keys[] = {"format",       "kind",     "id",          "name",
-                                  "version",      "author",   "description", "language",
-                                  "game_version", "port_min", "content",     "license"};
-
-} // namespace
-
-bool check_manifest(const fs::path &dir, const char *kind, Reporter &r,
-                    std::map<std::string, std::string> *out) {
-    out->clear();
-    const fs::path path = dir / k_manifest;
-    std::error_code ec;
-    const fs::file_status st = fs::symlink_status(path, ec);
-    if (ec || !fs::exists(st)) {
-        r.note(std::string(k_manifest) + ": none: the game shows the folder's name");
+// X.Y.Z[-rc.N] as four numbers (N: UINT64_MAX for a release, so it sorts after its rcs).
+bool parse_version(const char *text, std::uint64_t (&v)[4]) {
+    if (text == nullptr) {
         return false;
     }
-    if (fs::is_symlink(st) || !fs::is_regular_file(st)) {
-        r.ignored(std::string(k_manifest) + ": not a file of its own (a link is never followed)");
-        return false;
-    }
-    const std::uintmax_t size = fs::file_size(path, ec);
-    std::vector<std::uint8_t> bytes;
-    std::string why;
-    if (ec) {
-        why = "cannot be read";
-    } else if (size > MT_TEXTPACK_MAX_FILE) {
-        why = "larger than " + std::to_string(MT_TEXTPACK_MAX_FILE >> 20) + " MiB";
-    } else {
-        std::ifstream in(path, std::ios::binary);
-        bytes.resize(static_cast<std::size_t>(size));
-        if (!in || (size > 0 && !in.read(reinterpret_cast<char *>(bytes.data()),
-                                         static_cast<std::streamsize>(size)))) {
-            why = "cannot be read";
+    const char *p = text;
+    for (int i = 0; i < 3; i++) {
+        if (*p < '0' || *p > '9' || (*p == '0' && p[1] >= '0' && p[1] <= '9')) {
+            return false;
+        }
+        std::uint64_t n = 0;
+        for (; *p >= '0' && *p <= '9'; p++) {
+            if (n > 1'000'000'000) {
+                return false;
+            }
+            n = n * 10 + static_cast<std::uint64_t>(*p - '0');
+        }
+        v[i] = n;
+        if (i < 2 && *p++ != '.') {
+            return false;
         }
     }
-    mt_textpack::StringsFile file;
-    // A parse error's reason names its line ("line 3: ...").
-    if (!why.empty() || !mt_textpack::parse_strings(bytes.data(), bytes.size(), &file, &why)) {
-        r.refused(std::string(k_manifest) + ": " + why + ": the pack is refused");
+    v[3] = UINT64_MAX;
+    if (*p == 0) {
         return true;
     }
-    if (file.duplicates != 0) {
-        r.note(std::string(k_manifest) + ": " + std::to_string(file.duplicates) +
-               " keys given more than once: the last value of each kept");
+    if (std::strncmp(p, "-rc.", 4) != 0 || p[4] < '0' || p[4] > '9') {
+        return false;
     }
-    const auto &m = file.entries;
+    std::uint64_t n = 0;
+    for (p += 4; *p >= '0' && *p <= '9'; p++) {
+        if (n > 1'000'000'000) {
+            return false;
+        }
+        n = n * 10 + static_cast<std::uint64_t>(*p - '0');
+    }
+    v[3] = n;
+    return *p == 0;
+}
+
+// Why ADR 0149 refuses `m` as a pack of `kind` for `port`, or "".
+std::string check(const Entries &m, const std::string &kind, const char *port, bool own) {
     const auto get = [&m](const char *k) {
         const auto it = m.find(k);
         return it != m.end() ? it->second : std::string();
     };
-    const auto refuse = [&r](const std::string &reason) {
-        r.refused(std::string(k_manifest) + ": " + reason + ": the pack is refused");
-    };
     const std::string format = get("format");
     if (format.empty()) {
-        refuse("it has no \"format\"");
-    } else if (format != "1") {
-        unsigned v[3] = {0, 0, 0};
-        const bool number = format.find_first_not_of("0123456789") == std::string::npos &&
-                            format.size() < 7 && parse_version(format + ".0.0", v);
-        refuse(number && v[0] > 1 ? "pack format " + format + " needs a newer port"
-                                  : "its \"format\" is not \"1\"");
+        return "it has no \"format\"";
     }
-    const std::string k = get("kind");
-    if (k != "texture" && k != "audio" && k != "text") {
-        refuse("its \"kind\" is not texture, audio or text");
-    } else if (kind != nullptr && *kind != '\0' && k != kind) {
-        refuse("a " + k + " pack, opened as a " + kind + " pack");
+    if (format != "1") {
+        const bool number =
+            format.size() <= 9 && format.find_first_not_of("0123456789") == std::string::npos;
+        return number && format[0] != '0' ? "pack format " + format + " needs a newer port"
+                                          : "its \"format\" is not a number";
     }
-    if (!valid_id(get("id"))) {
-        refuse("its \"id\" is not 1 to 64 of a-z, 0-9, '.', '_' and '-', starting with a letter "
-               "or digit");
+    if (own) {
+        const std::string k = get("kind");
+        if (k.empty()) {
+            return "it has no \"kind\"";
+        }
+        if (k != "texture" && k != "audio" && k != "text") {
+            return "its \"kind\" is not texture, audio or text";
+        }
+        if (k != kind) {
+            return "it is a" + std::string(k == "audio" ? "n " : " ") + k + " pack, not a" +
+                   (kind == "audio" ? "n " : " ") + kind + " pack";
+        }
+        if (!valid_id(get("id"))) {
+            return "its \"id\" is not 1 to 64 of a-z, 0-9, '.', '_' and '-'";
+        }
     }
     const std::string name = get("name");
-    if (name.empty() || chars(name) > 64) {
-        refuse("its \"name\" is missing or longer than 64 characters");
+    if (name.empty()) {
+        return "it has no \"name\"";
     }
-    const struct {
-        const char *key;
-        std::size_t max;
-    } lengths[] = {{"version", 32}, {"author", 128}, {"description", 1024}};
-    for (const auto &l : lengths) {
-        if (chars(get(l.key)) > l.max) {
-            refuse("its \"" + std::string(l.key) + "\" is longer than " + std::to_string(l.max) +
-                   " characters");
-        }
+    if (characters(name) > MT_PACK_MAX_NAME) {
+        return "its \"name\" is longer than 64 characters";
     }
-    const std::string language = get("language");
-    if ((k == "text" || !language.empty()) && !valid_language(language)) {
-        refuse("its \"language\" is not a language tag (letters, digits and '-', such as \"de\" "
-               "or \"pt-BR\")");
+    if (characters(get("version")) > MT_PACK_MAX_VERSION) {
+        return "its \"version\" is longer than 32 characters";
+    }
+    if (characters(get("author")) > MT_PACK_MAX_AUTHOR) {
+        return "its \"author\" is longer than 128 characters";
+    }
+    if (characters(get("description")) > MT_PACK_MAX_DESCRIPTION) {
+        return "its \"description\" is longer than 1,024 characters";
+    }
+    if (kind == "text" && !valid_language(get("language"))) {
+        return "its \"language\" is not a language tag (such as \"de\" or \"pt-BR\")";
     }
     const std::string game = get("game_version");
-    if (!game.empty() && game != k_game_version) {
-        refuse("made for the game's version " + game + "; this port runs " + k_game_version);
+    if (!game.empty() && game != MT_PACK_MANIFEST_GAME) {
+        return "made for the game's version " + mt_textpack::utf8_cut(game, 16) +
+               "; this port runs " MT_PACK_MANIFEST_GAME;
     }
     const std::string port_min = get("port_min");
-    unsigned want[3] = {0, 0, 0}, have[3] = {0, 0, 0};
-    if (!port_min.empty() && !parse_version(port_min, want)) {
-        refuse("its \"port_min\" is not a version X.Y.Z");
-    } else if (!port_min.empty() && parse_version(MT_VERSION, have) &&
-               (want[0] != have[0]   ? want[0] > have[0]
-                : want[1] != have[1] ? want[1] > have[1]
-                                     : want[2] > have[2])) {
-        refuse("needs port " + port_min + " or later; this is " + MT_VERSION);
-    }
-    const std::string content = get("content");
-    if (!content.empty() && content != "own" && content != "derived") {
-        r.ignored(std::string(k_manifest) + ": its \"content\" is neither own nor derived: not "
-                                            "shown");
-    }
-    for (const auto &[key, value] : m) {
-        bool known = false;
-        for (const char *kk : k_keys) {
-            known = known || key == kk;
+    if (!port_min.empty()) {
+        std::uint64_t v[4];
+        if (!parse_version(port_min.c_str(), v)) {
+            return "its \"port_min\" is not a version (X.Y.Z)";
         }
-        if (!known) {
-            r.note(std::string(k_manifest) + ": \"" + key + "\" is not a key of format 1: ignored");
+        int ok = 0;
+        if (port != nullptr && port[0] != 0 &&
+            mt_pack_compare_versions(port_min.c_str(), port, &ok) > 0 && ok != 0) {
+            return "needs port " + port_min + " or later; this is " + port;
         }
     }
-    *out = m;
-    return true;
-}
-
-} // namespace mt_packcheck
-
-namespace {
-
-namespace fs = std::filesystem;
-using mt_packcheck::host_path;
-using mt_packcheck::utf8_of;
-
-std::string lower(std::string s) {
-    for (char &c : s) {
-        c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-    }
-    return s;
-}
-
-// The kind's name as a static string, for the report.
-const char *kind_name(const std::string &k) {
-    return k == "texture" ? "texture" : k == "audio" ? "audio" : k == "text" ? "text" : "";
+    return "";
 }
 
 } // namespace
 
-extern "C" const char *mt_pack_kind(const char *dir) noexcept {
+extern "C" int mt_pack_compare_versions(const char *a, const char *b, int *ok) MT_NOEXCEPT {
+    std::uint64_t x[4], y[4];
+    const bool good = parse_version(a, x) && parse_version(b, y);
+    if (ok != nullptr) {
+        *ok = good ? 1 : 0;
+    }
+    if (!good) {
+        return 0;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (x[i] != y[i]) {
+            return x[i] < y[i] ? -1 : 1;
+        }
+    }
+    return 0;
+}
+
+extern "C" int mt_pack_manifest_read(const char *dir, const char *kind, const char *port_version,
+                                     mt_pack_manifest *out) MT_NOEXCEPT {
+    if (out == nullptr) {
+        return 0;
+    }
+    *out = mt_pack_manifest{};
+    const std::string k = kind != nullptr ? kind : "";
+    const std::string d = dir != nullptr ? dir : "";
     try {
-        if (dir == nullptr || *dir == '\0') {
-            return "";
+        const std::string folder = folder_name(d);
+        put(out->kind, k);
+        put(out->name, folder);
+        put(out->id, folder);
+        const auto refuse = [out](const std::string &why) {
+            put(out->refused, why);
+            return 0;
+        };
+        if (k != "texture" && k != "audio" && k != "text") {
+            return refuse("no such pack kind");
         }
-        const fs::path root = host_path(dir);
         std::error_code ec;
-        if (!fs::is_directory(root, ec)) {
-            return "";
+        const fs::path root = host_path(d);
+        if (d.empty() || !fs::is_directory(root, ec)) {
+            return refuse("the folder is missing");
         }
-        mt_packcheck::Reporter quiet(nullptr, nullptr, "");
-        std::map<std::string, std::string> m;
-        if (mt_packcheck::check_manifest(root, nullptr, quiet, &m)) {
-            const auto it = m.find("kind");
-            if (it != m.end() && *kind_name(it->second) != '\0') {
-                return kind_name(it->second);
+        fs::path file = find_file(root, "pack.strings");
+        const bool own = !file.empty();
+        if (!own && k == "text") {
+            file = find_file(root, "textpack.strings");
+            if (file.empty()) {
+                return refuse("it has no pack.strings or textpack.strings");
             }
         }
-        bool texture = false, audio = false, text = false;
-        unsigned seen = 0;
-        for (fs::directory_iterator it(root, ec), end; !ec && it != end && seen < 4096;
-             it.increment(ec), ++seen) {
-            const std::string name = lower(utf8_of(it->path().filename()));
-            const std::size_t dot = name.rfind('.');
-            const std::string ext = dot == std::string::npos ? "" : name.substr(dot + 1);
-            if (name == mt_packcheck::k_text_manifest) {
-                text = true;
-            } else if (name == "ui" || (ext == "png" && name.size() > 17 && name[16] == '_')) {
-                texture = true;
-            } else if (ext == "wav" || ext == "mp3" || ext == "flac" || ext == "loop") {
-                audio = true;
-            }
+        if (file.empty()) {
+            return 1; // a bare texture or audio folder (ADR 0081, 0106)
         }
-        return text ? "text" : texture ? "texture" : audio ? "audio" : "";
+        put(out->source, own ? "pack.strings" : "textpack.strings");
+        Entries m;
+        std::string why;
+        if (!read_strings(file, &m, &why)) {
+            return refuse(std::string(out->source) + ": " + why);
+        }
+        const auto get = [&m](const char *key) {
+            const auto it = m.find(key);
+            return it != m.end() ? it->second : std::string();
+        };
+        if (!get("name").empty()) {
+            put(out->name, get("name"));
+        }
+        if (own && valid_id(get("id"))) {
+            put(out->id, get("id"));
+        }
+        put(out->version, get("version"));
+        put(out->author, get("author"));
+        put(out->description, get("description"));
+        put(out->language, get("language"));
+        put(out->game_version, get("game_version"));
+        put(out->port_min, get("port_min"));
+        put(out->content, get("content"));
+        put(out->license, get("license"));
+        why = check(m, k, port_version, own);
+        if (!why.empty()) {
+            return refuse(std::string(out->source) + ": " + why);
+        }
+        return 1;
     } catch (...) {
-        return "";
+        put(out->refused, "the folder cannot be read");
+        return 0;
     }
-}
-
-extern "C" mt_packcheck_report mt_pack_check(const char *dir, const char *kind, const char *bundle,
-                                             mt_packcheck_fn fn, void *user) noexcept {
-    const char *k = kind != nullptr && *kind != '\0' ? kind : mt_pack_kind(dir);
-    if (std::strcmp(k, "texture") == 0) {
-        return mt_texpack_check(dir, bundle, fn, user);
-    }
-    if (std::strcmp(k, "audio") == 0) {
-        return mt_audio_pack_check(dir, bundle, fn, user);
-    }
-    if (std::strcmp(k, "text") == 0) {
-        return mt_textpack_check(dir, fn, user);
-    }
-    mt_packcheck::Reporter r(fn, user, "");
-    r.refused(std::string(dir != nullptr ? dir : "") +
-              ": no pack of any kind (no pack.strings, textpack.strings, texture or sound file)");
-    return r.report;
-}
-
-extern "C" uint32_t mt_textpack_quote(const char *s, char *out, uint32_t size) noexcept {
-    std::string q = "\"";
-    for (const char *p = s != nullptr ? s : ""; *p != '\0'; ++p) {
-        const auto c = static_cast<unsigned char>(*p);
-        switch (c) {
-        case '"':
-            q += "\\\"";
-            break;
-        case '\\':
-            q += "\\\\";
-            break;
-        case '\n':
-            q += "\\n";
-            break;
-        case '\t':
-            q += "\\t";
-            break;
-        case '\r':
-            q += "\\r";
-            break;
-        default:
-            if (c < 0x20u || c == 0x7Fu) {
-                char esc[8];
-                std::snprintf(esc, sizeof esc, "\\U%04X", static_cast<unsigned>(c));
-                q += esc;
-            } else {
-                q += static_cast<char>(c);
-            }
-        }
-    }
-    q += '"';
-    if (out != nullptr && size != 0) {
-        const std::size_t n = q.size() < size ? q.size() : size - 1u;
-        std::memcpy(out, q.data(), n);
-        out[n] = '\0';
-    }
-    return static_cast<uint32_t>(q.size());
 }

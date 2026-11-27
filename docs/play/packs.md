@@ -6,15 +6,16 @@ A pack is a folder that changes what the game shows or plays, without touching t
 
 ## Where the tools work
 
-The tools are rows in the settings menu's **Other** tab (F1, or the gear), and options on the command line. They read and write in the pack folders, which sit next to the game's `game/` folder:
+The tools are rows in the settings menu's **Other** tab (F1, or the gear), and options on the command line. They read and write in the pack folders the [packs screen](settings.md#the-packs-screen) lists:
 
-| System | The folder that holds `game/` |
+| System | The folder that holds the pack folders |
 |---|---|
-| Windows, Linux, Mac | Next to the program, or in your user folder when the game keeps its data there (the **Saves** tab names the data folder) |
+| Windows, Linux | The program's folder |
+| Mac | The folder that holds `MapleThief.app` |
 | iPhone | The app's folder in the Files app |
 | Nintendo Switch | `sdmc:/switch/maplethief/` |
 
-In it the tools use `texture-dumps/` for the dump, and `texture-packs/`, `audio-packs/` and `text-packs/` for the packs. Put a pack's folder in its pack folder and the game finds it there; a pack anywhere else works too, by its path.
+In it the tools use `texture-dumps/` for the dump, and `texture-packs/`, `audio-packs/` and `text-packs/` for the packs. A pack in its pack folder shows up in the packs screen; a pack anywhere else works too, by its path.
 
 To run a tool from the command line, open a terminal in the game's folder and start the program with the option: `MapleThief.exe --check-pack MyPack` on Windows, `./MapleThief.app/Contents/MacOS/MapleThief --check-pack MyPack` on a Mac, `./MapleThief.sh --check-pack MyPack` on Linux. A tool prints its report, doesn't open a window, and exits.
 
@@ -43,9 +44,9 @@ A texture pack is a folder of pictures the game draws instead of its own: HD ver
    - **By hand**: make a folder in `texture-packs/`, copy the PNGs you want to change from the dump into it, and edit them in any image editor. Keep each file's name, and make the picture the same size or a whole multiple of it (2, 3, … 8 times as wide and as high, at most 4096 pixels a side). Keep transparent areas transparent.
 3. **Name it** (optional): a file `pack.strings` in the pack's folder gives the name, version and author the game shows. See [The pack.strings file](#the-packstrings-file).
 4. **Check it**: **Other → Check packs**, or `MapleThief --check-pack texture-packs/MyPack`.
-5. **Play with it**: set **Video → Texture pack** to the folder (or `texture_pack = /path/to/MyPack` in `settings.ini`, or start with `--texture-pack /path/to/MyPack`) and start the game again. When it quits, the log says how many pictures the pack replaced.
+5. **Play with it**: choose **Video → Texture pack** to open the packs screen and turn the pack on (or set `texture_pack = /path/to/MyPack` in `settings.ini`, or start with `--texture-pack /path/to/MyPack`), then start the game again. When it quits, the log says how many pictures the pack replaced.
 
-At a render scale above 1, **Video → Texture filter** `nearest` keeps a pack's pixels crisp. A picture the dump didn't see (a map you didn't visit) stays the game's own: dump again into the same folder, which adds only what's new, and make the pack again. On the Nintendo Switch the pack rows list the folders in `texture-packs/`.
+At a render scale above 1, **Video → Texture filter** `nearest` keeps a pack's pixels crisp. A picture the dump didn't see (a map you didn't visit) stays the game's own: dump again into the same folder, which adds only what's new, and make the pack again.
 
 The steps behind this are in [ADR 0081](../adr/0081-texture-packs-and-nearest-texture-filter.md) and [ADR 0205](../adr/0205-pack-tools-in-the-game.md).
 
@@ -58,7 +59,7 @@ An audio pack is a folder of your own music and sound files that play instead of
 3. **Loops** (optional): music loops by itself, as the game's does. To loop only part of a track (an intro, then a loop), add `31.loop`, a text file with two numbers: the sample frame where the loop starts and the one where it ends (the end isn't played), in your file's own frames, for example `441000 2646000`. A WAV with a loop saved by a sound editor (a `smpl` loop) works too.
 4. **Name it** (optional) with a `pack.strings`, with `content = "own";` when everything in it is yours.
 5. **Check it**: **Other → Check packs**, or `MapleThief --check-pack audio-packs/MyPack`. The check knows from the game's files which of your files are effects and which are music, and says which game sound each one replaces.
-6. **Play with it**: set **Audio → Audio pack** to the folder (or `audio_pack = /path/to/MyPack`, or `--audio-pack /path/to/MyPack`) and start the game again.
+6. **Play with it**: choose **Audio → Audio pack** and turn the pack on in the packs screen (or `audio_pack = /path/to/MyPack`, or `--audio-pack /path/to/MyPack`) and start the game again.
 
 A file the game can't use (damaged, too long, too many channels) is skipped: the game's own sound plays instead, and the log says why, once. An audio pack of only your own music and sounds can be shared in the project's Discussions ([Sharing packs](sharing-packs.md)).
 
@@ -75,7 +76,7 @@ A text pack is a folder of translated text: the game's dialogue, the names and d
    From the command line: `MapleThief --export-text text-packs/MyTranslation` (add `--language ko` for the Korean text).
 2. **Rename and translate.** Rename the folder, then in `pack.strings` give the pack your own `id` and `name`, set its `language` (`de`, `fr`, `pt-BR`, …) and your name as `author`. Translate the values, the text on the right of each `=`, in any text editor that saves UTF-8. Keep the keys on the left as they are, and keep each `{0}`, `{1}`, … in `Port.strings`. Delete the lines you don't translate: anything a pack doesn't have stays in the game's own words.
 3. **Check it**: **Other → Check packs**, or `MapleThief --check-pack text-packs/MyTranslation`. It says which values will be cut to fit and which keys the game doesn't have.
-4. **Play with it**: set **Other → Text pack** to the folder (or `text_pack = /path/to/MyTranslation`, or `--text-pack /path/to/MyTranslation`) and start the game again.
+4. **Play with it**: choose **Other → Text pack** and turn the pack on in the packs screen (or `text_pack = /path/to/MyTranslation`, or `--text-pack /path/to/MyTranslation`) and start the game again.
 
 The game's text is drawn with its own font, plus a second font for accented Latin, Greek and Cyrillic letters. Names and descriptions have a fixed room in the game's tables: a longer one is cut at a whole letter, and the log says so, once. The format is described in [the text pack spec](../formats/text-pack.md).
 

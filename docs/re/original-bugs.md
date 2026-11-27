@@ -38,6 +38,7 @@ Each fix has a test with the setting off (the original behaviour) and on.
 | 16 | [Chapter 1's main quest 20 is never completed](#16-chapter-1s-main-quest-20-is-never-completed) | `chapter1/Pirate.out` (`toOrbis`), `clearAll` `0x996ED` | chapter 1's end | main 20 stays in progress until `clearAll` resets it with every quest | **Fixed in Enhanced** (to do, #388) |
 | 17 | [A `crestore` receipt is granted twice](#17-a-crestore-receipt-is-granted-twice) | the Cash button's restore (popup `0x25D`, purchase kind 3), `CDataMgr::OnServerPacket` `0x3ED19` | the Cash button with one receipt in `crestore` | the receipt goes to the server twice (op 2) and the product is granted twice | **Kept** |
 | 18 | [`totalrestore` grants no EXP pack](#18-totalrestore-grants-no-exp-pack) | `CStateGame::Paint` `0x87501` (popup `0x267`, kind 6), `CDataMgr::OnServerPacket` `0x3ED19` (op 5) | an `exppack1` receipt in `totalrestore` | "Restoration Complete!", the list emptied, no EXP; the cash shop opens | **Kept** |
+| 19 | [A boss killed while the hero is knocked back locks its end scene](#19-a-boss-killed-while-the-hero-is-knocked-back-locks-its-end-scene) | `CMob::Die` `0x73349`, `CStateGame::OnKeyPressed` `0x8D4C9` (the knock-back gate at its top), `CHero::vf2` `0x66189` | the boss's last hit landed while the hero is knocked back (`CHero +0x119`) | the end scene's box takes no key: the app must be quit, and the boss fought again | **Fixed in Enhanced** (to do, [#420](https://github.com/armaatus/maplethief-port/issues/420)) |
 
 ### 1. Play before the engine's main menu
 
@@ -214,6 +215,16 @@ Found by [#304](https://github.com/armaatus/maplethief-port/issues/304), with 17
 - **In the port today.** The same, with the fake server: EXP and level unchanged, meso unchanged, the receipt gone.
 - **Why kept.** As 17: the trigger needs an interrupted purchase and a server; what op 5 grants for the other products was not checked.
 - **Tests.** `play.systems2_cash_restores_synthetic` (real assets): popups `0x267`, `0x268`, `0x269`, op 4 sent, the list empty, level 30 EXP 0 before and after, game mode 11 after the popup.
+
+### 19. A boss killed while the hero is knocked back locks its end scene
+
+Found by [#298](https://github.com/armaatus/maplethief-port/issues/298) (`play.chapter_2_f_synthetic`; [testing/chapter-2-quests.md](../testing/chapter-2-quests.md)).
+
+- **Cause.** `CMob::Die` `0x73349` queues a boss's end scene in world `+0x1E4` (mob 64: scene 4, 66: 6, 67: 10, 68: 8, 69: 1), sets game mode 10 and turns the key pad off; `CStateGame::Paint` `0x87501` then starts it (`StartScene` `0x853E5`: game mode 9, panel 3). No map script takes part, so it is the same on every boss map. The scene's speech box (command 50) waits for a key, and only `CStateGame::OnKeyPressed` `0x8D4C9` closes it. That handler first drops every key while the hero's knock-back byte `CHero +0x119` is set, and only `CHero::vf2` `0x66189` clears it, when the hero lands. `vf2` runs from the field update (`0x6DE09`, Paint's game mode 0), which game mode 9 does not call. So when the boss's last hit lands while the hero is in the air from a hit, the hero never lands and the box never closes.
+- **On the device.** Every key and the tap on the box go through the same handler, so nothing gets past it: the player has to quit the app and load the last save. Boss maps refuse the save, so the boss is fought again.
+- **In the port today.** The same. A level-80 run of part F killed mob 68 with the hero at y 265 (airborne, hit just before) and stayed in the scene for 15 minutes with A pressed every 0.6 s; in the debugger the key reached `0x8D4C9` (−5, game mode 9, scene 8, box `+0x1E9` 1) with `CHero +0x119` 1. Runs that killed the boss standing played scene 8 through. The bot now starts no attack on a boss while the hero is knocked back (`FarmStyle::land_first`).
+- **The repair.** With the setting on, clear the hero's knock-back state (`+0x119`, and its partner `+0x108`) when a scene starts, so the scene's keys are heard. Touched: a hook on `StartScene` `0x853E5`. **Risk: low.** The hero stands still in a scene anyway; the change is only that the keys reach the box.
+- **Tests (to do).** A real-asset run that kills a boss with the hero knocked back: off, still in game mode 9 after a minute of keys; on, the scene ends.
 
 ## Unreachable content
 

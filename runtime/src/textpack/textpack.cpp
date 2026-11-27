@@ -82,8 +82,8 @@ constexpr TextColumn k_columns[] = {
     {"skill", "detail", 169, 128, 19, 297},
 };
 
-// The files a pack may have, by their name in lower case, and the table each serves. The
-// manifest is pack.strings (ADR 0149) or, without one, textpack.strings (ADR 0108).
+// The files a pack may have, by their name in lower case, and the table each serves.
+// pack.strings (ADR 0149) is the manifest when it is there; else textpack.strings (ADR 0108).
 constexpr const char *k_files[][2] = {
     {"pack.strings", "pack"},       {"textpack.strings", "textpack"},
     {"scripts.strings", "Scripts"}, {"scriptextra.strings", "ScriptExtra"},
@@ -395,32 +395,9 @@ extern "C" int mt_textpack_open(const char *dir) noexcept {
         pack.dir = dir;
         mt_textpack_stats stats{};
         std::map<std::string, std::string> manifest;
-        // pack.strings counts when it is there (ADR 0149): checked by its own rules.
-        const bool has_pack = found.count("pack") != 0;
-        if (has_pack) {
-            std::string first;
-            mt_packcheck::Reporter rep(
-                [](void *user, int level, const char *line) {
-                    auto *out = static_cast<std::string *>(user);
-                    if (level == MT_PACKCHECK_REJECTED && out->empty()) {
-                        *out = line;
-                    }
-                },
-                &first, "text");
-            mt_packcheck::check_manifest(root, "text", rep, &manifest);
-            if (rep.report.opens == 0) {
-                logf("textpack: %s/%s: no text pack", dir, first.c_str());
-                return -1;
-            }
-            stats.files++;
-            if (found.count("textpack") != 0) {
-                logf("textpack: %s: pack.strings is the manifest: textpack.strings ignored", dir);
-            }
-        }
         for (const auto &f : k_files) {
             const auto it = found.find(f[1]);
-            if (it == found.end() || std::strcmp(f[1], "pack") == 0 ||
-                (has_pack && std::strcmp(f[1], "textpack") == 0)) {
+            if (it == found.end()) {
                 continue;
             }
             const std::string path = utf8_of(it->second);
@@ -439,8 +416,17 @@ extern "C" int mt_textpack_open(const char *dir) noexcept {
                      path.c_str(), file.duplicates);
             }
             const std::string table = f[1];
-            if (table == "textpack") {
+            if (table == "pack") {
                 manifest = std::move(file.entries);
+                continue;
+            }
+            if (table == "textpack") {
+                if (found.count("pack") != 0) {
+                    logf("textpack: %s: pack.strings is the manifest: textpack.strings ignored",
+                         dir);
+                } else {
+                    manifest = std::move(file.entries);
+                }
                 continue;
             }
             stats.entries += static_cast<u32>(file.entries.size());
@@ -461,18 +447,18 @@ extern "C" int mt_textpack_open(const char *dir) noexcept {
                 pack.tables[table] = std::move(file.entries);
             }
         }
-        if (!has_pack && found.count("textpack") == 0) {
+        const char *manifest_name = found.count("pack") != 0 ? "pack.strings" : "textpack.strings";
+        if (found.count("pack") == 0 && found.count("textpack") == 0) {
             logf("textpack: %s has no pack.strings or textpack.strings (the manifest): no text "
                  "pack",
                  dir);
             return -1;
         }
-        const std::string bad = has_pack ? std::string()
-                                : manifest.empty() && stats.refused != 0
+        const std::string bad = manifest.empty() && stats.refused != 0
                                     ? std::string("the manifest was refused")
                                     : check_manifest(manifest);
         if (!bad.empty()) {
-            logf("textpack: %s/textpack.strings: %s: no text pack", dir, bad.c_str());
+            logf("textpack: %s/%s: %s: no text pack", dir, manifest_name, bad.c_str());
             return -1;
         }
         pack.tables["textpack"] = std::move(manifest);

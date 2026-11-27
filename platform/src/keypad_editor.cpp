@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
 
 #include "canvas.h"
 #include "gamepad.h"
@@ -29,7 +30,30 @@ constexpr Txt kButtonLabels[KeypadEditor::kButtonCount] = {
     Txt::keypad_size_down, Txt::keypad_size_up,   Txt::keypad_opacity_down, Txt::keypad_opacity_up,
     Txt::keypad_reset,     Txt::keypad_reset_all, Txt::keypad_save,         Txt::keypad_cancel};
 
-int button_width(int i) { return Canvas::text_width(tr(kButtonLabels[i])) + 2 * kButtonPad; }
+// The bar's width with each label cut to `cells` (Canvas::fit_width's "...").
+int bar_width_at(int cells) {
+    int w = 0;
+    for (int i = 0; i < KeypadEditor::kButtonCount; i++) {
+        const std::string label = Canvas::fit_width(tr(kButtonLabels[i]), cells * 6 - 1);
+        w += Canvas::text_width(label) + 2 * kButtonPad + (i > 0 ? kButtonGap : 0);
+    }
+    return w;
+}
+
+// Button i's label: all of it, unless the bar would not fit the screen (a translation, #372);
+// then every label cut to the most cells that do.
+std::string label_text(int i) {
+    int cells = 0;
+    for (const Txt t : kButtonLabels) {
+        cells = std::max(cells, Canvas::columns(tr(t)));
+    }
+    while (cells > 4 && bar_width_at(cells) + 8 > 480) {
+        cells--;
+    }
+    return Canvas::fit_width(tr(kButtonLabels[i]), cells * 6 - 1);
+}
+
+int button_width(int i) { return Canvas::text_width(label_text(i)) + 2 * kButtonPad; }
 
 int bar_width() {
     int w = 0;
@@ -394,11 +418,11 @@ void KeypadEditor::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         const KeypadRect r = button_rect(b);
         c.fill(static_cast<int>(r.x), static_cast<int>(r.y), static_cast<int>(r.w),
                static_cast<int>(r.h), b == Button::kSave ? kSaveBack : kButtonBack);
-        c.text(static_cast<int>(r.x) + kButtonPad, static_cast<int>(r.y) + 6, tr(kButtonLabels[i]),
-               kText);
+        c.text(static_cast<int>(r.x) + kButtonPad, static_cast<int>(r.y) + 6, label_text(i), kText);
     }
-    c.text(bx + 4, kBarY + kBarH + 3, status(), kSelected);
-    c.text(bx + 4, kBarY + kBarH + 14, tr(Txt::keypad_hint), kDim);
+    c.text(bx + 4, kBarY + kBarH + 3, Canvas::fit_width(status(), 480 - 2 - (bx + 4)), kSelected);
+    c.text(bx + 4, kBarY + kBarH + 14, Canvas::fit_width(tr(Txt::keypad_hint), 480 - 2 - (bx + 4)),
+           kDim);
 }
 
 } // namespace maplethief::frontend

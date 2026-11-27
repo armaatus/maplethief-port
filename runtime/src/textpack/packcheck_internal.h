@@ -49,14 +49,15 @@ struct Reporter {
 inline constexpr const char *k_manifest = "pack.strings";
 inline constexpr const char *k_text_manifest = "textpack.strings";
 
-// Reads `dir`/pack.strings, if there, by ADR 0149's rules for a pack of `kind` ("texture",
-// "audio", "text"). Its entries into *out (empty without one). Refuses the pack in `r` when the
-// file breaks a rule; a note when there is none. Returns whether the file is there.
+// Checks `dir`/pack.strings, if there, with the manifest reader (maplethief/pack_manifest.h) as a
+// pack of `kind` ("texture", "audio", "text"; NULL or "": the kind it names). Its entries into
+// *out (empty without one). Refuses the pack in `r` when the reader does; a note when there is
+// none, and for duplicate and unknown keys. Returns whether the file is there.
 bool check_manifest(const std::filesystem::path &dir, const char *kind, Reporter &r,
                     std::map<std::string, std::string> *out);
 
-// The numeric X.Y.Z of a port version ("1.4.0", "1.4.0-rc.2"): false if it is not one.
-bool parse_version(const std::string &v, unsigned out[3]);
+// The "kind" `dir`/pack.strings names, "" without a readable one.
+std::string manifest_kind(const std::filesystem::path &dir);
 
 std::filesystem::path host_path(const std::string &utf8);
 std::string utf8_of(const std::filesystem::path &p);

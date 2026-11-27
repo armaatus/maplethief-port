@@ -13,7 +13,7 @@ Press **F1** (or the gamepad's Guide button, or click both sticks, or the gear b
 | **Gameplay** | Save on quit, and the game's own options (sound, speed, vibration) |
 | **Assists** | Optional help that changes the game, such as the cash shop for meso. Always off unless you turn it on |
 | **Saves** | Export and import your saves, and the backups |
-| **Other** | The language, text packs, and the optional [check for new versions](#checking-for-new-versions) |
+| **Other** | The language, text packs (the [packs screen](#the-packs-screen)), and the optional [check for new versions](#checking-for-new-versions) |
 
 Move with the arrow keys, the d-pad or the mouse. **Tab**, **Q / E** or **LB / RB** switch tabs. **Esc** or **B** closes the menu. Most settings apply at once; those marked `*` apply the next time you start the game. **Quit** is at the bottom of every tab.
 
@@ -64,15 +64,37 @@ Neither shows on a computer.
 - **Cash shop for meso** (`cash_shop = meso`, an Assist, off in every preset): the original's cash shop needed real money and an online server. With this on, its items and revives cost in-game meso instead, at a price that grows with your level.
 - **Hide online buttons** (`hide_online_ui`) and **local Game Center** (`local_game_center`): hide the menu buttons whose web pages are gone, and turn Game Center's button into a leaderboard of your own save slots, with a few achievements.
 
-## Packs
+## The packs screen
 
-Packs change what the game shows and plays without touching its files: a **texture pack** (HD or edited pictures), an **audio pack** (your own music and sounds) or a **text pack** (a translation). Set one with **Video → Texture pack**, **Audio → Audio pack** or **Other → Text pack** (or `texture_pack`, `audio_pack`, `text_pack` in `settings.ini`, or `--texture-pack`, `--audio-pack`, `--text-pack`), and start the game again. At a render scale above 1, **Texture filter** `nearest` (`texture_filter = nearest`, the sharp sprites of [Display](#display)) keeps a texture pack's pixels crisp.
+Choose **Texture pack** (Video), **Audio pack** (Audio) or **Text pack** (Other) in the menu to open the packs screen. It lists every pack in the data folder's pack folders, and any pack `settings.ini` names by its path:
 
-You make and check packs with the game itself: the **Other** tab has **Dump textures**, **Make texture pack**, **Export text** and **Check packs**. [Making packs](packs.md) walks through each kind step by step. A pack the game can't use, or a file in it, is skipped with the reason in the log, and **Check packs** shows the same reasons before you play.
+| Kind | Folder in the [data folder](saves.md#where-your-saves-are) |
+|---|---|
+| Texture | `texture-packs/<pack>/` |
+| Audio | `audio-packs/<pack>/` |
+| Text | `text-packs/<pack>/` |
 
-Texture dumps, text exports and packs made from them hold the game's own art or text: keep them to yourself, and don't share them ([Sharing packs](sharing-packs.md)). On the Nintendo Switch the pack rows list the folders in `sdmc:/switch/maplethief/texture-packs/`, `audio-packs/` and `text-packs/` ([below](#on-the-nintendo-switch)).
+The game makes the folders the first time the screen opens. Each row shows a pack's name and version, and whether it is **on** (with its place: `on #1` comes first), **off** or **refused**. The two lines under the list show its author and description, or why the game refuses it.
 
-The game's text is drawn with its own font, plus a second font for accented Latin, Greek and Cyrillic letters. The port's menus have plain letters only: their accents are dropped ("Pötion" shows as "Potion").
+| To | Keyboard | Gamepad | Mouse or touch |
+|---|---|---|---|
+| Turn a pack on or off | **Enter** or **Space** | **A** (the bottom face button) | Click or tap the row |
+| Move a pack earlier or later | **Left / Right** | d-pad or stick **Left / Right** | The row's **<** / **>** |
+| Go back to the tab | **Esc** | **B** | |
+
+When two packs of a kind have the same file, the one higher in the list wins. Changes apply the next time you start the game. For now the game opens only the first pack of each kind that it accepts; several at once come in a later version.
+
+A pack can say what it is in a file `pack.strings` at its top: its kind, name, version and author, and which game and port version it needs ([ADR 0149](../adr/0149-pack-manifest-several-packs-and-what-the-project-hosts.md)). A pack without one shows by its folder's name. The game refuses a pack whose `pack.strings` is broken (the reason names the line), is of another kind, needs a newer version of the port, or was made for another version of the game; a second text pack in another language; a second pack with the same `id`; and more than 16 packs of a kind. A refused pack shows **refused** on the screen with its reason, and if `settings.ini` still names it, the title screen says at the start that it wasn't loaded and why.
+
+In `settings.ini` each kind is one line, its packs in order with `|` between them: `texture_pack = /packs/HD|/packs/UI`.
+
+## Making packs
+
+Packs change what the game shows and plays without touching its files: a **texture pack** (HD or edited pictures), an **audio pack** (your own music and sounds) or a **text pack** (a translation). You make and check them with the game itself: the **Other** tab has **Dump textures**, **Make texture pack**, **Export text** and **Check packs**, and they write into the same pack folders the packs screen lists. [Making packs](packs.md) walks through each kind step by step. A pack the game can't use, or a file in it, is skipped with the reason in the log; the packs screen shows why a pack is refused, and **Check packs** shows every file's reason before you play.
+
+At a render scale above 1, **Texture filter** `nearest` (`texture_filter = nearest`, the sharp sprites of [Display](#display)) keeps a texture pack's pixels crisp.
+
+Texture dumps, text exports and packs made from them hold the game's own art or text: keep them to yourself, and don't share them ([Sharing packs](sharing-packs.md)).
 
 ## Language
 
@@ -122,7 +144,7 @@ Some defaults differ on the console, in every preset. **Scale mode** is `sharp`,
 
 The keyboard shortcuts for the window (F11, Alt+Enter, Ctrl+1 to 5) and F12 for a screenshot do nothing there. **Quit** goes back to the Homebrew Menu.
 
-Packs and border pictures go in folders on the SD card, beside `game`. The menu lists what is in them: choose with Left / Right, and start the game again.
+Packs and border pictures go in folders on the SD card, beside `game`. Texture, audio and text packs are turned on, off and ordered in the [packs screen](#the-packs-screen), as on every platform; **Border image** lists the pictures: choose with Left / Right. Start the game again for a change to apply.
 
 | Row | Folder |
 |---|---|

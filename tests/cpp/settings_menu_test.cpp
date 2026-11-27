@@ -2116,7 +2116,7 @@ TEST_CASE("settings menu: the pack rows offer their folders and show a pack by i
     CHECK(changes[0].first == "texture_pack");
     CHECK(changes[0].second == "sdmc:/switch/maplethief/texture-packs/HD");
     fe::set_pack_choices("texture_pack", {});
-    // On the desktop the row offers nothing and shows the path as it is, as before.
+    // On the desktop the row offers nothing; since #370 it shows the pack by its name too.
     const SettingInfo *row = fe::find_setting("texture_pack");
     REQUIRE(row != nullptr);
     CHECK(fe::setting_choices(*row).empty());
@@ -2129,7 +2129,7 @@ TEST_CASE("settings menu: the pack rows offer their folders and show a pack by i
     for (std::size_t k = 1; k < desk.items().size(); k++) {
         const SettingsMenu::Item &it = desk.items()[k];
         if (it.kind == Kind::kSetting && std::strcmp(it.setting->key, "texture_pack") == 0) {
-            CHECK(desk.row_value(k) == "/packs/HD");
+            CHECK(desk.row_value(k) == "HD");
         }
     }
     for (const char *key : {"texture_pack", "audio_pack", "text_pack", "border_image"}) {

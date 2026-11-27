@@ -1218,6 +1218,10 @@ TEST_CASE("focus: mt_uikit_controls lists what a tap reaches, as the hit test do
     const u32 edge = g.button(menu, 440, 10, 80, 40, menu, "closeHelp:");
 
     std::vector<mt_uikit_control> c = g.controls();
+    const mt_ui::ControlsWalkTrace t = mt_ui::last_controls_walk();
+    INFO("walk: windows ", t.windows, " views ", t.views, " visible ", t.visible, " controls ",
+         t.controls, " with an action ", t.with_action, " reached ", t.reached, " listed ",
+         t.listed);
     INFO(g.describe(mt_ui::state(&g.cpu).windows.at(0)));
     INFO(g.describe(g.root));
     INFO(g.describe(menu));
