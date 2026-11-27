@@ -17,7 +17,8 @@
 //   size keys    Ctrl+1 ... Ctrl+5 (Cmd on macOS; bindings.ini's [window], #196): the window at
 //                exactly N times the picture (480 x 320, or 568 x 320 with widescreen),
 //                centred on its display, the largest N that fits its usable bounds
-//                (window_rect_for_scale), out of fullscreen and maximise first.
+//                (window_rect_for_scale), out of fullscreen and maximise first. Ctrl (attack)
+//                and Alt (jump) wait for the chord (keyboard.h, #381), so they never press too.
 //   window       <data dir>/window.ini (WindowState): the windowed size and position (never the
 //                fullscreen one) and whether it was maximised, written when the game ends and
 //                read before the window opens. Only in an interactive run (is_interactive_run)

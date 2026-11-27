@@ -453,7 +453,7 @@ void parse_window_line(const std::string &key, std::string_view value, std::size
                 continue;
             }
             if (c.mods == 0 && reserved_control(Control{ControlKind::kKey, c.key})) {
-                report(line_no, "key F1 opens the remap overlay and cannot be bound: skipped");
+                report(line_no, "key F1 opens the settings menu and cannot be bound: skipped");
                 continue;
             }
             const bool taken = std::any_of(claims->begin(), claims->end(),
@@ -606,7 +606,7 @@ std::vector<std::string> parse_bindings(std::string_view text, const std::string
                 }
                 if (reserved_control(c)) {
                     report(line_no, control_text(c) +
-                                        " opens the remap overlay and cannot be bound: skipped");
+                                        " opens the settings menu and cannot be bound: skipped");
                     continue;
                 }
                 if (std::find(controls.begin(), controls.end(), c) != controls.end()) {
@@ -663,8 +663,8 @@ std::string serialise_bindings(const BindingSet &set) {
         "# by the Xbox layout's positions, back start leftshoulder rightshoulder leftstick\n"
         "# rightstick ...), hold NAME (a button held 0.3 s while the pad pointer shows),\n"
         "# trigger lefttrigger | righttrigger, direction up | down | left | right\n"
-        "# (the d-pad and the left stick). F1 and the gamepad's Guide button open the remap\n"
-        "# overlay and cannot be bound.\n";
+        "# (the d-pad and the left stick). F1 and the gamepad's Guide button open the settings\n"
+        "# menu and cannot be bound.\n";
     if (kSettingsPlatform == SettingsPlatform::kSwitch) {
         // #239, ADR 0140: HOME is the system's.
         out += "# On the Nintendo Switch + (button start) opens it and cannot be bound either;\n"

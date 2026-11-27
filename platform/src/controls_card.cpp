@@ -45,14 +45,18 @@ bool is_direction(std::uint32_t action) {
 }
 
 std::vector<Control> device_controls(const std::vector<Binding> &table, Context context,
-                                     std::uint32_t action, PromptDevice device) {
+                                     std::uint32_t action, PromptDevice device,
+                                     SDL_GamepadType type) {
     std::vector<Control> out;
     if (device == PromptDevice::kNone) {
         return out;
     }
     const Device want = device == PromptDevice::kKeyboard ? Device::kKeyboard : Device::kGamepad;
+    const bool touchpad = pad_type_has_touchpad(type);
     for (const Control &c : controls_for(table, context, action)) {
-        if (device_of(c) == want) {
+        const bool click =
+            c.kind == ControlKind::kGamepadButton && c.code == SDL_GAMEPAD_BUTTON_TOUCHPAD;
+        if (device_of(c) == want && (touchpad || !click)) {
             out.push_back(c);
         }
     }
@@ -264,7 +268,7 @@ void draw_keyboard(Canvas &c, const std::vector<Binding> &table) {
 
 // The two lists, field and menus.
 void draw_lists(Canvas &c, const PromptStyle &style, const std::vector<Binding> &table) {
-    const std::vector<CardLine> lines = controls_card_lines(table, style.device);
+    const std::vector<CardLine> lines = controls_card_lines(table, style.device, style.type);
     std::size_t counts[2] = {0, 0};
     for (const CardLine &l : lines) {
         counts[l.context == Context::kField ? 0 : 1]++;
@@ -416,7 +420,8 @@ std::string card_title(Context context, std::uint32_t action) {
     }
 }
 
-std::vector<CardLine> controls_card_lines(const std::vector<Binding> &table, PromptDevice device) {
+std::vector<CardLine> controls_card_lines(const std::vector<Binding> &table, PromptDevice device,
+                                          SDL_GamepadType type) {
     static const std::vector<Binding> defaults = default_bindings();
     std::vector<CardLine> out;
     const std::vector<ActionSlot> slots = action_slots(table);
@@ -430,7 +435,7 @@ std::vector<CardLine> controls_card_lines(const std::vector<Binding> &table, Pro
                       false};
         bool merged = device != PromptDevice::kNone;
         for (const std::uint32_t a : kDirectionActions) {
-            const std::vector<Control> c = device_controls(table, context, a, device);
+            const std::vector<Control> c = device_controls(table, context, a, device, type);
             if (c.empty()) {
                 merged = false;
                 break;
@@ -447,14 +452,14 @@ std::vector<CardLine> controls_card_lines(const std::vector<Binding> &table, Pro
             // Only what the device can do there: a control of it now or by default (the pad has
             // no field OK, the keyboard no menus auto-run); one it lost shows "unbound".
             if (device != PromptDevice::kNone &&
-                device_controls(table, context, s.action, device).empty() &&
-                device_controls(defaults, context, s.action, device).empty()) {
+                device_controls(table, context, s.action, device, type).empty() &&
+                device_controls(defaults, context, s.action, device, type).empty()) {
                 continue;
             }
             CardLine line{context,
                           s.action,
                           card_title(context, s.action),
-                          device_controls(table, context, s.action, device),
+                          device_controls(table, context, s.action, device, type),
                           false,
                           false};
             if (line.controls.size() > kCardMaxControls) {

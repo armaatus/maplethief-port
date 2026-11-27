@@ -68,8 +68,10 @@ struct CardLine {
 std::string card_title(Context context, std::uint32_t action);
 
 // The lists for `device` (keyboard or gamepad; none gives the lines with no controls), field
-// first, from `table`.
-std::vector<CardLine> controls_card_lines(const std::vector<Binding> &table, PromptDevice device);
+// first, from `table`. A gamepad's lines leave out the touchpad's click when a pad of `type` has
+// no touchpad (pad_type_has_touchpad, #381): a Nintendo pad's pointer tap shows Hold RS.
+std::vector<CardLine> controls_card_lines(const std::vector<Binding> &table, PromptDevice device,
+                                          SDL_GamepadType type = SDL_GAMEPAD_TYPE_UNKNOWN);
 
 // A key of the touch key pad as the card draws it: its name, where it is drawn with the player's
 // layout (screen points, 480 x 320), and the side its name goes on.

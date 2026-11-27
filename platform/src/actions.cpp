@@ -396,6 +396,7 @@ std::uint64_t Actions::presses(std::uint32_t action, Context context) const {
 }
 
 void Actions::release_source(InputSource source) {
+    lifts_[static_cast<int>(source)]++;
     const std::vector<Held> held = held_;
     for (const Held &h : held) {
         if (h.source == source) {
@@ -403,6 +404,8 @@ void Actions::release_source(InputSource source) {
         }
     }
 }
+
+std::uint64_t Actions::lifts(InputSource source) const { return lifts_[static_cast<int>(source)]; }
 
 void Actions::start_gesture(InputSource source, const TouchFallback &f) {
     const std::uint32_t id = kGestureFinger + next_gesture_id_++ % kGestureFingers;

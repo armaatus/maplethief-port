@@ -193,3 +193,7 @@ A **Quit** action row ends every tab (`MenuActionInfo::every_tab`), on every pla
 ## Addendum: rows hidden by platform (#241, 2026-11-11)
 
 The menu shows a registry row or an action row only on a platform that has the capabilities it needs (`SettingInfo::needs`, `MenuActionInfo::needs`, [ADR 0142](0142-platform-capabilities-and-the-switch-frontend.md)'s table in `platform/src/platform_caps.h`). A tab without a shown row is left out. On the desktop every row shows, as before. The iOS `#if`s around Data location, Open data folder, Open logs folder and Quit are now those rows' `needs`. A test decides every row for the Nintendo Switch and walks its menu with the pad alone.
+
+## Addendum: F1 and Guide stay unbindable (#381, 2026-11-27)
+
+Accepted (delegated by Joris, 2026-11-13). `bindings.ini` keeps refusing F1, `button guide` and `hold guide` (and `+` on the Switch): they are the way into the settings menu, and through it back to the bindings, that no file or remap can take away. A keyboard player whose F1 was given to an action would have no menu to undo it from, as the gear is drawn on touch screens only. The skip message now names the settings menu instead of the remap overlay (`bindings: F1 and Guide stay the settings menu's, whatever the file says (#381)`), and [remapping.md](../controls/remapping.md) says why.

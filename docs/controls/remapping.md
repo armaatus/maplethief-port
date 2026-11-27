@@ -27,7 +27,7 @@ The list shows every action twice: first **in the field** (the game pad, panel 0
 - A control that another action had in that context leaves it. The status line names that action, and warns if it has no key or gamepad control left.
 - F1 or Guide stops waiting; after 5 s nothing changes.
 
-F1 and Guide always open the settings menu (or the overlay, in a scripted run), so they can't be bound. The stick clicks can: a stick click bound to an action sends it, and pressing the other stick too still opens the menu.
+F1 and Guide always open the settings menu (or the overlay, in a scripted run), so they can't be bound ([#381](https://github.com/armaatus/maplethief-port/issues/381)): they are the one way back to every setting, these bindings included, that no file or remap can take away. A `bindings.ini` that gave F1 to attack would leave a keyboard player with no menu to undo it from (the gear is drawn on touch screens only), and one that gave Guide away would do the same to a pad player. The stick clicks can: a stick click bound to an action sends it, and pressing the other stick too still opens the menu.
 
 ## Button glyphs
 
@@ -96,8 +96,8 @@ The overlay writes this file with the defaults unchanged:
 # by the Xbox layout's positions, back start leftshoulder rightshoulder leftstick
 # rightstick ...), hold NAME (a button held 0.3 s while the pad pointer shows),
 # trigger lefttrigger | righttrigger, direction up | down | left | right
-# (the d-pad and the left stick). F1 and the gamepad's Guide button open the remap
-# overlay and cannot be bound.
+# (the d-pad and the left stick). F1 and the gamepad's Guide button open the settings
+# menu and cannot be bound.
 
 # A Nintendo pad's face buttons by position (SDL's way: the bottom one is 'a') or by
 # label (its A is 'a'): position | label
@@ -205,7 +205,7 @@ The game never refuses the file. Each problem is logged with the file and the li
 ```text
 bindings.ini:4: unknown key 'Nonsense': skipped
 bindings.ini:7: unknown action 'atack'
-bindings.ini:9: key F1 opens the remap overlay and cannot be bound: skipped
+bindings.ini:9: key F1 opens the settings menu and cannot be bound: skipped
 bindings.ini:12: attack in the field is already set on line 5: this line is skipped
 bindings.ini:14: key Q is already bound to slot1 in the field on line 13: skipped here
 bindings.ini: attack has no gamepad control in the field
