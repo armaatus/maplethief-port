@@ -42,9 +42,7 @@ using u8 = std::uint8_t;
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 
-// A pack file larger than this is rejected unread (a 4096 x 4096 RGBA PNG stored without
-// compression is 64 MiB and a little more).
-constexpr std::uintmax_t k_max_file = 80u << 20;
+constexpr std::uintmax_t k_max_file = MT_TEXPACK_MAX_FILE;
 
 fs::path host_path(const std::string &utf8) {
     return fs::path(std::u8string(utf8.begin(), utf8.end()));

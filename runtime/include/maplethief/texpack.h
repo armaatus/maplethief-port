@@ -66,6 +66,9 @@ typedef struct mt_texpack_stats {
 
 /* The files a pack indexes at most (GL and ui/ together); the rest are skipped, logged (#413). */
 #define MT_TEXPACK_MAX_FILES 65536u
+/* A pack file larger than this is rejected unread (a 4096 x 4096 RGBA PNG stored without
+ * compression is 64 MiB and a little more). */
+#define MT_TEXPACK_MAX_FILE (80u << 20) /* bytes */
 
 /* Adds the pack in the directory `dir` (UTF-8) after the packs open now: indexes its file names
  * and, for the first pack, installs the hooks. Returns the files indexed (GL and ui/), or -1
