@@ -16,6 +16,11 @@
 //             or off; a refused pack is not turned on, and the status line says why
 //   Left / Right (the d-pad, the stick, the arrows, the row's "<" / ">")
 //             move an enabled pack earlier or later in its kind's order
+//   add       (#422, pack_add.h) where the platform has file dialogs and one can show, a last
+//             row "Add a pack..." opens a folder picker; on a desktop a folder or zip dropped
+//             on the window while the screen is open is added the same way. A folder goes on
+//             its kind's list by its path; a zip is unpacked into its kind's pack folder. The
+//             status line says what was added, or why not.
 //
 // Each kind's setting (texture_pack, audio_pack, text_pack) holds its enabled packs as an
 // ordered list, '|' between them, first first (ADR 0149); a single path is a list of one. The
@@ -124,6 +129,11 @@ class PacksScreen {
     using Uses = std::function<std::vector<PackUse>(PackKind)>;
     void set_uses(Uses uses) { uses_ = std::move(uses); }
 
+    // Whether the next scan ends the rows with "Add a pack..." (#422).
+    void set_add_row(bool on) { add_row_ = on; }
+    const std::string &base() const { return base_; }
+    const std::string &port_version() const { return port_; }
+
     // Lists the pack folders and the settings' lists again.
     void scan(const Settings &s);
 
@@ -131,10 +141,13 @@ class PacksScreen {
         PackKind kind;
         std::size_t pack = 0; // in packs(kind)
         bool empty = false;   // the kind's "none found" row
+        bool add = false;     // "Add a pack..." (#422)
     };
     const std::vector<Row> &rows() const { return rows_; }
     // The first row of `kind`.
     std::size_t first_row(PackKind kind) const;
+    // The row of the pack at `path` of `kind`, or nullopt.
+    std::optional<std::size_t> row_of(PackKind kind, const std::string &path) const;
     std::vector<MenuListRow> list_rows() const;
     std::string row_help(std::size_t row) const;
 
@@ -160,6 +173,7 @@ class PacksScreen {
 
   private:
     std::string base_, port_;
+    bool add_row_ = false;
     Uses uses_;
     std::vector<Entry> kinds_[3];
     std::vector<Row> rows_;
@@ -169,9 +183,15 @@ class PacksScreen {
 // nullptr if the value was refused.
 using PacksApply =
     std::function<const Settings *(const std::string &key, const std::string &value)>;
+// The folder picker (#422): opens it (its answer comes later, to SettingsMenu::drop_on_list)
+// and returns the status line ("" while it is up).
+using PacksPick = std::function<std::string()>;
 // The settings menu's list for the packs screen (SettingsMenu::open_list), opened at `kind`'s
-// first row: its rows, help, toggle and move go through `screen`, its changes through `apply`.
-MenuList packs_menu_list(std::shared_ptr<PacksScreen> screen, PackKind kind, PacksApply apply);
+// first row: its rows, help, toggle and move go through `screen`, its changes through `apply`;
+// the "Add a pack..." row calls `pick`; a drop (`drop`) adds a folder or zip (add_pack_path)
+// and selects it. `current`: the settings now, which the drop adds to.
+MenuList packs_menu_list(std::shared_ptr<PacksScreen> screen, PackKind kind, PacksApply apply,
+                         std::function<const Settings &()> current = {}, PacksPick pick = {});
 
 } // namespace maplethief::frontend
 

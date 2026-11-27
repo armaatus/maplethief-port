@@ -14,6 +14,7 @@
 #include "maplethief/pack_manifest.h"
 #include "maplethief/texpack.h"
 #include "maplethief/textpack.h"
+#include "pack_add.h"
 #include "pack_folders.h"
 #include "port_text.h"
 
@@ -360,20 +361,38 @@ void PacksScreen::scan(const Settings &s) {
             rows_.push_back(Row{kind, i, false});
         }
     }
+    if (add_row_) {
+        rows_.push_back(Row{PackKind::kTexture, 0, false, true});
+    }
 }
 
 std::size_t PacksScreen::first_row(PackKind kind) const {
     for (std::size_t i = 0; i < rows_.size(); i++) {
-        if (rows_[i].kind == kind) {
+        if (rows_[i].kind == kind && !rows_[i].add) {
             return i;
         }
     }
     return 0;
 }
 
+std::optional<std::size_t> PacksScreen::row_of(PackKind kind, const std::string &path) const {
+    for (std::size_t i = 0; i < rows_.size(); i++) {
+        const Row &r = rows_[i];
+        if (r.kind == kind && !r.empty && !r.add &&
+            trimmed(kinds_[index_of(kind)][r.pack].info.path) == trimmed(path)) {
+            return i;
+        }
+    }
+    return std::nullopt;
+}
+
 std::vector<MenuListRow> PacksScreen::list_rows() const {
     std::vector<MenuListRow> out;
     for (const Row &r : rows_) {
+        if (r.add) {
+            out.push_back(MenuListRow{tr(Txt::packs_add_label), tr(Txt::packs_add_button)});
+            continue;
+        }
         if (r.empty) {
             out.push_back(MenuListRow{tr(Txt::packs_none_label, {kind_label(r.kind)}), ""});
             continue;
@@ -399,6 +418,9 @@ std::string PacksScreen::row_help(std::size_t row) const {
         return "";
     }
     const Row &r = rows_[row];
+    if (r.add) {
+        return tr(Txt::packs_add_help);
+    }
     if (r.empty) {
         return tr(Txt::packs_none_help, {pack_kind_folder(r.kind)});
     }
@@ -427,7 +449,7 @@ std::string PacksScreen::row_help(std::size_t row) const {
 PacksScreen::Change PacksScreen::toggle(std::size_t row) const {
     Change c;
     c.row = row;
-    if (row >= rows_.size() || rows_[row].empty) {
+    if (row >= rows_.size() || rows_[row].empty || rows_[row].add) {
         c.status = tr(Txt::packs_nothing);
         return c;
     }
@@ -472,7 +494,7 @@ PacksScreen::Change PacksScreen::toggle(std::size_t row) const {
 PacksScreen::Change PacksScreen::move(std::size_t row, int delta) const {
     Change c;
     c.row = row;
-    if (row >= rows_.size() || rows_[row].empty) {
+    if (row >= rows_.size() || rows_[row].empty || rows_[row].add) {
         c.status = tr(Txt::packs_nothing);
         return c;
     }
@@ -508,7 +530,8 @@ PacksScreen::Change PacksScreen::move(std::size_t row, int delta) const {
     return c;
 }
 
-MenuList packs_menu_list(std::shared_ptr<PacksScreen> screen, PackKind kind, PacksApply apply) {
+MenuList packs_menu_list(std::shared_ptr<PacksScreen> screen, PackKind kind, PacksApply apply,
+                         std::function<const Settings &()> current, PacksPick pick) {
     MenuList list;
     list.title = tr(Txt::packs_title);
     list.rows = screen->list_rows();
@@ -527,10 +550,31 @@ MenuList packs_menu_list(std::shared_ptr<PacksScreen> screen, PackKind kind, Pac
         row = c.row;
         return c.status;
     };
-    list.toggle = [screen, run](std::size_t &row) { return run(screen->toggle(row), row); };
+    list.toggle = [screen, run, pick](std::size_t &row) {
+        const std::vector<PacksScreen::Row> &rows = screen->rows();
+        if (row < rows.size() && rows[row].add) {
+            return pick ? pick() : std::string(tr(Txt::packs_nothing));
+        }
+        return run(screen->toggle(row), row);
+    };
     list.step = [screen, run](std::size_t &row, int delta) {
         return run(screen->move(row, delta), row);
     };
+    if (current) {
+        // A drop or the folder picker's answer (#422): the pack added, then selected.
+        list.drop = [screen, apply, current](const std::string &path, std::size_t &row) {
+            const PackAddChange a =
+                add_pack_path(path, current(), screen->base(), screen->port_version());
+            if (!a.key.empty() && (!apply || apply(a.key, a.value) == nullptr)) {
+                return std::string(tr(Txt::packs_not_saved));
+            }
+            screen->scan(current());
+            if (a.added.ok) {
+                row = screen->row_of(a.added.kind, a.added.path).value_or(row);
+            }
+            return a.status;
+        };
+    }
     return list;
 }
 

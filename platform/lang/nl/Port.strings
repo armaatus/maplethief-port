@@ -128,6 +128,15 @@
 "packs_last" = "{0} staat al laatst";
 "packs_nothing" = "Hier staan nog geen packs";
 "packs_not_saved" = "De wijziging kon niet worden gemaakt";
+"packs_add_label" = "Een pack toevoegen...";
+"packs_add_button" = "kies een map";
+"packs_add_help" = "Kies de map van een pack om het via zijn pad toe te voegen. Of sleep de map of .zip van een pack naar het venster.";
+"packs_added_on" = "{0} toegevoegd, aan (#{1}), vanaf de volgende start";
+"packs_unpacked" = "{0} uitgepakt in {1}: kies het om het aan te zetten";
+"packs_add_refused" = "{0} niet toegevoegd: {1}";
+"packs_add_listed" = "{0} staat al in de lijst";
+"packs_add_cannot" = "De mapkiezer kan niet openen: {0}";
+"packs_add_failed" = "De mapkiezer is mislukt: {0}";
 "notice_pack_refused" = "De pack {0} is niet geladen: {1}";
 "picker_keep" = "Mijn instellingen houden";
 "picker_ready" = "KLAAR OM TE SPELEN";

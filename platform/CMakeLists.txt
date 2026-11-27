@@ -116,6 +116,7 @@ add_library(
     src/start_question.cpp
     src/switch_pads.cpp
     src/pack_folders.cpp
+    src/pack_add.cpp
     src/pack_tools.cpp
     src/packs.cpp
     src/list_keys.cpp

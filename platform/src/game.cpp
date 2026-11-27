@@ -3558,14 +3558,39 @@ void start_menu(Game &g, const GameOptions &options) {
     }
     // The packs screen (#370, packs.h): the texture, audio and text pack rows open it, on every
     // platform, at their kind; its changes are the menu's, saved with them.
+    // #422 (pack_add.h): where a dialog can show, "Add a pack..." opens a folder picker whose
+    // answer goes to the list as a drop does; a folder or zip dropped while it is open is added.
     const auto packs = std::make_shared<PacksScreen>(packs_base(), MT_VERSION);
+    const auto pick_pack_folder = [&g] {
+        FileDialogRequest req;
+        req.kind = FileDialogRequest::Kind::kOpenFolder;
+        req.title = "add a pack";
+        std::string why;
+        const bool shown = g.file_dialogs.show(
+            g.window, req,
+            [&g](const FileDialogResult &r) {
+                if (r.outcome == FileDialogResult::Outcome::kFailed) {
+                    g.menu.set_status(tr(Txt::packs_add_failed, {r.why}));
+                } else if (r.outcome == FileDialogResult::Outcome::kChosen &&
+                           !g.menu.drop_on_list(r.path)) {
+                    SDL_Log("packs: %s was chosen after the packs screen closed; not added",
+                            r.path.c_str());
+                }
+            },
+            &why);
+        return shown ? std::string() : tr(Txt::packs_add_cannot, {why});
+    };
     for (const PackKind kind : kPackKinds) {
-        g.menu.set_setting_opener(pack_kind_key(kind), [&g, packs, kind] {
+        g.menu.set_setting_opener(pack_kind_key(kind), [&g, packs, kind, pick_pack_folder] {
+            packs->set_add_row(platform_has(kCapFileDialogs) &&
+                               dialog_route(dialog_place(g.window)) == DialogRoute::kDialog);
             packs->scan(g.settings);
             g.menu.open_list(packs_menu_list(
-                packs, kind, [&g](const std::string &key, const std::string &value) {
+                packs, kind,
+                [&g](const std::string &key, const std::string &value) {
                     return g.menu.change_setting(key, value) ? &g.settings : nullptr;
-                }));
+                },
+                [&g]() -> const Settings & { return g.settings; }, pick_pack_folder));
             return std::string();
         });
     }

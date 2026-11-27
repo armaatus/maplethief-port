@@ -155,6 +155,18 @@ MT_TEXT(packs_first, "{0} is first already")
 MT_TEXT(packs_last, "{0} is last already")
 MT_TEXT(packs_nothing, "No packs here yet")
 MT_TEXT(packs_not_saved, "The change could not be made")
+// Adding a pack on a desktop (#422, pack_add.h): the folder picker's row, a drop.
+MT_TEXT(packs_add_label, "Add a pack...")
+MT_TEXT(packs_add_button, "choose a folder")
+MT_TEXT(packs_add_help,
+        "Choose a pack's folder to add it by its path. Or drop a pack's folder or .zip on the "
+        "window.")
+MT_TEXT(packs_added_on, "{0} added, on (#{1}), from the next start")
+MT_TEXT(packs_unpacked, "{0} unpacked into {1}: choose it to turn it on")
+MT_TEXT(packs_add_refused, "{0} not added: {1}")
+MT_TEXT(packs_add_listed, "{0} is on the list already")
+MT_TEXT(packs_add_cannot, "The folder picker cannot open: {0}")
+MT_TEXT(packs_add_failed, "The folder picker failed: {0}")
 MT_TEXT(notice_pack_refused, "The pack {0} was not loaded: {1}")
 
 // The first start's preset picker (preset_picker.cpp).
