@@ -74,7 +74,7 @@ Choose **Texture pack** (Video), **Audio pack** (Audio) or **Text pack** (Other)
 | Audio | `audio-packs/<pack>/` |
 | Text | `text-packs/<pack>/` |
 
-The game makes the folders the first time the screen opens. Each row shows a pack's name and version, and whether it is **on** (with its place: `on #1` comes first), **off** or **refused**. The two lines under the list show its author and description, or why the game refuses it.
+The game makes the folders the first time the screen opens. Each row shows a pack's name and version, and whether it is **on** (with its place: `on #1` comes first), **off** or **refused**. The two lines under the list show its author and description, or why the game refuses it; while you play with a pack on, they also say how many of its files or lines it replaced this run and how many a pack higher in the list hid.
 
 | To | Keyboard | Gamepad | Mouse or touch |
 |---|---|---|---|
@@ -82,11 +82,11 @@ The game makes the folders the first time the screen opens. Each row shows a pac
 | Move a pack earlier or later | **Left / Right** | d-pad or stick **Left / Right** | The row's **<** / **>** |
 | Go back to the tab | **Esc** | **B** | |
 
-When two packs of a kind have the same file, the one higher in the list wins. Changes apply the next time you start the game. For now the game opens only the first pack of each kind that it accepts; several at once come in a later version.
+All the packs that are on play at once. When two packs of a kind have the same entry, the one higher in the list wins: for textures the same file name, for audio the same sound (`31.mp3` and `31.wav` are one sound; a `.loop` file goes with its own pack's sound only), for text the same key in the same file. If the higher pack's file is damaged or the wrong size, the game skips it and takes the next pack's, then its own. So a menu translation can sit above a dialogue translation, or a pack of sound effects beside a music pack. Changes apply the next time you start the game. When the game quits, the log has a line per pack: how many entries it replaced, and how many a higher pack hid (`texpack: HD Sprites 1.2: 812 replaced, 40 hidden by UI Redraw`).
 
 A pack can say what it is in a file `pack.strings` at its top: its kind, name, version and author, and which game and port version it needs ([ADR 0149](../adr/0149-pack-manifest-several-packs-and-what-the-project-hosts.md)). A pack without one shows by its folder's name. The game refuses a pack whose `pack.strings` is broken (the reason names the line), is of another kind, needs a newer version of the port, or was made for another version of the game; a second text pack in another language; a second pack with the same `id`; and more than 16 packs of a kind. A refused pack shows **refused** on the screen with its reason, and if `settings.ini` still names it, the title screen says at the start that it wasn't loaded and why.
 
-In `settings.ini` each kind is one line, its packs in order with `|` between them: `texture_pack = /packs/HD|/packs/UI`.
+In `settings.ini` each kind is one line, its packs in order with `|` between them: `texture_pack = /packs/HD|/packs/UI`. On the command line, give `--texture-pack`, `--audio-pack` or `--text-pack` more than once, first first: `--texture-pack /packs/HD --texture-pack /packs/UI` is the same list.
 
 ## Making packs
 

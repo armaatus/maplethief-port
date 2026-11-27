@@ -5,7 +5,9 @@
 // (no decoder delay), looped whole, by a .loop file or by a WAV's smpl chunk. Names in any case,
 // .wav for .mp3 and .mp3 for .wav, FLAC (our own triangles, losslessly). Corrupt, cut, oversize and
 // out-of-limit files (and random mutations of a good one) fall back to the game's file, logged once
-// each. Without a pack, or with a pack without the name, nothing changes.
+// each. Without a pack, or with a pack without the name, nothing changes. Two packs at once
+// (#421): the first wins per sound id, a rejected file falls to the second, a .loop stays with
+// its own pack's sound.
 #include <doctest/doctest.h>
 
 #include <algorithm>
@@ -913,4 +915,89 @@ TEST_CASE("audio.pack: a pack indexes at most MT_AUDIO_PACK_MAX_FILES files, the
     CHECK(mt_audio_pack_open(dir.string().c_str()) == 4);
     CHECK(mt_audio_pack_get_stats().loops == 1);
     CHECK(count_logged("skipped") == 1);
+}
+
+TEST_CASE("audio.pack: two packs: the first wins per sound id, a rejected file falls to the "
+          "second, a .loop stays with its own pack's sound (#421)") {
+    Clean clean;
+    const fs::path first = pack_dir();
+    const fs::path second = test_dir() / "pack2";
+    std::error_code ec;
+    fs::remove_all(second, ec);
+    fs::create_directories(second);
+    const std::vector<i16> a = tone(800, 1, 1), b = tone(900, 2, 2), c = tone(4000, 2, 3);
+    // 12: both have it (the second as another extension): the first's.
+    write_file(first / "12.wav", make_wav(a, 8000, 1));
+    write_file(second / "12.WAV", make_wav(b, 22050, 2));
+    // 31: the first's is no WAV (rejected; its .loop goes with it), the second's plays unlooped.
+    write_text(first / "31.wav", "not a wav");
+    write_text(first / "31.loop", "100 200");
+    write_file(second / "31.wav", make_wav(c, 44100, 2));
+    // 5: the first's has no loop; the second's .loop is not the first's.
+    write_file(first / "5.wav", make_wav(c, 44100, 2));
+    write_file(second / "5.wav", make_wav(b, 22050, 2));
+    write_text(second / "5.loop", "10 20");
+    // 7: only the second has it, with its .loop.
+    write_file(second / "7.wav", make_wav(c, 44100, 2));
+    write_text(second / "7.loop", "100 300");
+    REQUIRE(mt_audio_pack_add(first.string().c_str()) == 3);
+    REQUIRE(mt_audio_pack_add(second.string().c_str()) == 4);
+    CHECK(mt_audio_pack_count() == 2);
+    CHECK(mt_audio_pack_get_stats().files == 7);
+    CHECK(mt_audio_pack_get_stats().loops == 3);
+
+    mt_audio::pack::Sound s;
+    REQUIRE(mt_audio::pack::effect("/game/sound/12.wav", &s));
+    CHECK(s.samples == a);
+    CHECK(s.rate == 8000);
+    CHECK(s.file.find("pack2") == std::string::npos);
+
+    std::string file;
+    const auto m31 = mt_audio::pack::music("/game/sound/31.mp3", false, &file);
+    REQUIRE(m31 != nullptr);
+    CHECK(file.find("pack2") != std::string::npos);
+    CHECK(m31->loop().end == 0);
+    CHECK(count_logged("31.wav is no PCM WAV: rejected, the game's 31.mp3 kept") == 1);
+    REQUIRE(mt_audio::pack::music("/game/sound/31.mp3", false, &file) != nullptr); // again
+    CHECK(count_logged("is no PCM WAV") == 1);
+
+    const auto m5 = mt_audio::pack::music("/game/sound/5.mp3", false, &file);
+    REQUIRE(m5 != nullptr);
+    CHECK(file.find("pack2") == std::string::npos);
+    CHECK(m5->loop().end == 0);
+    CHECK(m5->rate() == 44100);
+
+    const auto m7 = mt_audio::pack::music("/game/sound/7.mp3", false, &file);
+    REQUIRE(m7 != nullptr);
+    CHECK(m7->loop().start == 100);
+    CHECK(m7->loop().end == 300);
+    CHECK(mt_audio::pack::music("/game/sound/8.mp3", false, &file) == nullptr);
+
+    const mt_audio_pack_stats st = mt_audio_pack_get_stats();
+    CHECK(st.effects == 1);
+    CHECK(st.effects_replaced == 1);
+    CHECK(st.music == 5);
+    CHECK(st.music_replaced == 4);
+    CHECK(st.rejected == 1);
+    mt_pack_use u{};
+    REQUIRE(mt_audio_pack_use(0, &u) == 0);
+    CHECK(std::string(u.dir) == first.string());
+    CHECK(u.replaced == 2);
+    CHECK(u.rejected == 1);
+    CHECK(u.hidden == 0);
+    REQUIRE(mt_audio_pack_use(1, &u) == 0);
+    CHECK(u.replaced == 3);
+    CHECK(u.rejected == 0);
+    CHECK(u.hidden == 2);
+    CHECK(u.hidden_by[0] == 2);
+    CHECK(mt_audio_pack_use(2, &u) == -1);
+
+    for (u32 i = 2; i < MT_PACKS_MAX; i++) {
+        REQUIRE(mt_audio_pack_add(second.string().c_str()) == 4);
+    }
+    CHECK(mt_audio_pack_add(second.string().c_str()) == -1);
+    CHECK(count_logged("at most 16 audio packs at once") == 1);
+    mt_audio_pack_close();
+    CHECK(mt_audio_pack_count() == 0);
+    fs::remove_all(second, ec);
 }

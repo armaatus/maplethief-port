@@ -13,6 +13,7 @@
 #include "maplethief/saves.h"
 #include "maplethief/texpack.h"
 #include "pack_folders.h"
+#include "packs.h"
 #include "port_text.h"
 #include "settings_menu.h"
 
@@ -219,25 +220,22 @@ std::string pack_check_verdict(const PackToolResult &r) {
 std::vector<PackToCheck> packs_to_check(const Settings &s, const std::string &parent) {
     std::vector<PackToCheck> out;
     std::set<std::string> seen;
-    const auto add = [&out, &seen](const char *kind, const std::string &dir) {
+    const auto add = [&out, &seen](const char *kind, const std::string &dir,
+                                   const std::string &refused = "") {
         std::error_code ec;
         const fs::path p = utf8_path(dir);
         const std::string key = path_utf8(fs::weakly_canonical(p, ec));
         if (!dir.empty() && seen.insert(ec ? dir : key).second) {
-            out.push_back({kind, dir});
+            out.push_back({kind, dir, refused});
         }
     };
-    const struct {
-        const char *kind;
-        const std::string *value;
-    } rows[] = {{"texture", &s.texture_pack}, {"audio", &s.audio_pack}, {"text", &s.text_pack}};
-    for (const auto &row : rows) {
-        // ADR 0149: a row may list several folders, separated by '|', first first.
-        std::string_view v = *row.value;
-        while (!v.empty()) {
-            const std::size_t bar = v.find('|');
-            add(row.kind, std::string(v.substr(0, bar)));
-            v = bar == std::string_view::npos ? std::string_view() : v.substr(bar + 1);
+    for (const PackKind kind : kPackKinds) {
+        // ADR 0149: a row may list several folders, separated by '|', first first; the start
+        // opens them all (#421), so the list's own rules are checked as it applies them.
+        for (const PackInfo &p :
+             check_pack_list(split_pack_list(pack_kind_value(s, kind)), kind, MT_VERSION)) {
+            const bool alone = read_pack(p.path, kind, MT_VERSION).refused == p.refused;
+            add(pack_kind_name(kind), p.path, alone ? std::string() : p.refused);
         }
     }
     if (!parent.empty()) {
@@ -321,6 +319,14 @@ MenuList check_packs_list(const Settings &s, const std::string &parent, const st
         const PackToolResult r = check_pack(p.dir, bundle, p.kind.c_str());
         SDL_Log("packcheck: %s", pack_tool_text(p.dir, r).c_str());
         const std::string name = path_utf8(utf8_path(p.dir).filename());
+        if (!p.refused.empty()) {
+            // The pack alone opens, but its place in the row's list does not (#421).
+            SDL_Log("packcheck: %s: %s pack: refused in its list: %s", p.dir.c_str(),
+                    p.kind.c_str(), p.refused.c_str());
+            list.rows.push_back({kind_text(p.kind) + ": " + name, tr(Txt::packs_verdict_refused)});
+            problems.push_back(tr(Txt::packs_refused_help, {p.refused}));
+            continue;
+        }
         list.rows.push_back({kind_text(p.kind) + ": " + name, pack_check_verdict(r)});
         const std::string first = first_problem(r);
         problems.push_back(first.empty() ? tr(Txt::packs_check_fine, {name}) : first);

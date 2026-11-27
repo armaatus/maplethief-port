@@ -32,6 +32,12 @@
  *     wider than the texture the game draws it into is logged ("overflow").
  * Without a pack nothing changes.
  *
+ * Several packs (#421, ADR 0149): mt_textpack_add appends a pack to an ordered list of at most
+ * MT_PACKS_MAX, all of the first pack's language (a pack of another language is refused). The
+ * first pack that has a key in a table answers it (a Tables.strings field by its row and column);
+ * the manifest asked of mt_textpack_manifest is the first pack's. Each pack's counts:
+ * mt_textpack_pack_use (maplethief/pack_manifest.h; its rejected: the pack's refused files).
+ *
  * Opened by the frontend before the boot (text_pack = DIR); kept across processes. Single guest
  * thread. C17, also C++20. */
 #ifndef MAPLETHIEF_TEXTPACK_H
@@ -39,6 +45,7 @@
 
 #include <stdint.h>
 
+#include "maplethief/pack_manifest.h"
 #include "maplethief/recomp/recomp.h"
 
 MT_EXTERN_C_BEGIN
@@ -48,32 +55,40 @@ MT_EXTERN_C_BEGIN
 #define MT_TEXTPACK_MAX_VALUE 4096u     /* bytes of a value (UTF-8) */
 #define MT_TEXTPACK_MAX_ENTRIES 65536u  /* entries of one file */
 
-typedef struct mt_textpack_stats {
-    uint32_t files;     /* .strings files loaded (the manifest included) */
-    uint32_t refused;   /* files refused (logged) */
-    uint32_t entries;   /* entries loaded from the text files (not the manifest's) */
-    uint32_t unknown;   /* Tables.strings keys that name no table text column (logged) */
-    uint64_t lookups;   /* strings the game asked the pack for */
-    uint64_t replaced;  /* of them, answered from the pack */
-    uint32_t fields;    /* table fields written from the pack */
+typedef struct mt_textpack_stats { /* the packs, all together */
+    uint32_t files;                /* .strings files loaded (the manifest included) */
+    uint32_t refused;              /* files refused (logged) */
+    uint32_t entries;              /* entries loaded from the text files (not the manifest's) */
+    uint32_t unknown;              /* Tables.strings keys that name no table text column (logged) */
+    uint64_t lookups;              /* strings the game asked the pack for */
+    uint64_t replaced;             /* of them, answered from the pack */
+    uint32_t fields;               /* table fields written from the pack */
     uint32_t overflows; /* table values cut to their field, texts wider than their texture */
 } mt_textpack_stats;
 
-/* Opens the pack in the directory `dir` (UTF-8): reads and checks its files. Returns the entries
- * loaded, or -1 (logged) if `dir` is no directory or its manifest is missing or refused. A pack
- * open before is closed first. */
+/* Adds the pack in the directory `dir` (UTF-8) after the packs open now: reads and checks its
+ * files. Returns the entries loaded, or -1 (logged) if `dir` is no directory, its manifest is
+ * missing or refused, its language differs from the first pack's, or MT_PACKS_MAX packs are
+ * open. */
+int mt_textpack_add(const char *dir) MT_NOEXCEPT;
+/* Closes every pack, then adds `dir`: the pack alone. */
 int mt_textpack_open(const char *dir) MT_NOEXCEPT;
+/* Closes every pack. */
 void mt_textpack_close(void) MT_NOEXCEPT;
+/* 1 while any pack is open. */
 int mt_textpack_is_open(void) MT_NOEXCEPT;
+/* The packs open now, and what pack `index` (0: the first) did: 0, or -1 if there is none. */
+uint32_t mt_textpack_pack_count(void) MT_NOEXCEPT;
+int mt_textpack_pack_use(uint32_t index, mt_pack_use *out) MT_NOEXCEPT;
 
-/* The pack's text for `key` in `table` ("Scripts", "ScriptExtra", "Port"; UTF-8, valid until the
- * pack closes), or NULL: no pack, no such file or key. Counts a lookup. */
+/* The first pack's text for `key` in `table` ("Scripts", "ScriptExtra", "Port"; UTF-8, valid
+ * until the packs close), or NULL: no pack, no such file or key. Counts a lookup. */
 const char *mt_textpack_lookup(const char *table, const char *key) MT_NOEXCEPT;
 
-/* A manifest value ("name", "language", "version", ...), or NULL. */
+/* A manifest value of the first pack ("name", "language", "version", ...), or NULL. */
 const char *mt_textpack_manifest(const char *key) MT_NOEXCEPT;
 
-/* The counters since the pack opened (zeros without one). */
+/* The counters since the first pack opened (zeros without one). */
 mt_textpack_stats mt_textpack_get_stats(void) MT_NOEXCEPT;
 
 /* Calls `fn` with each text the game draws into a bitmap (-[NSString drawAtPoint:withFont:],

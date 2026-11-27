@@ -154,3 +154,34 @@ TEST_CASE("pack tools: the menu's dump starts and stops, the others say what is 
     CHECK(list.choose(0).find("0000000000000002_2x2.png is no PNG") != std::string::npos);
     CHECK(fe::check_packs_list(fe::Settings{}, "", "").rows.empty());
 }
+
+TEST_CASE("pack tools: Check packs applies a row's list rules as the start opens it (#421)") {
+    Dir d("list-rules");
+    const auto text_pack = [&d](const std::string &name, const std::string &id,
+                                const std::string &language) {
+        const fs::path p = d.path / "text-packs" / name;
+        write(p / "pack.strings", "\"format\" = \"1\";\n\"kind\" = \"text\";\n\"id\" = \"" + id +
+                                      "\";\n\"name\" = \"" + name + "\";\n\"language\" = \"" +
+                                      language + "\";\n");
+        write(p / "Port.strings", "\"hint_move\" = \"x\";\n");
+        return p.string();
+    };
+    const std::string de = text_pack("de", "de", "de");
+    const std::string fr = text_pack("fr", "fr", "fr");
+    const std::string again = text_pack("de-again", "de", "de");
+    fe::Settings s;
+    s.text_pack = de + "|" + fr + "|" + again;
+    const std::vector<fe::PackToCheck> got = fe::packs_to_check(s, "");
+    REQUIRE(got.size() == 3);
+    CHECK(got[0].refused.empty());
+    CHECK(got[1].refused == "language fr differs from the first text pack's de");
+    CHECK(got[2].refused == "an earlier pack in the list has its id, de");
+    // Alone, each pack opens; in the list, the later two are refused with the list's reason.
+    CHECK(fe::pack_check_verdict(fe::check_pack(fr, "", "text")).rfind("opens", 0) == 0);
+    const fe::MenuList list = fe::check_packs_list(s, "", "");
+    REQUIRE(list.rows.size() == 3);
+    CHECK(list.rows[0].value.rfind("opens", 0) == 0);
+    CHECK(list.rows[1].value == "refused");
+    CHECK(list.choose(1) == "Refused: language fr differs from the first text pack's de");
+    CHECK(list.rows[2].value == "refused");
+}

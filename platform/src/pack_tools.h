@@ -12,7 +12,10 @@
 //   <parent>/text-packs/text-<lang>/    Export text writes the game's and the port's text here
 //
 // Check packs looks at every folder the pack rows name (texture_pack, audio_pack, text_pack;
-// ADR 0149's '|' lists too) and every pack in the three pack folders.
+// ADR 0149's '|' lists too) and every pack in the three pack folders. Each pack is checked as
+// the loader indexes it alone; a pack a row lists is also put through that list's own rules
+// as the start opens the list (#421, packs.h's check_pack_list: a second id, a text pack of
+// another language, the 17th), and refused with that reason when one applies.
 //
 // Single thread: the frontend's, while the game is paused (the menu) or before it boots (the
 // command line).
@@ -78,6 +81,7 @@ std::string pack_check_verdict(const PackToolResult &r);
 struct PackToCheck {
     std::string kind; // "texture", "audio", "text"
     std::string dir;
+    std::string refused; // why its row's list refuses it (#421), "" if it does not
 };
 std::vector<PackToCheck> packs_to_check(const Settings &s, const std::string &parent);
 

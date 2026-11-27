@@ -21,7 +21,7 @@ To run a tool from the command line, open a terminal in the game's folder and st
 
 ## Checking a pack
 
-**Other → Check packs** checks every pack the settings name and every pack in the pack folders, with the game's own rules. Each pack gets a line: *opens, 812 usable*, *opens, 810 usable, 2 rejected*, or *refused*. Choose a line to see its first problem. The whole report, file by file, is in the log (**Saves → Open logs folder** on a computer).
+**Other → Check packs** checks every pack the settings name and every pack in the pack folders, with the game's own rules. Each pack gets a line: *opens, 812 usable*, *opens, 810 usable, 2 rejected*, or *refused*. A pack the settings list is also checked in its place in the list, as the game opens them all at once: a second text pack in another language, or a second pack with the same id, shows *refused* with that reason even when it would open alone. Choose a line to see its first problem. The whole report, file by file, is in the log (**Saves → Open logs folder** on a computer).
 
 From the command line: `MapleThief --check-pack MyPack`. Add `--pack-kind texture`, `audio` or `text` when the folder doesn't say what it is. The exit status is 0 when the game uses every file, and 3 when it rejects one or refuses the pack.
 

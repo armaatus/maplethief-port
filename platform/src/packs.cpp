@@ -10,7 +10,10 @@
 #include <utility>
 
 #include "data_notice.h"
+#include "maplethief/audio.h"
 #include "maplethief/pack_manifest.h"
+#include "maplethief/texpack.h"
+#include "maplethief/textpack.h"
 #include "pack_folders.h"
 #include "port_text.h"
 
@@ -178,23 +181,127 @@ std::vector<PackInfo> check_pack_list(const std::vector<std::string> &paths, Pac
     return out;
 }
 
-std::string pack_to_open(const Settings &s, PackKind kind, const std::string &port_version) {
-    std::string first;
+std::vector<std::string> packs_to_open(const Settings &s, PackKind kind,
+                                       const std::string &port_version) {
+    std::vector<std::string> out;
     for (const PackInfo &p :
          check_pack_list(split_pack_list(pack_kind_value(s, kind)), kind, port_version)) {
         if (!p.refused.empty()) {
             SDL_Log("packs: %s pack %s refused: %s", pack_kind_name(kind), p.path.c_str(),
                     p.refused.c_str());
             queue_data_notice(tr(Txt::notice_pack_refused, {pack_title(p), p.refused}));
-        } else if (first.empty()) {
-            first = p.path;
         } else {
-            SDL_Log("packs: %s pack %s not opened: one pack of a kind opens at a time, the "
-                    "first (%s)",
-                    pack_kind_name(kind), p.path.c_str(), first.c_str());
+            out.push_back(p.path);
         }
     }
-    return first;
+    return out;
+}
+
+std::vector<std::string> open_packs(PackKind kind, const std::vector<std::string> &paths) {
+    std::vector<std::string> failed;
+    switch (kind) {
+    case PackKind::kTexture:
+        mt_texpack_close();
+        break;
+    case PackKind::kAudio:
+        mt_audio_pack_close();
+        break;
+    case PackKind::kText:
+        mt_textpack_close();
+        break;
+    }
+    for (const std::string &path : paths) {
+        int n = -1;
+        switch (kind) {
+        case PackKind::kTexture:
+            n = mt_texpack_add(path.c_str());
+            break;
+        case PackKind::kAudio:
+            n = mt_audio_pack_add(path.c_str());
+            break;
+        case PackKind::kText:
+            n = mt_textpack_add(path.c_str());
+            break;
+        }
+        if (n < 0) {
+            failed.push_back(path);
+        }
+    }
+    return failed;
+}
+
+std::vector<PackUse> open_pack_uses(PackKind kind, const std::string &port_version) {
+    std::vector<mt_pack_use> raw;
+    for (std::uint32_t i = 0;; i++) {
+        mt_pack_use u{};
+        const int ok = kind == PackKind::kTexture ? mt_texpack_pack_use(i, &u)
+                       : kind == PackKind::kAudio ? mt_audio_pack_use(i, &u)
+                                                  : mt_textpack_pack_use(i, &u);
+        if (ok != 0) {
+            break;
+        }
+        raw.push_back(u);
+    }
+    std::vector<PackUse> out;
+    for (const mt_pack_use &u : raw) {
+        PackUse p;
+        p.path = u.dir != nullptr ? u.dir : "";
+        p.title = pack_title(read_pack(p.path, kind, port_version));
+        p.replaced = u.replaced;
+        p.rejected = u.rejected;
+        p.hidden = u.hidden;
+        for (std::size_t i = 0; i < out.size() && i < MT_PACKS_MAX; i++) {
+            if (u.hidden_by[i] != 0) {
+                p.hidden_by.emplace_back(out[i].title, u.hidden_by[i]);
+            }
+        }
+        out.push_back(std::move(p));
+    }
+    return out;
+}
+
+std::string pack_use_counts(const PackUse &u) {
+    std::string s =
+        std::to_string(u.replaced) + " replaced, " + std::to_string(u.hidden) + " hidden";
+    if (u.hidden_by.size() == 1) {
+        s += " by " + u.hidden_by.front().first;
+    } else if (u.hidden_by.size() > 1) {
+        std::string by;
+        for (const auto &[title, n] : u.hidden_by) {
+            by += (by.empty() ? "" : ", ") + std::to_string(n) + " by " + title;
+        }
+        s += " (" + by + ")";
+    }
+    if (u.rejected != 0) {
+        s += ", " + std::to_string(u.rejected) + " rejected";
+    }
+    return s;
+}
+
+std::string pack_use_line(PackKind kind, const PackUse &u) {
+    const char *prefix = kind == PackKind::kTexture ? "texpack"
+                         : kind == PackKind::kAudio ? "audiopack"
+                                                    : "textpack";
+    return std::string(prefix) + ": " + u.title + ": " + pack_use_counts(u);
+}
+
+void log_pack_uses(PackKind kind, const std::string &port_version) {
+    for (const PackUse &u : open_pack_uses(kind, port_version)) {
+        SDL_Log("%s", pack_use_line(kind, u).c_str());
+    }
+}
+
+void add_setting_flag(std::vector<std::pair<std::string, std::string>> &flags,
+                      const std::string &key, const std::string &value) {
+    if (pack_kind_of(key)) {
+        for (auto &[k, v] : flags) {
+            if (k == key) {
+                v = join_pack_list({v, value});
+                return;
+            }
+        }
+    }
+    flags.emplace_back(key, value);
 }
 
 std::string pack_title(const PackInfo &p) {
@@ -295,13 +402,26 @@ std::string PacksScreen::row_help(std::size_t row) const {
     if (r.empty) {
         return tr(Txt::packs_none_help, {pack_kind_folder(r.kind)});
     }
-    const PackInfo &p = kinds_[index_of(r.kind)][r.pack].info;
+    const Entry &e = kinds_[index_of(r.kind)][r.pack];
+    const PackInfo &p = e.info;
     if (!p.refused.empty()) {
         return tr(Txt::packs_refused_help, {p.refused});
     }
     std::string help = p.author.empty() ? std::string() : tr(Txt::packs_by, {p.author});
     const std::string more = p.description.empty() ? p.path : p.description;
-    return help.empty() ? more : help + " " + more;
+    help = help.empty() ? more : help + " " + more;
+    // What the pack did this run, while it is open.
+    if (e.enabled) {
+        const std::vector<PackUse> uses = uses_ ? uses_(r.kind) : open_pack_uses(r.kind, port_);
+        for (const PackUse &u : uses) {
+            if (trimmed(u.path) == trimmed(p.path)) {
+                help += " " + tr(Txt::packs_this_run,
+                                 {std::to_string(u.replaced), std::to_string(u.hidden)});
+                break;
+            }
+        }
+    }
+    return help;
 }
 
 PacksScreen::Change PacksScreen::toggle(std::size_t row) const {

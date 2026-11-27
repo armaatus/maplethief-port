@@ -229,7 +229,8 @@
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
 //   --audio-pack DIR  the music and sound files in DIR replace the game's by file name
 //                     (audio_pack, maplethief/audio.h, ADR 0106); python3 -m mtport.audiopack
-//                     init DIR lists the names
+//                     init DIR lists the names; given more than once, the packs stack in order,
+//                     the first winning per sound (ADR 0149, as --texture-pack and --text-pack)
 //   --text-pack DIR   the text in DIR (UTF-8 .strings files) replaces the game's dialogue,
 //                     table names and descriptions and the port's own text by key (text_pack,
 //                     maplethief/textpack.h, ADR 0108); python3 -m mtport.textpack export DIR
@@ -361,6 +362,7 @@
 #include "maplethief/runtime.h"
 #include "maplethief/texpack.h"
 #include "pack_tools.h"
+#include "packs.h"
 #include "player_log.h"
 #include "present.h"
 #include "preset_picker.h"
@@ -616,7 +618,7 @@ void print_usage() {
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
             "[--gapless-music on|off] [--audio-mono on|off] [--audio-device default|NAME] "
-            "[--audio-pack DIR] "
+            "[--audio-pack DIR]... "
             "[--right-touch X,Y|off] [--hide-keypad auto|always|never] "
             "[--shot-gl] [--rumble on|off] [--rumble-strength N] "
             "[--minimise T,S]... [--background T,S]... [--unfocus T,S]... [--quit T] "
@@ -631,7 +633,8 @@ void print_usage() {
             "[--check-ios-backup DIR] [--import-ios-backup DIR] "
             "[--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off] "
             "[--language en|ko] "
-            "[--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR] "
+            "[--texture-pack DIR]... [--text-pack DIR]... [--texture-filter game|nearest] "
+            "[--dump-textures DIR] "
             "[--menu-repeat on|off] [--confirm-guard on|off] "
             "[--focus-highlight on|off] [--button-prompts on|off] "
             "[--keypad-layout original|GROUP=S,DX,DY,O;...] [--edit-keypad] "
@@ -712,7 +715,8 @@ bool parse_options(int argc, char **argv, Options &options) {
                 SDL_Log("%s: %s", std::string(arg).c_str(), why.c_str());
                 return false;
             }
-            options.setting_flags.emplace_back(info->key, argv[i]);
+            // A pack's flag given again adds to its list (#421).
+            add_setting_flag(options.setting_flags, info->key, argv[i]);
         } else if (arg == kPresetFlag && has_value) {
             Preset preset{};
             if (!parse_preset(argv[++i], &preset)) {

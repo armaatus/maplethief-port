@@ -23,6 +23,8 @@
 #ifndef MAPLETHIEF_PACK_MANIFEST_H
 #define MAPLETHIEF_PACK_MANIFEST_H
 
+#include <stdint.h>
+
 #include "maplethief/recomp/recomp.h"
 
 MT_EXTERN_C_BEGIN
@@ -65,6 +67,24 @@ int mt_pack_manifest_read(const char *dir, const char *kind, const char *port_ve
  * newer than b (a release candidate is older than its release). If either is not a version: 0,
  * and *ok = 0 (when `ok` is not NULL; else *ok = 1). */
 int mt_pack_compare_versions(const char *a, const char *b, int *ok) MT_NOEXCEPT;
+
+/* Several packs of a kind at once (#421, ADR 0149): each kind's runtime (maplethief/texpack.h,
+ * audio.h, textpack.h) keeps an ordered list of at most MT_PACKS_MAX packs; the first pack that
+ * has an entry, with a file that passes the kind's checks, wins it. What each pack did since it
+ * opened, read with mt_texpack_pack_use, mt_audio_pack_use and mt_textpack_pack_use:
+ *   replaced   entries it answered (uploads or UIKit images; sounds; strings and table fields)
+ *   rejected   entries it had a file or text for that was rejected (the next pack was asked)
+ *   hidden     entries it had that an earlier pack answered, and by which: hidden_by[i] counts
+ *              those pack i answered (hidden is their sum) */
+#define MT_PACKS_MAX 16u
+
+typedef struct mt_pack_use {
+    const char *dir; /* the pack's folder as opened (UTF-8; valid until its kind's packs close) */
+    uint64_t replaced;
+    uint64_t rejected;
+    uint64_t hidden;
+    uint64_t hidden_by[MT_PACKS_MAX];
+} mt_pack_use;
 
 MT_EXTERN_C_END
 
