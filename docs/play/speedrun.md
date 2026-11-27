@@ -158,6 +158,12 @@ The link is off by default. It connects to LiveSplit's own server only: `localho
 
 No LiveSplit auto-splitter script is needed or offered: such scripts read the game's memory, which moves with every build of the port.
 
+## Input display
+
+**Input display** in the **Video** tab (`input_display = on`, off by default, `--input-display on`) shows the keys the game is being given, for your videos and for practice: the four directions, jump, attack, the four quick slots, and OK, back, the menu and the map. Each lights while it is held, whatever you play with: the keyboard, a gamepad or the touch key pad. It sits in the bottom left of the border beside or under the picture when there is one, else over the picture's left edge between the Map button and the d-pad. It is not part of a preset.
+
+It only draws: the game never sees it, so it doesn't change a run, a recording or a verification. A touch on the Map, Bag or Cash buttons of the touch screen doesn't light a key, because those buttons go to the game directly.
+
 ## Not yet
 
 - A run that quits and goes on in a later session can't be verified: one session makes one run file.
