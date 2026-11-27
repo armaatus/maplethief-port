@@ -7,6 +7,9 @@ advancement, the two ending scenes, and a save that goes on after them. The bot 
 skills and mobs are named by id; the [compendium](../compendium/README.md) has their names. Each
 quest is ticked when a CTest part has completed it and checked its state in guest memory (the
 quest manager: world `+0x58`; 0 not started, 1 active, 2 done).
+[#301](https://github.com/armaatus/maplethief-port/issues/301) adds everything chapter 3 offers
+beside its main line: the 33 side quests, every offer path of sides 1, 14 and 16, the climb of
+6.1 and 6.2, and chapter 3's recipes and trades ([below](#side-quests-the-climb-crafts-and-trades-301)).
 
 ## Running it
 
@@ -155,6 +158,176 @@ The bytes the game never writes (heap leftovers, [formats/save.md](../formats/sa
 out of every compare and counted (`9 never-written heap bytes differ` in quest0 when the save
 came from another process).
 
+## Side quests, the climb, crafts and trades (#301)
+
+All 33 side quests of chapter 3 in the knowledge base reach state 2. The main parts take 0, 2's
+start, 4, 15, 25 and 58 (above). The side parts below take 27 more, chained from part D's save
+(9.0, main 7 active, the played level-72 Bandit with the 4th job). Sides 1, 16 and 42 are also the
+Dark Lord's job advancements, which the chain's hero took in earlier chapters; the job runs of
+[skills-and-jobs.md](skills-and-jobs.md) hand them in (below). Each part checks its quests in
+guest memory and in the save it writes (`then_quests_are`), and the common checks hold on every
+part (no trap, no unimplemented call, no error line, the game ticks and draws).
+
+```sh
+ctest --preset mac-debug -R 'chapter_3_(sides|climb|side_14|crafts)' --output-on-failure
+# from part D's kept output:
+ctest --preset mac-debug -R 'chapter_3_(sides|climb|side_14|crafts)' \
+    -FA 'play_chapter_[23]_[a-f]|start_chapter_2.*|bot_world'
+```
+
+| Part | Test | Starts from | Covers | Game time | Falls |
+| --- | --- | --- | --- | ---: | ---: |
+| sides_a | `play.chapter_3_sides_a` | D's save (9.0, level 72) | sides 3, 1 and 16 (BrokerHan's path), 2, 5, 17 done; 6 and 18 given; item 127 farmed | 1,143 s | 0 |
+| sides_b | `play.chapter_3_sides_b` | sides_a's | sides 7, 6, 8, 10 done; 9 and 11 given | 864 s | 0 |
+| sides_c | `play.chapter_3_sides_c` | sides_b's | sides 12 (the smith, 0.0), 11, 9, 18, 13 done; 14 given | 614 s | 0 |
+| climb | `play.chapter_3_climb` | sides_c's | the climb of 6.1 and 6.2, side 34 (item 85) | 391 s | 0 |
+| side_14 | `play.chapter_3_side_14` | climb's | side 14 by the Bandit: dagger 32 | 15 s | 0 |
+| side 14, Assassin | `play.chapter_3_side_14_assassin_synthetic` | `starts.chapter_3_side_14_assassin`: sides_c's save, an Assassin, side 14 not yet offered | side 14 offered to an Assassin, the climb again, claw 44 | 264 s | 0 |
+| sides_10_a | `play.chapter_3_sides_10_a_synthetic` | `starts.chapter_3_sides_10`: side_14's save, level 99 | sides 20, 22, 23, 24 (area 10) | 2,378 s | 0 |
+| sides_10_b | `play.chapter_3_sides_10_b_synthetic` | sides_10_a's | sides 26 to 30 (area 10) | 4,499 s | 0 |
+| sides_10_c | `play.chapter_3_sides_10_c_synthetic` | sides_10_b's | side 31 (area 10); every side quest checked | 4,589 s | 17 |
+| crafts | `play.chapter_3_crafts_synthetic` | `starts.chapter_3_crafts`: D's save with the materials | the 10 trades and 18 recipes | 222 s (wall) | 0 |
+
+The synthetic starts (`tests/starts/raise/chapter_3_*.json`, laid over a chained save with
+`savedata build --base`):
+
+- `chapter_3_sides_10.json`: level 99, as part E, wearing chapter 3's best crafted set (hat 11,
+  dagger 35, overall 23, earrings 71, shoes 59, each for level 65 and each made by the crafts
+  part). Area 10's mobs are level 98 to 130 (sides 29 and 31 want 60 drops each of mobs 54 and
+  55, level 125 and 130); the played level-72 hero fell 23 times there in an hour (part E above).
+  In the first run the hero still wore the level-30 hat 4, overall 16 and shoes 53 of chapter 2:
+  sides 26 to 30 were done with 17 falls in 2.4 game-hours, and on 10.3 mob 55 felled it within
+  a minute each time, so side 31's 60 drops did not come in an hour. In the crafted set sides 26
+  to 30 took 75 game-minutes with no fall; side 31 took 67 game-minutes and 17 falls on 10.3
+  (mob 55 is 31 levels above the hero, and the bot only fights and drinks). Areas 6 to 8 and the climb are played at level 72 to
+  75.
+- `chapter_3_side_14_assassin.json`: over sides_c's save, branch 1 (an Assassin, the Bandit's
+  skills and their quick slots cleared), side 14 back to not offered and its record removed.
+  Side 14's reward is chosen by `getHeroClass` (`chapter3/ZenumistChief.out`) when the quest is
+  offered, not when it is handed in: claw 44 for an Assassin, dagger 32 otherwise. The chain's
+  hero is a Bandit; a first try that made it an Assassin after the offer still got dagger 32.
+- `chapter_3_crafts.json`: 100,000 meso, the 10 trades' items (50 each), the recipes' materials and
+  an empty equipment bag for the 18 results.
+
+### Every side quest
+
+Giver and completer are the NPC scripts and their maps; "list" is the row value of the NPC's quest
+list (`regSelList`, read from the scripts).
+
+| # | Giver → completer, list | Needs | Status | Evidence |
+| --- | --- | --- | --- | --- |
+| 0 | BrokerHan (6.0), 1 | 10 of item 8, 10,000 meso | done | part A (above) |
+| 1 | BrokerHan, 2 (his path) | 15,000 meso | done | sides_a: `talk: BrokerHan: side 1 done (15,000 meso)` |
+| 1 | the Dark Lord (0.0) (his path: the 1st job) | a Beginner of level 10 | done | `play.jobs_3_1_synthetic`: `ok: the quests the advancement hands in: side 1:2` |
+| 2 | AlchadnoChief (8.0), 2 | side 4 done | done | sides_a: `talk: AlchadnoChief: side 2 done` |
+| 3 | BrokerHan, 3 | side 2 active; 10,000 meso | done | sides_a: `side 3:2` |
+| 4 | Humanoid3 (8.4) | side 2 active | done | part B (above) |
+| 5 | ZenumistChief (7.0), 6 | 25 of item 83 (mob 58, 7.2) | done | sides_a: `farm: 30 of mob 56 and 25 of item 83 (mob 58) on 7.2`, `side 5:2` |
+| 6 | ZenumistChief, 7 | item 121 (side 7's reward) | done | sides_b: `talk: ZenumistChief: side 6 done (item 121)` |
+| 7 | Alchester (9.0), 2 | side 6 active; item 127 (mob 57 on 7.5, 10 %) | done | sides_a: `farm: item 127 from mob 57 on 7.5 (side 7)`; sides_b: `talk: Alchester: side 7 done (item 127), item 121` |
+| 8 | ZenumistChief, 8 | 30 of item 80 (mob 59, 8.3) | done | sides_b: `side 8:2` |
+| 9 | ZenumistChief, 9 | item 122 (side 11's reward) | done | sides_c: `talk: ZenumistChief: side 9 done (item 122)` |
+| 10 | Humanoid3, 2 | side 9 active; 30 of item 79 (mob 60, 8.2) | done | sides_b: `talk: Humanoid3: side 10 done, item 124` |
+| 11 | Humanoid3, 3 | item 125 (side 12's reward) | done | sides_c: `talk: Humanoid3: side 11 done (item 125), item 122` |
+| 12 | the smith (0.0), 1 | side 11 active; item 124, 10,000 meso | done | sides_c: `talk: smith: side 12 done (item 124, 10,000 meso), item 125` |
+| 13 | ZenumistChief, 10 | 30 of item 81 (mob 62, 8.4) | done | sides_c: `side 13:2` |
+| 14 | ZenumistChief, 11 | item 85 (side 34's reward) | done | side_14: `ok: branch 2: equipment 32 0 -> 1, equipment 44 0, item 85 0`; the Assassin: `ok: branch 1: equipment 44 0 -> 1, equipment 32 0, item 85 0` |
+| 15 | BrokerHan, 4 | 40 of mob 60 | done | part B (above) |
+| 16 | BrokerHan, 5 (his path) | 30 of mob 56 (7.2), 10,000 meso | done | sides_a: `talk: BrokerHan: side 16 done (10,000 meso)` |
+| 16 | the Dark Lord (his path: the 2nd job, lists 6 and 7) | a Rogue of level 30 | done | `play.jobs_3_2_assassin_synthetic`, `_bandit_synthetic`: `side 16:2` |
+| 17 | AlchadnoChief, 3 | 30 of item 78 (mob 61, 8.1) | done | sides_a: `talk: AlchadnoChief: side 17 done` |
+| 18 | AlchadnoChief, 4 | 40 of mob 62 (8.4) | done | sides_c: `talk: AlchadnoChief: side 18 done` |
+| 20 | Skadru (9.0), 1 | 30 of item 73 (mob 43, 10.0) | done | sides_10_a: `side 20:2` |
+| 22 | the SnowQueen (9.0), 2 | main 6 started; 30 of mob 43 | done | sides_10_a: `side 22:2` |
+| 23 | the SnowQueen, 3 | 33 of mob 44 (10.1) | done | sides_10_a: `side 23:2` |
+| 24 | the SnowQueen, 4 | 30 of item 75 (mob 33, 10.2), 30 of item 123 (mob 37, 10.1) | done | sides_10_a: `side 24:2` |
+| 25 | ZenumistChief, 12 → the Dark Lord | the 4th job | done | part D (above) |
+| 26 | the Miner (9.0), 1 → Alchester, 3 | side 24 done | done | sides_10_b: `side 26:2` |
+| 27 | Alchester, 4 | 30 of item 74 (mob 29, 10.2) | done | sides_10_b: `side 27:2` |
+| 28 | Alchester, 5 → Skadru, 2 | side 27 done | done | sides_10_b: `side 28:2` |
+| 29 | Skadru, 3 | 60 of item 76 (mob 54, 10.2) | done | sides_10_b: `side 29:2` |
+| 30 | Alchester, 6 | 60 of mob 54 | done | sides_10_b: `side 30:2` |
+| 31 | Alchester, 7 | 60 of item 77 (mob 55, 10.3) | done | sides_10_c: `side 31:2` |
+| 34 | remem2 (6.2), on a talk | the climb | done | climb: `talk: remem2 (6.2): the climb, side 34 done, item 85` |
+| 42 | the Dark Lord (the 3rd job) | 2 advancements, level 60 | done | `play.jobs_3_4_assassin_synthetic`, `_bandit_synthetic` (first talk): `side 42:2` |
+| 58 | AlchadnoChief, on a talk | item 118 | done | part B (above) |
+
+sides_10_c ends with every side quest the chain takes in one check: `ok: chapter 3's side
+quests but 42: side 0:2 side 1:2 … side 34:2 side 58:2` (32 quests; 42 is the 3rd job, which
+the chain's hero took in chapter 2).
+
+**The offer paths.** Side 1 is offered by BrokerHan (15,000 meso for 4,000 EXP) and by the Dark
+Lord to a Beginner (the 1st job, claw 36 and 200 of item 11). Side 16 by BrokerHan (30 of mob 56
+and 10,000 meso for 2 of item 90 and 4,000 EXP) and by the Dark Lord to a Rogue (the 2nd job:
+list 6 an Assassin with claw 40, list 7 a Bandit with dagger 28; lists 4 and 5 only explain the
+two jobs). Side 14 is one offer with two rewards by the hero's job (above). Each path is played
+once: BrokerHan's in sides_a, the Dark Lord's in the job runs, side 14's in side_14 and its
+Assassin run.
+
+### The climb of 6.1 and 6.2
+
+While side 14 is active, 6.0's portal to 6.1 opens (`link 3 6 0 1 6 1 q1.14==1` in the bot
+world). 6.1 and 6.2 are a climb of ropes and ledges with portal611 at 6.1's top and remem2 at
+6.2's; the game refuses to save on both ([re/autosave.md](../re/autosave.md)). The bot climbed
+both in 237 game-s with no fall: `ok: run event 6.0's portal to 6.1 (side 14 active): heard 1
+time(s)`, `ok: run event 6.1's top to 6.2: heard 1 time(s)`, `talk: remem2 (6.2): the climb,
+side 34 done, item 85`, `ok: part climb's quests: side 14:1 side 34:2`. The way back down takes
+portal620, which lands on 6.1 where the hero stood on 6.2 ([original bug 14](../re/original-bugs.md#14-commonportal620-warps-to-a-portal-that-does-not-exist)),
+then portal610 to 6.0.
+
+### Crafts and trades
+
+`play.chapter_3_crafts_synthetic` plays each trade and recipe of chapter 3 once, checked in the
+bag, the meso and the quest manager before and after (a trade is side 78, a craft side 77, each
+at state 2 after).
+
+| NPC | Lists | Takes | Gives | Evidence |
+| --- | --- | --- | --- | --- |
+| Ericsson (4.0) | 1 | 50 of item 54 | 3 of item 94 | `ok: Ericsson: trade 1, … (side 78:2) … before item 54:50 item 94:50 meso 100000; after item 54:0 item 94:53 meso 100000` |
+| Ericsson | 2 | 50 of item 50 | 3 of item 100 | `ok: Ericsson: trade 2, …` |
+| Ericsson | 3 | 50 of item 66 | 3 of item 95 | `ok: Ericsson: trade 3, …` |
+| Ericsson | 4 | 50 of item 68 | 3 of item 101 | `ok: Ericsson: trade 4, …` |
+| BrokerHan (6.0) | 6, 1 | 50 of item 79 | 3 of item 96 | `ok: BrokerHan: trade 1, …` |
+| BrokerHan | 6, 2 | 50 of item 81 | 3 of item 102 | `ok: BrokerHan: trade 2, …` |
+| BrokerHan | 6, 3 | 50 of item 74 | 3 of item 97 | `ok: BrokerHan: trade 3, …` |
+| pig (1.0) | 1 | 50 of item 103 | 3 of item 98 | `ok: pig: trade 1, …` |
+| pig | 2 | 50 of item 42 | 3 of item 93 | `ok: pig: trade 2, …` |
+| pig | 3 | 50 of item 112 | 3 of item 99 | `ok: pig: trade 3, …` |
+
+In chapter 3 `common/Ericsson.out` has no quest to list, so his trade list opens at once (in
+chapter 2 it is his list 5). The smith (`chapter3/smith.out`) lists side 12 (list 1) only while
+side 11 is active; otherwise the Craft's kinds open at once (1 hat, 2 overall, 3 dagger, 4 glove, 5
+shoes, 6 earrings), then the row (1 to 3, the kind's recipes by result id). All 18 of chapter 3
+passed against the knowledge base's recipe: equipment 7, 9, 11 (hats), 19, 21, 23 (overalls),
+31, 33, 35 (daggers), 43, 45, 47 (gloves), 55, 57, 59 (shoes), 67, 69, 71 (earrings), e.g. `ok:
+smith: hat 7: the compendium's recipe (1 of equipment 7 for 1800 meso, 5 of item 98, 6 of item
+100, 6 of item 101): before item 98:43 item 100:63 item 101:53 equipment 7:0 meso 100000; after
+…`, then `ok: crafted 18 recipes; the knowledge base has 18 in chapter 3`.
+
+### A port bug found: no way off 7.5 for the bot
+
+7.5's only portal (portal750, to 7.3) stands on its top platform (y 159). The way up is a rope
+that hangs 63 px above the floor, 8 px beside a lower ledge, with nothing at its top: a player
+jumps from the ledge onto it, climbs and hops off right. The bot's route planner
+(`tests/cpp/world_map.h`) had no such move, and the first run of sides_a stayed on 7.5 after
+farming item 127 (`FAIL: timed out after 300 s: talk: BrokerHan: side 16 done …; map 7.5 x 200 y
+271`). The planner now has a rope jump that starts with a jump onto the rope from a platform
+beside it; like a long hop it is kept only where nothing else leads to the far platform, so no
+other map's moves change (the moves of all 90 maps were compared: only 3.8 and 4.6 had such a
+rope, and both already had a way). `world_map_test`'s `a rope with no top is caught from a ledge
+and hopped off` checks it on a synthetic grid; sides_a then left 7.5 with no fall. This was a bug
+of the test bot, not of the port or the game.
+
+### A second bot bug: a ban that left no way to 10.3
+
+The bot bans a move that failed three times on a map for the rest of the task (`Nav::banned` in
+`tests/cpp/quest_bot.h`). On 10.2 mobs knocked the hero off the one climb toward 10.3's portal
+three times; with that climb banned there was no route, and the hero stood at the climb's foot
+(x 779) until it fell, 26 times in a row, so side 31's first run timed out. Where the bans
+alone leave no route the bot now lifts that map's bans and tries again; the rerun lifted them
+twice and reached 10.3 every time. The same run also logged 12 failed writes of
+`gamecenter.json` while the disk was nearly full (another job filled it); the rerun had none.
+
 ## Run coverage
 
 Rerun of #295's report (`python3 -m mtport.runcoverage run --tests 'play\.chapter_3.*'`,
@@ -189,3 +362,8 @@ Against chapter 2's runs, chapter 3's add 43 game functions, 50 scripts, 17 maps
 
 The report is in the git-ignored `work/coverage/chapter-3/`. The total with chapter 1 whole was
 not rerun.
+
+#301's parts (the side quests, the climb, side 14's two paths, area 10's sides and the crafts)
+are not in this report yet: the rerun needs a second build tree (`mac-coverage`) and the chain
+from chapter 1 as fixtures, and the disk had 3 to 6 GB free while #301 was built. A rerun with
+`--tests 'play\.chapter_3.*'` picks them up.

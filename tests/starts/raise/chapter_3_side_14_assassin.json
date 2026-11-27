@@ -1,0 +1,64 @@
+{
+ "branch": 1,
+ "skills": {},
+ "shortcuts": [
+  null,
+  [
+   1,
+   4
+  ],
+  [
+   1,
+   7
+  ],
+  null,
+  null
+ ],
+ "side": {
+  "0": 2,
+  "1": 2,
+  "2": 2,
+  "3": 2,
+  "4": 2,
+  "5": 2,
+  "6": 2,
+  "7": 2,
+  "8": 2,
+  "9": 2,
+  "10": 2,
+  "11": 2,
+  "12": 2,
+  "13": 2,
+  "14": 0,
+  "15": 2,
+  "16": 2,
+  "17": 2,
+  "18": 2,
+  "25": 2,
+  "58": 2
+ },
+ "records": [
+  {
+   "kind": 0,
+   "number": 7,
+   "npc": 28,
+   "title": "Chapter3_Quest_Alchester.mainQuest7.1",
+   "description": "Chapter3_Quest_Alchester.mainQuest7.2",
+   "requirements": [
+    {
+     "mob": 69,
+     "needed": 1,
+     "progress": 0
+    }
+   ],
+   "rewards": [
+    {
+     "exp": 32000
+    },
+    {
+     "meso": 32000
+    }
+   ]
+  }
+ ]
+}

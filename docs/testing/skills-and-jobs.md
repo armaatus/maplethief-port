@@ -30,10 +30,10 @@ that the saved game holds the new job.
 | `2-2-1` | `play.jobs_2_2_assassin_synthetic` | `jobs_ch2_rogue_30` | Assassin (1/2), equip 40 |
 | `2-2-2` | `play.jobs_2_2_bandit_synthetic` | `jobs_ch2_rogue_30` | Bandit (2/2), equip 28 |
 | `2-3-same` | `play.jobs_2_3_assassin_synthetic`, `play.jobs_2_3_bandit_synthetic` | `jobs_ch2_assassin_60`, `jobs_ch2_bandit_60` | tier 3, branch kept |
-| `3-1-0` | `play.jobs_3_1_synthetic` | `jobs_ch3_beginner_10` | Rogue (0/1), equip 36 |
-| `3-2-1` | `play.jobs_3_2_assassin_synthetic` | `jobs_ch3_rogue_30` | Assassin (1/2), equip 40 |
-| `3-2-2` | `play.jobs_3_2_bandit_synthetic` | `jobs_ch3_rogue_30` | Bandit (2/2), equip 28 |
-| `3-3-same` | `play.jobs_3_4_assassin_synthetic`, `play.jobs_3_4_bandit_synthetic` (first talk) | `jobs_ch3_assassin_60`, `jobs_ch3_bandit_60` | tier 3, branch kept |
+| `3-1-0` | `play.jobs_3_1_synthetic` | `jobs_ch3_beginner_10` | Rogue (0/1), equip 36, side quest 1 handed in |
+| `3-2-1` | `play.jobs_3_2_assassin_synthetic` | `jobs_ch3_rogue_30` | Assassin (1/2), equip 40, side quest 16 handed in |
+| `3-2-2` | `play.jobs_3_2_bandit_synthetic` | `jobs_ch3_rogue_30` | Bandit (2/2), equip 28, side quest 16 handed in |
+| `3-3-same` | `play.jobs_3_4_assassin_synthetic`, `play.jobs_3_4_bandit_synthetic` (first talk) | `jobs_ch3_assassin_60`, `jobs_ch3_bandit_60` | tier 3, branch kept, side quest 42 handed in |
 | `3-4-same` | the same tests (second talk) | the same | tier 4, branch kept, side quest 25 handed in |
 
 ### Against the compendium

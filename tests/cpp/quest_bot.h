@@ -85,8 +85,9 @@ struct Nav {
     wm::Edge edge{};
     int from = -1, from_y = 0, map_key = -1;
     double start = 0;
-    bool left = false;   // the hero left the ground during the move
-    bool hopped = false; // a rope jump's hop off the ladder is under way (since `hop`)
+    bool left = false;     // the hero left the ground during the move
+    bool hopped = false;   // a rope jump's hop off the ladder is under way (since `hop`)
+    bool grabbing = false; // a rope jump's jump onto a rope beside the platform is under way
     double hop = 0;
     int last_x = INT32_MIN, last_y = INT32_MIN;
     double still = 0, drink = -10;
@@ -273,6 +274,23 @@ inline void act(Run &r, Nav &n, const wm::Map &m, const Hero &h, double el, int 
             hold(r, LEFT, n.edge.dir < 0);
             hold(r, RIGHT, n.edge.dir > 0);
             hold(r, A, true);
+            break;
+        }
+        // A rope beside the platform, not over it (world_map.h: caught in the air): a jump
+        // toward it, the direction held until the hero is over it, then up, as a rope grab.
+        const int lx = m.ladders[static_cast<std::size_t>(n.edge.ladder)].x();
+        const int toward = lx < h.x ? -1 : 1;
+        if (!on_ladder(h) && (stand ? std::abs(lx - h.x) > 6 : n.grabbing)) {
+            n.grabbing = n.grabbing || !stand;
+            const bool short_of = (lx - h.x) * toward > 4;
+            hold(r, UP, !stand && !short_of);
+            hold(r, DOWN, false);
+            hold(r, A, stand && t < 0.12);
+            hold(r, LEFT, (stand ? t < 0.12 : short_of) && toward < 0);
+            hold(r, RIGHT, (stand ? t < 0.12 : short_of) && toward > 0);
+            if ((stand && t > 0.3) || t > 15) {
+                end_move(r, n, m, h, key);
+            }
             break;
         }
         const bool up = on_ladder(h) ? h.y > want - 1 : h.y > want;
@@ -515,7 +533,15 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
         return false;
     }
     n.settled = -1;
-    const std::vector<wm::Step> path = route(m, n, key, here, h.x, there);
+    std::vector<wm::Step> path = route(m, n, key, here, h.x, there);
+    if (path.empty() && !wm::route(m, here, h.x, there).empty()) {
+        // Only the bans stand in the way (a climb a mob knocked the hero off three times): lift
+        // this map's bans and try again, rather than stand at a dead end.
+        std::erase_if(n.banned, [key](const auto &b) { return std::get<0>(b) == key; });
+        std::erase_if(n.fails, [key](const auto &f) { return std::get<0>(f.first) == key; });
+        say(n, "map " + std::to_string(key) + ": the bans leave no route; lifted");
+        path = route(m, n, key, here, h.x, there);
+    }
     if (path.empty()) {
         say(n, "no route on map " + std::to_string(key) + " from platform " + std::to_string(here) +
                    " to " + std::to_string(there) + "; walking toward x " + std::to_string(tx));
@@ -579,6 +605,7 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     n.start = el;
     n.left = false;
     n.hopped = false;
+    n.grabbing = false;
     n.last_y = h.y;
     n.still = el;
     return false;
