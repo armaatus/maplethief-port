@@ -1276,6 +1276,9 @@ struct FarmStyle {
     i32 buff_mp = 0;
     i32 min_mp = 0, hp_pct = 33, mp_pct = 25, reach_up = 6, keep = 0;
     bool no_attack = false;
+    // No attack starts while the hero is knocked back (CHero +0x119): a boss killed then leaves
+    // its end scene's box deaf to every key (docs/re/original-bugs.md, 17).
+    bool land_first = false;
     std::vector<Restock> restock{Restock{}};
 };
 
@@ -1439,7 +1442,8 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
                  }
                  const int dir = go != 0 ? go : (turning ? s->facing : 0);
                  walk_toward(r, s->nav, h, el, dir);
-                 if (go == 0 && !turning && el - s->attack > 0.45) {
+                 if (go == 0 && !turning && el - s->attack > 0.45 &&
+                     !(style.land_first && h.knocked)) {
                      s->attack = el;
                  }
                  const bool skill =

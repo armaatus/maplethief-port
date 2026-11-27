@@ -53,7 +53,7 @@ inline i32 popup_id(const mt_cpu *cpu) { return rdi(cpu, k_popup_id); }
 
 // The hero: SkyCanvas -> the current state +0x0C (CStateGame) -> CHero +0x30: x +0x04, y +0x08,
 // flags +0x0C (0x10: dead), state +0x10 (2 standing, 3 walking, 5 jumping, 6 / 7 attacking, 11
-// a skill; docs/ANALYSIS.md), HP +0x94, MP +0x98, max HP +0x9C, max MP +0xA0 (CHero::LevelUp
+// a skill; docs/ANALYSIS.md), knocked back +0x119 (a byte, cleared on landing), HP +0x94, MP +0x98, max HP +0x9C, max MP +0xA0 (CHero::LevelUp
 // 0x65089), level +0x80, EXP +0x90, meso +0xD0, the other items +0xD8 (48 item pointers: id
 // +0x90, count +0x100); its world +0x150: area +0x84, map +0x88, the quest manager +0x58
 // (chapter +0x04, the main quests' states +0x08 + 4n, the side quests' +0x19C + 4n, the active
@@ -62,6 +62,7 @@ struct Hero {
     u32 addr = 0, world = 0, quests = 0;
     i32 x = 0, y = 0, hp = 0, level = 0, exp = 0, meso = 0, area = -1, map = -1, chapter = -1;
     i32 flags = 0, state = 0, mp = 0, max_hp = 0, max_mp = 0;
+    bool knocked = false;
     bool on(i32 a, i32 m) const { return addr != 0 && area == a && map == m; }
 };
 inline Hero hero(const mt_cpu *cpu) {
@@ -76,6 +77,7 @@ inline Hero hero(const mt_cpu *cpu) {
     h.y = rdi(cpu, h.addr + 0x08);
     h.flags = rdi(cpu, h.addr + 0x0C);
     h.state = rdi(cpu, h.addr + 0x10);
+    h.knocked = (rd(cpu, h.addr + 0x118) >> 8 & 0xFF) != 0;
     h.hp = rdi(cpu, h.addr + 0x94);
     h.mp = rdi(cpu, h.addr + 0x98);
     h.max_hp = rdi(cpu, h.addr + 0x9C);
