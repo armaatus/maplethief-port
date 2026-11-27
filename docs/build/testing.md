@@ -54,6 +54,19 @@ A few tests measure time: `gfx_gpu_test`'s GPU time checks (the busy frame, the 
 
 `scripts/timing-stress` checks this: a busy loop on every core and a second process drawing on the GPU, while the time checks (and with `--game-speed`, `platform.game_speed`) run 20 times in a row (`--passes N`). Each pass prints its load average; the readings go to `build/test-output/<preset>/timing_stress/`.
 
+### GPU tests
+
+`gfx_gpu_test` (CTest label `gpu`, cases `gfx_gpu.*`) checks the GPU backend against the software rasterizer ([ADR 0060](../adr/0060-gpu-rendering-backend.md)): the synthetic golden scenes within ADR 0060's tolerance, the sync points, batching, the present filters and the border, the colour-blind filter, the grade, widescreen and GPU presentation. It runs on whatever device SDL GPU opens: Metal on the Mac, Vulkan or D3D12 elsewhere. Without a device every case prints `gfx_gpu: skipped` and CTest reports it as skipped. `MAPLETHIEF_GPU_TESTS=1` makes a missing device a failure, `=0` skips; on GitHub Actions they skip unless the job sets `=1`. Without a display the test falls back to SDL's offscreen video driver; nothing opens a window.
+
+CI's Linux debug job and the Linux container run them on Mesa's **lavapipe**, a Vulkan driver on the CPU (`mesa-vulkan-drivers`, `VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json`; [ADR 0202](../adr/0202-gpu-tests-on-a-software-vulkan-device-in-ci.md)). On a software device (llvmpipe, SwiftShader or Direct3D's WARP, by SDL's device name; the log line `gfx_gpu: device name`):
+
+- the time-only cases skip (the present filters', the border blur's, the colour-blind filter's and the wide picture's GPU time), and the batching case prints its time without the 2 ms limit. The time limits are the Mac's and stay a local check;
+- every picture comparison runs. The lines scene alone may move a line's pixel by one, since Vulkan's lines are not GL ES's diamond-exit lines, with ADR 0060's 0.5% for anything else.
+
+The cases take about two minutes on lavapipe, one at a time (one `RESOURCE_LOCK`); the slowest take 35 to 46 s, under the 300 s timeout. A failure leaves its `.actual.png` and `.diff.png` in the job's uploaded `build/test-output/`.
+
+On Windows, the runner's only adapter is WARP. The Windows debug jobs (on the runs that build every OS) try the cases on it after `scripts/test.ps1`, in the step "Try - gpu tests on D3D12's WARP adapter", which never fails the job; the outcome is recorded on [#364](https://github.com/armaatus/maplethief-port/issues/364) and in ADR 0202.
+
 ### Run coverage
 
 `python3 -m mtport.runcoverage run` builds the `mac-coverage` preset (the entry counters) and runs the baseline tests one at a time with `MAPLETHIEF_COVERAGE` set, then writes `work/coverage/run-coverage.md` and `.json`: the guest functions executed per function tag, the unexecuted ones, and the scripts, natives, maps, imports and selectors the runs used ([ADR 0160](../adr/0160-run-coverage-entry-counters-and-hit-recorders.md)). How, and the baseline's numbers: [testing/run-coverage.md](../testing/run-coverage.md).

@@ -228,6 +228,13 @@ jobs:
             libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl1-mesa-dev \
             libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev libdbus-1-dev libudev-dev
 
+      - name: Install the software Vulkan driver (Linux debug, the gpu tests)
+        if: runner.os == 'Linux' && matrix.config == 'debug'
+        # Mesa's lavapipe, a Vulkan device on the CPU: the synthetic gpu-labelled tests
+        # (gfx_gpu_test) run on it instead of skipping (#364, ADR 0202); their GPU-time limits
+        # are not checked on a software device. libvulkan1 is the loader SDL opens.
+        run: sudo apt-get install -y mesa-vulkan-drivers libvulkan1
+
       - name: Install Ninja (macOS)
         if: runner.os == 'macOS'
         run: command -v ninja >/dev/null || brew install ninja
@@ -268,11 +275,29 @@ jobs:
       - name: Build and run all tests (scripts/test)
         if: matrix.config == 'debug' && runner.os != 'Windows'
         run: scripts/test
+        env:
+          # Linux: the gpu tests on lavapipe, a missing device fails them (#364); only its ICD,
+          # so the loader never picks another driver. Elsewhere they skip on GitHub Actions.
+          MAPLETHIEF_GPU_TESTS: ${{ runner.os == 'Linux' && '1' || '' }}
+          VK_DRIVER_FILES: ${{ runner.os == 'Linux' && '/usr/share/vulkan/icd.d/lvp_icd.json' || '' }}
 
       - name: Build and run all tests (scripts/test.ps1)
         if: matrix.config == 'debug' && runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/test.ps1
+
+      # The Windows runner has no GPU; its only DXGI adapter is Direct3D's WARP (the Microsoft
+      # Basic Render Driver), which SDL GPU's D3D12 backend takes as adapter 0. A try (#364, ADR
+      # 0202): the gpu tests on it, after scripts/test.ps1 skipped them. It never fails the job;
+      # its log names the device ("gfx_gpu: device name") and each case's result.
+      - name: Try - gpu tests on D3D12's WARP adapter (Windows debug, never fails the job)
+        if: matrix.config == 'debug' && runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: ctest --preset $env:PRESET -L gpu -R '^gfx_gpu\.' -V
+        env:
+          MAPLETHIEF_GPU_TESTS: "1"
+          PRESET: ${{ runner.arch == 'ARM64' && 'win-arm64-debug' || 'win-debug' }}
 
       - name: Release build, C/C++ tests and package
         if: matrix.config == 'release'
