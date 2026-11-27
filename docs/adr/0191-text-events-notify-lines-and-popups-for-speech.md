@@ -10,7 +10,8 @@
 #392 adds the two other places [docs/re/speech.md](../re/speech.md) found the game's text whole: the notify lines (a pick-up, meso, EXP, the map's name) and the engine's popups (the death popup, confirmations, notices). The decompiler settled what was open in #378 ([speech.md](../re/speech.md#notify-lines-and-popups)):
 
 - `CNotifyTextList::Add` `0x78339` is `(list, text, colour)`: the text a NUL-ended string the caller built, the colour `0xRRGGBB`. It adds nothing while the list's most entries (`+0x0C`, the save's "information lines") is below 1.
-- `Popup_Open` `0x3EAA1` is `(mgr, id, text, kind)`. The one `CMPopup` (`*0x11A96C`) gets the message (`+0x04`, a copy of a preset or of `text`), wrapped at `$` and the width (`+0x08`, count `+0x0C`), the kind (`+0x10`) and the two button labels the kind uses (`+0x70`, `+0x74`, the localized "Yes", "No", "OK" or ""). A popup has no title. The death popup (`0x68`) has no message at all: its four choices are images the field draws.
+- `Popup_Open` `0x3EAA1` is `(mgr, id, text, kind)`. The one `CMPopup` (`*0x11A96C`) gets the message (`+0x04`, a copy of a preset or of `text`), wrapped at `$` and the width (`+0x08`, count `+0x0C`), and the kind (`+0x10`), which says the buttons. A popup has no title, and its buttons are images: the label pointers the `CMPopup` keeps point at autoreleased buffers long freed. The death popup (`0x68`) has no message at all: its four choices are images the field draws.
+- The hero's notify lines are formatted into a buffer on the caller's stack, which the text events' checked reads (image and heap) did not cover.
 
 A fight adds several notify lines a second, and dialogue must not be drowned out.
 
@@ -26,13 +27,15 @@ A fight adds several notify lines a second, and dialogue must not be drowned out
 **Runtime.** Two more text event kinds (`maplethief/text_events.h`):
 
 - **notice** (`MT_TEXT_EVENT_NOTICE`): `CNotifyTextList::Add`'s text (runs of white space as one, CP949 converted), when the list keeps lines; `value` says which of the current `CStateGame`'s lists it is (0 `+0x4C` under the compass, 1 `+0x50`, 2 `+0x54` the map's name; −1 another), `index` the colour.
-- **popup** (`MT_TEXT_EVENT_POPUP`): after `Popup_Open`, the message's wrapped lines joined, `index` the id (`0x108C64`), `value` the kind, `speaker` the button labels of kinds 1 to 6, one per line (kind 0 has none: a tap anywhere is OK, and `+0x70` still holds the last popup's).
+- **popup** (`MT_TEXT_EVENT_POPUP`): after `Popup_Open`, the message's wrapped lines joined, `index` the id (`0x108C64`), `value` the kind.
+
+A notice's text is read where the caller put it: the image, the heap, or the caller's frame on the guest stack (from `sp` up to the string's end).
 
 As in ADR 0187, nothing is written and no guest function is called; `runtime_test` runs a synthetic list and popup with the wrappers on and off and compares the guest byte for byte.
 
 **Platform** (`SpeechText`):
 
-- A **popup** is `SpeechKind::kDialogue`, like a page: it interrupts. Its message, then its buttons ("Yes or No.", "OK.", port text around the game's labels). The death popup says the port's words for its image buttons (`speech_death_popup`).
+- A **popup** is `SpeechKind::kDialogue`, like a page: it interrupts. Its message, then its buttons by the kind, in port text: kinds 1, 2 and 5 "Yes or No.", 3 and 6 "OK.", 4 "OK or Cancel.", 0 none. The death popup says the port's words for its image buttons (`speech_death_popup`).
 - The **notify lines** of one run-loop turn are **merged** into one `kNotice` utterance ("EXP obtained.(+7). Meso obtained.(+70)."), handed to the speech after that turn's dialogue: a notice queues behind what is being said (ADR 0174's rule), so a page or a popup is never cut off by one, and a long fight keeps at most the queue's 4 waiting, the oldest dropped.
 - **`speech_notices = on | off`** (Accessibility, `--speech-notices`, default on, live, needs `kCapSpeech`): off says no notify line; popups and dialogue are still said. ADR 0174 had no such setting. The default is on because the lines are what the player would otherwise only see (a pick-up, a level's EXP).
 
