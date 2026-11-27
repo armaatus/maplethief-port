@@ -25,6 +25,10 @@ By hand: configure and build `mac-coverage` (`cmake --preset mac-coverage && cma
 - `work/coverage/run-coverage.txt`: the merged file (`# run` lines, functions, hits);
 - `work/coverage/run-coverage.md` and `.json`: the report. Game code is every tagged function but Chartboost's 675 (`lib:chartboost`, never run by design: [re/libraries.md](../re/libraries.md)).
 
+## The coverage gaps
+
+[re/coverage-gaps.md](../re/coverage-gaps.md) gives every game function no run enters a class and the evidence (ADR 0232). To make it, collect the coverage of the whole real-asset suite into one directory (`MAPLETHIEF_COVERAGE=<dir>/coverage-%p.txt`; the suite takes about 1.5 h on the coverage build split into three fixture-connected partitions run in parallel, `ctest -R <partition> -FA '.*'`), then `python3 -m mtport.coveragegaps generate --coverage <dir>`. `python3 -m mtport.coveragegaps check` (and `tests/test_coveragegaps_real.py`) regenerates the doc from its own list and the current `work/`, so it fails when a re-analysis or a difftest change moved a class.
+
 ## The baseline
 
 2026-11-26, branch `armaatus/295-run-coverage` at `3c6e8ad3` (on `dev` after #415), Apple M4, macOS 26.6.2, `mac-coverage` build, `python3 -m mtport.runcoverage run` with its default tests: `play.chapter_1_a` to `play.chapter_1_m`, `play.regress`, every `menus.*` and every `input.*` (53 tests, all real-asset, 0 failed). `play.regress` gave its usual digest `8a2f05733c8d4603` with the recorders on.

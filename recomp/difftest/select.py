@@ -13,10 +13,11 @@ one's count is in the report, ``Selection.counts``):
    (``mrc``/``mcr``/``mrs``/``msr``/``vmsr``) and the wait hints (``wfi``/``wfe``/``sev``/
    ``yield``).
 5. ``clean``: it lifts with no unsupported instruction and no problem, and the C has no trap
-   other than a jump table's out-of-range default, and no indirect call or jump.
-6. ``leaf``: every call and tail call goes to another selected function (a fixpoint: a
-   function that calls an import or a function that fails a criterion drops out, then its
-   callers do). So no imports.
+   other than a jump table's out-of-range default, and no indirect call or jump; every
+   import it calls is one of the pure imports :mod:`recomp.difftest.models` models (#305).
+6. ``leaf``: every call and tail call goes to another selected function or to a modeled
+   import's stub (a fixpoint: a function that calls a function that fails a criterion drops
+   out, then its callers do).
 
 "Bounded memory access" is checked when the test runs (``recomp.difftest``): a run must
 return within an instruction budget, and an access outside the guest window must fault at
@@ -30,6 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from recomp.decode.insn import DReg, Mem, QReg, Reg, SReg, VRegList
+from recomp.difftest.models import MODEL_IDS, UNMODELED
 from recomp.discover import Discovery, Function
 from recomp.lift.core import Lifted, LiftOptions, c_name, lift_function
 
@@ -43,8 +45,9 @@ ALLOWED_TRAP = "MT_TRAP(MT_TRAP_UNREACHABLE"  # a jump table's default (index ou
 
 class ImageProgram:
     """:class:`recomp.lift.core.Program` over the image: every function in ``lifted`` is
-    callable by name, an import stub is an import (``(0, symbol)``: the id does not matter,
-    since a function that calls one is no leaf)."""
+    callable by name, an import stub is an import: ``(id, symbol)``, the id of its model
+    (:data:`recomp.difftest.models.MODEL_IDS`), or :data:`~recomp.difftest.models.UNMODELED`
+    for every other import (a function that calls one is no leaf)."""
 
     def __init__(self, image, lifted: set[int]) -> None:
         self.image, self.lifted = image, lifted
@@ -57,7 +60,9 @@ class ImageProgram:
 
     def import_at(self, addr: int) -> tuple[int, str] | None:
         stub = self.image.stubs.get(addr & ~1)
-        return None if stub is None else (0, stub.symbol)
+        if stub is None:
+            return None
+        return MODEL_IDS.get(stub.symbol, UNMODELED), stub.symbol
 
 
 @dataclass
@@ -92,7 +97,7 @@ def _plain(fn: Function) -> bool:
 
 
 def _clean(lifted: Lifted) -> bool:
-    if not lifted.clean or lifted.imports:
+    if not lifted.clean or UNMODELED in lifted.imports:
         return False
     src = lifted.source
     if "MT_CALL_INDIRECT" in src or "MT_JUMP_INDIRECT" in src or "MT_SJLJ" in src:
@@ -158,11 +163,15 @@ def select_leaves(image, discovery: Discovery) -> Selection:
             rejected[ptr] = "clean"
     counts["clean"] = len(lifted)
     members = set(lifted)
+    modeled = {a for a, s in image.stubs.items() if s.symbol in MODEL_IDS}
     while True:
         drop = {
             p
             for p in members
-            if any(t not in members for t in (*fns[p].calls.values(), *fns[p].tail_calls.values()))
+            if any(
+                t not in members and t & ~1 not in modeled
+                for t in (*fns[p].calls.values(), *fns[p].tail_calls.values())
+            )
         }
         if not drop:
             break

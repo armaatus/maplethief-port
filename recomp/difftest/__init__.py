@@ -121,11 +121,13 @@ def differences(end, res: host.Result, variant: int, flags: bool) -> list[str]:
 _W: dict = {}
 
 
-def _init_worker(pristine_path: str, exe: str, work: str, seed: int, data, text) -> None:
+def _init_worker(
+    pristine_path: str, exe: str, work: str, seed: int, data, text, stubs=None
+) -> None:
     from recomp.difftest.emulator import Emulator
 
     pristine = Path(pristine_path).read_bytes()
-    emu = Emulator(pristine, text)
+    emu = Emulator(pristine, text, stubs)
     _W.update(emu=emu, pristine=pristine_path, exe=Path(exe), work=Path(work))
     _W.update(seed=seed, data=data)
 
@@ -310,6 +312,11 @@ class Run:
         return "\n".join(lines)
 
 
+def _stubs(image) -> dict[int, str]:
+    """Stub address -> import model, for the emulator's hooks."""
+    return {addr: name for name, addr in host.model_stubs(image).items()}
+
+
 def prepare(slice_path: Path, out_dir: Path, jobs: int):
     """Load, select, build: ``(image, selection, targets, exe, pristine path)``."""
     from recomp.discover import discover
@@ -345,7 +352,7 @@ def run(
         targets = [t for t in targets if t.ptr in set(only)]
     t1 = time.perf_counter()
     init = (str(pristine), str(exe), str(out_dir), seed, inputs.data_range(image),
-            inputs.text_range(image))  # fmt: skip
+            inputs.text_range(image), _stubs(image))  # fmt: skip
     work = [(t, wanted, max_attempts) for t in targets]
     # Big functions first, so the long ones do not end up last on one worker.
     work.sort(key=lambda w: -w[0].instructions)
@@ -368,7 +375,7 @@ def run_case(slice_path: Path, ptr: int, case: int, seed: int = SEED, out_dir: P
     if t is None:
         raise ValueError(f"0x{ptr:X} is not a leaf function")
     _init_worker(str(pristine), str(exe), str(out_dir), seed, inputs.data_range(image),
-                 inputs.text_range(image))  # fmt: skip
+                 inputs.text_range(image), _stubs(image))  # fmt: skip
     return test_function(t, 1, 1, only_case=case)
 
 

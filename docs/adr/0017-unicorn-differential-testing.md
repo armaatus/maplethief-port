@@ -67,3 +67,7 @@ It isn't cheap, so it isn't done. The armv6 slice has the same 2,655 function st
 ## Addendum: after the other M3 children (#40, 2026-10-26)
 
 Re-measured on the epic branch after #34 (VFP/NEON), #35, #36 and #37 had landed, with the iOS FP mode of ADR 0022 as each case's start state (Apple M4, 8 jobs, seed 41): **786 leaves** (selection: 2,655 discovered, 2,440 return, 2,321 closed and plain, 1,136 clean), **775 pass** 1,000 returning inputs each with zero mismatches (780,051 returning and 458,655 faulting cases, 85 s). The same 11 are not bounded. 43 of the passing leaves have VFP code and 134 call other leaves. The "Result" above is the first run.
+
+## Addendum: import models (#305, 2026-11-27)
+
+[ADR 0232](0232-coverage-gaps-and-difftest-import-models.md) adds the "possible later extension" above: thirteen pure imports (the integer divisions, `memcmp`, `memcpy`, `memset`, `strcat`, `strcmp`, `strcpy`, `strlen`) have the same model in Unicorn (a code hook on the stub) and in the driver, so criterion 5 accepts calls to them. **857 leaves, 839 pass** with zero mismatches (847,338 returning and 576,423 faulting cases); 18 are not bounded.

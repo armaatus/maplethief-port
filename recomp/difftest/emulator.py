@@ -23,6 +23,13 @@ stops as:
 - ``error``: anything else Unicorn reports (an alignment fault, a write to ``__TEXT``, an
   undefined instruction, a jump outside the code), with its message.
 
+**Import models** (#305): a code hook on the stub of each modeled import
+(:mod:`recomp.difftest.models`) runs the model on a copy of the window (read a page at a
+time, as the model touches it), writes back what it changed and returns to ``lr``. A model's
+fault stops the run as a ``fault`` at the stub; its write into ``__TEXT`` as an ``error``.
+The hook is a code hook on the stubs' addresses only: the IT-state bug below is a memory
+hook's.
+
 **Two Unicorn 2.1.4 bugs shape this module** (found by this test, ADR 0017):
 
 - A memory hook (``UC_HOOK_MEM_WRITE`` or ``UC_HOOK_MEM_READ``) on a load or store inside
@@ -45,6 +52,7 @@ from dataclasses import dataclass
 import unicorn as uc
 from unicorn import arm_const as a
 
+from recomp.difftest import models
 from recomp.difftest.inputs import HEAP, RET, WINDOW, Case
 
 BUDGET = 50_000  # instructions per run
@@ -69,7 +77,9 @@ class End:
 
 
 class Emulator:
-    def __init__(self, pristine: bytes, text: tuple[int, int]) -> None:
+    def __init__(
+        self, pristine: bytes, text: tuple[int, int], stubs: dict[int, str] | None = None
+    ) -> None:
         start, end = text
         if len(pristine) != WINDOW or not 0 < start < end <= WINDOW or (start | end) & 0xFFF:
             raise ValueError("pristine image or __TEXT does not fit the window")
@@ -91,7 +101,37 @@ class Emulator:
         self.uc.reg_write(a.UC_ARM_REG_C1_C0_2, cpacr | (0xF << 20))  # cp10, cp11: full access
         self.uc.reg_write(a.UC_ARM_REG_FPEXC, 0x40000000)  # EN
         self.fault: tuple[int, int] | None = None
+        self.text = text
         self.uc.hook_add(uc.UC_HOOK_MEM_UNMAPPED, self._on_unmapped)
+        self.stubs = dict(stubs or {})  # stub address -> model name
+        self.model_stop: tuple[str, str] | None = None  # (status, error) of a model's stop
+        self.model_buffer = bytearray(WINDOW)
+        for addr in self.stubs:
+            self.uc.hook_add(uc.UC_HOOK_CODE, self._on_stub, begin=addr, end=addr)
+
+    def _on_stub(self, mu, address, _size, _data) -> None:
+        name = self.stubs.get(address)
+        if name is None:
+            return
+        regs = list(mu.reg_read_batch(_R[:4]))
+        # The buffer is reused: the model sees only pages it loads in this call.
+        mem = models.Memory(self.model_buffer, self.text, lambda at, n: bytes(mu.mem_read(at, n)))
+        try:
+            models.call(name, regs, mem)
+        except models.Fault as f:
+            self.fault = (f.addr, address)
+            self.model_stop = ("fault", f"{name}: {f}")
+        except models.TextWrite as e:
+            self.model_stop = ("error", f"{name}: {e}")
+        if self.model_stop is None:
+            for lo, hi in mem.dirty:
+                mu.mem_write(lo, bytes(mem.data[lo:hi]))
+            mu.reg_write_batch(list(zip(_R[:4], regs, strict=True)))
+            mu.reg_write(a.UC_ARM_REG_PC, mu.reg_read(a.UC_ARM_REG_LR))
+        else:
+            for lo, hi in mem.dirty:  # what the model wrote before it stopped
+                mu.mem_write(lo, bytes(mem.data[lo:hi]))
+            mu.emu_stop()
 
     def _on_unmapped(self, mu, access, address, _size, _value, _data) -> bool:
         if access in (uc.UC_MEM_READ_UNMAPPED, uc.UC_MEM_WRITE_UNMAPPED):
@@ -114,10 +154,13 @@ class Emulator:
         mu.reg_write(a.UC_ARM_REG_CPSR, (cpsr & 0x1FF) | (case.cpsr & 0xF0000000))
         mu.reg_write(a.UC_ARM_REG_FPSCR, case.fpscr)
         self.fault = None
+        self.model_stop = None
         status, error = "return", ""
         try:
             mu.emu_start(ptr, RET, count=BUDGET)
-            if mu.reg_read(a.UC_ARM_REG_PC) != RET:
+            if self.model_stop is not None:
+                status, error = self.model_stop
+            elif mu.reg_read(a.UC_ARM_REG_PC) != RET:
                 status = "budget"
         except uc.UcError as exc:
             status = "fault" if self.fault is not None else "error"
