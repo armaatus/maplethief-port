@@ -50,7 +50,8 @@ the test output directory (skipped without the bundle) and `play.<mode>_syntheti
 So are systems sweep 1's ([systems-sweep-1.md](systems-sweep-1.md)): `korean_ch3.json` and
 `korean_ch3_key.json` (built with `--language ko`), `chapter_2.json` again as
 `starts.korean_chapter_2`, and `systems_slot0.json`, `systems_inventory_full.json`,
-`systems_level_99.json` and `systems_carry.json`.
+`systems_level_99.json` and `systems_carry.json`. `speech_notices.json` (a level-10 Beginner with
+a knife on 2.3) starts `play.speech_notices_synthetic` and its base run (#392).
 
 ## The bot's world
 

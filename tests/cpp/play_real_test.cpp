@@ -84,6 +84,7 @@
 
 #if defined(MT_HAVE_GENERATED_CODE)
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <fstream>
@@ -119,6 +120,7 @@
 #include "maplethief/textpack.h"
 #include "maplethief/widescreen.h"
 #include "minimap.h"
+#include "port_text.h"
 #include "present.h"
 #include "price_line.h"
 #include "quest_bot.h"
@@ -9960,6 +9962,232 @@ std::string seen_text(const std::set<i32> &seen) {
     return s;
 }
 
+// --- Speech: notify lines and popups (#392, ADR 0191, speech_text.h) ---------------------------
+//
+// speech_notices: from a built start (tests/starts/speech_notices.json, MT_FROM_SAVE: a level-10
+// Beginner with a knife on the hunting field 2.3), the hunt until the hero has gained EXP and
+// the notify list has shown a line besides the kill's (a pick-up or meso); then a fall, the
+// death popup (0x68) and its Return to town, answered with OK and Yes (0x69), back in town.
+// With the speech on the log backend (MT_SPEECH=on) or off (unset: the base run). Each turn the
+// run reads the notify list (+0x4C) from guest memory and keeps every new line; the text events
+// and the utterances are recorded. In town the state goes to OUT_DIR/speech_state.txt as
+// speech_dialogue's. Checks, with the speech on:
+//   - each notice event is a line the list showed, in the same order; at least one EXP line
+//     (the kill) and one other on the list +0x4C (the pick-up or meso);
+//   - the popups 0x68 (no message, kind 0) then 0x69 (a message, kind 1: Yes / No);
+//   - the notices said as kNotice utterances (a turn's lines in one), the popups as kDialogue:
+//     the death popup in the port's words, 0x69 its message then "Yes or No.";
+//   - MT_SPEECH_BASE=<the off run's OUT_DIR>: every state line equals the off run's.
+// With it off: no event and no utterance. Only counts and hashes are printed, never the text.
+struct NoticesRun {
+    bool on = false;
+    std::unique_ptr<fe::Speech> speech;
+    std::unique_ptr<fe::SpeechText> text;
+    struct Event {
+        std::uint32_t kind = 0;
+        i32 index = 0, value = 0;
+        std::string speaker, text;
+    };
+    std::vector<Event> events;
+    fe::LogSpeechBackend *log = nullptr;
+    std::set<std::pair<u32, std::uint64_t>> seen; // the list's entries seen: address, time
+    std::vector<std::string> lines;               // their text, in order
+    std::size_t lines_at_hunt = 0;
+    i32 exp_at_hunt = -1;
+    std::shared_ptr<std::set<i32>> popups = std::make_shared<std::set<i32>>();
+    std::vector<std::pair<std::string, std::string>> state;
+} g_sn;
+
+void record_notice_event(void *, const mt_text_event *e) {
+    g_sn.events.push_back(NoticesRun::Event{e->kind, e->index, e->value, e->speaker, e->text});
+}
+
+void speech_notices(Run &r, u64) {
+    r.settings_from_env = false;
+    g_sn.on = std::getenv("MT_SPEECH") != nullptr && std::string(std::getenv("MT_SPEECH")) == "on";
+    auto backend = std::make_unique<fe::LogSpeechBackend>([](const std::string &) {});
+    g_sn.log = backend.get();
+    g_sn.speech = std::make_unique<fe::Speech>(std::move(backend));
+    g_sn.speech->set_enabled(g_sn.on);
+    g_sn.text = std::make_unique<fe::SpeechText>();
+    mt_text_events_add_listener(record_notice_event, nullptr);
+    from_save(r);
+    const std::function<void(mt_cpu *)> monitor_turn = r.on_turn;
+    r.on_turn = [&r, monitor_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        g_sn.text->turn(*g_sn.speech, r.settings, r.t);
+        g_sn.speech->turn(r.t);
+        for (const NotifyLine &l : notify_lines(cpu)) {
+            if (g_sn.seen.insert({l.addr, l.time}).second) {
+                g_sn.lines.push_back(l.text);
+            }
+        }
+    };
+    then_wait_field(r);
+    then_do(r, "the hunt begins", [](mt_cpu *cpu) {
+        g_play.hunting = true;
+        g_sn.lines_at_hunt = g_sn.lines.size();
+        g_sn.exp_at_hunt = hero(cpu).exp;
+        std::printf("speech_notices: the hunt from %s\n", hero_text(cpu, hero(cpu)).c_str());
+    });
+    then_hunt(r, "map 2.3 until a kill's EXP and a pick-up's line",
+              [](mt_cpu *cpu) {
+                  return hero(cpu).exp > g_sn.exp_at_hunt &&
+                         g_sn.lines.size() >= g_sn.lines_at_hunt + 2;
+              },
+              600, {2, 0, 42, 2, 3});
+    then_do(r, "the hero falls", [&r](mt_cpu *cpu) {
+        g_play.hunting = false;
+        release_all(r);
+        fall(cpu);
+    });
+    then_wait_for(
+        r, "the death popup (0x68)", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+    then_answer(
+        r, "Return to town (0x68 OK, 0x69 Yes)",
+        [](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            return h.hp > 0 && h.on(2, 0);
+        },
+        g_sn.popups);
+    then_do(r, "the state in town", [&r](mt_cpu *cpu) {
+        g_sn.state = scene_state(cpu);
+        g_sn.state.emplace_back("ticks", std::to_string(r.ticks));
+        std::ofstream f(r.out / "speech_state.txt", std::ios::trunc);
+        for (const auto &[k, v] : g_sn.state) {
+            f << k << " = " << v << "\n";
+        }
+    });
+    then_finish(r);
+}
+
+void speech_notices_checks(Run &, u64) {
+    NoticesRun &s = g_sn;
+    mt_text_events_remove_listener(record_notice_event, nullptr);
+    // The notices still queued behind the last popup, said as the voice frees up.
+    for (int i = 1; i <= 60; i++) {
+        s.speech->turn(1e6 + 30.0 * i);
+    }
+    std::vector<std::pair<fe::SpeechKind, std::string>> said;
+    for (const fe::Utterance &u : s.log->said()) {
+        said.emplace_back(u.kind, u.text);
+    }
+    std::vector<const NoticesRun::Event *> notices, popups;
+    for (const NoticesRun::Event &e : s.events) {
+        (e.kind == MT_TEXT_EVENT_NOTICE ? notices : popups).push_back(&e);
+    }
+    std::string all;
+    for (const auto &[k, t] : said) {
+        all += (k == fe::SpeechKind::kNotice ? "n " : "d ") + t + "\n";
+    }
+    const fe::SpeechText::Stats ts = s.text->stats();
+    s.text.reset();
+    s.speech.reset();
+    std::printf("speech_notices (speech %s): %zu list lines seen, popups %s; events: %zu "
+                "notices, %zu popups; %zu utterances (hash %s), %llu notice utterances\n",
+                s.on ? "on" : "off", s.lines.size(), seen_text(*s.popups).c_str(), notices.size(),
+                popups.size(), said.size(), fe::hex64(fe::fnv1a64(all.data(), all.size())).c_str(),
+                static_cast<unsigned long long>(ts.notice_utterances));
+    check(!s.state.empty(), "the run reached the town after the death popup");
+    check(s.popups->count(0x68) == 1 && s.popups->count(0x69) == 1,
+          "the game showed the death popup and its Return to town (" + seen_text(*s.popups) + ")");
+    if (!s.on) {
+        check(s.events.empty() && said.empty(), "speech off: no text event and nothing said (" +
+                                                    std::to_string(s.events.size()) + " events, " +
+                                                    std::to_string(said.size()) + " utterances)");
+    } else {
+        // The list +0x4C's lines, against the notice events of that list.
+        std::vector<std::string> heard;
+        u64 exp = 0, other = 0;
+        for (const NoticesRun::Event *e : notices) {
+            if (e->value == 0) {
+                heard.push_back(e->text);
+                (e->text.rfind("EXP ", 0) == 0 ? exp : other)++;
+            }
+        }
+        // The run reads the list once a turn, so a line the list drops within the turn it came
+        // (its most entries reached) is an event the run never saw listed: the lines are the
+        // events in order, some events between them.
+        std::size_t at = 0;
+        for (std::size_t i = 0; at < s.lines.size() && i < heard.size(); i++) {
+            at += bare(heard[i]) == bare(s.lines[at]) ? 1 : 0;
+        }
+        check(at == s.lines.size() && !s.lines.empty(),
+              "each line the notify list showed is a notice event, in order, with its text (" +
+                  std::to_string(heard.size()) + " events, " + std::to_string(s.lines.size()) +
+                  " lines)");
+        check(exp >= 1 && other >= 1, "a kill's EXP line and a pick-up or meso line (" +
+                                          std::to_string(exp) + " EXP, " + std::to_string(other) +
+                                          " other)");
+        bool whole = true;
+        for (const NoticesRun::Event &e : s.events) {
+            whole = whole && valid_utf8(e.text) && valid_utf8(e.speaker);
+        }
+        check(whole, "every event's text is whole UTF-8");
+        // The popups: 0x68 then 0x69 (the death popup is reopened after a sub-popup it cancels;
+        // here none is cancelled).
+        std::vector<i32> ids;
+        for (const NoticesRun::Event *e : popups) {
+            ids.push_back(e->index);
+        }
+        const auto death = std::find(ids.begin(), ids.end(), 0x68);
+        const auto town = std::find(ids.begin(), ids.end(), 0x69);
+        check(death != ids.end() && town != ids.end() && death < town,
+              "the popup events: the death popup, then its Return to town");
+        const NoticesRun::Event *ask = town != ids.end() ? popups[town - ids.begin()] : nullptr;
+        check(ask != nullptr && ask->value == 1 && !ask->text.empty(),
+              "Return to town: kind 1 (Yes / No) with a message");
+        // The utterances: the notices as kNotice, the popups as kDialogue in their words.
+        std::string notice_text;
+        u64 dialogue = 0;
+        bool death_said = false, town_said = false;
+        for (const auto &[k, t] : said) {
+            if (k == fe::SpeechKind::kNotice) {
+                notice_text += t + "\n";
+            } else {
+                dialogue++;
+                death_said = death_said || t == fe::tr(fe::Txt::speech_death_popup);
+                const std::string yes_no = fe::tr(fe::Txt::speech_popup_yes_no);
+                town_said = town_said || (ask != nullptr && t == ask->text + " " + yes_no);
+            }
+        }
+        bool every = true;
+        for (const std::string &h : heard) {
+            every = every && notice_text.find(h) != std::string::npos;
+        }
+        check(every && ts.notice_utterances >= 1 && ts.notice_utterances <= notices.size(),
+              "each notify line is said in a kNotice utterance (" +
+                  std::to_string(ts.notice_utterances) + " utterances for " +
+                  std::to_string(notices.size()) + " lines)");
+        check(death_said && town_said && dialogue == popups.size(),
+              "the death popup said in the port's words, Return to town as its message and "
+              "\"Yes or No.\", each popup one dialogue utterance");
+    }
+    const char *base_dir = std::getenv("MT_SPEECH_BASE");
+    if (base_dir == nullptr || *base_dir == 0) {
+        return;
+    }
+    std::ifstream in(fs::path(base_dir) / "speech_state.txt", std::ios::binary);
+    std::vector<std::pair<std::string, std::string>> base;
+    for (std::string line; std::getline(in, line);) {
+        const std::size_t eq = line.find(" = ");
+        if (eq != std::string::npos) {
+            base.emplace_back(line.substr(0, eq), line.substr(eq + 3));
+        }
+    }
+    std::size_t differ = 0;
+    for (std::size_t i = 0; i < s.state.size() && i < base.size(); i++) {
+        if (s.state[i] != base[i]) {
+            differ++;
+            std::printf("speech_notices: %s differs from the off run's\n",
+                        s.state[i].first.c_str());
+        }
+    }
+    check(!base.empty() && base.size() == s.state.size() && differ == 0,
+          "the rand() state, the tick, the hero, the quests and the mobs equal the off run's (" +
+              std::to_string(s.state.size()) + " lines, " + std::to_string(differ) + " differ)");
+}
+
 // --- the cash shop's tiles, the Comeback Pack and the Reverse item ------------------------------
 //
 // systems2_cash_tiles: cash_shop = meso, a level-30 Rogue on 0.0 with 3,000,000 meso, 50 Red
@@ -11544,7 +11772,8 @@ void level_cap(Run &r, u64) {
 }
 void level_cap_checks(Run &, u64) {}
 
-// --- Quick slots and the trash (#303, docs/testing/systems-sweep-1.md) ----------------------------
+// --- Quick slots and the trash (#303, docs/testing/systems-sweep-1.md)
+// ----------------------------
 //
 // quick_slots_trash_synthetic (tests/starts/systems_carry.json): a Bandit with Double Step
 // (skill 3) and Nimble Body (4) learned, by the pad only through the port's pick up and drop
@@ -11768,6 +11997,7 @@ constexpr Mode k_modes[] = {
     {"ui_animations_instant", ui_animations_instant, ui_animations_checks, 1},
     {"chat_text", chat_text, chat_text_checks, 1},
     {"speech_dialogue", speech_dialogue, speech_dialogue_checks, 1},
+    {"speech_notices", speech_notices, speech_notices_checks, 1},
     {"text_pack", text_pack_play, text_pack_checks, 1, false, text_pack_setup},
     {"skip_intros_watched", skip_intros_watched, skip_intros_checks, 1},
     {"skip_intros_skipped", skip_intros_skipped, skip_intros_checks, 1},

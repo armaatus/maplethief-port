@@ -1383,6 +1383,32 @@ set_tests_properties(
         "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_SPEECH=on;MT_SPEECH_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_speech_off"
 )
 
+# Speech of the notify lines and popups (#392, ADR 0191): from a built start on 2.3 (synthetic),
+# a hunt until a kill's EXP line and a pick-up's, then a fall and Return to town; off (the base)
+# and on the log backend. Each line the notify list shows is one notice event and is said in a
+# notice; the death popup and its Return to town are said as dialogue; the state equals the off
+# run's.
+add_test(NAME play.speech_notices_off_synthetic
+         COMMAND play_real_test speech_notices "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_notices_off" 1)
+add_test(NAME play.speech_notices_synthetic
+         COMMAND play_real_test speech_notices "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_notices_on" 1)
+set_tests_properties(
+    play.speech_notices_off_synthetic
+    PROPERTIES
+        LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE
+        FIXTURES_REQUIRED start_speech_notices FIXTURES_SETUP play_notices
+        ENVIRONMENT
+        "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_speech_notices"
+)
+set_tests_properties(
+    play.speech_notices_synthetic
+    PROPERTIES
+        LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE
+        FIXTURES_REQUIRED "start_speech_notices;play_notices"
+        ENVIRONMENT
+        "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_speech_notices;MT_SPEECH=on;MT_SPEECH_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_notices_off"
+)
+
 # The HUD extras (#191, ADR 0109, docs/re/hud-extras.md): first_map's route to 2.3 with
 # exp_percent = on and a hunt until a Red Potion and a level: the figure equal to the hero's
 # fields and hero.dat in every field turn; the game's own mob HP bar after each hit and its own
@@ -1428,7 +1454,8 @@ set(_starts
     systems2_scrolls_success
     systems2_scrolls_failure
     systems2_pigmy
-    systems2_portal620)
+    systems2_portal620
+    speech_notices)
 foreach(start IN LISTS _starts)
     add_test(NAME starts.${start}
              COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
