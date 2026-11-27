@@ -409,6 +409,9 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # The LiveSplit link (#407, livesplit_test.cpp): a test TCP server on 127.0.0.1 receives the
 # exact lines of a synthetic run (start, splits, reset, game time); a refused or unanswered
 # connection never holds a turn and logs once.
+# Adding a pack on a desktop (#422, pack_add_test.cpp): synthetic zips with a '..' entry, a link
+# or too many bytes refused whole with nothing written, a good zip unpacked and listed, a folder
+# dropped on the packs screen added by its path.
 # The first-launch IPA import (#182, ipa_import_test.cpp): synthetic IPAs refused with each
 # reason, unsafe entries writing nothing, an interrupted import leaving no game/, a re-import,
 # the bundle lookup's order, and the import screen's input and loop on a dummy-driver window.
@@ -430,6 +433,7 @@ maplethief_add_cpp_test(
             cpp/prompts_test.cpp cpp/keypad_layout_test.cpp cpp/border_test.cpp
             cpp/settings_menu_test.cpp cpp/game_speed_test.cpp cpp/autosave_test.cpp
             cpp/packs_test.cpp
+            cpp/pack_add_test.cpp
             cpp/color_filter_test.cpp
             cpp/speech_test.cpp
             cpp/speech_menus_test.cpp
