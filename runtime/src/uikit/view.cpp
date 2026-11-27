@@ -805,6 +805,21 @@ void layer_bounds(mt_cpu *cpu) {
     ret_rect(cpu, result, v != nullptr ? v->model.bounds : Rect{});
 }
 
+// -[UIWindow makeKeyAndVisible]: the window joins the visible ones (front-most) if it is not
+// one yet. The game's window is the nib's visible window and never gets this; a window made in
+// code (the guest program, #385, ADR 0213) does.
+void window_make_key_and_visible(mt_cpu *cpu) {
+    const u32 self = mt_objc_self(cpu);
+    State &st = state(cpu);
+    if (std::find(st.windows.begin(), st.windows.end(), self) == st.windows.end()) {
+        st.windows.push_back(mt_objc_retain(cpu, self));
+    }
+}
+
+const mt_objc_host_method k_window_methods[] = {
+    {"makeKeyAndVisible", window_make_key_and_visible},
+};
+
 const mt_objc_host_method k_responder_methods[] = {
     {"touchesBegan:withEvent:", responder_touches_began},
     {"touchesMoved:withEvent:", responder_touches_moved},
@@ -1157,7 +1172,8 @@ const mt_objc_host_class k_uiview = {"UIView",
                                      countof(k_view_methods),
                                      k_view_class_methods,
                                      countof(k_view_class_methods)};
-const mt_objc_host_class k_uiwindow = {"UIWindow", "UIView", 46, nullptr, 0, nullptr, 0};
+const mt_objc_host_class k_uiwindow = {
+    "UIWindow", "UIView", 46, k_window_methods, countof(k_window_methods), nullptr, 0};
 const mt_objc_host_class k_calayer = {
     "CALayer", "NSObject", 4, k_layer_methods, countof(k_layer_methods), nullptr, 0};
 const mt_objc_host_class k_caeagllayer = {
