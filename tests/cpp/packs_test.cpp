@@ -281,8 +281,10 @@ TEST_CASE("packs: the list's own rules; the start opens the first it takes and s
         fe::check_pack_list(many, PackKind::kTexture, "1.4.0");
     CHECK(seventeen[15].refused.empty());
     CHECK(seventeen[16].refused == "at most 16 packs of a kind are on at once");
+#ifndef _WIN32 // Windows cannot create a folder with '|' in its name
     CHECK(read(b.pack("texture-packs", "a|b", ""), PackKind::kTexture).refused ==
           "its folder's path holds '|', which a list of packs cannot");
+#endif
 
     // The start: the refused pack is a notice with its reason; the first accepted opens.
     Settings s;
