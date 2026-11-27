@@ -22,6 +22,7 @@
 // loads). The driver (the run, the tasks, the tutorial's way, the boot) is game_driver.h.
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <cstdio>
 #include <initializer_list>
 #include <string>
@@ -1479,6 +1480,232 @@ void pointer(Run &r) {
     then_finish(r);
 }
 
+// --- the key pads' buttons by touch (#433) -----------------------------------------------------
+//
+// The flows above press game keys, which the runtime puts straight into the key pad's state: the
+// UIKit buttons of panels 5-8 (NpcKeyPadView, MarketKeyPadView, PopupKeyPadView,
+// MapKeyPadView) and their touch handlers never run. `touches` touches them with scripted
+// fingers (fe::Input::touch: UIKit's own hit test, touch handlers and target actions), as a
+// player on the device does; the checks read the uikit trace's button actions and guest memory.
+
+// A finger down at (x, y), lifted `hold` seconds later; `after` seconds before the next task.
+void then_touch_at(Run &r, std::string what, float x, float y, double hold = 0.1,
+                   double after = 0.5) {
+    auto lifted = std::make_shared<int>(0);
+    then(r, "touch " + what, hold + after + 1,
+         [&r, x, y, hold, after, lifted](mt_cpu *, double el) {
+             if (*lifted == 0) {
+                 r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, x, y);
+                 *lifted = 1;
+             } else if (*lifted == 1 && el >= hold) {
+                 r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, x, y);
+                 *lifted = 2;
+             }
+             return *lifted == 2 && el >= hold + after;
+         });
+}
+
+// A finger on the control whose action is `action` (its tap point, once it shows: at most
+// 10 s), lifted `hold` seconds later.
+void then_touch(Run &r, const std::string &action, double hold = 0.1, double after = 0.5) {
+    auto p = std::make_shared<std::array<float, 2>>();
+    then_wait_for(r, action + " shows", 10, [&r, action, p](mt_cpu *) {
+        return control_point(r, action, &(*p)[0], &(*p)[1]);
+    });
+    auto lifted = std::make_shared<int>(0);
+    then(r, "touch " + action, hold + after + 1, [&r, p, hold, after, lifted](mt_cpu *, double el) {
+        if (*lifted == 0) {
+            r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, (*p)[0], (*p)[1]);
+            *lifted = 1;
+        } else if (*lifted == 1 && el >= hold) {
+            r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, (*p)[0], (*p)[1]);
+            *lifted = 2;
+        }
+        return *lifted == 2 && el >= hold + after;
+    });
+}
+
+// A finger down at (x0, y0), moved to (x1, y1) in `steps` moves 50 ms apart, lifted there.
+void then_drag(Run &r, std::string what, float x0, float y0, float x1, float y1, int steps = 6) {
+    then(r, "drag " + what, steps * 0.05 + 2, [&r, x0, y0, x1, y1, steps](mt_cpu *, double el) {
+        const int i = static_cast<int>(el / 0.05);
+        const float f = std::min(1.0f, static_cast<float>(i) / static_cast<float>(steps));
+        if (i == 0) {
+            r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, x0, y0);
+        } else if (i <= steps) {
+            r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_MOVED, x0 + (x1 - x0) * f,
+                          y0 + (y1 - y0) * f);
+        } else if (i == steps + 1) {
+            r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, x1, y1);
+        }
+        return el >= (steps + 2) * 0.05 + 0.5;
+    });
+}
+
+// A guest float and BOOL (ivars).
+float rdf(mt_cpu *cpu, u32 addr) {
+    const u32 v = rd(cpu, addr);
+    float f = 0;
+    std::memcpy(&f, &v, 4);
+    return f;
+}
+bool rd_bool(mt_cpu *cpu, u32 addr) { return (rd(cpu, addr) & 0xFF) != 0; }
+
+// On a copy of the post-tutorial save (Henesys): Mr. Wang talked to by a touch on him, his
+// shop's tabs, list, Buy and Sell with their popups' buttons, his close; Humanoid's offer
+// refused and accepted; the map touched, its buttons.
+void touches(Run &r) {
+    attach_pad(r);
+    auto from = std::make_shared<std::size_t>(0);
+    const auto mark = [&r, from](const std::string &what) {
+        then_do(r, "mark: " + what, [&r, from](mt_cpu *) { *from = r.log.size(); });
+    };
+    const auto ran = [&r, from](std::vector<std::string> want, const std::string &what) {
+        then_do(r, "check: " + what,
+                [&r, from, want, what](mt_cpu *) { check_actions(r, *from, want, what); });
+    };
+    then_load_slot0(r);
+    then_check(r, "the save loads in Henesys", [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+
+    // Mr. Wang (x 440): a touch on him talks (TouchKeyPadView's touchesBegan: sends
+    // clickUpButton: while isNearNPC, +0xE6, around npcPosition, +0x94).
+    then_walk_to(r, 440);
+    then_wait_field(r);
+    auto next = std::make_shared<double>(0);
+    then(r, "touch Mr. Wang until his shop opens", 15, [&r, next](mt_cpu *cpu, double el) {
+        if (in_shop(cpu)) {
+            hold(r, A, false);
+            return true;
+        }
+        const u32 pad = mt_input_pad_view();
+        if (field(cpu) && pad != 0 && rd_bool(cpu, pad + 0xE6) && el >= *next) {
+            const float nx = rdf(cpu, pad + 0x94), ny = rdf(cpu, pad + 0x98) - 20;
+            r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, nx, ny);
+            r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, nx, ny);
+            *next = el + 1.5;
+        }
+        hold(r, A, !field(cpu) && std::fmod(el, 0.8) < 0.1); // through the greeting
+        return false;
+    });
+
+    // The tabs, the list's drag (MarketKeyPadView's touches), a row's tap.
+    mark("the shop's tabs");
+    then_touch(r, "releaseSellTabButton:");
+    then_check(r, "the Sell tab by touch", [](mt_cpu *cpu) { return shop(cpu).tab == 1; });
+    then_touch(r, "releaseBuyTabButton:");
+    then_check(r, "the Buy tab by touch", [](mt_cpu *cpu) { return shop(cpu).tab == 0; });
+    ran({"-[MarketKeyPadView releaseSellTabButton:]", "-[MarketKeyPadView releaseBuyTabButton:]"},
+        "the tabs' buttons");
+    then_drag(r, "the Buy list up", 248, 220, 248, 120);
+    then_drag(r, "the Buy list down", 248, 120, 248, 230);
+    then_touch_at(r, "the first row", 248, 80);
+    // Buy: popup 5 (how many), its + and - (touch-down actions), Cancel; Buy again, OK2, and
+    // the OK of popup 111 (bought).
+    mark("Buy");
+    then_touch(r, "releaseBuyButton:");
+    then_wait_for(r, "how many (popup 5)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 5; });
+    then_touch(r, "releasePlusButton:");
+    then_touch(r, "releasePlusButton:");
+    then_touch(r, "releaseMinusButton:");
+    then_check(r, "+, +, -: two", [](mt_cpu *cpu) { return popup_amount(cpu) == 2; });
+    then_touch(r, "releaseCancelButton:");
+    then_wait_for(r, "the shop's list again", 5, in_shop, 0.3);
+    then_touch(r, "releaseBuyButton:");
+    then_wait_for(r, "how many (popup 5)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 5; });
+    then_touch(r, "releaseOk2Button:");
+    then_wait_for(r, "bought (popup 111)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 111; });
+    then_touch(r, "releaseOkButton:");
+    then_wait_for(r, "the shop's list again", 5, in_shop, 0.3);
+    ran({"-[MarketKeyPadView releaseBuyButton:]", "-[PopupKeyPadView pressPlusButton:]",
+         "-[PopupKeyPadView pressMinusButton:]", "-[PopupKeyPadView releaseCancelButton:]",
+         "-[MarketKeyPadView releaseBuyButton:]", "-[PopupKeyPadView releaseOk2Button:]",
+         "-[PopupKeyPadView releaseOkButton:]"},
+        "Buy, +, -, Cancel, Buy, OK2, OK by touch");
+    // Sell: the Sell tab, its first row, Sell, Cancel.
+    mark("Sell");
+    then_touch(r, "releaseSellTabButton:");
+    then_touch_at(r, "the Sell tab's first row", 248, 80);
+    then_touch(r, "releaseSellButton:");
+    then_wait_for(r, "how many to sell (popup 6)", 5,
+                  [](mt_cpu *cpu) { return popup_id(cpu) == 6; });
+    then_touch(r, "releaseCancelButton:");
+    then_wait_for(r, "the shop's list again", 5, in_shop, 0.3);
+    ran({"-[MarketKeyPadView releaseSellTabButton:]", "-[MarketKeyPadView releaseSellButton:]",
+         "-[PopupKeyPadView releaseCancelButton:]"},
+        "Sell and Cancel by touch");
+    // The Subi Throwing-Stars (Buy row 2, sold as a whole stack: popup 3, Yes / No), No then
+    // Yes. (Charge shows only for a short stack: #435.)
+    then_touch(r, "releaseBuyTabButton:");
+    then_touch_at(r, "the Buy tab's third row", 248, 157);
+    then_check(r, "row 2: the stars", [](mt_cpu *cpu) {
+        return shop(cpu).selected == 2 && shop_row(cpu, shop(cpu), 2).id == 11;
+    });
+    mark("the stars");
+    then_touch(r, "releaseBuyButton:");
+    then_wait_for(r, "buy? (popup 3)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 3; });
+    then_touch(r, "releaseNoButton:");
+    then_wait_for(r, "the shop's list again", 5, in_shop, 0.3);
+    then_touch(r, "releaseBuyButton:");
+    then_wait_for(r, "buy? (popup 3)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 3; });
+    then_touch(r, "releaseYesButton:");
+    then_wait_for(r, "bought (popup 111)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 111; });
+    then_touch(r, "releaseOkButton:");
+    then_wait_for(r, "the shop's list again", 5, in_shop, 0.3);
+    then_check(r, "the stars bought",
+               [](mt_cpu *cpu) { return item_count(cpu, hero(cpu), 11) > 0; });
+    ran({"-[PopupKeyPadView releaseNoButton:]", "-[PopupKeyPadView releaseYesButton:]",
+         "-[PopupKeyPadView releaseOkButton:]"},
+        "No, then Yes, by touch");
+    // The shop's close (TouchKeyPadView's, over panel 6).
+    mark("close");
+    then_touch(r, "releaseClearButton:");
+    then_wait_field(r);
+    ran({"-[TouchKeyPadView releaseClearButton:]"}, "the shop's close by touch");
+
+    // Humanoid's offer (side quest 3): Refuse, then Accept, by touch.
+    mark("the offer");
+    then_walk_to(r, 42); // down the steps
+    then_walk_to(r, 376);
+    then_offer(r, "Humanoid");
+    then_touch(r, "releaseRefuseButton:");
+    then_wait_field(r);
+    then_check(r, "Refuse: side quest 3 not started", [](mt_cpu *cpu) {
+        return quest_state(cpu, hero(cpu), 1, 3) == 0 && !quest_active(cpu, hero(cpu), 1, 3);
+    });
+    then_offer(r, "Humanoid");
+    then_touch(r, "releaseAcceptButton:");
+    then_wait_for(
+        r, "the field", 20,
+        [](mt_cpu *cpu) { return field(cpu) && quest_active(cpu, hero(cpu), 1, 3); }, 0.5);
+    ran({"-[NpcKeyPadView releaseRefuseButton:]", "-[NpcKeyPadView releaseAcceptButton:]"},
+        "Refuse and Accept by touch");
+
+    // The map (Back): a touch on it, then its buttons.
+    mark("the map");
+    then_press(r, SELECT);
+    then_wait_for(
+        r, "the map", 5, [](mt_cpu *cpu) { return mt_input_panel() == 8 && game_mode(cpu) == 3; },
+        0.3);
+    then_touch_at(r, "the map", 240, 160);
+    then_touch(r, "releaseAsteriskButton:");
+    // A town (Map_PaintSub2 reads MapKeyPadView's touchPoint while the finger is down):
+    // a town chosen; the map's next submode shows World again where Mini was.
+    then_touch_at(r, "a town on the world map", 190, 75, 0.2);
+    then_wait_for(r, "a town chosen: World where Mini was", 5,
+                  [&r](mt_cpu *) { return has_control(r, "releaseAsteriskButton:"); });
+    // Its keys (Map_OnKeySub1): World, then Mini, then the close.
+    then_touch(r, "releaseAsteriskButton:");
+    then_touch(r, "releaseOkButton:");
+    then_touch(r, "releaseClearButton:");
+    then_wait_field(r);
+    // The map's buttons send only their press (controls/keypad.md), the close both.
+    ran({"-[TouchKeyPadView clickAsteriskButton:]", "-[TouchKeyPadView clickAsteriskButton:]",
+         "-[TouchKeyPadView clickOkButton:]", "-[TouchKeyPadView clickClearButton:]",
+         "-[TouchKeyPadView releaseClearButton:]"},
+        "the map's World, a town, World, Mini and close by touch");
+    then_finish(r);
+}
+
 // --- direction resolution at a rope (#138, ADR 0128) -------------------------------------------
 //
 // The tutorial's first map (2.8): the rope at x 279, hanging above the ledge, so a jump reaches it
@@ -2223,6 +2450,8 @@ bool run_mode(Run &r, int argc, char **argv) {
         popup_grids(r);
     } else if (r.mode == "pointer") {
         pointer(r);
+    } else if (r.mode == "touches") {
+        touches(r);
     } else if (r.mode == "climb_stick") {
         climb_stick(r);
     } else if (r.mode == "climb_last") {
@@ -2290,7 +2519,8 @@ int equip_save(const fs::path &data) {
 
 int usage() {
     std::printf("usage: menu_nav_real_test main_menu|terms|early|seed|create|select|delete|"
-                "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|pointer|chords_touch|"
+                "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|pointer|touches|"
+                "chords_touch|"
                 "chords_pad|chords_keys|chords_keys_last|chord_mash|chord_mixed|carry_pad|carry_"
                 "keys|explore DATA_DIR "
                 "OUT_DIR "

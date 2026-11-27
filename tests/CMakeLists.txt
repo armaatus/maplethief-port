@@ -1015,6 +1015,19 @@ add_test(
 set_tests_properties(
     input.menu_shops PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
                                 TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
+# input.menu_touches (#433): the key pads' UIKit buttons and touch handlers by scripted fingers,
+# as on the device (the other flows press game keys, which never run them): an NPC touched, Mr.
+# Wang's tabs, list, Buy and Sell, the popups' buttons, a quest offer's Refuse and
+# Accept, the map's buttons and towns. On the same save.
+add_test(
+    NAME input.menu_touches
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=touches"
+            "-DSEED=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops_save/data"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_touches" -P
+            "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+set_tests_properties(
+    input.menu_touches PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
+                                  TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
 # input.menu_shop_scroll (ADR 0102): Mr. Wang's Buy and Sell lists by the d-pad, item by item,
 # the drawn list scrolled so the cursor's row stays in view; the amount set by the d-pad (and
 # held with menu_repeat, ADR 0114) and two bought; the Sell list paged with LT (ADR 0114); the

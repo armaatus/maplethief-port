@@ -18,6 +18,8 @@
 #   pointer     pointer                         (MAPLETHIEF_LANGUAGE=ko: the gamepad pointer
 #                                                taps the terms, About, Help and swipes Help's
 #                                                pages, #185, ADR 0107)
+#   touches     touches                         (on a copy of SEED: the key pads' UIKit buttons
+#                                                by scripted touches, #433)
 #   carry_pad   carry_pad                       (on a copy of SEED: pick up and drop by the pad,
 #                                                #140, ADR 0129)
 #   carry_keys  carry_keys                      (the same by the keys, and the trash)
@@ -72,6 +74,8 @@ elseif(FLOW STREQUAL "speech_skills")
 elseif(FLOW STREQUAL "pointer")
     set(modes pointer)
     set(language ko)
+elseif(FLOW STREQUAL "touches")
+    set(modes touches)
 elseif(FLOW STREQUAL "carry_pad")
     set(modes carry_pad)
 elseif(FLOW STREQUAL "carry_keys")
