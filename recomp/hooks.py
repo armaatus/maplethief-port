@@ -50,6 +50,12 @@ HOOKED: dict[int, Hooked] = {
         "(map, x, y, smooth): centres the camera on a point, then clamps it; widescreen (#86, "
         "ADR 0090) sets the view width for the map first",
     ),
+    0xD259: Hooked(
+        "CMMap::LoadObj",
+        "(map, area, map): reads the map's .obj into its object list; restored_content (#427) "
+        "adds Monster Carnival's NPC (kind 42, a Spiegelman script) to Kerning City, Orbis and "
+        "Magatia's first maps after it, in memory",
+    ),
     0x23D1D: Hooked(
         "Canvas_FillRect",
         "(x, y, w, h): FillRect in the canvas's colour (and the global alpha while one is set); "
