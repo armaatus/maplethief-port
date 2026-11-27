@@ -7,11 +7,16 @@
 //                    FillRect 0x8079, its window at (0x4A, 0x1C), the tabs at fixed x
 //   mode 2  0x56E91  the NPC shop: windows at fixed x, clipped to +0x88
 //   mode 3  0x59BB1, 0x59119, 0x58AE9  the map screen's views (Map_PaintSub0/1/2)
+//   mode 9  0x35189  CChatBox::drawChatBox, a scene's speech box across the whole width (#396)
 // Each is called only from Paint. Wrapped, each runs with the engine's width words back at 480
 // (as widescreen.cpp's apply writes them) and a host clip-space x offset of (E - 480) / W, which
 // moves its draws (E - 480) / 2 points right, into the GL frame's centre 480 points: the screen
 // image the host shows (gl_screen_columns) and takes its touches on. Afterwards the words are as
 // they were. Nothing the game keeps reads them in between: only drawing code reads the width.
+//
+// The speech box's lines are wrapped earlier, by the scene runner's command 50 (Text_Wrap
+// 0x22EC5 at 0x85158, width +0x88 - 24): in a wide view the wrap gets the 3:2 width, 456, so the
+// lines fit the box drawn at 480 (a wider line would run past the box's right edge).
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -37,15 +42,17 @@ constexpr u32 k_narrow = MT_WIDESCREEN_NARROW;
 constexpr u32 k_height = MT_WIDESCREEN_HEIGHT;
 
 constexpr u32 k_screens[] = {MT_HOOK_FN_POPUP_MENU_PAINT, MT_HOOK_FN_SHOP_PAINT,
-                             MT_HOOK_FN_MAP_PAINT_0, MT_HOOK_FN_MAP_PAINT_1,
-                             MT_HOOK_FN_MAP_PAINT_2};
+                             MT_HOOK_FN_MAP_PAINT_0,      MT_HOOK_FN_MAP_PAINT_1,
+                             MT_HOOK_FN_MAP_PAINT_2,      MT_HOOK_FN_CHAT_BOX_DRAW};
+// Text_Wrap's return address in the scene runner (command 50's call at 0x85158).
+constexpr u32 k_scene_box_wrap_return = 0x8515Du;
 
 // Guest thread: the screen whose paint runs (its function pointer), 0 outside one; the view E and
 // the host offset during it.
 u32 g_screen = 0;
 u32 g_view = 0;
 float g_offset = 0.0f;
-std::atomic<std::uint64_t> g_screens{0}, g_dims{0};
+std::atomic<std::uint64_t> g_screens{0}, g_dims{0}, g_wraps{0};
 
 // The image maps every word read here (mt_widescreen_view() is only above 480 once
 // mt_widescreen_apply found the game's globals, but a test's guest may differ).
@@ -144,6 +151,19 @@ int fill_hook(mt_cpu *cpu, const mt_hook_call *call) {
     return MT_HOOK_HANDLED;
 }
 
+// Text_Wrap 0x22EC5 (owner, text, width, &count) from the scene runner's command 50: the width
+// less (E - 480), the speech box's 3:2 width. Every other caller wraps as the original.
+int wrap_hook(mt_cpu *cpu, const mt_hook_call *call) {
+    const u32 e = mt_widescreen_view();
+    if (e <= k_narrow || cpu->r[MT_LR] != k_scene_box_wrap_return || cpu->r[2] <= e - k_narrow) {
+        return MT_HOOK_PASS;
+    }
+    cpu->r[2] -= e - k_narrow;
+    call->original(cpu);
+    g_wraps.fetch_add(1, std::memory_order_relaxed);
+    return MT_HOOK_HANDLED;
+}
+
 } // namespace
 
 namespace mt_widescreen_detail {
@@ -153,6 +173,7 @@ void menus_configure(bool on) noexcept {
         mt_hook_register(fn, screen_hook, nullptr, on ? 1 : 0);
     }
     mt_hook_register(MT_HOOK_FN_FILL_RECT, fill_hook, nullptr, on ? 1 : 0);
+    mt_hook_register(MT_HOOK_FN_TEXT_WRAP, wrap_hook, nullptr, on ? 1 : 0);
 }
 
 void menus_reset() noexcept {
@@ -160,11 +181,13 @@ void menus_reset() noexcept {
         mt_hook_unregister(fn);
     }
     mt_hook_unregister(MT_HOOK_FN_FILL_RECT);
+    mt_hook_unregister(MT_HOOK_FN_TEXT_WRAP);
     g_screen = 0u;
     g_view = 0u;
     g_offset = 0.0f;
     g_screens.store(0);
     g_dims.store(0);
+    g_wraps.store(0);
 }
 
 bool menu_active() noexcept { return g_screen != 0u; }
@@ -175,5 +198,6 @@ extern "C" mt_widescreen_menu_stats mt_widescreen_get_menu_stats(void) noexcept 
     mt_widescreen_menu_stats s{};
     s.screens = g_screens.load();
     s.dims = g_dims.load();
+    s.box_wraps = g_wraps.load();
     return s;
 }

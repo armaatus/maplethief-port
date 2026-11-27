@@ -4,8 +4,10 @@
 // decision (field, NPC chat, menus, other states, the map's width, the host's word), what apply
 // writes (the clip rect only when it is the whole screen), off as a no-op, the hooked camera
 // and backdrop draws as the generated code calls them (MT_FN_HOOK), and the menus' screens drawn
-// at 480 in the view's centre with the popup menu's dim stretched (#169). The real game's run is
-// play.widescreen_off / play.widescreen_on (play_real_test.cpp).
+// at 480 in the view's centre with the popup menu's dim stretched (#169), and the scenes (#396):
+// wide only when listed, their speech box wrapped at the 3:2 width and drawn in the centre. The
+// real game's runs are play.widescreen_off / play.widescreen_on and
+// play.widescreen_scene_<n>_off_synthetic / _on_synthetic (play_real_test.cpp).
 #include <doctest/doctest.h>
 
 #include <cstdint>
@@ -147,6 +149,23 @@ void hooked_popup(mt_cpu *MT_RESTRICT cpu) {
     MT_FN_HOOK(MT_HOOK_FN_POPUP_MENU_PAINT, screen_original);
 }
 void hooked_map(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(MT_HOOK_FN_MAP_PAINT_0, screen_original); }
+void hooked_chat_box(mt_cpu *MT_RESTRICT cpu) {
+    MT_FN_HOOK(MT_HOOK_FN_CHAT_BOX_DRAW, screen_original);
+}
+
+// Text_Wrap's original records the width it was given.
+u32 g_wrap_width = 0;
+void wrap_original(mt_cpu *MT_RESTRICT cpu) { g_wrap_width = cpu->r[2]; }
+void hooked_wrap(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(MT_HOOK_FN_TEXT_WRAP, wrap_original); }
+u32 wrap(mt_cpu &cpu, u32 width, u32 lr) {
+    cpu.r[0] = 0x2000; // the owner, the text, &count: passed through
+    cpu.r[1] = 0x3000;
+    cpu.r[2] = width;
+    cpu.r[3] = 0x4000;
+    cpu.r[MT_LR] = lr;
+    hooked_wrap(&cpu);
+    return g_wrap_width;
+}
 
 void draw(mt_cpu &cpu, u32 image, u32 x, u32 y) {
     cpu.r[0] = image;
@@ -180,7 +199,8 @@ TEST_CASE("widescreen: 480 off the field, while the host says no, or when off") 
         put32(g.cpu, k_game_mode, mode);
         CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 568u);
     }
-    for (const u32 mode : {5u, 6u, 7u, 8u, 9u, 10u, 12u}) { // loading, exit, scenes: 3:2
+    // Loading, the waiting box, scene 0 (unlisted, #396) and a scene without its list: 3:2.
+    for (const u32 mode : {5u, 6u, 7u, 8u, 9u, 10u, 12u}) {
         put32(g.cpu, k_game_mode, mode);
         CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 480u);
     }
@@ -193,6 +213,98 @@ TEST_CASE("widescreen: 480 off the field, while the host says no, or when off") 
     put32(g.cpu, g.state, k_game_vptr);
     put32(g.cpu, k_canvas_global, 0); // no canvas yet
     CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 480u);
+}
+
+TEST_CASE("widescreen: game modes 9 and 10 are wide only for the listed scenes (#396)") {
+    Guest g;
+    put32(g.cpu, g.state + 0x38, 0x1000u); // the scene's command list
+    u32 listed = 0;
+    for (u32 scene = 0; scene <= 20; scene++) {
+        put32(g.cpu, g.state + 0x1E4, scene);
+        const bool wide = mt_widescreen_scene_wide(scene) != 0;
+        listed += wide ? 1u : 0u;
+        for (const u32 mode : {9u, 10u}) {
+            put32(g.cpu, k_game_mode, mode);
+            CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == (wide ? 568u : 480u));
+            CHECK(mt_widescreen_decide(&g.cpu, 480, 1) == 480u); // off
+            CHECK(mt_widescreen_decide(&g.cpu, 568, 0) == 480u); // the host says no
+        }
+    }
+    CHECK(listed == 7u);
+    for (const u32 scene : {2u, 11u, 13u, 15u, 16u, 19u, 20u}) {
+        CHECK(mt_widescreen_scene_wide(scene) == 1);
+    }
+    CHECK(mt_widescreen_scene_wide(21u) == 0);
+    CHECK(mt_widescreen_scene_wide(0xFFFFFFFFu) == 0);
+    // A listed scene is as wide as its map: 35 tiles, 560; 30 tiles, the original 480.
+    put32(g.cpu, g.state + 0x1E4, 16u);
+    put32(g.cpu, k_game_mode, 9u);
+    put32(g.cpu, g.map + 0x5C, 35 * 16);
+    CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 560u);
+    put32(g.cpu, g.map + 0x5C, 30 * 16);
+    CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 480u);
+    put32(g.cpu, g.map + 0x5C, 60 * 16);
+    // Game mode 9 with no command list (the runner has nothing to run): 480. Queued (10): the
+    // list comes with StartScene, so none is needed yet.
+    put32(g.cpu, g.state + 0x38, 0u);
+    CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 480u);
+    put32(g.cpu, k_game_mode, 10u);
+    CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 568u);
+}
+
+TEST_CASE("widescreen: off, a listed scene changes nothing (#396)") {
+    Guest g;
+    mt_widescreen_configure(480);
+    put32(g.cpu, g.state + 0x38, 0x1000u);
+    put32(g.cpu, g.state + 0x1E4, 16u);
+    for (const u32 mode : {0u, 10u, 9u}) {
+        put32(g.cpu, k_game_mode, mode);
+        CHECK(mt_widescreen_turn(&g.cpu, 1) == 480u);
+    }
+    CHECK(get32(g.cpu, g.canvas + 0x88) == 480u);
+    CHECK(mt_widescreen_get_stats().changes == 0u);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_TEXT_WRAP) == 0);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CHAT_BOX_DRAW) == 0);
+}
+
+TEST_CASE("widescreen scenes: the speech box is wrapped at 3:2 and drawn in the centre (#396)") {
+    Guest g;
+    g_canvas = g.canvas;
+    g_surface = g.surface;
+    g_stack = mt_heap_calloc(g.mem, 1, 0x40);
+    REQUIRE(g_stack != 0);
+    mt_widescreen_configure(MT_WIDESCREEN_WIDE);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_TEXT_WRAP) == 1);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CHAT_BOX_DRAW) == 1);
+    put32(g.cpu, g.state + 0x38, 0x1000u);
+    put32(g.cpu, g.state + 0x1E4, 16u);
+    put32(g.cpu, k_game_mode, 9u);
+    REQUIRE(mt_widescreen_turn(&g.cpu, 1) == 568u);
+    // The runner's command 50 (the call at 0x85158) passes +0x88 - 24: the 3:2 456 instead.
+    constexpr u32 runner = 0x8515Du;
+    CHECK(wrap(g.cpu, 568 - 24, runner) == 456u);
+    CHECK(mt_widescreen_get_menu_stats().box_wraps == 1u);
+    // Every other caller (an NPC's dialogue page, the menus) wraps as the original.
+    CHECK(wrap(g.cpu, 568 - 24, 0x34B29u) == 544u);
+    CHECK(mt_widescreen_get_menu_stats().box_wraps == 1u);
+    // CChatBox::drawChatBox: at 480 points, 44 points right; the wide words afterwards.
+    g_seen = Seen{};
+    hooked_chat_box(&g.cpu);
+    CHECK(g_seen.calls == 1);
+    CHECK(g_seen.width == 480u);
+    CHECK(g_seen.half == 240u);
+    CHECK(g_seen.offset == doctest::Approx(88.0f / 568.0f));
+    CHECK(get32(g.cpu, g.canvas + 0x88) == 568u);
+    // An unlisted scene is drawn at 480: the box and its wrap as the original's.
+    put32(g.cpu, g.state + 0x1E4, 14u);
+    REQUIRE(mt_widescreen_turn(&g.cpu, 1) == 480u);
+    CHECK(wrap(g.cpu, 480 - 24, runner) == 456u);
+    CHECK(mt_widescreen_get_menu_stats().box_wraps == 1u);
+    g_seen = Seen{};
+    hooked_chat_box(&g.cpu);
+    CHECK(g_seen.calls == 1);
+    CHECK(g_seen.width == 480u);
+    CHECK(g_seen.offset == 0.0f);
 }
 
 TEST_CASE("widescreen: a guest without the game's image is never read") {

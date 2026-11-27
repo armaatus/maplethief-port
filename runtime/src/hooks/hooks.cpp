@@ -23,11 +23,13 @@ constexpr u32 k_hookable[] = {
     MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT,    // 0x22955
     MT_HOOK_FN_TEXT_CHAR_COUNT,             // 0x22989
     MT_HOOK_FN_TEXT_SUB_CHARS,              // 0x22A1D
+    MT_HOOK_FN_TEXT_WRAP,                   // 0x22EC5
     MT_HOOK_FN_CANVAS_FILL_RECT,            // 0x23D1D
     MT_HOOK_FN_CANVAS_FILL_RECT_COLOR,      // 0x23D95
     MT_HOOK_FN_DRAW_IMAGE,                  // 0x24DC9
     MT_HOOK_FN_CHAT_BOX_NEXT_PAGE,          // 0x34A05
     MT_HOOK_FN_CHAT_BOX_FIRST_PAGE,         // 0x34CD1
+    MT_HOOK_FN_CHAT_BOX_DRAW,               // 0x35189
     MT_HOOK_FN_SAVE_QUEST_DATA,             // 0x38F55
     MT_HOOK_FN_POPUP_OPEN,                  // 0x3EAA1
     MT_HOOK_FN_SHOP_ON_KEY,                 // 0x46DB9

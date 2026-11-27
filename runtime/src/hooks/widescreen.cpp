@@ -7,16 +7,18 @@
 //     +0x10             the graphics context: its clip rect x0, y0, x1, y1 at +0x14 ... +0x20
 //     +0x88, +0x90      the screen width and half of it (+0x8C, +0x94: the height, unchanged)
 //   0x11AA00            the game mode (0 field, 1 popup menu, 2 shop, 3 map, 4 NPC chat,
-//                       0xB cash shop, ...)
+//                       9 a scene, 10 a scene queued, 0xB cash shop, ...)
 //   0x11AA88            the screen surface: +0x00 width, +0x10 bytes a row (width x 4)
 //   0x11AA8C            Screen_Init's width
 //   CStateGame +0x2C    the map (CMMap): +0x5C its width in pixels
+//   CStateGame +0x38    the scene's command list (0: none), +0x1E4 the scene's number (#396)
 //   CStateGame +0x454   the backdrop (CMImage), drawn at (0, 0) by 0x24DC9 each field frame
 //   HUD_Paint 0x5A465   the field HUD, at fixed 480-point places (moved to the middle, #168)
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 
 #include "maplethief/diag.h"
 #include "maplethief/gles.h"
@@ -43,6 +45,23 @@ constexpr u32 k_game_vptr = 0x119B78u; // CStateGame: vtable 0x119B70, slots fro
 constexpr u32 k_state_map = 0x2Cu;
 constexpr u32 k_state_backdrop = 0x454u;
 constexpr u32 k_map_width = 0x5Cu;
+constexpr u32 k_mode_scene = 9u, k_mode_scene_queued = 10u;
+constexpr u32 k_state_scene_list = 0x38u;
+constexpr u32 k_state_scene = 0x1E4u;
+
+// The scenes drawn at the field's width (#396, docs/re/widescreen.md#scenes-at-the-fields-width):
+// each plays on a map wider than 480 points and stages no actor where only the wider view shows
+// it (python3 -m mtport.scenes stage gives the same list). The other 14 play on 30-tile maps
+// (480 points: nothing to widen) or stage actors in the wings (the intro, 0).
+constexpr u32 k_wide_scenes[] = {
+    2u,  // makeAniEndingHenesis, 2.11
+    11u, // makeAniChapter1, 2.0
+    13u, // makeAniChapter3, 6.0
+    15u, // makeAniChapter1Perion, 1.0
+    16u, // makeAniMagatiaHumanoid1, 8.4
+    19u, // makeAniMagatiaHumanoid4, 8.4
+    20u, // makeAniChapter2Perion, 1.0
+};
 
 std::atomic<u32> g_width{MT_WIDESCREEN_NARROW}; // configured; 480 = off
 std::atomic<u32> g_view{MT_WIDESCREEN_NARROW};  // applied
@@ -191,9 +210,15 @@ extern "C" std::uint32_t mt_widescreen_decide(const mt_cpu *cpu, std::uint32_t w
     }
     // The field and the NPC chat (its box is centred on +0x90); the popup menu, the shop and the
     // map screen, drawn at 480 in the view's centre (#169, widescreen_menus.cpp), and the cash
-    // shop (UIKit) over the wide field. Loading, exit and scenes stay 480.
+    // shop (UIKit) over the wide field; a listed scene, queued (10) or running (9) with its
+    // list (#396). Loading, the waiting box and every other scene stay 480.
     const u32 mode = read_word(cpu, k_game_mode);
-    if (mode > 4u && mode != 0xBu) {
+    if (mode == k_mode_scene || mode == k_mode_scene_queued) {
+        if ((mode == k_mode_scene && read_word(cpu, state + k_state_scene_list) == 0u) ||
+            mt_widescreen_scene_wide(read_word(cpu, state + k_state_scene)) == 0) {
+            return MT_WIDESCREEN_NARROW;
+        }
+    } else if (mode > 4u && mode != 0xBu) {
         return MT_WIDESCREEN_NARROW;
     }
     const u32 map = read_word(cpu, state + k_state_map);
@@ -205,6 +230,13 @@ extern "C" std::uint32_t mt_widescreen_decide(const mt_cpu *cpu, std::uint32_t w
         return MT_WIDESCREEN_NARROW;
     }
     return std::min(static_cast<u32>(map_width), width);
+}
+
+extern "C" int mt_widescreen_scene_wide(std::uint32_t scene) noexcept {
+    return std::find(std::begin(k_wide_scenes), std::end(k_wide_scenes), scene) !=
+                   std::end(k_wide_scenes)
+               ? 1
+               : 0;
 }
 
 extern "C" void mt_widescreen_apply(mt_cpu *cpu, std::uint32_t e) noexcept {
