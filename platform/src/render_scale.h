@@ -108,10 +108,10 @@ class RenderScaleGovernor {
 // SDL_GetTicksNS seconds and the backend's numbers, the tests made-up ones.
 class GpuFrameTimer {
   public:
-    static constexpr std::uint32_t kEvery = 4;       // GL frames: one timed in this many
-    static constexpr double kWindowSeconds = 1.0;    // the samples ms() looks at
-    static constexpr std::uint32_t kMinSamples = 2;  // fewer: unknown
-    static constexpr std::size_t kMaxSamples = 64;   // kept at most
+    static constexpr std::uint32_t kEvery = 4;      // GL frames: one timed in this many
+    static constexpr double kWindowSeconds = 1.0;   // the samples ms() looks at
+    static constexpr std::uint32_t kMinSamples = 2; // fewer: unknown
+    static constexpr std::size_t kMaxSamples = 64;  // kept at most
 
     // A window frame showed a new GL frame (a tick): whether to time the next GL frame. Every
     // kEvery-th tick, and not while a timed frame is still to arrive.

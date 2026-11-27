@@ -226,7 +226,7 @@ TEST_CASE("render_scale: the GPU timer times one GL frame in four and keeps a se
     CHECK(t.ms(0.80) == doctest::Approx(7.0));
     // Samples older than a second drop out: unknown again when too few remain.
     CHECK(t.ms(1.55) == doctest::Approx(90.0)); // 0.60 and 0.80 are left
-    CHECK(t.ms(1.70) == 0);                       // only 0.80 is left
+    CHECK(t.ms(1.70) == 0);                     // only 0.80 is left
 }
 
 TEST_CASE("render_scale: auto steps down on a slow injected GPU clock (#365)") {

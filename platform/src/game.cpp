@@ -611,7 +611,7 @@ struct Game {
     bool govern = false;
     // The GPU's time per GL frame for the governor (#365): one GL frame in a few is timed.
     GpuFrameTimer gpu_timer;
-    bool gpu_timing_env = false; // MAPLETHIEF_GFX_GPU_TIMING=1: the backend times every frame
+    bool gpu_timing_env = false;     // MAPLETHIEF_GFX_GPU_TIMING=1: the backend times every frame
     std::uint32_t pending_scale = 0; // 0: none
     std::uint32_t scale_changes = 0;
     std::string notice; // the guard's warning in the window, until notice_until (SDL ns)
