@@ -111,6 +111,8 @@ const Expected kExpected[] = {
     {"auto_potion", {"off", "off", "off"}},
     {"skip_intros", {"off", "off", "off"}},
     {"minimap", {"off", "off", "off"}},
+    {"minimap_mobs", {"off", "off", "off"}},
+    {"minimap_name", {"off", "off", "off"}},
     {"exp_percent", {"off", "off", "on"}},
     {"input_display", {nullptr, nullptr, nullptr}}, // #404: the input display, in no preset
     {"auto_run", {"off", "off", "off"}},

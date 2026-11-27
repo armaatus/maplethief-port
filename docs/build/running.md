@@ -196,6 +196,8 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `auto_potion` | off | off / off / off | Assist: drink the HP potion of a quick slot under this share of max HP: off, 25, 50, 75 (percent) |
 | `skip_intros` | off | off / off / off | Scenes (the intro, chapter cards, boss entrances) run fast, each speech box tapped: on, off |
 | `minimap` | off | off / off / off | The port's minimap of the map in the field (platforms, ladders, the hero, portals and NPCs): off, border (beside the picture where there is room, else over it), overlay |
+| `minimap_mobs` | off | off / off / off | The minimap also shows the map's live mobs as dots (#397): on, off |
+| `minimap_name` | off | off / off / off | The minimap also shows the map's name, as the game names it in its language, on a strip along the box's top (#397): on, off |
 | `exp_percent` | off | off / off / on | The hero's EXP to the next level as a percentage beside the HUD's bar: on, off |
 | `auto_run` | off | off / off / off | Assist: the auto-run key (R, the left stick's click) keeps the hero walking: on, off |
 | `hold_toggle` | off | off / off / off | Assist: a press starts these held actions and the next one stops them: off, walk, fast_forward, all |

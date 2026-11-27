@@ -7242,10 +7242,17 @@ void auto_loot_checks(Run &, u64) {
 // dot (at a 3:2 960 x 640 window, overlay, and a 1920 x 1080 one, border: in the left bar) is
 // where the hero's position maps to, and moves left and right with him. A shot of the screen
 // with the minimap over it every 5 s on 2.3 (minimap_NN.png), for looking at; never committed.
+// With its extras on (#397, minimap_mobs and minimap_name): on 2.3 in every turn a mob dot for
+// every live mob of the list (guest_state's, the dead flag +0x0C & 0x10 clear) where its feet map
+// to, and the name the knowledge base gives 2.3 in the run's language (MAPLETHIEF_LANGUAGE),
+// written by `mtport.compendium.world map-name` to MT_MINIMAP_NAME (minimap.kb_name_2_3), on its
+// strip.
 struct MinimapRun {
     u64 field_turns = 0, shown_turns = 0, hero_mismatch = 0, menu_turns = 0, menu_shown = 0;
     u64 on_23 = 0, dot_bad = 0, border_turns = 0, moves = 0, moves_left = 0, moves_right = 0;
     u64 moves_wrong = 0, marker_bad = 0, hunt_start = 0;
+    u64 mob_turns = 0, mobs_live = 0, mobs_bad = 0, name_bad = 0, name_turns = 0;
+    std::string want_name, lang, first_mob_bad, got_name;
     bool grid_checked = false, grid_equal = false;
     std::string grid_note, first_bad;
     std::set<std::pair<i32, i32>> maps;
@@ -7300,7 +7307,8 @@ void minimap_shot(Run &r, mt_cpu *cpu, const fe::MinimapView &v, const std::stri
 
 void minimap_tick(Run &r, mt_cpu *cpu) {
     MinimapRun &m = *g_minimap;
-    const fe::MinimapView v = fe::read_minimap(fe::guest_span(cpu));
+    const fe::MinimapView v = fe::read_minimap(
+        fe::guest_span(cpu), fe::MinimapExtras{r.settings.minimap_mobs, r.settings.minimap_name});
     const Hero h = hero(cpu);
     if (h.addr != 0 && game_mode(cpu) == 3) {
         m.menu_turns++;
@@ -7331,6 +7339,9 @@ void minimap_tick(Run &r, mt_cpu *cpu) {
                       v.rows, file.w, file.h);
         m.grid_note = buf;
         for (const fe::MinimapMarker &mk : v.markers) {
+            if (mk.kind == fe::MinimapMarker::kMob) {
+                continue; // the mob list's, checked below
+            }
             bool found = false;
             for (const world_map::Object &o : file.objects) {
                 const bool portal = o.kind >= 0 && o.kind <= 2;
@@ -7367,6 +7378,37 @@ void minimap_tick(Run &r, mt_cpu *cpu) {
             m.first_bad = buf;
         }
     }
+    // The extras: a mob dot for every live mob; the name the knowledge base's.
+    std::vector<fe::MinimapDot> dots = fe::minimap_dots(v, l);
+    m.mob_turns++;
+    for (const Mob &mob : mobs(cpu)) {
+        if ((rd(cpu, mob.addr + 0x0C) & fe::kMinimapMobDead) != 0) {
+            continue;
+        }
+        m.mobs_live++;
+        const bool marked =
+            std::find(v.markers.begin(), v.markers.end(),
+                      fe::MinimapMarker{fe::MinimapMarker::kMob, mob.x, mob.y}) != v.markers.end();
+        bool dotted = false;
+        for (const fe::MinimapDot &d : dots) {
+            dotted = dotted || (d.color.r == fe::kMinimapMob.r && d.color.g == fe::kMinimapMob.g &&
+                                d.color.b == fe::kMinimapMob.b &&
+                                dot_holds(l, d.rect, static_cast<float>(mob.x),
+                                          static_cast<float>(mob.y - v.cell_h)));
+        }
+        if (!marked || !dotted) {
+            if (m.mobs_bad++ == 0) {
+                m.first_mob_bad = "mob " + std::to_string(mob.id) + " at (" +
+                                  std::to_string(mob.x) + ", " + std::to_string(mob.y) + ")" +
+                                  (marked ? "" : " has no marker") + (dotted ? "" : " has no dot");
+            }
+        }
+    }
+    m.name_turns++;
+    if (v.name != m.want_name || !fe::minimap_name_strip(v, l).shown) {
+        m.name_bad++;
+        m.got_name = v.name;
+    }
     m.dot_xs.insert(static_cast<int>(dot.x));
     // A move the dot can show (two pixels at least): the dot went the hero's way.
     if (m.last_x == INT32_MIN) {
@@ -7390,14 +7432,32 @@ void minimap_tick(Run &r, mt_cpu *cpu) {
     }
 }
 
+void then_korean_terms(Run &r); // the Korean runs' (below)
+
 void minimap(Run &r, u64 goal) {
     attach_pad(r);
     g_minimap = std::make_shared<MinimapRun>();
     r.settings.minimap = fe::Minimap::kOverlay;
+    r.settings.minimap_mobs = r.settings.minimap_name = true;
+    // The knowledge base's name of 2.3 in the run's language (minimap.kb_name_2_3's file).
+    const char *lang = std::getenv("MAPLETHIEF_LANGUAGE");
+    g_minimap->lang = lang != nullptr && std::string(lang) == "ko" ? "ko" : "en";
+    if (const char *names = std::getenv("MT_MINIMAP_NAME")) {
+        std::ifstream in(names);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line.rfind(g_minimap->lang + "\t", 0) == 0) {
+                g_minimap->want_name = line.substr(g_minimap->lang.size() + 1);
+            }
+        }
+    }
     r.on_turn = [&r](mt_cpu *cpu) {
         monitor(r, cpu);
         minimap_tick(r, cpu);
     };
+    if (g_minimap->lang == "ko") {
+        then_korean_terms(r); // the Korean bundle's terms screen first
+    }
     then_new_game(r);
     then_tutorial(r);
     then_walk_to(r, 42);
@@ -7447,6 +7507,16 @@ void minimap_checks(Run &, u64) {
           "the hero's dot is at the hero's position in all " + std::to_string(m.on_23) +
               " turns on 2.3 (" + std::to_string(m.dot_bad) + " not" +
               (m.first_bad.empty() ? "" : "; first: " + m.first_bad) + ")");
+    check(m.mob_turns == m.on_23 && m.mobs_live > 0 && m.mobs_bad == 0,
+          "a mob dot for every live mob on 2.3 in every turn (" + std::to_string(m.mobs_live) +
+              " mob-turns over " + std::to_string(m.mob_turns) + " turns, " +
+              std::to_string(m.mobs_bad) + " without" +
+              (m.first_mob_bad.empty() ? "" : "; first: " + m.first_mob_bad) + ")");
+    check(!m.want_name.empty() && m.name_turns > 0 && m.name_turns == m.on_23 && m.name_bad == 0,
+          "the name on 2.3 is the knowledge base's (" + m.lang + ": '" + m.want_name +
+              "') on its strip in every turn (" + std::to_string(m.name_bad) + " of " +
+              std::to_string(m.name_turns) + " not" +
+              (m.got_name.empty() && m.name_bad == 0 ? "" : "; got '" + m.got_name + "'") + ")");
     check(m.border_turns == m.on_23, "border at 16:9: in the left bar beside the picture (" +
                                          std::to_string(m.border_turns) + " of " +
                                          std::to_string(m.on_23) + " turns)");

@@ -1782,6 +1782,8 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"auto_potion", true, ""},
     {"skip_intros", true, ""},
     {"minimap", true, ""},
+    {"minimap_mobs", true, ""},
+    {"minimap_name", true, ""},
     {"exp_percent", true, ""},
     {"input_display", true, ""},
     {"auto_run", true, ""},

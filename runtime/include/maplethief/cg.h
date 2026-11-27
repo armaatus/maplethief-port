@@ -156,6 +156,25 @@ typedef struct mt_cg_glyph {
 int mt_cg_bundled_glyph(uint32_t cp, int32_t em_pixels, int32_t max_width, mt_cg_glyph *g,
                         uint8_t *coverage, size_t capacity) MT_NOEXCEPT;
 
+/* One line of text with the same fonts (#397: the minimap's map name), for a frontend that
+ * uploads the result as one texture. */
+typedef struct mt_cg_line {
+    int32_t width, height; /* the bitmap's size in pixels: the pen's end (or the ink's, if
+                              further) by the font's ascent to descent, at most max_width wide */
+    int32_t baseline;      /* the baseline's row from the top */
+    uint32_t missing;      /* characters neither font has a glyph for (drawn as nothing) */
+} mt_cg_line;
+
+/* Measures `utf8` (`size` bytes, not NUL-terminated; an invalid sequence is U+FFFD, controls are
+ * skipped) at an em of `em_pixels` pixels into *line, clipped to `max_width` pixels (> 0; at
+ * most 4096). With `rgba` (at least width * height * 4 bytes, `capacity`), draws it too: straight
+ * RGBA8, rows top first, every pixel `color` (R, G, B, A) with its alpha times the glyphs'
+ * coverage, transparent where there is none. Returns 1, or 0 (*line zeroed) for an empty line,
+ * em_pixels outside 1 to 256 or a missing font. Any thread, like mt_cg_bundled_glyph. */
+int mt_cg_bundled_line(const char *utf8, size_t size, int32_t em_pixels, int32_t max_width,
+                       const uint8_t color[4], mt_cg_line *line, uint8_t *rgba,
+                       size_t capacity) MT_NOEXCEPT;
+
 MT_EXTERN_C_END
 
 #endif /* MAPLETHIEF_CG_H */
