@@ -4139,6 +4139,9 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // The port's keys reach the popup menu's quest tab, which the device's never did (#167):
     // OK there opens a quest's page the engine then cannot paint. Fixed in every mode.
     mt_hooks_install_quest_page_fix(1);
+    // A word wider than a text box makes Text_Wrap run off memory's end (#419, bug 15's key in
+    // Korean): the guard cuts the word at the box's width instead. Every mode (ADR 0228).
+    mt_hooks_install_text_wrap_guard(1);
     // screen_shake (#158, ADR 0093): the scenes' camera shake scaled; off at 100 (the original).
     mt_hooks_install_screen_shake(options.settings.screen_shake);
     // flashes (#186): the full-screen flashes' alpha scaled; off at 100 (the original).

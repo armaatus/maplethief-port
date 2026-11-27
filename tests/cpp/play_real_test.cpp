@@ -12940,7 +12940,9 @@ struct KoreanRun {
     std::set<std::string> since; // texts drawn since the last checkpoint
     std::string last_box;
     std::string key; // a text a box must show (the English line of the key ko.lproj lacks)
-    u64 key_shown = 0, raw_key = 0;          // how often a box showed it, and the key itself
+    u64 key_shown = 0, raw_key = 0; // how often a box showed it, and the key itself
+    u64 key_cut = 0;                // boxes whose lines, joined, are the key, more than one line
+    std::string key_lines;          // the last such box's lines, '|' after each
     std::map<std::string, std::string> base; // the recorded checkpoints: name -> FNV-1a
     fs::path base_dir;                       // MT_KOREAN_BASE
     bool recording = false;
@@ -13044,6 +13046,14 @@ void korean_turn(Run &r, mt_cpu *cpu) {
             std::printf("korean: the box shows the English line (%s ...)\n", k.key.c_str());
         }
         k.raw_key += v.text.find("Chapter3_Quest_Zenumist_Chief") != std::string::npos ? 1 : 0;
+        std::string whole;
+        for (const char c : v.text) {
+            whole += c != '|' ? std::string(1, c) : std::string();
+        }
+        if (v.lines > 1 && whole == "Chapter3_Quest_Zenumist_Chief.dialog.1") {
+            k.key_cut++;
+            k.key_lines = v.text;
+        }
         for (std::size_t a = 0, b = 0; (b = v.text.find('|', a)) != std::string::npos; a = b + 1) {
             k.box_lines++;
             if (!whole_utf8(v.text.substr(a, b - a))) {
@@ -13172,34 +13182,53 @@ void korean_offer_3(Run &r, u64) {
 
 // The key ko.lproj lacks (re/original-bugs.md #15; tests/starts/korean_ch3_key.json): with main
 // 0-3 and every side quest he gives done, the Zenumist President's only line is
-// Chapter3_Quest_Zenumist_Chief.dialog.1, shown as the field is entered. Without a Korean text
-// the box gets the key, one 38-character word wider than the box, and Text_Wrap reads past the
-// end of memory (the process dies). With fix_original_bugs (on here) the line is the English
-// table's: the box shows it whole, and never the key.
-void korean_missing_key(Run &r, u64) {
+// Chapter3_Quest_Zenumist_Chief.dialog.1, shown as the field is entered. With fix_original_bugs
+// (korean_missing_key) the line is the English table's: the box shows it whole, and never the
+// key. Without it (korean_missing_key_original) the box gets the key, one 38-character word
+// wider than the box; Text_Wrap's runaway on it (#419) is cut by the wrap guard, so the run
+// lives and the box shows the key cut across lines, the first cut after its "C" as the
+// device's wrap does, and the lines joined are the key.
+void korean_missing_key_run(Run &r, bool fixed) {
     using namespace quest_bot;
-    r.settings.fix_original_bugs = true;
-    const std::vector<std::uint8_t> raw =
-        read_file((fs::path(MT_BUNDLE_DIR) / "en.lproj/Scripts.strings").string());
-    mt_ns::PlistValue table;
-    std::string why;
-    const mt_ns::PlistValue *line = nullptr;
-    if (mt_ns::plist_parse(raw.data(), raw.size(), &table, &why)) {
-        line = table.find(u"Chapter3_Quest_Zenumist_Chief.dialog.1");
+    r.settings.fix_original_bugs = fixed;
+    if (fixed) {
+        const std::vector<std::uint8_t> raw =
+            read_file((fs::path(MT_BUNDLE_DIR) / "en.lproj/Scripts.strings").string());
+        mt_ns::PlistValue table;
+        std::string why;
+        const mt_ns::PlistValue *line = nullptr;
+        if (mt_ns::plist_parse(raw.data(), raw.size(), &table, &why)) {
+            line = table.find(u"Chapter3_Quest_Zenumist_Chief.dialog.1");
+        }
+        check(line != nullptr && line->kind == mt_ns::PlistValue::string,
+              "en.lproj/Scripts.strings has the key ko.lproj lacks");
+        // The box's first line: the English text up to its first space.
+        const std::string english = line != nullptr ? utf8_of(line->s) : std::string();
+        g_ko.key = english.substr(0, english.find(' '));
     }
-    check(line != nullptr && line->kind == mt_ns::PlistValue::string,
-          "en.lproj/Scripts.strings has the key ko.lproj lacks");
-    // The box's first line: the English text up to its first space.
-    const std::string english = line != nullptr ? utf8_of(line->s) : std::string();
-    g_ko.key = english.substr(0, english.find(' '));
     korean_attach(r);
     then_korean_load(r);
-    then_talk_to(r, "the Zenumist President: the line without a Korean text", 7, 0, "ZenumistChief",
-                 -1, [](mt_cpu *) { return g_ko.key_shown > 0; });
-    then_do(r, "the key never shown",
-            [](mt_cpu *) { check(g_ko.raw_key == 0, "no box showed the key itself"); });
+    if (fixed) {
+        then_talk_to(r, "the Zenumist President: the line without a Korean text", 7, 0,
+                     "ZenumistChief", -1, [](mt_cpu *) { return g_ko.key_shown > 0; });
+        then_do(r, "the key never shown",
+                [](mt_cpu *) { check(g_ko.raw_key == 0, "no box showed the key itself"); });
+    } else {
+        const std::uint64_t guarded = mt_hooks_text_wrap_guarded();
+        then_talk_to(r, "the Zenumist President: the key, cut across lines", 7, 0, "ZenumistChief",
+                     -1, [](mt_cpu *) { return g_ko.key_cut > 0; });
+        then_do(r, "the key cut by the wrap guard", [guarded](mt_cpu *) {
+            std::printf("korean: the box's lines: %s\n", g_ko.key_lines.c_str());
+            check(g_ko.key_lines.rfind("C|", 0) == 0,
+                  "the key's first line is its \"C\", as the device's wrap cuts it");
+            check(mt_hooks_text_wrap_guarded() > guarded, "the wrap guard cut the key");
+        });
+    }
     then_finish(r);
 }
+
+void korean_missing_key(Run &r, u64) { korean_missing_key_run(r, true); }
+void korean_missing_key_original(Run &r, u64) { korean_missing_key_run(r, false); }
 
 // --- Slots 2 and 3 (#303, docs/testing/systems-sweep-1.md) ---------------------------------------
 //
@@ -13922,6 +13951,8 @@ constexpr Mode k_modes[] = {
     {"korean_offer_2", korean_offer_2, korean_checks, 1, false, korean_setup},
     {"korean_offer_3", korean_offer_3, korean_checks, 1, false, korean_setup},
     {"korean_missing_key", korean_missing_key, korean_checks, 1, false, korean_setup},
+    {"korean_missing_key_original", korean_missing_key_original, korean_checks, 1, false,
+     korean_setup},
     {"slots_create", slots_create, slots_create_checks, 1, false, slots_setup},
     {"slots_reload", slots_reload, slots_reload_checks, 1, true, slots_setup},
     {"inventory_full", inventory_full, inventory_full_checks, 1},
