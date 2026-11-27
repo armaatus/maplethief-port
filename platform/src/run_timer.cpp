@@ -685,10 +685,25 @@ void RunTimer::set_category(RunCategory category, std::optional<RunRecord> best)
     if (state_ == State::kRunning) {
         end_run(false, clock_.now());
     }
+    clear_finished();
     category_ = std::move(category);
     best_ = std::move(best);
     state_ = State::kWaiting;
     times_.clear();
+}
+
+void RunTimer::signal(RunSignal s, const RunTime &t) const {
+    if (listener_) {
+        listener_(s, t);
+    }
+}
+
+void RunTimer::clear_finished() {
+    if (state_ == State::kFinished) {
+        state_ = State::kWaiting;
+        times_.clear();
+        signal(RunSignal::kReset, end_);
+    }
 }
 
 void RunTimer::on_event(const mt_game_event &e) {
@@ -703,6 +718,7 @@ void RunTimer::on_event(const mt_game_event &e) {
     const RunInstant now = clock_.now();
     times_.push_back(since_start(now));
     check();
+    signal(RunSignal::kSplit, times_.back());
     if (times_.size() == category_.splits.size()) {
         end_run(true, now);
     }
@@ -722,6 +738,7 @@ void RunTimer::start() {
     if (state_ == State::kRunning) {
         end_run(false, now);
     }
+    clear_finished();
     state_ = State::kRunning;
     start_ = now;
     started_ = clock_.stamp ? clock_.stamp() : std::string();
@@ -735,12 +752,14 @@ void RunTimer::start() {
     }
     in_category_ = true;
     check();
+    signal(RunSignal::kStart, RunTime{});
 }
 
 void RunTimer::reset() {
     if (state_ == State::kRunning) {
         end_run(false, clock_.now());
     } else {
+        clear_finished();
         state_ = State::kWaiting;
         times_.clear();
     }
@@ -796,6 +815,7 @@ void RunTimer::end_run(bool finished, const RunInstant &now) {
     } else {
         state_ = State::kWaiting;
         times_.clear();
+        signal(RunSignal::kReset, end_);
     }
 }
 
