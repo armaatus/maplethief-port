@@ -45,16 +45,17 @@ struct Voice {
     const std::string &last() const { return log->said().back().text; }
 };
 
-// The shell's screens as the runtime lists their buttons (mt_uikit_controls): the image names
-// +imageNamed: was given, in a folder or not, Korean twins included. A synthetic tree: positions
-// in a grid, one screen after the other.
+// The shell's screens as the runtime lists their buttons (mt_uikit_controls): each control by
+// its action ("-[Target selector:]"), or by the image +imageNamed: was given (a name with
+// ".png", in a folder or not, Korean twins included) with an action of its own. A synthetic
+// tree: positions in a column, one screen after the other.
 struct Screen {
-    std::vector<std::string> images;
+    std::vector<std::string> controls;
 };
 
 std::vector<fe::FocusTarget> screen_targets(const Screen &s) {
     std::vector<fe::FocusTarget> out;
-    for (std::size_t i = 0; i < s.images.size(); i++) {
+    for (std::size_t i = 0; i < s.controls.size(); i++) {
         fe::FocusTarget t;
         t.object = 0x1000 + static_cast<std::uint32_t>(i) * 0x10;
         t.order = static_cast<std::uint32_t>(i + 1);
@@ -64,10 +65,17 @@ std::vector<fe::FocusTarget> screen_targets(const Screen &s) {
         t.h = 30;
         t.px = t.cx();
         t.py = t.cy();
-        t.action = "click" + std::to_string(i) + ":";
-        t.target = "ShellView";
+        const std::string &c = s.controls[i];
         t.view_class = "UIButton";
-        t.image = s.images[i];
+        if (c.rfind("-[", 0) == 0) { // "-[Target action]"
+            const std::size_t space = c.find(' ');
+            t.target = c.substr(2, space - 2);
+            t.action = c.substr(space + 1, c.size() - space - 2);
+        } else {
+            t.target = "ShellView";
+            t.action = "click" + std::to_string(i) + ":";
+            t.image = c;
+        }
         out.push_back(t);
     }
     return out;
@@ -188,34 +196,64 @@ TEST_CASE("speech menus: a change of a speech row leaves its sample alone (#390,
     CHECK(v.count() == said); // the frontend's apply says the sample (live_settings.cpp)
 }
 
-TEST_CASE("speech menus: shell button names; every image the focus reaches has one (#393)") {
-    // The table's keys: the file name without folder, extension or Korean suffix.
+TEST_CASE("speech menus: shell button names; every control the focus reaches has one (#393)") {
+    // The table's keys: an image's file name without folder, extension or Korean suffix, or an
+    // action as the uikit trace writes it.
     CHECK(fe::shell_button_key("AlertYesButton.png") == "AlertYesButton");
     CHECK(fe::shell_button_key("/png/npc/npcAcceptButton_kor.png") == "npcAcceptButton");
     CHECK(fe::shell_button_key("") == "");
     CHECK(fe::shell_button_name("NoSuchImage.png") == nullptr);
+    CHECK(fe::shell_button_name("-[NoView noAction:]") == nullptr);
+    fe::FocusTarget plain;
+    plain.target = "MainMenuView";
+    plain.action = "clickPlay:";
+    CHECK(fe::shell_button_lookup(plain) == "-[MainMenuView clickPlay:]");
+    plain.image = "/png/TouchCloseButton_kor.png";
+    CHECK(fe::shell_button_lookup(plain) == "TouchCloseButton"); // the image first
     std::set<std::string> keys;
     for (const fe::ShellButton &b : fe::shell_buttons()) {
-        CHECK(keys.insert(b.image).second); // once each
-        CHECK(fe::shell_button_key(b.image) == b.image);
-        const char *name = fe::shell_button_name(std::string(b.image) + ".png");
+        INFO("key " << b.key);
+        CHECK(keys.insert(b.key).second); // once each
+        const char *name = fe::shell_button_name(b.key);
         REQUIRE(name != nullptr);
         CHECK(*name != 0);
-        CHECK(fe::shell_button_name(std::string(b.image) + "_kor.png") == name);
+        if (b.key[0] != '-') {
+            CHECK(fe::shell_button_key(b.key) == b.key);
+            CHECK(fe::shell_button_name(std::string(b.key) + "_kor.png") == name);
+        }
     }
 
-    // The shell's screens (main menu, terms, About, Help, the character select and their
-    // alerts) as the focus lists them: a synthetic tree of every image button a tap reaches
-    // (input.speech_menus lists the real ones and checks each against the table).
+    // The shell's screens (main menu, Help, About, the terms, the character select and their
+    // alerts) as the focus lists them: a synthetic tree of every control the input.menu_* flows
+    // focus (with MT_SPEECH_MENUS=1 they list the real ones and check each against the table).
     const std::vector<Screen> screens = {
-        {{"MainMenuPlay.png", "MainMenuHelp.png", "MainMenuAbout.png", "MainMenuGameCenter.png",
-          "MainMenuMoreGames.png", "MainMenuADClose.png"}},
-        {{"MainMenuClose.png"}},
-        {{"TermsAgree.png", "TermsAgree_kor.png"}},
-        {{"ChooseCharacterSlot.png", "ChooseCharacterStart.png", "ChooseCharacterNew.png",
-          "ChooseCharacterDelete.png", "ChooseCharacterBackButton.png"}},
+        {{"-[MainMenuView clickPlay:]", "-[MainMenuView clickHelp:]", "-[MainMenuView clickAbout:]",
+          "-[MainMenuView clickGameCenter:]", "-[MainMenuView clickMoreGame:]",
+          "-[MainMenuView clickADButton:]", "-[MainMenuView clickADClose:]"}},
+        {{"-[MainMenuView closeHelp:]"}},
+        {{"TouchCloseButton.png", "-[MainMenuView clickLinkURL1:]",
+          "-[MainMenuView clickLinkURL2:]", "-[MainMenuView clickLinkURL3:]",
+          "-[MainMenuView clickLinkURL4:]", "-[MainMenuView clickAboutBuild:]",
+          "-[MainMenuView closeAbout:]"}},
+        {{"TermsButton_kor.png", "-[TermsView releaseAgreementButton:]"}},
+        {{"-[ChooseCharacterView chooseCharacterOne:]", "-[ChooseCharacterView newCharacterTwo:]",
+          "-[ChooseCharacterView clickStart:]", "-[ChooseCharacterView clickNew:]",
+          "-[ChooseCharacterView clickDelete:]", "-[ChooseCharacterView clickBack:]",
+          "ChooseCharacterBackButton.png"}},
+        {{"-[ChooseCharacterView newCharacterOne:]", "-[ChooseCharacterView chooseCharacterTwo:]",
+          "-[ChooseCharacterView chooseCharacterThree:]",
+          "-[ChooseCharacterView newCharacterThree:]"}},
+        {{"-[ChooseCharacterView cancelNewAlert:]"}},
+        {{"cash_meso_3000.png", "cash_meso_10000.png", "cash_meso_22000.png", "cash_meso_50000.png",
+          "cash_meso_120000.png", "cash_meso_300000.png", "cash_exp_40.png", "cash_exp_80.png",
+          "-[TouchKeyPadView releaseClearButton:]"}},
+        {{"-[ChooseCharacterView okDeleteAlert:]", "-[ChooseCharacterView cancelAlert:]"}},
+        {{"-[ChooseCharacterView confirmAlert:]"}},
+        {{"-[ChooseCharacterView okNewAlert:]"}},
+        {{"-[TouchKeyPadView releaseOkButton:]"}},
         {{"AlertYesButton.png", "AlertNoButton.png"}},
-        {{"AlertOKButton.png"}},
+        {{"/png/AlertOKButton.png"}},
+        {{"map.png"}}, // the key pad's map button, reachable while a game loads (panel -1)
     };
     Voice v;
     fe::Input input;
@@ -234,35 +272,50 @@ TEST_CASE("speech menus: shell button names; every image the focus reaches has o
         focus.turn(nullptr, now);
         sm.shell_turn(focus, {}, v.speech, now);
     };
+    // Each change of the focused control (a screen opening, a move up or down) is said once;
+    // a press that moves nothing says nothing.
     std::size_t controls = 0;
+    std::uint32_t last = 0;
+    const auto seen = [&] {
+        const fe::FocusTarget *f = focus.focused();
+        if (f != nullptr && f->object != last) {
+            controls++;
+        }
+        last = f != nullptr ? f->object : 0;
+        CHECK(v.count() == controls);
+    };
+    const auto press = [&](std::uint32_t action) {
+        focus.action(action, true);
+        turn();
+        seen();
+        focus.action(action, false);
+        turn();
+        seen();
+        turn();
+        seen();
+    };
     for (const Screen &s : screens) {
         targets = screen_targets(s);
         for (const fe::FocusTarget &t : targets) {
-            INFO("image " << t.image);
-            CHECK(fe::shell_button_name(t.image) != nullptr);
+            INFO("control " << fe::shell_button_lookup(t));
+            CHECK(fe::shell_button_name(t) != nullptr);
         }
-        turn(); // the screen opens: the focus on its first control, said once
-        const std::size_t said = v.count();
-        CHECK(said == controls + 1);
-        controls++;
-        // Down over the rest: once per move.
-        for (std::size_t i = 1; i < targets.size(); i++) {
-            focus.action(MT_ACTION_DOWN, true);
-            turn();
-            focus.action(MT_ACTION_DOWN, false);
-            turn();
-            turn();
-            CHECK(v.count() == ++controls);
+        turn(); // the screen opens: the focus on one of its controls, said once
+        seen();
+        REQUIRE(focus.focused() != nullptr);
+        // Up to the top, then down over every control to the bottom and once past it.
+        for (std::size_t i = 0; i < targets.size(); i++) {
+            press(MT_ACTION_UP);
         }
-        // At the end: down moves nothing, says nothing.
-        focus.action(MT_ACTION_DOWN, true);
-        turn();
-        focus.action(MT_ACTION_DOWN, false);
-        turn();
-        CHECK(v.count() == controls);
+        for (std::size_t i = 0; i <= targets.size(); i++) {
+            press(MT_ACTION_DOWN);
+        }
         targets.clear();
         turn(); // the screen closes
+        seen();
+        last = 0;
     }
+    CHECK(controls >= 34);
     CHECK(sm.stats().controls == controls);
     CHECK(sm.stats().unnamed == 0);
 }

@@ -1573,7 +1573,8 @@ void speak_menus(Game &g, mt_cpu *cpu) {
         g.speech_menus.spot_turn(MenuSpot{}, SpotText{}, g.speech, now);
         return;
     }
-    g.speech_menus.shell_turn(g.focus, g.focus.active() ? runtime_labels(cpu) : std::vector<ScreenLabel>{},
+    g.speech_menus.shell_turn(g.focus,
+                              g.focus.active() ? runtime_labels(cpu) : std::vector<ScreenLabel>{},
                               g.speech, now);
     const MenuSpot spot = read_menu_spot(cpu);
     g.speech_menus.spot_turn(spot, spot_text(cpu, spot), g.speech, now);

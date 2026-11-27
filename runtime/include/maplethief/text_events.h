@@ -105,8 +105,8 @@ uint32_t mt_text_table_field(mt_cpu *cpu, uint32_t table, int32_t id, uint32_t o
 #define MT_TEXT_NPC_TABLE 0x11A988u         /* the NPC table's bytes (pointer) */
 #define MT_TEXT_MOB_LIST 0x11A9ECu          /* the mobs (pointer to a list: count +4, items +8) */
 #define MT_TEXT_EQUIP_TABLE 0x11A9ACu       /* item_equip.dat's bytes: name (1, 32) */
-#define MT_TEXT_ETC_TABLE 0x11A9B0u         /* item_etc.dat's: name (1, 64), description (90, 128) */
-#define MT_TEXT_SKILL_TABLE 0x11A9F8u       /* skill.dat's: name (1, 16), description (41, 128) */
+#define MT_TEXT_ETC_TABLE 0x11A9B0u   /* item_etc.dat's: name (1, 64), description (90, 128) */
+#define MT_TEXT_SKILL_TABLE 0x11A9F8u /* skill.dat's: name (1, 16), description (41, 128) */
 
 MT_EXTERN_C_END
 

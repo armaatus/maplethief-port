@@ -14,13 +14,58 @@ namespace {
 using u32 = std::uint32_t;
 using i32 = std::int32_t;
 
-// The shell's image buttons a tap reaches (the focus's targets on the main menu, the terms,
-// About, the character select and their alerts; `input.speech_menus` lists every image it met).
+// The shell's buttons a tap reaches (the focus's targets on the main menu, Help, About, the
+// terms, the character select, the cash shop's tiles and their alerts), by image or action
+// (shell_button_lookup). The input.menu_* flows with MT_SPEECH_MENUS=1 list every control they
+// focus and fail on one without a name here.
 constexpr ShellButton kShellButtons[] = {
+    {"-[ChooseCharacterView cancelAlert:]", Txt::button_no},
+    {"-[ChooseCharacterView cancelNewAlert:]", Txt::button_no},
+    {"-[ChooseCharacterView chooseCharacterOne:]", Txt::button_slot_1},
+    {"-[ChooseCharacterView chooseCharacterThree:]", Txt::button_slot_3},
+    {"-[ChooseCharacterView chooseCharacterTwo:]", Txt::button_slot_2},
+    {"-[ChooseCharacterView clickBack:]", Txt::button_back},
+    {"-[ChooseCharacterView clickDelete:]", Txt::button_delete},
+    {"-[ChooseCharacterView clickNew:]", Txt::button_new},
+    {"-[ChooseCharacterView clickStart:]", Txt::button_start},
+    {"-[ChooseCharacterView confirmAlert:]", Txt::button_ok},
+    {"-[ChooseCharacterView newCharacterOne:]", Txt::button_new_slot_1},
+    {"-[ChooseCharacterView newCharacterThree:]", Txt::button_new_slot_3},
+    {"-[ChooseCharacterView newCharacterTwo:]", Txt::button_new_slot_2},
+    {"-[ChooseCharacterView okDeleteAlert:]", Txt::button_yes},
+    {"-[ChooseCharacterView okNewAlert:]", Txt::button_ok},
+    {"-[MainMenuView clickADButton:]", Txt::button_banner},
+    {"-[MainMenuView clickADClose:]", Txt::button_close},
+    {"-[MainMenuView clickAbout:]", Txt::button_about},
+    {"-[MainMenuView clickAboutBuild:]", Txt::button_build},
+    {"-[MainMenuView clickGameCenter:]", Txt::button_game_center},
+    {"-[MainMenuView clickHelp:]", Txt::button_help},
+    {"-[MainMenuView clickLinkURL1:]", Txt::button_link_1},
+    {"-[MainMenuView clickLinkURL2:]", Txt::button_link_2},
+    {"-[MainMenuView clickLinkURL3:]", Txt::button_link_3},
+    {"-[MainMenuView clickLinkURL4:]", Txt::button_link_4},
+    {"-[MainMenuView clickMoreGame:]", Txt::button_more_games},
+    {"-[MainMenuView clickPlay:]", Txt::button_play},
+    {"-[MainMenuView closeAbout:]", Txt::button_close},
+    {"-[MainMenuView closeHelp:]", Txt::button_close},
+    {"-[TermsView releaseAgreementButton:]", Txt::button_agree},
+    {"-[TouchKeyPadView releaseClearButton:]", Txt::button_close},
+    {"-[TouchKeyPadView releaseOkButton:]", Txt::button_ok},
     {"AlertNoButton", Txt::button_no},
     {"AlertOKButton", Txt::button_ok},
     {"AlertYesButton", Txt::button_yes},
     {"ChooseCharacterBackButton", Txt::button_back},
+    {"cash_exp_40", Txt::button_exp_40},
+    {"cash_exp_80", Txt::button_exp_80},
+    {"cash_meso_10000", Txt::button_meso_10000},
+    {"cash_meso_120000", Txt::button_meso_120000},
+    {"cash_meso_22000", Txt::button_meso_22000},
+    {"cash_meso_3000", Txt::button_meso_3000},
+    {"cash_meso_300000", Txt::button_meso_300000},
+    {"cash_meso_50000", Txt::button_meso_50000},
+    {"TermsButton", Txt::button_agree},
+    {"TouchCloseButton", Txt::button_close},
+    {"map", Txt::button_map},
 };
 
 // --- guest reads (docs/re/speech.md, "The menus") -----------------------------------------------
@@ -36,7 +81,9 @@ constexpr u32 kHeroItems = 0xD8;      // CHero: 48 etc items, packed from the fr
 constexpr u32 kHeroSkills = 0x114;    // CHero: the skills; slot i id +0x08 + 8 i
 constexpr u32 kItemId = 0x90;         // an item: its id in its table
 constexpr u32 kItemPrice = 0x98;      // a shop's Buy row: its price
-constexpr u32 kItemSellPrice = 0xA4;  // a carried item: what a shop pays for it
+constexpr u32 kItemTablePrice = 0x9C; // an item: its table price
+constexpr u32 kItemStarValue = 0xA4;  // an etc item: a star's value, tenths of a meso
+constexpr u32 kItemCount = 0x100;     // an etc item: how many (u16)
 constexpr i32 kMaxItems = 48;
 constexpr i32 kMaxSkills = 13;
 // CDataMgr: the open tab (1 items, 2 equipment, 3 skills), the quest page, the cursors, the
@@ -75,8 +122,7 @@ u32 game_hero(const mt_cpu *cpu) {
 // Item `n` of one of the hero's lists (0 past its end).
 u32 hero_item(const mt_cpu *cpu, u32 hero, u32 list, i32 n) {
     const u32 items = hero != 0 ? rd32(cpu, hero + list) : 0u;
-    return items != 0 && n >= 0 && n < kMaxItems ? rd32(cpu, items + 4 * static_cast<u32>(n))
-                                                 : 0u;
+    return items != 0 && n >= 0 && n < kMaxItems ? rd32(cpu, items + 4 * static_cast<u32>(n)) : 0u;
 }
 
 std::string field(mt_cpu *cpu, u32 table, i32 id, u32 offset, u32 width) {
@@ -102,14 +148,28 @@ std::string shell_button_key(std::string_view image) {
     return std::string(image);
 }
 
-const char *shell_button_name(std::string_view image) {
-    const std::string key = shell_button_key(image);
+std::string shell_button_lookup(const FocusTarget &t) {
+    if (!t.image.empty()) {
+        return shell_button_key(t.image);
+    }
+    if (t.action.empty()) {
+        return {};
+    }
+    return "-[" + t.target + " " + t.action + "]";
+}
+
+const char *shell_button_name(std::string_view key) {
+    const std::string k = key.substr(0, 2) == "-[" ? std::string(key) : shell_button_key(key);
     for (const ShellButton &b : kShellButtons) {
-        if (key == b.image) {
+        if (!k.empty() && k == b.key) {
             return tr(b.name);
         }
     }
     return nullptr;
+}
+
+const char *shell_button_name(const FocusTarget &t) {
+    return shell_button_name(shell_button_lookup(t));
 }
 
 std::vector<ScreenLabel> runtime_labels(mt_cpu *cpu) {
@@ -124,14 +184,14 @@ std::vector<ScreenLabel> runtime_labels(mt_cpu *cpu) {
         n = mt_uikit_labels(cpu, l.data(), n);
     }
     for (u32 i = 0; i < n && i < l.size(); i++) {
-        out.push_back(ScreenLabel{l[i].object, l[i].order, l[i].rect[0], l[i].rect[1],
-                                  l[i].rect[2], l[i].rect[3], l[i].text});
+        out.push_back(ScreenLabel{l[i].object, l[i].order, l[i].rect[0], l[i].rect[1], l[i].rect[2],
+                                  l[i].rect[3], l[i].text});
     }
     return out;
 }
 
 std::string control_name(const FocusTarget &t, const std::vector<ScreenLabel> &labels) {
-    if (const char *name = shell_button_name(t.image); name != nullptr && *name != 0) {
+    if (const char *name = shell_button_name(t); name != nullptr && *name != 0) {
         return name;
     }
     const ScreenLabel *best = nullptr;
@@ -147,8 +207,7 @@ std::string control_name(const FocusTarget &t, const std::vector<ScreenLabel> &l
 
 std::string settings_menu_line(const SettingsMenu &menu, bool tab) {
     const std::size_t row = menu.selected();
-    const std::string line =
-        tr(Txt::speech_row, {menu.row_label(row), menu.row_value(row)});
+    const std::string line = tr(Txt::speech_row, {menu.row_label(row), menu.row_value(row)});
     if (!tab || menu.tab() >= menu.tabs().size()) {
         return line;
     }
@@ -235,7 +294,17 @@ MenuSpot read_menu_spot(mt_cpu *cpu) {
         }
         s.kind = tab == 0 ? MenuSpot::Kind::kShopBuy : MenuSpot::Kind::kShopSell;
         s.id = rdi(cpu, item + kItemId);
-        s.price = rdi(cpu, item + (tab == 0 ? kItemPrice : kItemSellPrice));
+        if (tab == 0) {
+            s.price = rdi(cpu, item + kItemPrice);
+        } else {
+            // What Shop_OnKey 0x46DB9 pays: the price, plus a star's value per star carried.
+            const i32 count =
+                mapped(cpu, item + kItemCount, 2)
+                    ? cpu->mem[item + kItemCount] | (cpu->mem[item + kItemCount + 1] << 8)
+                    : 0;
+            s.price = rdi(cpu, item + kItemTablePrice) +
+                      (s.equip ? 0 : rdi(cpu, item + kItemStarValue) * count / 10);
+        }
         return s;
     }
     return s;
@@ -266,7 +335,8 @@ std::string menu_spot_line(const MenuSpot &spot, const SpotText &text) {
     if (text.name.empty()) {
         return {};
     }
-    const bool shop = spot.kind == MenuSpot::Kind::kShopBuy || spot.kind == MenuSpot::Kind::kShopSell;
+    const bool shop =
+        spot.kind == MenuSpot::Kind::kShopBuy || spot.kind == MenuSpot::Kind::kShopSell;
     if (shop && spot.price >= 0) {
         return tr(Txt::speech_price, {text.name, std::to_string(spot.price)});
     }

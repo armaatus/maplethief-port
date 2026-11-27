@@ -909,6 +909,19 @@ foreach(flow main terms early characters game pointer)
                                                        SKIP_REGULAR_EXPRESSION "skipped:"
                                                        TIMEOUT 600 RUN_SERIAL TRUE)
 endforeach()
+# The skill tab read aloud (#393, speech_menus.h) on the built Rogue's save: each row's skill
+# said once per move, its description when the game's sub-list opens (MT_SPEECH_MENUS on, the
+# log backend; hashes, not text, in the output).
+add_test(
+    NAME input.speech_menus_skills
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=speech_skills"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/speech_menus_skills"
+            "-DSEED=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_jobs_ch1_rogue_30/data" -P
+            "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+set_tests_properties(
+    input.speech_menus_skills
+    PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:" TIMEOUT 600 RUN_SERIAL
+               TRUE FIXTURES_REQUIRED start_jobs_ch1_rogue_30 ENVIRONMENT "MT_SPEECH_MENUS=1")
 add_test(
     NAME input.menu_shops_save
     COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=shops_save"

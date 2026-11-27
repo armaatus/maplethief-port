@@ -8,10 +8,10 @@
 //   the shell's UIKit screens  while the controller focus is active (focus.h, ADR 0051): the
 //                              focused control's name, once per move. The shell's buttons are
 //                              images without a title, so a button is named by its image
-//                              (kShellButtons, port_text.def's button_* texts, which a text pack
-//                              translates); else by the visible label it holds. A screen's labels
-//                              that appear (a screen or an alert opens) are said before it, the
-//                              first of them, as the screen's title.
+//                              or its action (kShellButtons, port_text.def's button_* texts,
+//                              which a text pack translates); else by the visible label it holds. A
+//                              screen's labels that appear (a screen or an alert opens) are said
+//                              before it, the first of them, as the screen's title.
 //   the popup menu (panel 1)   the item, equipment or skill under the list's cursor (CDataMgr
 //                              +0xD8, +0xDC, +0xD4, read_menu_spot): its name from the data
 //                              tables, by id; its description when the game's own detail view
@@ -41,18 +41,24 @@
 
 namespace maplethief::frontend {
 
-// The name of each of the shell's image buttons, by the name its image was loaded by
-// (FocusTarget::image, "AlertYesButton.png"; a Korean twin "_kor" before the extension shares
-// its English twin's entry).
+// The name of each of the shell's buttons that a tap reaches. A button with an image loaded by
+// name is keyed by it (FocusTarget::image, "TouchCloseButton.png" -> "TouchCloseButton"; a
+// Korean twin "_kor" before the extension shares its English twin's entry). Most of the shell's
+// buttons have none: the main menu's and the character select's draw their art in their
+// view's -drawRect: under a transparent button (input.speech_menus), so they are keyed by their
+// action as the uikit trace writes it, "-[MainMenuView clickPlay:]".
 struct ShellButton {
-    const char *image;
+    const char *key;
     Txt name;
 };
 std::span<const ShellButton> shell_buttons();
-// The button's name for an image (shell_button_key's key), or nullptr if the table has none.
-const char *shell_button_name(std::string_view image);
 // The table's key of an image name: the file name without a folder, ".png" or "_kor".
 std::string shell_button_key(std::string_view image);
+// The table's key of a control: its image's, else "-[Target action]" ("" for neither).
+std::string shell_button_lookup(const FocusTarget &t);
+// The name for a key (an image name is reduced by shell_button_key first), or nullptr.
+const char *shell_button_name(std::string_view key);
+const char *shell_button_name(const FocusTarget &t);
 
 // A visible label (maplethief/uikit.h mt_uikit_labels).
 struct ScreenLabel {
@@ -64,7 +70,7 @@ struct ScreenLabel {
 // The labels the runtime sees now.
 std::vector<ScreenLabel> runtime_labels(mt_cpu *cpu);
 
-// What a focused control is called: its image's name, else the text of the frontmost label
+// What a focused control is called: its table name, else the text of the frontmost label
 // whose centre lies inside it, else "" (nothing is said of it).
 std::string control_name(const FocusTarget &t, const std::vector<ScreenLabel> &labels);
 
@@ -75,11 +81,11 @@ std::string settings_menu_line(const SettingsMenu &menu, bool tab);
 struct MenuSpot {
     enum class Kind : std::uint8_t { kNone, kItem, kEquip, kSkill, kShopBuy, kShopSell };
     Kind kind = Kind::kNone;
-    std::int32_t row = -1;  // the list's row or cell
-    std::int32_t id = -1;   // the item's id (item_etc or item_equip) or the skill's
-    bool equip = false;     // the id is item_equip's (else item_etc's or a skill's)
+    std::int32_t row = -1;   // the list's row or cell
+    std::int32_t id = -1;    // the item's id (item_etc or item_equip) or the skill's
+    bool equip = false;      // the id is item_equip's (else item_etc's or a skill's)
     std::int32_t price = -1; // the shop's price, -1 when not known
-    bool detail = false;    // the game's detail view of the row is open (CDataMgr +0xBC)
+    bool detail = false;     // the game's detail view of the row is open (CDataMgr +0xBC)
     bool operator==(const MenuSpot &) const = default;
 };
 const char *menu_spot_kind_name(MenuSpot::Kind kind); // "none", "item", "equip", ...
