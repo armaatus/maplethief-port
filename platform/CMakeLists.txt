@@ -87,13 +87,10 @@ add_library(
     src/render_scale.cpp
     src/replay.cpp
     src/rumble.cpp
-<<<<<<< HEAD
     src/run_census.cpp
     src/run_file.cpp
     src/run_recorder.cpp
-=======
     src/run_timer.cpp
->>>>>>> agent-sweep-2026-11-26
     src/file_dialog.cpp
     src/save_menu.cpp
     src/save_state_input.cpp
