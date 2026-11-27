@@ -92,6 +92,8 @@ constexpr const char *k_names[] = {
 static_assert(sizeof k_names / sizeof k_names[0] == 0x43, "67 opcodes");
 
 std::atomic<u64> g_calls{0}, g_steps{0}, g_natives{0}, g_checks{0};
+std::atomic<mt_scriptvm_step_fn> g_step_fn{nullptr};
+std::atomic<void *> g_step_user{nullptr};
 
 // The guest's signed division as the HLE's __divsi3 does it (0 for a zero divisor).
 u32 sdiv(u32 a, u32 b) {
@@ -404,6 +406,9 @@ u32 Vm::run() {
         op_pc_ = rd(tfunc_ + k_tfunc_pc);
         const u32 op = fetch(1);
         g_steps.fetch_add(1, std::memory_order_relaxed);
+        if (const mt_scriptvm_step_fn observe = g_step_fn.load(std::memory_order_acquire)) {
+            observe(g_step_user.load(std::memory_order_relaxed), tfunc_, op_pc_, op);
+        }
         trace_step(op);
         switch (op) {
         case 0x00: { // PUSHNIL: the tag only
@@ -647,6 +652,11 @@ extern "C" std::uint32_t mt_scriptvm_execute(mt_cpu *cpu, std::uint32_t lua, std
 
 extern "C" void mt_hooks_install_native_script_vm(int enabled) noexcept {
     mt_hook_register(MT_HOOK_FN_LUA_EXECUTE, execute_hook, nullptr, enabled);
+}
+
+extern "C" void mt_scriptvm_set_step_observer(mt_scriptvm_step_fn fn, void *user) noexcept {
+    g_step_user.store(user, std::memory_order_relaxed);
+    g_step_fn.store(fn, std::memory_order_release);
 }
 
 extern "C" mt_scriptvm_stats mt_scriptvm_get_stats(void) noexcept {
