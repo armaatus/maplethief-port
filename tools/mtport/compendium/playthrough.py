@@ -93,10 +93,10 @@ RUNS: dict[str, str] = {
     "event:chapter2-PerionMap-scene-20": _CH2 + "d",
     **{f"quest:2-main-{n}": _CH2 + "e" for n in (7, 71, 72)},
     **{f"quest:2-sub-{n}": _CH2 + "e" for n in (35, 36)},
-    "quest:2-main-8": _CH2 + "f",
-    "quest:2-main-9": _CH2 + "f",
-    "monster:68": _CH2 + "f",
-    "event:chapter2-Pirate_Orbis-chapter_end": _CH2 + "f",
+    "quest:2-main-8": _CH2 + "f_synthetic",  # from a raised save (levels 62-70)
+    "quest:2-main-9": _CH2 + "f_synthetic",
+    "monster:68": _CH2 + "f_synthetic",
+    "event:chapter2-Pirate_Orbis-chapter_end": _CH2 + "f_synthetic",
     # From built start states (#302, docs/testing/skills-and-jobs.md).
     "job_advancement:1-2-1": "play.jobs_1_2_assassin_synthetic",
     "job_advancement:2-2-1": "play.jobs_2_2_assassin_synthetic",

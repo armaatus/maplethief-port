@@ -2874,10 +2874,13 @@ quest_bot::FarmStyle chapter_2_fight() {
                      quest_bot::Restock{7, 60, 500, 8, 2000}};
     return fight;
 }
-// Branch 2's skills in chapter 2 by id: chapter 1's (3, 4, 15), then 16, 17 and 18 and, from
-// the 3rd job, 20, 21 and 22.
+// Branch 2's skills in chapter 2 by id: chapter 1's (3, 4, 15), then 16 and, from the 3rd job,
+// 21 (attack and accuracy up, for mob 68) and 20, then 17, 18 and 22.
 const std::vector<std::pair<i32, i32>> k_chapter_2_build = {
-    {3, 15}, {4, 20}, {15, 15}, {17, 15}, {16, 15}, {18, 15}, {20, 15}, {21, 10}, {22, 10}};
+    {3, 15}, {4, 20}, {15, 15}, {16, 15}, {21, 10}, {20, 15}, {17, 15}, {18, 15}, {22, 10}};
+// Before the 3rd job only up to 16: the rest of the SP waits for 21.
+const std::vector<std::pair<i32, i32>> k_chapter_2_before_job(k_chapter_2_build.begin(),
+                                                              k_chapter_2_build.begin() + 4);
 
 // Part B (#298, synthetic: tests/starts/raise/chapter_2_b.json over part A's save): the hero at
 // level 60 (the game's level-up rules: 2 SP a level, HP and MP full) with items 4 and 7 on Y and
@@ -2892,7 +2895,7 @@ void chapter_2_b(Run &r, u64) {
         const Hero h = hero(cpu);
         return h.level == 60 && quick_slot_item(cpu, h, 1) == 4 && quick_slot_item(cpu, h, 2) == 7;
     });
-    then_spend_sp(r, "level 60", k_chapter_2_build);
+    then_spend_sp(r, "level 60", k_chapter_2_before_job);
     then_quick_slot(r, "skill 16 on LB (quick slot 3)", 16, 3);
     then_stock(r, "item 4 (Etc40)", 4, 4, 150, 500, 600);
     then_stock(r, "item 7 (Etc40)", 4, 7, 60, 500, 600);
@@ -2941,6 +2944,7 @@ void chapter_2_c(Run &r, u64) {
     FarmStyle boss = fight;
     boss.restock = {};
     boss.hp_pct = 55;
+    boss.land_first = true;
     then_farm(r, "mob 66 on 4.17 (side 37)", 4, 17, {66}, ready(1, 37), 3600, boss);
     then_run_event(r, "portal4111 to the boss's map 4.17", MT_GAME_EVENT_MAP_CHANGE, 4, {17});
     then_run_event(r, "mob 66 killed", MT_GAME_EVENT_BOSS_KILLED, 66);
@@ -3039,12 +3043,14 @@ void chapter_2_e(Run &r, u64) {
 }
 void chapter_2_e_checks(Run &, u64) {}
 
-// Part F (#298): the second boss and the end of chapter 2. Chapter 2's portal942 (9.4) leads to
-// 9.5 while main 8 is active and its kill not yet made. 9.5 has no map script: no map object
-// names YetiMap.out (the knowledge base lists it unused), so no boss scene starts the fight; the
-// boss (mob 68, 32,000 HP) is one of the map's own spawns, there from the start
-// (docs/re/boss-fights.md). Alchester ends 8 (list 5) and gives main 9, which has no reward call:
-// Pirate_Orbis (4.1) ends the chapter (list 2, with 9 active): clearAll, then chapter 3 on 6.0.
+// Part F (#298, synthetic: tests/starts/raise/chapter_2_f.json over part E's save): the second
+// boss and the end of chapter 2. Chapter 2's portal942 (9.4) leads to 9.5 while main 8 is active
+// and its kill not yet made. 9.5 has no map script: no map object names YetiMap.out (the
+// knowledge base lists it unused), so no boss scene starts the fight; the boss (mob 68, 32,000
+// HP) is one of the map's own spawns, there from the start (docs/re/boss-fights.md). Its death
+// plays end scene 8 (CMob::Die 0x73349). Alchester ends 8 (list 5) and gives main 9, which has no
+// reward call: Pirate_Orbis (4.1) ends the chapter (list 2, with 9 active): clearAll, then
+// chapter 3 on 6.0.
 void chapter_2_f(Run &r, u64) {
     using namespace quest_bot;
     from_save(r);
@@ -3052,15 +3058,28 @@ void chapter_2_f(Run &r, u64) {
     then_spend_sp(r, "part F", k_chapter_2_build);
     then_stock(r, "item 4 for the boss (Etc90)", 9, 4, 300, 500, 900);
     then_stock(r, "item 7 for the boss (Etc90)", 9, 7, 100, 500, 600);
+    // Mob 68 is level 121 and hits for about 470 a second: with the hero's dagger 28 (attack
+    // 25-30) the first try took 1,200 of its 32,000 HP before the hero fell. A player would buy
+    // Equip90's level-60 dagger 34 (77,700 meso there) and cast skill 21 (attack and accuracy
+    // up) for the fight. Even so the level-62 hero fell 46 times in an hour (at best 6,400 HP a
+    // try; the boss heals when the map reloads), so part F is synthetic: it starts at level 70
+    // (tests/starts/raise/chapter_2_f.json over part E's save).
+    then_gear(r, "dagger 34 (Equip90)", 9, 34, 1, 2000);
+    then_quick_slot(r, "skill 21 on RB (quick slot 4)", 21, 4);
     FarmStyle boss = fight;
     boss.restock = {};
     boss.hp_pct = 55;
+    boss.land_first = true;
+    boss.buff = RB;
+    boss.buff_mp = 400;
     // How mob 68's fight starts (docs/re/boss-fights.md): 9.5 has no map script (YetiMap.out
     // is never named), so no boss message and no boss scene; mob 68 is the map's own spawn and is
     // there from the first tick. 4.17's WolfMap, by contrast, plays the boss scene (panel 3).
     auto nav = std::make_shared<Nav>();
     auto since = std::make_shared<double>(-1);
     auto scene = std::make_shared<bool>(false);
+    then_go(r, "portal942 (9.4)", at_object(9, 4, "portal942", 10), 600);
+    then_heal(r, "full HP before 9.5", 95);
     then(r, "enter 9.5: mob 68 there, no boss scene", 600,
          [&r, nav, since, scene](mt_cpu *cpu, double el) {
              const Hero h = hero(cpu);

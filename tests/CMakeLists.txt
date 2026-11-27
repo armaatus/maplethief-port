@@ -1501,9 +1501,10 @@ endforeach()
 # start-states.md) and part a goes on from it; each later part from the save of the part before.
 # A part listed in _chapter_2_raised starts from the save before it with the level raised by the
 # game's level-up rules (tests/starts/raise/chapter_2_<part>.json over that save, savedata build
-# --base): levels 34-60 by play would take game-hours, so that part's test says synthetic.
+# --base): levels 34-60 by play would take game-hours (part b), and mob 68 (level 121) beat the
+# played level-62 hero 46 times (part f, raised to 70), so that part's test says synthetic.
 set(_chapter_2_parts a b c d e f)
-set(_chapter_2_raised b)
+set(_chapter_2_raised b f)
 add_test(NAME starts.chapter_2
          COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
                  "${PROJECT_SOURCE_DIR}/tests/starts/chapter_2.json"
