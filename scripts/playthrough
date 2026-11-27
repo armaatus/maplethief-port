@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# The playthrough (#306, docs/testing/regression-replay.md): plays the save-chained whole-game
+# runs (chapter 1's parts, chapter 2's main parts, chapter 3's, the ending and the post-game)
+# through CTest in Release, with ADR 0104's checkpoint digest (screen, audio and state hashes)
+# at the end of each part, a summary and the chain's digest. Local only: it needs work/gen
+# (python3 -m recomp all), the slice and the bundle (scripts/bootstrap).
+#
+#   scripts/playthrough [OPTIONS]
+#     --build-preset P     the CMake preset whose play_real_test plays (default: mac-release on
+#                          macOS, linux-release on Linux); built first unless --no-build
+#     --no-build           use the built play_real_test as it is
+#     --quick              the chain's first parts only (under 15 minutes)
+#     --tests REGEX        the parts to play (a CTest regex; their fixtures come with them)
+#     --repeat N           play it N times; one digest or a failure (default 1)
+#     --baseline FILE      compare each part with FILE's (another build's run)
+#     --save-baseline FILE write the run's log to FILE (keep baselines in work/regress/)
+#     --every N            a checkpoint every N steps of 1 ms (default 60000), and at each end
+#     --nudge-tick STEP    the clock moves one game tick more at STEP: a deliberate change
+#     --out DIR            the runs' output (default build/test-output/<preset>/playthrough)
+#
+# The last line is "playthrough: digest <16 hex>": two builds compare by it.
+# Exit status: 0 passed, 1 failed, 77 skipped (no generated code or no game files), 2 usage.
+# Windows: scripts/playthrough.ps1.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+case "$(uname -s)" in
+Darwin) build_preset=mac-release ;;
+*) build_preset=linux-release ;;
+esac
+build=1
+out=""
+args=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+    --build-preset)
+        build_preset="${2:?--build-preset needs a preset}"
+        shift 2
+        ;;
+    --no-build)
+        build=0
+        shift
+        ;;
+    --out)
+        out="${2:?--out needs a directory}"
+        shift 2
+        ;;
+    -h | --help)
+        sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+        exit 0
+        ;;
+    *)
+        args+=("$1")
+        shift
+        ;;
+    esac
+done
+
+PY="${PYTHON:-python3}"
+if [ "$build" = 1 ]; then
+    if [ ! -f "build/$build_preset/CMakeCache.txt" ]; then
+        cmake --preset "$build_preset" >/dev/null
+    fi
+    cmake --build --preset "$build_preset" --target play_real_test
+fi
+[ -n "$out" ] || out="build/test-output/$build_preset/playthrough"
+PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -B -m mtport.playthrough \
+    --build "build/$build_preset" --out "$out" ${args[@]+"${args[@]}"}

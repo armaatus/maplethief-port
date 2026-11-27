@@ -2880,6 +2880,8 @@ void chapter_1_j_checks(Run &, u64) {}
 // leads to 3.8, whose map script (MelodyMap) shows the boss's lines and starts the boss scene.
 // Malady (mob 64) killed, Sabitrama there (Sabi2) ends 18, gives Master in Danger (19) and
 // sends the hero to Henesys; Stan (list 4) ends 19 and gives 20.
+void then_boss_end(Run &r, const std::string &what, Pred left, double timeout = 300);
+
 void chapter_1_k(Run &r, u64) {
     using namespace quest_bot;
     from_save(r);
@@ -2901,11 +2903,12 @@ void chapter_1_k(Run &r, u64) {
     then_run_event(r, "portal371 to the boss's map 3.8", MT_GAME_EVENT_MAP_CHANGE, 3, {8});
     then_run_event(r, "Malady (mob 64) killed", MT_GAME_EVENT_BOSS_KILLED, 64);
     // Malady's closing scene (4) moves Sabitrama (Sabi2) from where the map file puts him:
-    // then_talk_to follows the live object.
-    then(r, "Malady's closing scene (A through it)", 600, [&r](mt_cpu *cpu, double el) {
-        if (interrupted(r, cpu, el)) {
-            return false;
-        }
+    // then_talk_to follows the live object. Original bug 19 locked this scene in the Release
+    // chain (#306: Malady killed with the hero knocked back), so it goes through then_boss_end.
+    then_boss_end(
+        r, "Malady's closing scene (A through it)", [](mt_cpu *cpu) { return hero(cpu).on(3, 8); },
+        600);
+    then(r, "Sabi2 after the scene", 5, [](mt_cpu *cpu, double) {
         int x = 0, y = 0;
         const bool seen = live_object(cpu, "Sabi2", x, y);
         std::printf("after the scene: Sabi2 %s at %d,%d; %s\n", seen ? "visible" : "hidden", x, y,
@@ -3493,7 +3496,7 @@ quest_bot::FarmStyle chapter_3_fight() { return chapter_2_fight(); }
 // back leaves the scene's box deaf to every key; when A has not moved it on for 5 s with CHero
 // +0x119 still set, the run clears that byte (as #420's fix will) and says so. `left` says when
 // the scene is over (the map it ends on).
-void then_boss_end(Run &r, const std::string &what, Pred left, double timeout = 300) {
+void then_boss_end(Run &r, const std::string &what, Pred left, double timeout) {
     auto locked = std::make_shared<double>(-1);
     then(r, what, timeout, [&r, locked, left](mt_cpu *cpu, double el) {
         const Hero h = hero(cpu);
@@ -8357,6 +8360,46 @@ void regress_checks(Run &r, u64) {
     check(static_cast<bool>(log), "checkpoints.txt is written");
     std::printf("regress: %zu checkpoints (%zu named), digest %s\n", r.checkpoints.points().size(),
                 named, r.checkpoints.digest().c_str());
+}
+
+// --- the playthrough's checkpoints (#306, docs/testing/regression-replay.md) -------------------
+//
+// MT_CHECKPOINTS=N (scripts/playthrough sets it): a mode the bot plays (a chapter's part, the
+// post-game) takes ADR 0104's checkpoints as the regression run does: the composited screen, the
+// audio so far, the GL frame and regress_state's line, every N steps (0: none) and one "end" at
+// the end of the turn the part is done in. It writes them to OUT_DIR/checkpoints_MODE.txt (the
+// post-game's processes share OUT_DIR) and prints their digest. The replay's own modes keep
+// their plan. MT_NUDGE_TICK=STEP moves the virtual clock one game tick more at that step: a
+// deliberate one-tick change, for checking that the comparison catches one.
+
+bool playthrough_setup(Run &r) {
+    if (const char *n = std::getenv("MT_NUDGE_TICK"); n != nullptr && *n != 0) {
+        r.nudge_step = std::strtoull(n, nullptr, 10);
+        std::printf("playthrough: the clock moves one tick more at step %llu (MT_NUDGE_TICK)\n",
+                    static_cast<unsigned long long>(r.nudge_step));
+    }
+    const char *every = std::getenv("MT_CHECKPOINTS");
+    if (every == nullptr || *every == 0 || r.replay != nullptr || r.record != nullptr) {
+        return false;
+    }
+    r.audio = std::make_unique<fe::AudioHash>();
+    if (!r.state) {
+        r.state = regress_state;
+    }
+    r.plan.set_every(std::strtoull(every, nullptr, 10));
+    r.end_checkpoint = true;
+    return true;
+}
+
+void playthrough_checks(Run &r) {
+    check(r.checkpoints.find("end") != nullptr, "the part's end checkpoint was taken");
+    const fs::path path = r.out / ("checkpoints_" + r.mode + ".txt");
+    std::ofstream log(path, std::ios::binary);
+    log << r.checkpoints.text();
+    log.close();
+    check(static_cast<bool>(log), path.filename().string() + " is written");
+    std::printf("playthrough: %s: %zu checkpoints, digest %s\n", r.mode.c_str(),
+                r.checkpoints.points().size(), r.checkpoints.digest().c_str());
 }
 
 // --- save states in process (#203, ADR 0105 and its addendum, docs/re/save-states.md) -----------
@@ -15820,12 +15863,16 @@ int main(int argc, char **argv) {
         }
     }
     mode->queue(r, goal);
+    const bool part_checkpoints = playthrough_setup(r);
     std::stable_sort(r.steps.begin(), r.steps.end(),
                      [](const Step &a, const Step &b) { return a.at < b.at; });
     const int status = boot(r, read_file(MT_ARMV7_SLICE));
     if (status == 0) {
         common_checks(r, goal);
         mode->checks(r, goal);
+        if (part_checkpoints) {
+            playthrough_checks(r);
+        }
     }
     g_run = nullptr;
     SDL_Quit();
