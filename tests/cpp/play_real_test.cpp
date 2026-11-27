@@ -12328,56 +12328,18 @@ void chapter_2_sides_f(Run &r, u64) {
 }
 void chapter_2_sides_f_checks(Run &, u64) {}
 
-// Side 16, the 2nd job, in chapter 2 (#299, synthetic: tests/starts/raise/chapter_2_side_16.json
-// over starts.chapter_2, the hero still a Rogue: branch 0, job tier 1, level 35). The Darklord
-// (0.0) offers it while the hero has one advancement and level 30: list 6 makes an Assassin
-// (setClassUp(1, 2), equipment 40), list 7 a Bandit (setClassUp(2, 2), equipment 28), and with
-// no free equipment slot either list says the bag is full and changes nothing
-// (chapter_2_side_16.json's _full variant). The chain's hero took the job in chapter 1, so in it
-// side 16 is never offered.
-void chapter_2_side_16_job(Run &r, int list, i32 branch, i32 item) {
-    using namespace quest_bot;
-    from_save(r);
-    then_check(r, "chapter 2, a Rogue (branch 0, tier 1) at level 35", [](mt_cpu *cpu) {
-        const Hero h = hero(cpu);
-        return h.chapter == 2 && job_at(0, 1)(cpu) && h.level == 35;
-    });
-    then_talk_to(r, "Pirate_Orbis (4.1): to 2.0 (list 1)", 4, 1, "Pirate_Orbis", 1,
-                 [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
-    auto owned = std::make_shared<i32>(0);
-    then_do(r, "before the job", [owned, item](mt_cpu *cpu) {
-        *owned = equip_owned(cpu, hero(cpu), item);
-        std::printf("before the job: equipment %d: %d\n", item, *owned);
-    });
-    then_talk_to(r, "Darklord (0.0): side 16, list " + std::to_string(list), 0, 0, "Darklord",
-                 list, job_at(branch, 2), 600);
-    then_run_event(r, "the 2nd job (branch " + std::to_string(branch) + ", tier 2)",
-                   MT_GAME_EVENT_JOB_ADVANCE, branch, {2});
-    then_do(r, "side 16 done, its reward", [owned, item](mt_cpu *cpu) {
-        const Hero h = hero(cpu);
-        check(quest_state(cpu, h, 1, 16) == 2 && equip_owned(cpu, h, item) == *owned + 1,
-              "side 16:" + std::to_string(quest_state(cpu, h, 1, 16)) + ", equipment " +
-                  std::to_string(item) + ": " + std::to_string(*owned) + " -> " +
-                  std::to_string(equip_owned(cpu, h, item)));
-    });
-    then_save(r);
-    then_job_is(r, branch, 2);
-    then_finish(r);
-}
-void chapter_2_side_16_assassin(Run &r, u64) { chapter_2_side_16_job(r, 6, 1, 40); }
-void chapter_2_side_16_bandit(Run &r, u64) { chapter_2_side_16_job(r, 7, 2, 28); }
-void chapter_2_side_16_checks(Run &, u64) {}
-// With all 48 equipment slots used (tests/starts/raise/chapter_2_side_16_full.json): list 6
-// leads to the bag-full message (invenFullNotify), the job stays.
+// Side 16, the 2nd job, in chapter 2 with a full equipment bag (#299, synthetic:
+// tests/starts/raise/chapter_2_side_16_full.json over starts.jobs_ch2_rogue_30, the Rogue at
+// level 30 on 0.0 of #302's jobs_2_2_* parts, with all 48 equipment slots used). The Darklord's
+// list 6 (and 7) then ends in the bag-full notice (invenFullNotify, popup 8) and changes nothing.
+// Lists 6 and 7 themselves are play.jobs_2_2_assassin_synthetic and _bandit_synthetic.
 void chapter_2_side_16_full(Run &r, u64) {
     using namespace quest_bot;
     from_save(r);
-    then_check(r, "chapter 2, a Rogue at level 35, 48 pieces of equipment", [](mt_cpu *cpu) {
+    then_check(r, "chapter 2, a Rogue at level 30, 48 pieces of equipment", [](mt_cpu *cpu) {
         const Hero h = hero(cpu);
         return h.chapter == 2 && job_at(0, 1)(cpu) && equip_count(cpu, h, 48) == 48;
     });
-    then_talk_to(r, "Pirate_Orbis (4.1): to 2.0 (list 1)", 4, 1, "Pirate_Orbis", 1,
-                 [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
     then_talk_to(
         r, "Darklord (0.0): side 16, list 6, the bag full", 0, 0, "Darklord", std::vector<int>{6},
         [](mt_cpu *) { return true; }, 600, 1);
@@ -12397,6 +12359,7 @@ void chapter_2_side_16_full(Run &r, u64) {
     });
     then_finish(r);
 }
+void chapter_2_side_16_full_checks(Run &, u64) {}
 
 // --- map pages in the running port (#221, docs/compendium/kb.md) --------------------------------
 //
@@ -13436,9 +13399,7 @@ constexpr Mode k_modes[] = {
     {"chapter_2_sides_e", chapter_2_sides_e, chapter_2_sides_e_checks, 1},
     {"chapter_2_sides_f", chapter_2_sides_f, chapter_2_sides_f_checks, 1},
     {"chapter_2_crafts", chapter_2_crafts, chapter_2_crafts_checks, 1},
-    {"chapter_2_side_16_assassin", chapter_2_side_16_assassin, chapter_2_side_16_checks, 1},
-    {"chapter_2_side_16_bandit", chapter_2_side_16_bandit, chapter_2_side_16_checks, 1},
-    {"chapter_2_side_16_full", chapter_2_side_16_full, chapter_2_side_16_checks, 1},
+    {"chapter_2_side_16_full", chapter_2_side_16_full, chapter_2_side_16_full_checks, 1},
     {"chapter_2_shops", chapter_2_shops, chapter_2_shops_checks, 1},
     {"chapter_2_shop_6", chapter_2_shop_6, chapter_2_shop_6_checks, 1},
     {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},

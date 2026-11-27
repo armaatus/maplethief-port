@@ -1878,25 +1878,20 @@ set_tests_properties(
                "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
 _chapter_2_part(crafts play.chapter_2_crafts_synthetic start_chapter_2_crafts
                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2_crafts")
-# Side 16 (the 2nd job) in chapter 2, each offer path: starts.chapter_2 with the hero still a
-# Rogue (tests/starts/raise/chapter_2_side_16.json), and with a full equipment bag (_full).
-foreach(start IN ITEMS side_16 side_16_full)
-    add_test(NAME starts.chapter_2_${start}
-             COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
-                     "${PROJECT_SOURCE_DIR}/tests/starts/raise/chapter_2_${start}.json"
-                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2_${start}/data/saves" --base
-                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2" --app
-                     "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
-    set_tests_properties(
-        starts.chapter_2_${start}
-        PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_REQUIRED
-                   start_chapter_2 FIXTURES_SETUP start_chapter_2_${start} ENVIRONMENT
-                   "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
-endforeach()
-foreach(path IN ITEMS assassin bandit)
-    _chapter_2_part(side_16_${path} play.chapter_2_side_16_${path}_synthetic
-                    start_chapter_2_side_16 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2_side_16")
-endforeach()
+# Side 16 (the 2nd job) in chapter 2 with a full equipment bag: #302's Rogue on 0.0
+# (starts.jobs_ch2_rogue_30, whose jobs_2_2_* parts take lists 6 and 7) with 48 pieces of
+# equipment (tests/starts/raise/chapter_2_side_16_full.json).
+add_test(NAME starts.chapter_2_side_16_full
+         COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                 "${PROJECT_SOURCE_DIR}/tests/starts/raise/chapter_2_side_16_full.json"
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2_side_16_full/data/saves" --base
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_jobs_ch2_rogue_30" --app
+                 "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+set_tests_properties(
+    starts.chapter_2_side_16_full
+    PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_REQUIRED
+               start_jobs_ch2_rogue_30 FIXTURES_SETUP start_chapter_2_side_16_full ENVIRONMENT
+               "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
 _chapter_2_part(side_16_full play.chapter_2_side_16_full_synthetic start_chapter_2_side_16_full
                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2_side_16_full")
 # The popup menu's skill, quest and option tabs by the d-pad (#164, prompts.h): from part c's
