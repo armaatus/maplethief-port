@@ -235,6 +235,34 @@ if(NOT _maplethief_commit)
 endif()
 set_source_files_properties(src/player_log.cpp PROPERTIES COMPILE_DEFINITIONS
                                                           MT_COMMIT="${_maplethief_commit}")
+# The per-file hash list that lets the import take a repacked IPA (#350, ADR 0135's addendum):
+# <gen>/ipa_files.inc, which scripts/bootstrap writes from your own copy (mtport.ipa_files),
+# compiled into ipa_import.cpp when it is there. Hashes only. The player build needs it.
+set(MAPLETHIEF_IPA_FILES
+    ""
+    CACHE FILEPATH
+          "Per-file hash list for the import of a repacked IPA (mtport.ipa_files); empty: <gen>/ipa_files.inc")
+set(_maplethief_ipa_files "${MAPLETHIEF_IPA_FILES}")
+if(NOT _maplethief_ipa_files AND MAPLETHIEF_GEN_DIR)
+    set(_maplethief_ipa_files "${MAPLETHIEF_GEN_DIR}/ipa_files.inc")
+endif()
+if(_maplethief_ipa_files)
+    cmake_path(ABSOLUTE_PATH _maplethief_ipa_files BASE_DIRECTORY "${PROJECT_SOURCE_DIR}" NORMALIZE)
+endif()
+if(_maplethief_ipa_files AND EXISTS "${_maplethief_ipa_files}")
+    set_property(SOURCE src/ipa_import.cpp APPEND
+                 PROPERTY COMPILE_DEFINITIONS MT_IPA_FILES_INC="${_maplethief_ipa_files}")
+    set_property(SOURCE src/ipa_import.cpp APPEND PROPERTY OBJECT_DEPENDS "${_maplethief_ipa_files}")
+    message(STATUS "IPA import: accepts a repack (${_maplethief_ipa_files})")
+elseif(MAPLETHIEF_PLAYER_BUILD)
+    message(
+        FATAL_ERROR
+            "MAPLETHIEF_PLAYER_BUILD: the player build needs the per-file hash list "
+            "'${_maplethief_ipa_files}' (#350). From the repository: scripts/bootstrap writes it "
+            "into work/gen/, then configure again (docs/release-checklist.md).")
+else()
+    message(STATUS "IPA import: the exact IPA only (no ipa_files.inc)")
+endif()
 # The capture converts the mix to 16-bit the same way on every CPU (ADR 0045).
 maplethief_strict_fp(src/audio_out.cpp)
 

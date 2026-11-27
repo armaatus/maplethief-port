@@ -9,17 +9,24 @@
 //                 no Payload/<name>.app, another app, encrypted zip entries, an encrypted
 //                 executable (LC_ENCRYPTION_INFO with cryptid != 0 in its armv7 slice), another
 //                 version (CFBundleVersion or CFBundleShortVersionString of Info.plist, binary
-//                 or XML), or version 1.5 with other bytes.
+//                 or XML), or version 1.5 with other bytes. Version 1.5 with other bytes is
+//                 still accepted as a repack (ADR 0135's addendum, #350) when the executable's
+//                 armv7 slice is 1.5's and every file of the expected per-file hash list (made
+//                 at build time from the builder's own copy, MAPLETHIEF_IPA_FILES, hashes only)
+//                 is there with its hash; the first missing or differing file is named in the
+//                 refusal, and files the list does not name are ignored (not checked, and not
+//                 extracted by import_ipa). Without a list (a build without
+//                 work/gen/ipa_files.inc) only the exact file passes.
 //   import_ipa    check_ipa, then bootstrap.py's safe-extraction rules on every entry (no
 //                 absolute paths, '.', '..' or empty components, no backslashes, drive letters,
 //                 control or reserved characters, no names Windows cannot store, no duplicates
 //                 or case-only collisions, no file that is also a folder, no links or other
 //                 non-regular entries, nothing encrypted), extraction into game.tmp-<pid>/ next
-//                 to game/, the executable's SHA-256, then the rename into place: an old game/
-//                 goes to game.old-<pid>/ first and comes back if the rename fails, and is
-//                 removed after. Leftover game.tmp-* and game.old-* folders (an interrupted
-//                 import) are removed at the start of the next one, so an interrupted import
-//                 never leaves a half-extracted game/.
+//                 to game/, the executable's SHA-256 (or its armv7 slice's, for a repack),
+//                 then the rename into place: an old game/ goes to game.old-<pid>/ first and
+//                 comes back if the rename fails, and is removed after. Leftover game.tmp-*
+//                 and game.old-* folders (an interrupted import) are removed at the start of
+//                 the next one, so an interrupted import never leaves a half-extracted game/.
 //
 // No SDL, no UI: paths and bytes in, a result with its reason out, so that every frontend
 // calls it: the import screen (import_screen.h), --import-ipa FILE (main.cpp) and the import
@@ -46,6 +53,9 @@ inline constexpr std::string_view kIpaSha256 =
 // Payload/MapleThief.app/MapleThief (original/SHA256SUMS' work/ipa/... line).
 inline constexpr std::string_view kExecutableSha256 =
     "1267cf3e048113c26c8bc354087194da8f9e8ed830fcaa766da170e8e6e32066";
+// work/slices/MapleThief.armv7 (original/SHA256SUMS): the slice the recompiled code matches.
+inline constexpr std::string_view kArmv7Sha256 =
+    "60d4d5e75de5eb478ed320377babca8eab6616e9a94faad805f71cf8e084e467";
 inline constexpr std::string_view kIpaVersion = "1.5";
 inline constexpr std::string_view kIpaFileName = "MapleThief-1.5.ipa";
 
@@ -59,12 +69,23 @@ inline constexpr std::size_t kMaxIpaEntryBytes = 64u << 20;
 
 using Sha256 = std::array<std::uint8_t, 32>;
 
+// One file of the per-file hash list: its path below Payload/MapleThief.app/ and its SHA-256.
+struct IpaFileHash {
+    std::string path;
+    Sha256 sha256{};
+};
+
 // What the file must be. ipa_expected() is the 1.5 IPA; tests pass their own.
 struct IpaExpected {
     std::uint64_t size = 0;
     Sha256 ipa_sha256{};
     Sha256 executable_sha256{};
+    // A repack (see check_ipa above): the executable's armv7 slice and the files the game reads.
+    // An empty `files` accepts the exact file only.
+    Sha256 armv7_sha256{};
+    std::vector<IpaFileHash> files;
 };
+// The 1.5 IPA, with the hash list this build was made with (empty without one).
 IpaExpected ipa_expected();
 
 // Why a file was refused (kNone: it is the IPA, or it was imported).
@@ -77,7 +98,8 @@ enum class IpaProblem {
     kEncryptedZip,    // entries encrypted with a zip password
     kEncryptedApp,    // the executable is encrypted (cryptid != 0)
     kOtherVersion,    // MapleThief, but not version 1.5
-    kModified,        // version 1.5, but not the 1.5 IPA's bytes (damaged or changed)
+    kModified,        // version 1.5, but not the 1.5 IPA's bytes (damaged or changed; for a
+                      // repack, the executable or a named file is not 1.5's)
     kUnsafeEntry,     // an entry that is not safe to extract
     kWrongExecutable, // the extracted executable is not 1.5's
     kWriteFailed,     // the data directory could not be written
@@ -91,6 +113,8 @@ struct IpaResult {
     std::string why;      // a sentence for the player ("" when kNone)
     std::string version;  // the Info.plist version, when one was read
     std::string game_dir; // import_ipa: <parent dir>/game, once imported
+    bool repack = false;  // accepted as a repack (not the exact file): import_ipa then extracts
+                          // only the executable and the listed files
     bool ok() const { return problem == IpaProblem::kNone; }
 };
 

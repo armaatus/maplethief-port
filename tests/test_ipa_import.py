@@ -1,6 +1,7 @@
 """The C++ IPA import's expected values (#182, platform/src/ipa_import.h) are the bootstrap's:
-the IPA's size is ``IPA_SIZE`` in tools/mtport/bootstrap.py, and the IPA's and the bundle
-executable's SHA-256 are their lines in original/SHA256SUMS."""
+the IPA's size is ``IPA_SIZE`` in tools/mtport/bootstrap.py, and the IPA's, the bundle
+executable's and its armv7 slice's SHA-256 (a repack's check, #350) are their lines in
+original/SHA256SUMS."""
 
 from __future__ import annotations
 
@@ -32,6 +33,9 @@ class IpaImportConstantsTest(unittest.TestCase):
 
     def test_executable_sha256_is_sha256sums(self) -> None:
         self.assertEqual(_constant(self.header, "kExecutableSha256"), self.sums[bs.BINARY])
+
+    def test_armv7_sha256_is_sha256sums(self) -> None:
+        self.assertEqual(_constant(self.header, "kArmv7Sha256"), self.sums[bs.slice_path("armv7")])
 
     def test_file_name_is_bootstraps(self) -> None:
         self.assertEqual(_constant(self.header, "kIpaFileName"), bs.IPA.rsplit("/", 1)[1])
