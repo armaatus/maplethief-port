@@ -137,6 +137,7 @@ set(MAPLETHIEF_RUNTIME_TEST_SOURCES
     cpp/libc_test.cpp
     cpp/cxxabi_test.cpp
     cpp/hooks_test.cpp
+    cpp/scriptvm_test.cpp
     cpp/text_events_test.cpp
     cpp/widescreen_test.cpp
     cpp/trace_entry_fixture.c
