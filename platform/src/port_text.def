@@ -64,6 +64,11 @@ MT_TEXT(menu_not_available, "not available")
 MT_TEXT(speech_sample, "This is the voice that reads the game's text.")
 MT_TEXT(speech_unavailable,
         "No system voice: on Linux, install speech-dispatcher (libspeechd), then restart")
+// What the speech says of a dialogue box's answer (#391, speech_text.h): Accept / Refuse, and
+// the rows of a list ({0}: the rows, "; " between them). A speaker is said as "{0}: {1}".
+MT_TEXT(speech_accept_refuse, "Accept or refuse.")
+MT_TEXT(speech_rows, "Choose: {0}.")
+MT_TEXT(speech_speaker, "{0}: {1}")
 MT_TEXT(menu_preset_help,
         "Left / Right picks a preset: it sets every setting it controls. Custom keeps your own "
         "values.")

@@ -8,10 +8,9 @@
 #include "maplethief/events.h"
 
 #include <cstdint>
-#include <cstring>
 
+#include "events/guest_read.h"
 #include "maplethief/diag.h"
-#include "maplethief/memory.h"
 #include "maplethief/recomp/calls.h"
 
 namespace {
@@ -31,44 +30,8 @@ mt_game_event_fn g_hook = nullptr;
 void *g_user = nullptr;
 mt_game_events_stats g_stats{};
 
-// Whether [addr, addr + 4) is guest memory that is there: an image segment or the committed
-// heap (as the input module reads, runtime/src/input/input.cpp). A synthetic guest may have no
-// image, and its arena's other pages are not readable.
-bool readable(const mt_cpu *cpu, u32 addr) {
-    const std::uint64_t end = static_cast<std::uint64_t>(addr) + 4;
-    if (addr == 0 || end > cpu->mem_size) {
-        return false;
-    }
-    mt_mem *mem = mt_mem_from_cpu(cpu);
-    if (mem == nullptr) {
-        return false;
-    }
-    u32 n = 0;
-    const mt_segment *segs = mt_mem_segments(mem, &n);
-    for (u32 i = 0; segs != nullptr && i < n; i++) {
-        if (addr >= segs[i].vmaddr &&
-            end <= static_cast<std::uint64_t>(segs[i].vmaddr) + segs[i].vmsize) {
-            return true;
-        }
-    }
-    mt_heap_stats heap{};
-    mt_heap_get_stats(mem, &heap);
-    return addr >= MT_GUEST_HEAP_BASE && end <= heap.committed;
-}
-
-bool rd32(const mt_cpu *cpu, u32 addr, i32 *out) {
-    if (!readable(cpu, addr)) {
-        return false;
-    }
-    std::memcpy(out, cpu->mem + addr, 4);
-    return true;
-}
-
-// A pointer field: 0 when it is not readable.
-u32 rdptr(const mt_cpu *cpu, u32 addr) {
-    i32 v = 0;
-    return rd32(cpu, addr, &v) ? static_cast<u32>(v) : 0u;
-}
+using mt_events::rd32;
+using mt_events::rdptr;
 
 struct Listener {
     mt_game_event_fn fn = nullptr;

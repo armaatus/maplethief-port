@@ -84,6 +84,11 @@ u32 null_object(mt_cpu *cpu);
 // The guest path of the app's home directory: the directory that holds the bundle
 // (/var/mobile/Applications/<UUID>), NSHomeDirectory().
 std::string home_guest_path();
+// The text -localizedStringForKey:value:table: finds for `key` in <language>.lproj/<table>.strings
+// (a text pack's first), as UTF-8, without making a guest object: for host code that reads the
+// game's text (the speech's speakers, #391). False if there is none.
+bool localized_utf8(mt_cpu *cpu, const std::string &table, const std::string &key,
+                    std::string *out);
 
 // --- URLs (misc.cpp) ---------------------------------------------------------------------------
 

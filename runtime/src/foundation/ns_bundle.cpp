@@ -201,6 +201,30 @@ void bundle_localized_string(mt_cpu *cpu) {
     cpu->r[0] = val != nullptr && !val->empty() ? value : key;
 }
 
+} // namespace
+
+bool localized_utf8(mt_cpu *cpu, const std::string &table, const std::string &key,
+                    std::string *out) {
+    if (const char *packed = mt_textpack_lookup(table.c_str(), key.c_str())) {
+        *out = packed;
+        return true;
+    }
+    std::u16string k;
+    if (key.empty() || !mt_cf::decode(reinterpret_cast<const std::uint8_t *>(key.data()),
+                                      key.size(), mt_cf::k_enc_utf8, k)) {
+        return false;
+    }
+    const std::string rel = mt_cf::bundle_find(cpu, table, "strings", "", "");
+    const PlistValue *found = rel.empty() ? nullptr : plist(cpu, rel).find(k);
+    if (found == nullptr || found->kind != PlistValue::string) {
+        return false;
+    }
+    *out = mt_cf::to_utf8(found->s);
+    return true;
+}
+
+namespace {
+
 const mt_objc_host_method k_bundle_instance[] = {
     {"retain", singleton_retain},
     {"release", singleton_release},
