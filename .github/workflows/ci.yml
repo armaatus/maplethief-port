@@ -250,6 +250,17 @@ jobs:
         env:
           PYTHON: ${{ steps.python.outputs.python-path }}
 
+      - name: Run a shell script from the fresh checkout (Windows, .gitattributes)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # The runner's git has core.autocrlf=true; .gitattributes keeps the scripts LF (#328).
+          # A CRLF checkout fails here with "set: pipefail: invalid option name".
+          set -euo pipefail
+          out=$(printf 'docs/README.md\n' | bash scripts/ci-scope)
+          echo "$out"
+          [ "$out" = "$(printf 'native=false\nswitch=false\nandroid=false')" ]
+
       - name: Build and run all tests (scripts/test)
         if: matrix.config == 'debug' && runner.os != 'Windows'
         run: scripts/test
