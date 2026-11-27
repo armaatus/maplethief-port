@@ -49,6 +49,7 @@ constexpr u32 k_hookable[] = {
     MT_HOOK_FN_NOTIFY_TEXT_ADD,             // 0x78339
     MT_HOOK_FN_CHANGE_MAP,                  // 0x81369
     MT_HOOK_FN_SCENE_RUNNER,                // 0x83C71
+    MT_HOOK_FN_START_SCENE,                 // 0x853E5
     MT_HOOK_FN_STATE_GAME_PAINT,            // 0x87501
     MT_HOOK_FN_STATE_GAME_ON_KEY,           // 0x8D4C9
     MT_HOOK_FN_LUA_EXECUTE,                 // 0x9BC11
