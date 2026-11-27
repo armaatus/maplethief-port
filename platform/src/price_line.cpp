@@ -30,8 +30,10 @@ std::vector<std::string> price_lines(const mt_cash_view &view) {
     if (view.screen == MT_CASH_SCREEN_NONE || view.count == 0) {
         return lines;
     }
-    lines.push_back(tr(view.screen == MT_CASH_SCREEN_SHOP ? Txt::price_shop : Txt::price_revive,
-                       {meso_text(view.meso)}));
+    // SDL's debug font has ASCII only: a translation is folded (ADR 0206).
+    lines.push_back(
+        ascii_fold(tr(view.screen == MT_CASH_SCREEN_SHOP ? Txt::price_shop : Txt::price_revive,
+                      {meso_text(view.meso)})));
     std::string line;
     bool packs = false;
     const auto add = [&lines, &line](const std::string &item) {
@@ -51,7 +53,7 @@ std::vector<std::string> price_lines(const mt_cash_view &view) {
         add(std::string(title != nullptr ? title : "?") + " " + meso_text(q.price));
     }
     if (packs) {
-        add(tr(Txt::price_packs_not_sold));
+        add(ascii_fold(tr(Txt::price_packs_not_sold)));
     }
     if (!line.empty()) {
         lines.push_back(line);

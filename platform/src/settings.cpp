@@ -7,8 +7,10 @@
 #include <cstdio>
 #include <iterator>
 
+#include "livesplit.h"
 #include "maplethief/gfx.h"
 #include "port_text.h"
+#include "run_timer.h"
 
 namespace maplethief::frontend {
 
@@ -321,6 +323,71 @@ constexpr SettingValue fullscreen_display_value() {
                                   "current or a display's name");
     v.offer = &offer_displays;
     return v;
+}
+
+// run_category (#406): a category's name, 1 to 32 of a-z, 0-9 and '_' (any case read, written
+// in lower case).
+bool parse_run_category(const SettingValue &, std::string_view text, Settings *s) {
+    if (text.empty() || text.size() > kMaxRunCategoryBytes) {
+        return false;
+    }
+    std::string name;
+    for (const char c : text) {
+        const char l = (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+        if (!((l >= 'a' && l <= 'z') || (l >= '0' && l <= '9') || l == '_')) {
+            return false;
+        }
+        name += l;
+    }
+    s->run_category = name;
+    return true;
+}
+
+std::string print_run_category(const SettingValue &, const Settings &s) { return s.run_category; }
+
+std::vector<std::string> &run_category_names() {
+    static std::vector<std::string> names;
+    return names;
+}
+
+// The names game.cpp set; until then the shipped categories' (run_timer.h).
+std::vector<std::string> offer_run_categories() {
+    if (!run_category_names().empty()) {
+        return run_category_names();
+    }
+    std::vector<std::string> out;
+    for (const auto &file : shipped_run_category_files()) {
+        out.push_back(file.first);
+    }
+    return out;
+}
+
+constexpr SettingValue run_category_value() {
+    SettingValue v = custom_value(&parse_run_category, &print_run_category,
+                                  "a category's name (a-z, 0-9 and _, at most 32)");
+    v.offer = &offer_run_categories;
+    return v;
+}
+
+// livesplit (#407): off, or an address parse_livesplit_address reads (written as it prints it).
+bool parse_livesplit(const SettingValue &, std::string_view text, Settings *s) {
+    std::string lower(text);
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (lower == "off") {
+        s->livesplit.clear();
+        return true;
+    }
+    const std::optional<LiveSplitAddress> a = parse_livesplit_address(text);
+    if (!a) {
+        return false;
+    }
+    s->livesplit = livesplit_address_text(*a);
+    return true;
+}
+
+std::string print_livesplit(const SettingValue &, const Settings &s) {
+    return s.livesplit.empty() ? "off" : s.livesplit;
 }
 
 constexpr SettingValue audio_device_value() {
@@ -652,7 +719,7 @@ constexpr SettingInfo kRegistry[] = {
      .help = "English or Korean (the Korean build's screens and help), from the next start"},
     {.key = "text_pack",
      .group = SettingGroup::kOther,
-     .comment = "# a directory of translated text in UTF-8 (python3 -m mtport.textpack export "
+     .comment = "# a directory of translated text in UTF-8 (the menu's Other tab: Export text "
                 "makes one to edit); empty: none",
      .value = pack_value<2>(&parse_text_pack, &print_text_pack,
                             "a directory (empty: none), without control characters"),
@@ -675,8 +742,8 @@ constexpr SettingInfo kRegistry[] = {
     // Video: texture packs (#153, ADR 0081).
     {.key = "texture_pack",
      .group = SettingGroup::kVideo,
-     .comment = "# a directory of HD textures made from your own --dump-textures (python3 -m "
-                "mtport.texpack); empty: none",
+     .comment = "# a directory of HD textures made from your own texture dump (the menu's Other "
+                "tab: Dump textures, Make texture pack); empty: none",
      .value = pack_value<0>(&parse_texture_pack, &print_texture_pack,
                             "a directory (empty: none), without control characters"),
      .flag = "--texture-pack",
@@ -960,6 +1027,17 @@ constexpr SettingInfo kRegistry[] = {
      .help = "How loud the voice speaks, in percent",
      .applies = Applies::kAtOnce,
      .needs = kCapSpeech},
+    // #392 (ADR 0191, speech_text.h): the notify lines too, queued behind dialogue and popups.
+    {.key = "speech_notices",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# with speech on, also read the notify lines (pick-ups, meso, EXP): on | off",
+     .value = on_off<&Settings::speech_notices>(),
+     .flag = "--speech-notices",
+     .game_only = true,
+     .label = "Speak notices",
+     .help = "With speech on, also reads the pick-up, meso and EXP lines and the map's name",
+     .applies = Applies::kAtOnce,
+     .needs = kCapSpeech},
     // Video: the picture adjustments (#187, ADR 0093's addendum, color_filter.h), the colour
     // step with the colour-blind filter. The player's screen: no preset changes them.
     {.key = "brightness",
@@ -1170,7 +1248,7 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Direction priority",
      .help = "Two directions held: the game's own order, or the newest one wins (rolling keys)",
      .applies = Applies::kAtOnce},
-    // The opt-in update notice (#199, ADR 0137, update_check.h): the port's only network use.
+    // The opt-in update notice (#199, ADR 0137, update_check.h): network use, with livesplit.
     {.key = "update_check",
      .group = SettingGroup::kOther,
      .comment = "# once a day, ask github.com whether a newer version of the port is out (never "
@@ -1182,6 +1260,64 @@ constexpr SettingInfo kRegistry[] = {
      .help = "Asks github.com once a day whether a newer version of the port is out; downloads "
              "nothing. Never in the Original preset",
      .needs = kCapUpdateFetch},
+    // The speedrun timer (#406, ADR 0156, run_timer.h): read live by game.cpp's turn.
+    {.key = "run_timer",
+     .group = SettingGroup::kOther,
+     .comment = "# the speedrun timer over the picture (run_timer.h): on | off",
+     .value = on_off<&Settings::run_timer>(),
+     .flag = "--run-timer",
+     .game_only = true,
+     .label = "Speedrun timer",
+     .help = "Times a run from a new character, with splits and a personal best; says whether "
+             "an Assist was on",
+     .applies = Applies::kAtOnce},
+    {.key = "run_category",
+     .group = SettingGroup::kOther,
+     .comment = "# the timer's category: any | chapter_1, or a file of your own in <data "
+                "dir>/categories",
+     .value = run_category_value(),
+     .flag = "--run-category",
+     .game_only = true,
+     .label = "Speedrun category",
+     .help = "What the timer times: Any% (to the last boss) or Chapter 1 (to the trip to Orbis)",
+     .applies = Applies::kAtOnce},
+    // Run recording (#405, ADR 0156, run_recorder.h): a replay of every session.
+    {.key = "record_runs",
+     .group = SettingGroup::kOther,
+     .comment = "# record every session, from the start to quit, as a run file in runs/ that "
+                "plays back\n# exactly (MapleThief --play-run FILE): on | off",
+     .value = on_off<&Settings::record_runs>(),
+     .flag = "--record-runs",
+     .game_only = true,
+     .label = "Record runs",
+     .help = "Keeps a replay of every session in runs/, from the start to quit; it plays back "
+             "exactly with --play-run"},
+    // The LiveSplit link (#407, ADR 0156, livesplit.h): read live by game.cpp's turn.
+    {.key = "livesplit",
+     .group = SettingGroup::kOther,
+     .comment = "# send the run timer's start, splits and resets to LiveSplit's TCP server\n"
+                "# (livesplit.h): off | HOST:PORT (localhost:16834)",
+     .value = custom_value(&parse_livesplit, &print_livesplit,
+                           "off, or localhost, an IPv4 address or [an IPv6 one], with :PORT"),
+     .flag = "--livesplit",
+     .game_only = true,
+     .label = "LiveSplit server",
+     .help = "Sends the timer's start, splits and resets to LiveSplit's TCP server on this "
+             "computer (localhost:16834); needs the speedrun timer on",
+     .applies = Applies::kAtOnce,
+     .needs = kCapLiveSplit | kCapTypedValues},
+    {.key = "livesplit_game_time",
+     .group = SettingGroup::kOther,
+     .comment =
+         "# with livesplit, LiveSplit's game time is the game's ticks (50 ms each): on | off",
+     .value = on_off<&Settings::livesplit_game_time>(),
+     .flag = "--livesplit-game-time",
+     .game_only = true,
+     .label = "LiveSplit game time",
+     .help = "LiveSplit's game time counts the game's own ticks (50 ms each), whatever the "
+             "computer's speed",
+     .applies = Applies::kAtOnce,
+     .needs = kCapLiveSplit},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -1490,6 +1626,10 @@ void set_audio_device_choices(std::vector<std::string> names) {
 }
 
 void set_display_choices(std::vector<std::string> names) { display_names() = std::move(names); }
+
+void set_run_category_choices(std::vector<std::string> names) {
+    run_category_names() = std::move(names);
+}
 
 void set_pack_choices(std::string_view key, std::vector<std::string> values) {
     for (std::size_t i = 0; i < std::size(kPackRowKeys); i++) {

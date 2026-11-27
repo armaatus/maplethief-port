@@ -75,12 +75,14 @@ add_library(
     src/cashshop/pricing.cpp
     src/events/events.cpp
     src/events/run_hits.cpp
+    src/events/text_events.cpp
     src/hooks/builtin.cpp
     src/hooks/flashes.cpp
     src/hooks/hooks.cpp
     src/hooks/widescreen.cpp
     src/hooks/widescreen_menus.cpp
     src/input/input.cpp
+    src/runtape/runtape.cpp
     src/mem/commit_map.cpp
     src/mem/heap.cpp
     src/mem/memory.cpp
@@ -102,6 +104,9 @@ add_library(
     src/stubs/storekit.cpp
     src/stubs/stubs.cpp
     src/texpack/texpack.cpp
+    src/textpack/export.cpp
+    src/textpack/pack_manifest.cpp
+    src/textpack/packcheck.cpp
     src/textpack/strings_file.cpp
     src/textpack/textpack.cpp
     src/uikit/app.cpp

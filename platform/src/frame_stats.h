@@ -103,6 +103,9 @@ struct RecentStats {
     double other_ms = 0;
     double frontend_ms = 0;     // take + compose + draw
     double max_frontend_ms = 0; // the costliest frame's
+    // The GPU's time per GL frame (#365): not measured here; the caller fills it from
+    // GpuFrameTimer (render_scale.h) for the governor. 0: unknown (the software backend).
+    double gpu_ms = 0;
 };
 
 class FrameStats {

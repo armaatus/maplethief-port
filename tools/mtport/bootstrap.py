@@ -25,7 +25,9 @@ What it does, in order (each stage stops with an ``error:`` line on the first fa
    each slice against its ``work/slices/MapleThief.<arch>`` entry in ``original/SHA256SUMS``.
    On macOS with ``lipo`` on PATH, it cross-checks every slice against ``lipo -thin`` output.
    Only then does it write ``work/slices/MapleThief.armv6``, ``work/slices/MapleThief.armv7``,
-   ``work/slices/SHA256SUMS`` and ``work/bootstrap.json``.
+   ``work/slices/SHA256SUMS`` and ``work/bootstrap.json``, then ``work/gen/ipa_files.inc``, the
+   per-file hash list the player import of a repacked IPA checks (:mod:`mtport.ipa_files`, ADR
+   0135's addendum #350).
 
 Outputs are deterministic (no timestamps, sorted keys), so two runs produce byte-identical
 files. ``work/bootstrap.json`` is the contract for other tools. All paths in it are
@@ -65,7 +67,7 @@ import zipfile
 import zlib
 from pathlib import Path
 
-from . import __version__, fat
+from . import __version__, fat, ipa_files
 from .macho import MachO, MachOError
 
 TOOL_NAME = "mtport.bootstrap"
@@ -87,6 +89,7 @@ MAX_ENTRIES = 4096  # the most entries an IPA may have; save_zip.h's kMaxZipEntr
 SLICES_DIR = "work/slices"
 SLICE_SUMS = f"{SLICES_DIR}/SHA256SUMS"
 BOOTSTRAP_JSON = "work/bootstrap.json"
+IPA_FILES = "work/gen/ipa_files.inc"  # mtport.ipa_files; compiled into the player import
 ARCHS = ("armv6", "armv7")
 PRIMARY_ARCH = "armv7"
 
@@ -567,6 +570,11 @@ def split_slices(
         repo / BOOTSTRAP_JSON, (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("ascii")
     )
     log(f"wrote {SLICE_SUMS} and {BOOTSTRAP_JSON}")
+    try:
+        n = ipa_files.write(repo / APP_DIR, repo / IPA_FILES)
+    except ipa_files.IpaFilesError as e:
+        raise BootstrapError(str(e)) from None
+    log(f"wrote {IPA_FILES} ({n} file hashes)")
     return doc
 
 

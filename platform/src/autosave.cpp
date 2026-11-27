@@ -10,6 +10,7 @@
 #include "maplethief/hooks.h"
 #include "maplethief/memory.h"
 #include "maplethief/objc/objc.h"
+#include "run_recorder.h"
 
 namespace maplethief::frontend {
 
@@ -88,6 +89,7 @@ bool readable(const mt_cpu *cpu, u32 addr) {
 
 // A guest call from the host with every register kept.
 u32 call(mt_cpu *cpu, u32 fn, u32 a0, u32 a1) {
+    run_refuse("autosave"); // a replay has no window to close (run_census.h)
     u32 saved[16];
     std::memcpy(saved, cpu->r, sizeof saved);
     const u32 args[2] = {a0, a1};
@@ -268,10 +270,13 @@ AutosaveCheck check_autosave(const mt_cpu *cpu, std::int32_t open_popup) {
     return check_autosave(guest_reader(cpu), open_popup);
 }
 
-bool is_exit_to_menu_confirm(const GuestRead32 &read, std::int32_t key) {
-    u32 popup = 0, widget = 0, choice = 1;
-    return (key == kKeyOk || key == kKeyOkDigit) && read(kAutosavePopup, &popup) &&
-           static_cast<i32>(popup) == kAutosaveExitPopup && read(kAutosavePopupWidget, &widget) &&
+bool is_exit_to_menu_confirm(const GuestRead32 &read, std::int32_t key, std::int32_t popup) {
+    u32 open = 0, widget = 0, choice = 1, mode = 0;
+    if (popup == kAutosaveDeathExitPopup && (!read(kAutosaveGameMode, &mode) || mode != 0)) {
+        return false; // 0x8D4C9 answers popup 0x6D in the field only
+    }
+    return (key == kKeyOk || key == kKeyOkDigit) && read(kAutosavePopup, &open) &&
+           static_cast<i32>(open) == popup && read(kAutosavePopupWidget, &widget) &&
            read(widget + kWidgetChoice, &choice) && choice == 0;
 }
 
@@ -328,8 +333,9 @@ void Autosaver::count(const AutosaveResult &r) {
 
 namespace {
 
-// Game_ExitToMainMenu's hook (#179): the save first, then the game's own exit (MT_HOOK_PASS).
-int exit_to_menu_hook(mt_cpu *cpu, const mt_hook_call *call) {
+// The exits' hooks: the save first, then the game's own exit (MT_HOOK_PASS). Game_ExitToMainMenu
+// (#179) and CStateGame::OnKeyPressed (#336) both take the key in r1.
+template <std::int32_t Popup> int exit_to_menu_hook(mt_cpu *cpu, const mt_hook_call *call) {
     // The guest's call goes on after the save: every register as the caller left it (the
     // autorelease pool's push and pop are calls too, outside call()'s own save).
     u32 r[16];
@@ -337,7 +343,7 @@ int exit_to_menu_hook(mt_cpu *cpu, const mt_hook_call *call) {
     std::memcpy(r, cpu->r, sizeof r);
     std::memcpy(d, cpu->d, sizeof d);
     const u32 cpsr = cpu->cpsr, fpscr = cpu->fpscr;
-    static_cast<Autosaver *>(call->user)->exit_to_menu(cpu, static_cast<i32>(cpu->r[1]));
+    static_cast<Autosaver *>(call->user)->exit_to_menu(cpu, static_cast<i32>(cpu->r[1]), Popup);
     std::memcpy(cpu->r, r, sizeof r);
     std::memcpy(cpu->d, d, sizeof d);
     cpu->cpsr = cpsr;
@@ -350,26 +356,36 @@ int exit_to_menu_hook(mt_cpu *cpu, const mt_hook_call *call) {
 void Autosaver::install_exit_to_menu(const Autosave *mode, std::function<double()> clock) {
     exit_mode_ = mode;
     clock_ = std::move(clock);
-    if (mt_hook_register(MT_HOOK_FN_GAME_EXIT_TO_MAIN_MENU, &exit_to_menu_hook, this, 1) == 0) {
+    if (mt_hook_register(MT_HOOK_FN_GAME_EXIT_TO_MAIN_MENU, &exit_to_menu_hook<kAutosaveExitPopup>,
+                         this, 1) == 0) {
         SDL_Log("autosave: Game_ExitToMainMenu cannot be hooked: no autosave at the exit to the "
                 "main menu");
+    }
+    if (mt_hook_register(MT_HOOK_FN_STATE_GAME_ON_KEY, &exit_to_menu_hook<kAutosaveDeathExitPopup>,
+                         this, 1) == 0) {
+        SDL_Log("autosave: CStateGame::OnKeyPressed cannot be hooked: no check at the death "
+                "popup's exit to the main menu");
     }
 }
 
 void Autosaver::uninstall_exit_to_menu() {
     if (exit_mode_ != nullptr) {
         mt_hook_unregister(MT_HOOK_FN_GAME_EXIT_TO_MAIN_MENU);
+        mt_hook_unregister(MT_HOOK_FN_STATE_GAME_ON_KEY);
         exit_mode_ = nullptr;
     }
 }
 
-bool Autosaver::exit_to_menu(mt_cpu *cpu, std::int32_t key) {
+bool Autosaver::exit_to_menu(mt_cpu *cpu, std::int32_t key, std::int32_t popup) {
     if (exit_mode_ == nullptr || *exit_mode_ != Autosave::kOnQuit ||
-        !is_exit_to_menu_confirm(guest_reader(cpu), key)) {
+        !is_exit_to_menu_confirm(guest_reader(cpu), key, popup)) {
         return false;
     }
-    const AutosaveResult r = autosave_now(cpu, "the exit to the main menu (popup 14)",
-                                          clock_ ? clock_() : 0.0, kAutosaveExitPopup);
+    const AutosaveResult r = autosave_now(
+        cpu,
+        popup == kAutosaveDeathExitPopup ? "the death popup's exit to the main menu (popup 0x6D)"
+                                         : "the exit to the main menu (popup 14)",
+        clock_ ? clock_() : 0.0, popup);
     count(r);
     return r.saved;
 }

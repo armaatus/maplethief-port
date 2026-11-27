@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from mtport import appicon, jpeg, nro
+from mtport import appicon, ipa_files, jpeg, nro
 from mtport import release as rel
 from repo_paths import REPO
 
@@ -111,7 +111,9 @@ def test_planted_generated_file_fails(tmp_path, kit_format):
     assert ("lib/fn_000.c", "generated") in rules(report)
 
 
-@pytest.mark.parametrize("name", ["mt_gen.h", "dispatch.c", "imports.c", "gen.cmake", "fn_063.c"])
+@pytest.mark.parametrize(
+    "name", ["mt_gen.h", "dispatch.c", "imports.c", "gen.cmake", "fn_063.c", "ipa_files.inc"]
+)
 def test_generated_file_names_fail(tmp_path, name):
     report = run_guard(make_zip(tmp_path / "k.zip", {**CLEAN, f"src/{name}": b"x"}))
     assert (f"src/{name}", "generated") in rules(report)
@@ -397,6 +399,25 @@ def test_player_mode_rejects_the_bundle_executable(tmp_path, kit_format):
     )
 
 
+def test_player_mode_passes_with_the_ipa_hash_list_compiled_in(tmp_path, kit_format):
+    # #350: the player executable holds the per-file hash list (paths and SHA-256 hashes, from
+    # mtport.ipa_files); the guard, with work/ipa and work/gen (holding ipa_files.inc) as its
+    # references, still passes it. The list as a file of its own is caught by its name and hash.
+    app = tmp_path / "work/ipa/Payload/MapleThief.app"
+    write_dir(app, {"MapleThief": ARM_FAT, "map/m1.map": GAME_FILE, "Info.plist": b"<plist/>"})
+    listing = ipa_files.render(ipa_files.file_hashes(app))
+    gen = write_dir(tmp_path / "work/gen", {"ipa_files.inc": listing.encode()})
+    refs = rel.reference_hashes([tmp_path / "work/ipa", gen])
+    files = {**PLAYER, "MapleThief.exe": PLAYER_EXE + listing.encode() + b"\0"}
+    report = rel.guard(build_player(tmp_path / "p", kit_format, files), refs, TABLE, "player")
+    assert report.ok, report.findings
+    assert report.game_code == 1
+    files = {**PLAYER, "share/ipa_files.inc": listing.encode()}
+    report = rel.guard(build_player(tmp_path / "q", kit_format, files), refs, TABLE, "player")
+    assert player_rules(report) == {("share/ipa_files.inc", "generated"),
+                                    ("share/ipa_files.inc", "derived")}  # fmt: skip
+
+
 # --- The Nintendo Switch player zip (#243, ADR 0138): switch/maplethief/MapleThief.nro --------
 
 SWITCH_TOP = "MapleThief-0.0.1-switch"
@@ -617,11 +638,15 @@ def test_kit_names_match_cmake_packaging():
         "MapleThief-kit-0.0.1-rc.1-macos-universal.zip",
         "MapleThief-kit-0.0.1-rc.1-linux-x86_64.tar.gz",
         "MapleThief-kit-0.0.1-rc.1-windows-x64.zip",
+        "MapleThief-kit-0.0.1-rc.1-linux-aarch64.tar.gz",
+        "MapleThief-kit-0.0.1-rc.1-windows-arm64.zip",
     ]
     assert rel.player_names("0.0.1-rc.1") == [
         "MapleThief-0.0.1-rc.1-macos-universal.zip",
         "MapleThief-0.0.1-rc.1-linux-x86_64.tar.gz",
         "MapleThief-0.0.1-rc.1-windows-x64.zip",
+        "MapleThief-0.0.1-rc.1-linux-aarch64.tar.gz",
+        "MapleThief-0.0.1-rc.1-windows-arm64.zip",
         "MapleThief-0.0.1-rc.1-switch.zip",
     ]
     packaging = (REPO / "cmake/Packaging.cmake").read_text(encoding="utf-8")
@@ -722,7 +747,14 @@ def test_module_runs_as_script(tmp_path):
 
 ITCH_VERSION = "1.0.0"
 ITCH_TAG = f"v{ITCH_VERSION}"
-ITCH_CHANNELS = ("macos-universal", "linux-x86_64", "windows-x64", "switch")
+ITCH_CHANNELS = (
+    "macos-universal",
+    "linux-x86_64",
+    "windows-x64",
+    "linux-aarch64",
+    "windows-arm64",
+    "switch",
+)
 MACHO64 = b"\xcf\xfa\xed\xfe" + b"\0" * 60 + b"f_000027E0\0f_0002A3C1\0"
 ELF64 = b"\x7fELF\x02\x01\x01\0" + b"\0" * 56 + b"f_000027E0\0f_0002A3C1\0"
 FAKE_BUTLER = """\
@@ -741,6 +773,8 @@ def itch_release(root: Path, extra: dict[str, bytes] | None = None) -> Path:
         "macos-universal": {"MapleThief.app/Contents/MacOS/MapleThief": MACHO64, **licences},
         "linux-x86_64": {"bin/MapleThief": ELF64, "MapleThief.sh": b"#!/bin/sh\n", **licences},
         "windows-x64": {**PLAYER, **(extra or {})},
+        "linux-aarch64": {"bin/MapleThief": ELF64, "MapleThief.sh": b"#!/bin/sh\n", **licences},
+        "windows-arm64": dict(PLAYER),
         "switch": SWITCH_PLAYER,
     }
     sums = []
@@ -823,7 +857,7 @@ def test_itch_dry_run_prints_one_push_per_channel(tmp_path, itch_env, capsys):
     assert status == 0, out
     assert butler == []
     pushes = [line for line in out.splitlines() if "dry-run, not run: butler push" in line]
-    assert len(pushes) == 4  # every player build, the Switch zip included
+    assert len(pushes) == 6  # every player build, the Switch zip included
     for line, channel in zip(pushes, ITCH_CHANNELS, strict=True):
         assert line.endswith(
             f"MapleThief-{ITCH_VERSION}-{channel}."
@@ -916,8 +950,8 @@ def test_itch_push_runs_butler_with_the_key_from_the_environment(tmp_path, itch_
     status, butler = itch_run(tmp_path, itch_args(tmp_path), gh_run, {"BUTLER_API_KEY": key})
     out = capsys.readouterr().out
     assert status == 0, out
-    assert [c["argv"][0] for c in butler] == ["push", "push", "push", "push", "status"]
-    for call, channel in zip(butler[:4], ITCH_CHANNELS, strict=True):
+    assert [c["argv"][0] for c in butler] == ["push"] * 6 + ["status"]
+    for call, channel in zip(butler[:-1], ITCH_CHANNELS, strict=True):
         path, target, flag, version = call["argv"][1:]
         assert Path(path).parent == tmp_path / "out"
         assert (target, flag, version) == (
@@ -925,7 +959,7 @@ def test_itch_push_runs_butler_with_the_key_from_the_environment(tmp_path, itch_
             "--userversion",
             "1.0.0",
         )
-    assert butler[4]["argv"] == ["status", "armaatus/maplethief"]
+    assert butler[-1]["argv"] == ["status", "armaatus/maplethief"]
     assert all(c["key"] == key for c in butler)  # from the environment...
     assert not any(key in " ".join(c["argv"]) for c in butler)  # ...never on the command line
     assert key not in out
@@ -1098,10 +1132,12 @@ def test_scripts_release_itch_dry_run(tmp_path):
     )
     assert out.returncode == 0, out.stdout + out.stderr
     pushes = [line for line in out.stdout.splitlines() if "not run: butler push" in line]
-    # The Mac pushes macOS, Linux and the Switch; Windows pushes its own (scripts/release.ps1).
+    # The Mac pushes macOS, both Linux builds and the Switch; Windows pushes its own
+    # (scripts/release.ps1).
     assert [p.split()[-3] for p in pushes] == [
         "armaatus/maplethief:macos-universal",
         "armaatus/maplethief:linux-x86_64",
+        "armaatus/maplethief:linux-aarch64",
         "armaatus/maplethief:switch",
     ]
     assert all(p.endswith("--userversion 1.0.0") for p in pushes)

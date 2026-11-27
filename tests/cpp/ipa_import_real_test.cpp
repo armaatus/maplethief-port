@@ -4,7 +4,10 @@
 // hold exactly the files of work/ipa/Payload/MapleThief.app (bootstrap.py's extraction), byte
 // for byte. The Nintendo Switch's SD-card route (#243, import_screen.h) on a fake SD folder holding
 // a wrong .ipa and a copy of the IPA: the copy is found first, imported, and deleted when the
-// player says Yes. Nothing is kept: the temporary folders are removed at the end.
+// player says Yes. A repack (#350, ADR 0135's addendum): with the per-file hash list compiled in
+// (work/gen/ipa_files.inc), the IPA's entries stored in reverse order are imported through the
+// SD-card route, and the same with one listed file changed is refused by its name. Nothing is
+// kept: the temporary folders are removed at the end.
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -19,6 +22,7 @@
 #include "import_screen.h"
 #include "ipa_import.h"
 #include "maplethief/recomp/calls.h"
+#include "save_zip.h"
 
 // The boot (linked through the frontend library) refers to the dispatcher; nothing here runs
 // guest code.
@@ -139,6 +143,55 @@ int main() {
     std::printf("SD route: imported %s into %s, then deleted it\n", screen.file().c_str(),
                 (sd / "game").string().c_str());
     fs::remove_all(sd, ec);
+
+    // A repack: the same entries, stored, in reverse order; then one listed file changed.
+    const fe::IpaExpected expected = fe::ipa_expected();
+    if (expected.files.empty()) {
+        std::printf("repack: not checked (no work/gen/ipa_files.inc in this build)\n");
+    } else {
+        std::vector<std::uint8_t> bytes;
+        check(fe::check_ipa(ipa.string(), expected, &bytes).ok(), "read the IPA");
+        std::vector<fe::ZipEntry> entries;
+        std::string why;
+        check(fe::zip_read(bytes, fe::kMaxIpaEntryBytes, &entries, &why), "zip_read: " + why);
+        const std::vector<fe::ZipEntry> reversed(entries.rbegin(), entries.rend());
+        fs::create_directories(sd, ec);
+        const fs::path repack = sd / "repacked.ipa";
+        const std::vector<std::uint8_t> zip = fe::zip_store(reversed);
+        std::ofstream(repack, std::ios::binary)
+            .write(reinterpret_cast<const char *>(zip.data()),
+                   static_cast<std::streamsize>(zip.size()));
+        check(zip.size() != fe::kIpaSize, "the repack is another file");
+        fe::ImportScreen repacked(
+            sd.string(),
+            [&sd, &expected](const std::string &path, const fe::IpaProgress &p) {
+                return fe::import_ipa(path, sd.string(), expected, p);
+            },
+            fe::ImportScreen::Route::kSdCard);
+        check(repacked.look(), "repack: look");
+        repacked.wait();
+        check(repacked.state() == fe::ImportScreen::State::kAskDelete,
+              "repack: imported through the SD route: " + repacked.result().why);
+        check(fe::has_imported_game(sd.string()), "repack: game/ in <base>");
+        check(files_below(sd / "game").size() == expected.files.size() + 1,
+              "repack: game/ holds the executable and the listed files only");
+
+        const std::string victim = "Payload/MapleThief.app/" + expected.files.front().path;
+        std::vector<fe::ZipEntry> changed = reversed;
+        for (fe::ZipEntry &e : changed) {
+            if (e.name == victim) {
+                e.bytes.push_back(0);
+            }
+        }
+        const fe::IpaResult refused = fe::check_ipa_bytes(fe::zip_store(changed), expected);
+        check(refused.problem == fe::IpaProblem::kModified &&
+                  refused.why.find(expected.files.front().path) != std::string::npos,
+              "repack with " + victim + " changed: refused by name: " + refused.why);
+        std::printf("repack: %zu entries in reverse order imported (%zu listed files); "
+                    "changed: \"%s\"\n",
+                    entries.size(), expected.files.size(), refused.why.c_str());
+        fs::remove_all(sd, ec);
+    }
     std::printf("%s\n", failures == 0 ? "ok" : "FAILED");
     return failures == 0 ? 0 : 1;
 }

@@ -1765,6 +1765,7 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"speech", false, "no system voice open to homebrew (kCapSpeech, ADR 0174)"},
     {"speech_rate", false, "kCapSpeech"},
     {"speech_volume", false, "kCapSpeech"},
+    {"speech_notices", false, "kCapSpeech"},
     {"brightness", true, ""},
     {"contrast", true, ""},
     {"saturation", true, ""},
@@ -1784,6 +1785,11 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"stick_mode", true, ""},
     {"direction_priority", true, ""},
     {"update_check", false, "no HTTP fetcher on the console (update_fetch.cpp)"},
+    {"run_timer", true, ""},
+    {"run_category", true, ""},
+    {"record_runs", true, "run files go in the data folder (#405)"},
+    {"livesplit", false, "LiveSplit runs on a desktop (kCapLiveSplit)"},
+    {"livesplit_game_time", false, "LiveSplit runs on a desktop (kCapLiveSplit)"},
 };
 constexpr SwitchDecision kSwitchActions[] = {
     {"bindings", true, "the remap screen takes the pad"},
@@ -1798,6 +1804,10 @@ constexpr SwitchDecision kSwitchActions[] = {
     {"achievements", true, ""},
     {"keypad_layout_edit", true, "the editor takes the pad"},
     {"update_notice", false, "no update check"},
+    {"dump_textures", true, "into sdmc:/switch/maplethief/texture-dumps (#371)"},
+    {"build_texture_pack", true, "into texture-packs/, which the pack rows list"},
+    {"export_text", true, "into text-packs/, to translate on a computer"},
+    {"check_packs", true, "the verdicts in a list, the reports in the log"},
     {"quit", true, "back to the Homebrew Menu"},
 };
 
@@ -1999,9 +2009,11 @@ TEST_CASE("platform caps: the desktop shows every row as before; iOS and the Swi
             ios_hidden.emplace_back(row.key);
         }
     }
-    // iOS: the window is always the whole screen (ADR 0055), so its rows are gone; nothing else.
-    CHECK(ios_hidden ==
-          std::vector<std::string>{"fullscreen", "fullscreen_mode", "fullscreen_display"});
+    // iOS: the window is always the whole screen (ADR 0055), so its rows are gone; and LiveSplit
+    // runs on a desktop (#407). Nothing else.
+    CHECK(ios_hidden == std::vector<std::string>{"fullscreen", "fullscreen_mode",
+                                                 "fullscreen_display", "livesplit",
+                                                 "livesplit_game_time"});
     std::vector<std::string> ios_actions_hidden;
     for (const MenuActionInfo &a : fe::menu_actions()) {
         CHECK(fe::action_shown(a, SettingsPlatform::kDesktop));
@@ -2104,7 +2116,7 @@ TEST_CASE("settings menu: the pack rows offer their folders and show a pack by i
     CHECK(changes[0].first == "texture_pack");
     CHECK(changes[0].second == "sdmc:/switch/maplethief/texture-packs/HD");
     fe::set_pack_choices("texture_pack", {});
-    // On the desktop the row offers nothing and shows the path as it is, as before.
+    // On the desktop the row offers nothing; since #370 it shows the pack by its name too.
     const SettingInfo *row = fe::find_setting("texture_pack");
     REQUIRE(row != nullptr);
     CHECK(fe::setting_choices(*row).empty());
@@ -2117,7 +2129,7 @@ TEST_CASE("settings menu: the pack rows offer their folders and show a pack by i
     for (std::size_t k = 1; k < desk.items().size(); k++) {
         const SettingsMenu::Item &it = desk.items()[k];
         if (it.kind == Kind::kSetting && std::strcmp(it.setting->key, "texture_pack") == 0) {
-            CHECK(desk.row_value(k) == "/packs/HD");
+            CHECK(desk.row_value(k) == "HD");
         }
     }
     for (const char *key : {"texture_pack", "audio_pack", "text_pack", "border_image"}) {

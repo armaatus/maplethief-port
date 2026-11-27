@@ -83,10 +83,25 @@ HOOKED: dict[int, Hooked] = {
         "(image, x, y): an image at its top-left corner; widescreen (#86, ADR 0090) stretches "
         "the field's backdrop (CStateGame +0x454, a fixed 480 x 320 image) to the view's width",
     ),
+    0x34A05: Hooked(
+        "CChatBox::NextPage",
+        "(box): the next NPC dialogue page, its lines wrapped whole (+0x18, count +0x1C); the "
+        "text events (#391, ADR 0187) read the page after it for the speech",
+    ),
+    0x34CD1: Hooked(
+        "CChatBox::FirstPage",
+        "(box): the first NPC dialogue page, as NextPage; the text events (#391, ADR 0187) "
+        "read it after it",
+    ),
     0x38F55: Hooked(
         "CDataMgr::SaveQuestData",
         "(data manager, hero): the second of the game's save pair (after SaveSaveData 0x38711); "
         "the wrapper runs it, then backs up each slot whose files changed (#148, ADR 0078)",
+    ),
+    0x3EAA1: Hooked(
+        "Popup_Open",
+        "(mgr, id, text, kind): the engine's popup; the text events (#392) read its message, "
+        "kind and button labels (CMPopup at *0x11A96C) after it for the speech",
     ),
     0x46DB9: Hooked(
         "Shop_OnKey",
@@ -169,6 +184,11 @@ HOOKED: dict[int, Hooked] = {
         "rect; CDropItems::Update 0x5BC75 asks it for the hero and each lying drop (the call at "
         "0x5BCEE); auto_loot (#175) widens the drop's rect for that call only",
     ),
+    0x78339: Hooked(
+        "CNotifyTextList::Add",
+        "(list, text, colour): a notify line (pick-ups, meso, EXP, the map's name); the text "
+        "events (#392) read the text for the speech",
+    ),
     0x83C71: Hooked(
         "CStateGame::PaintExitToMenu",
         "(this): the scene runner, called by CStateGame::Paint before the shake is drawn; with "
@@ -179,6 +199,13 @@ HOOKED: dict[int, Hooked] = {
         "CStateGame::Paint",
         "(this): the field's frame; a scene's camera shake (+0x47E on, amplitude +0x488) is "
         "drawn here, so screen_shake below 100 (#158, ADR 0093) scales the amplitude for the call",
+    ),
+    0x8D4C9: Hooked(
+        "CStateGame::OnKeyPressed",
+        "(this, key): the field's keys and its popups, among them the death popup 0x68 and its "
+        '"Go to main menu" popup 0x6D, which leaves without a save; autosave = on_quit (#336) '
+        "checks its guards when Yes on 0x6D is confirmed, and finds the hero dead "
+        "(docs/re/autosave.md)",
     ),
     0xAAAB9: Hooked(
         "MainMenuView_clickPlay",

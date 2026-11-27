@@ -63,6 +63,24 @@ typedef struct mt_cg_text_stats {
 /* The counters since the text scale was last set. */
 mt_cg_text_stats mt_cg_get_text_stats(void) MT_NOEXCEPT;
 
+/* --- What the game draws as text (#303: the Korean run's checks) ---------------------------
+ *
+ * Every -[NSString drawAtPoint:withFont:] into a bitmap context (TextCache_DrawText 0x9031 draws
+ * every name, line and number this way) is handed to the observer after it is drawn, with or
+ * without a text pack. A test reads from it whether a character had no glyph in either font (it
+ * would draw nothing where the device drew a box) and whether the text ran past its bitmap. */
+typedef struct mt_cg_drawn_text {
+    const char *utf8;  /* the text, UTF-8; valid during the call */
+    float right;       /* where the text ends: its x plus its width, in points */
+    float limit;       /* the bitmap's width in points (TextCache's textures: 512) */
+    uint32_t missing;  /* characters no font has a glyph for (U+FFFD, a failed decode, counted) */
+    uint32_t newlines; /* line breaks: such a text is drawn and measured as one line */
+} mt_cg_drawn_text;
+typedef void (*mt_cg_text_observer_fn)(void *user, const mt_cg_drawn_text *text);
+
+/* Installs the observer (NULL: none, the default). On the game's thread. */
+void mt_cg_set_text_observer(mt_cg_text_observer_fn fn, void *user) MT_NOEXCEPT;
+
 /* --- UIKit images by file name (#153, ADR 0081: texture packs' menu art) ------------------
  *
  * The shell's images (+[UIImage imageNamed:], +[UIImage imageWithContentsOfFile:]) never pass
@@ -118,6 +136,25 @@ int mt_cg_color_rgba(mt_cpu *cpu, uint32_t color, float rgba[4]) MT_NOEXCEPT;
  * grows its buffer to a chunk's stated length before it reads the chunk, so a 100-byte file
  * could claim 2 GiB; with this walk no chunk claims more than the file holds. */
 const char *mt_cg_png_check(const uint8_t *data, size_t size) MT_NOEXCEPT;
+
+/* --- The bundled fonts for the port's own text (#372, ADR 0206) ------------------------------
+ *
+ * The frontend's overlays draw the characters their 5x7 font lacks (accented Latin, Hangul) with
+ * the game's glyph path: NanumGothic, else the fallback Fira Sans, rasterized by stb_truetype.
+ * One glyph at a time, for a frontend that composites the coverage itself. */
+typedef struct mt_cg_glyph {
+    int32_t width, height; /* the coverage's size in pixels; 0 x 0 for a blank glyph (a space) */
+    int32_t left, top;     /* its top-left from the pen on the baseline, in pixels (top < 0) */
+    int32_t advance;       /* the pen advance in pixels, rounded */
+} mt_cg_glyph;
+
+/* Fills *g for code point `cp` at an em of `em_pixels` pixels; a glyph whose coverage would be
+ * wider than `max_width` pixels (> 0) is narrowed to it. With `coverage` (at least width *
+ * height bytes, `capacity`), writes the coverage too: 0 to 255, rows top first. Returns 1, or 0
+ * (*g zeroed) when neither font has a glyph for `cp`, or for a control character. Any thread:
+ * the fonts used here are not the game's (the text the game draws keeps its own). */
+int mt_cg_bundled_glyph(uint32_t cp, int32_t em_pixels, int32_t max_width, mt_cg_glyph *g,
+                        uint8_t *coverage, size_t capacity) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

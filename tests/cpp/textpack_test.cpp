@@ -277,12 +277,31 @@ TEST_CASE("textpack: invalid UTF-8 is refused with a reason; the game's text sta
     CHECK(mt_textpack_get_stats().refused == 1);
 }
 
+TEST_CASE("textpack: pack.strings (ADR 0149) is the manifest, over textpack.strings (#370)") {
+    PackDir p;
+    p.write("pack.strings", "\"format\" = \"1\";\n\"kind\" = \"text\";\n\"id\" = \"t\";\n"
+                            "\"name\" = \"Neu\";\n\"language\" = \"fr\";\n");
+    p.write("Port.strings", "\"k\" = \"v\";");
+    CHECK(mt_textpack_open(p.path().c_str()) == 1);
+    CHECK(std::string(mt_textpack_manifest("name")) == "Neu");
+    CHECK(std::string(mt_textpack_manifest("language")) == "fr");
+    mt_textpack_close();
+    p.write("textpack.strings", k_manifest);
+    CHECK(mt_textpack_open(p.path().c_str()) == 1);
+    CHECK(std::string(mt_textpack_manifest("name")) == "Neu");
+    CHECK(logged("pack.strings is the manifest: textpack.strings ignored"));
+    mt_textpack_close();
+    p.write("pack.strings", "\"format\" = \"1\";\n\"name\" = \"Neu\";\n");
+    CHECK(mt_textpack_open(p.path().c_str()) == -1);
+    CHECK(logged("/pack.strings: its \"language\" is not a language tag"));
+}
+
 TEST_CASE("textpack: a pack without a good manifest is not opened") {
     {
         PackDir p;
         p.write("Scripts.strings", "\"k\" = \"v\";");
         CHECK(mt_textpack_open(p.path().c_str()) == -1);
-        CHECK(logged("has no textpack.strings (the manifest): no text pack"));
+        CHECK(logged("has no pack.strings or textpack.strings (the manifest): no text pack"));
         CHECK(mt_textpack_is_open() == 0);
     }
     const char *bad[][2] = {
@@ -398,7 +417,7 @@ TEST_CASE("textpack: a symbolic link in a pack is not followed, logged once (#41
     fs::create_symlink(outside.dir / "manifest.strings", p.dir / "textpack.strings", ec);
     REQUIRE(!ec);
     CHECK(mt_textpack_open(p.path().c_str()) == -1);
-    CHECK(logged("has no textpack.strings (the manifest): no text pack"));
+    CHECK(logged("has no pack.strings or textpack.strings (the manifest): no text pack"));
     CHECK(mt_textpack_is_open() == 0);
 }
 

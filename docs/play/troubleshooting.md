@@ -24,7 +24,7 @@ When you build it yourself, the build checks the file in `original/` instead, an
 
 ### Linux: "version `GLIBC_2.xx' not found"
 
-Your system is older than the build needs (glibc 2.39, e.g. Ubuntu 24.04). Update your distribution or SteamOS. More Linux tips: [Linux and Steam Deck](linux-and-steam-deck.md#if-it-doesnt-start).
+Your system is older than the build needs (glibc 2.35, e.g. Ubuntu 22.04). Update your distribution or SteamOS, or use the Flatpak bundle, which brings its own runtime. More Linux tips: [Linux and Steam Deck](linux-and-steam-deck.md#if-it-doesnt-start).
 
 ## The game keeps its data in the user folder
 
@@ -114,3 +114,5 @@ When you [report a problem](https://github.com/armaatus/maplethief-port/issues/n
 ## A crash or a bug to report
 
 The game writes a log to `logs/` in the data folder (settings menu → Saves → **Open logs folder**) and, after a crash, a report in `crashes/`; a dialog names the file. Attach both to a [bug report](https://github.com/armaatus/maplethief-port/issues/new?template=bug.yml). After a crash the next start offers to use default settings for one run (no texture or audio packs, the software renderer); your settings file is not changed. With **Crash recovery** on, it also offers to resume from a recovery point taken a few minutes before the crash ([Saves](saves.md#after-a-crash-recovery-points)).
+
+**The game freezes.** If the game stops drawing for 15 seconds on a desktop (not while it is minimised or in the background), it writes a hang report to `crashes/` and asks whether to **Keep waiting** or **Quit**. Keep waiting if it was loading something large; the question does not come back for the same freeze. Quit ends the game, and the next start offers default settings as after a crash. Attach the hang report and the newest log to a bug report as you would a crash report: it names where in the game it stopped.

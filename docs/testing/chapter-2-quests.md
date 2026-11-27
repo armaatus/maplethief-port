@@ -108,7 +108,7 @@ chat. It changes nothing on the main line.
   slot 4 and casts it every 20 s in the fight, and drinks to full HP on 9.4. The level-70 hero
   beat it in 12 game-s with no fall in the last run; an earlier run took 322, falling 3 times
   (the death popup's OK returns it to 9.0; the bot walks back and the fight goes on). The last
-  run killed it with the hero knocked back, and the run's *end scene* step cleared bug 17 (below). Its death plays end scene 8 (from the program, `CMob::Die`, not a
+  run killed it with the hero knocked back, and the run's *end scene* step cleared bug 19 (below). Its death plays end scene 8 (from the program, `CMob::Die`, not a
   script). How the fights start and end is written up in
   [re/boss-fights.md](../re/boss-fights.md).
 
@@ -141,7 +141,7 @@ No port bug turned up: the scripts, both bosses, the scenes, the 3rd job, the po
 `clearAll` and the chapter change ran as the scripts say.
 
 One bug of the game itself turned up: **a boss killed while the hero is knocked back locks its
-end scene** ([re/original-bugs.md, 17](../re/original-bugs.md#17-a-boss-killed-while-the-hero-is-knocked-back-locks-its-end-scene)).
+end scene** ([re/original-bugs.md, 19](../re/original-bugs.md#19-a-boss-killed-while-the-hero-is-knocked-back-locks-its-end-scene)).
 A level-80 try killed mob 68 with the hero in the air from a hit; the end scene's box then took
 no key for 15 minutes. The game drops every key while the hero's knock-back byte (`CHero +0x119`)
 is set, and nothing clears it during a scene. It is the device's behaviour; the Enhanced fix is
@@ -151,7 +151,7 @@ about every 1.5 s, so a blow already under way can still land the kill during a 
 did in the coverage run below (`play.chapter_2_f_synthetic` under `mac-coverage`: 12 hits in the
 19 s fight, one on the kill's tick, then 15 minutes in game mode 9). So part F has a step after
 the kill, *mob 68's end scene*: when A has not moved the scene on for 5 s with `+0x119` still set,
-the run prints `original bug 17: …` and clears that byte, as #420's fix will. The scene, the talk
+the run prints `original bug 19: …` and clears that byte, as #420's fix will. The scene, the talk
 with Alchester and the chapter change after it are the game's own. Two `mac-debug` reruns of part F
 after the change did not hit the bug; a run with the byte forced at the scene's start, and the
 last chain's part F, which hit it in play, took the step and went on to chapter 3.
@@ -222,7 +222,7 @@ ran past its 3,600 game-s: with this branch's bot changes the farm starts with 8
 dev's 5,350, and dev already took 3,114 game-s; the farm now has 5,400), and parts E to M then
 started from stale saves and failed, so the
 chapter-1 half of the game is short (1,245 functions, 65 scripts, 18 maps against the baseline's
-1,291, 113 and 30). Run 2's `play.chapter_2_f_synthetic` hit original bug 17 after killing
+1,291, 113 and 30). Run 2's `play.chapter_2_f_synthetic` hit original bug 19 after killing
 mob 68 (above), so its Alchester talk and the chapter change are missing from it. Measured
 against run 1, chapter 2's runs add 35 game functions, 84 scripts (23 of `script/chapter2/`,
 3 of them portals; 45 portals and 16 others of `script/common/`), 21 maps and 4 natives (49

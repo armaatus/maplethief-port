@@ -86,9 +86,9 @@
 //   pause_unfocused = off
 //   # the game's language: en | ko (MAPLETHIEF_LANGUAGE overrides it; from the next start)
 //   language = en
-//   # a directory of translated text in UTF-8 (python3 -m mtport.textpack export makes ...)
+//   # a directory of translated text in UTF-8 (the menu's Other tab: Export text makes ...)
 //   text_pack =
-//   # a directory of HD textures made from your own --dump-textures (python3 -m ...); empty: none
+//   # a directory of HD textures made from your own texture dump (the menu's Other tab: ...)
 //   texture_pack =
 //   # how textures are sampled at render scale 2 and up: game (smooth, the device's look) | ...
 //   texture_filter = game
@@ -149,6 +149,18 @@
 //   # once a day, ask github.com whether a newer version of the port is out (never in
 //   # Original; it downloads nothing): on | off
 //   update_check = off
+//   # the speedrun timer over the picture (run_timer.h): on | off
+//   run_timer = off
+//   # the timer's category: any | chapter_1, or a file of your own in <data dir>/categories
+//   run_category = any
+//   # record every session, from the start to quit, as a run file in runs/ that plays back
+//   # exactly (MapleThief --play-run FILE): on | off
+//   record_runs = off
+//   # send the run timer's start, splits and resets to LiveSplit's TCP server
+//   # (livesplit.h): off | HOST:PORT (localhost:16834)
+//   livesplit = off
+//   # with livesplit, LiveSplit's game time is the game's ticks (50 ms each): on | off
+//   livesplit_game_time = on
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -637,6 +649,8 @@ struct Settings {
     // none), a folder of the game's text and the port's own in UTF-8 that replace the
     // language's, by key; anything it lacks stays the original.
     std::string text_pack;
+    // #370 (ADR 0149, packs.h): each of texture_pack, audio_pack and text_pack is an ordered
+    // list of folders, '|' between them, first first; the packs screen writes it.
     // Offline polish (#154, ADR 0084, maplethief/offline.h): the title menu without its dead
     // online buttons (the banner, More Games, About's links; the Game Center button too while
     // local_game_center is off), and Game Center on this computer: the leaderboard screen and
@@ -683,6 +697,8 @@ struct Settings {
     bool speech = false;                            // speech, --speech (on | off)
     std::uint32_t speech_rate = kSpeechRateDefault; // --speech-rate (50 to 200, percent)
     std::uint32_t speech_volume = kSpeechVolumeMax; // --speech-volume (0 to 100, percent)
+    // The notify lines (pick-ups, meso, EXP, the map's name) said too (#392, ADR 0191).
+    bool speech_notices = true; // speech_notices, --speech-notices (on | off)
     // The picture adjustments (#187): the present stage's colour step with the filter.
     std::uint32_t brightness = kPictureDefault; // --brightness (50 to 150, percent)
     std::uint32_t contrast = kPictureDefault;   // --contrast (50 to 150, percent)
@@ -715,6 +731,17 @@ struct Settings {
     // The opt-in update notice (#199, ADR 0137, update_check.h): off by default, in no preset,
     // and it never runs in the Original preset.
     bool update_check = false; // update_check, --update-check (on | off)
+    // The speedrun timer (#406, ADR 0156, run_timer.h): its overlay and run logs, and the
+    // category it times (a category file's name, without .mtcat). Outside the presets.
+    bool run_timer = false;           // run_timer, --run-timer (on | off)
+    std::string run_category = "any"; // run_category, --run-category (NAME)
+    // Run recording (#405, ADR 0156, run_recorder.h): every session from the start to quit into
+    // <data dir>/runs/, off by default and in no preset.
+    bool record_runs = false; // record_runs, --record-runs (on | off)
+    // The LiveSplit link (#407, ADR 0156, livesplit.h): HOST:PORT of LiveSplit's TCP server, empty
+    // for off; and whether it gets the game time. Desktop only, outside the presets.
+    std::string livesplit;           // livesplit, --livesplit (off | HOST:PORT)
+    bool livesplit_game_time = true; // livesplit_game_time, --livesplit-game-time (on | off)
 
     bool operator==(const Settings &) const = default;
 };
@@ -962,6 +989,11 @@ inline constexpr const char *kFullscreenDisplayCurrent = "current";
 // (kCapPackFolders: the Switch; pack_folders.cpp's offer_pack_folders sets them at the start).
 // The menu then offers "" (none) and these; with none set it offers nothing, as before.
 void set_pack_choices(std::string_view key, std::vector<std::string> values);
+// run_category (#406, run_timer.h): the categories' names the settings menu offers (game.cpp
+// sets them from the shipped categories and the data folder's). Until then the menu offers the
+// shipped categories' names. A category's name is 1 to 32 of a-z, 0-9 and '_'.
+void set_run_category_choices(std::vector<std::string> names);
+inline constexpr std::size_t kMaxRunCategoryBytes = 32;
 
 // Every setting, in the order a new file lists them (after `preset`).
 std::span<const SettingInfo> settings_registry();

@@ -9,6 +9,9 @@
 #     once in real time with --seconds 3 and the device stream (dummy driver), whose exit log
 #     has the audio output's numbers and how long the stream ran.
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 if(MODE STREQUAL "usage")
     foreach(value 0 -1 abc 1x nan inf 604801)
         execute_process(

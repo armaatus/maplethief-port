@@ -188,7 +188,7 @@ def test_the_expected_jobs_are_cis_jobs():
     blocks = _job_blocks()
     assert set(blocks) == set(EXPECTED) | {SELF[0]}
     for job_id, names in EXPECTED.items():
-        if job_id != "build":
+        if job_id not in ("build", "min-compilers"):  # matrix jobs
             assert names == (re.search(r"\n    name: (.+)\n", blocks[job_id]).group(1),)
     assert f"\n    name: {SELF[1]}\n" in blocks[SELF[0]]
 
@@ -208,3 +208,13 @@ def test_the_weekly_run_builds_the_full_profile():
     assert "github.event_name == 'schedule'" in build  # Release on the weekly run
     assert "github.event_name == 'pull_request' && github.base_ref != 'main'" in build  # every OS
     assert "github.event_name == 'schedule'" in _job_blocks()["ios"]
+
+
+def test_the_weekly_run_builds_with_the_minimum_compilers():
+    # ADR 0002's minimum Linux compilers (#341): one job per compiler, on the image they ship with.
+    job = _job_blocks()["min-compilers"]
+    assert "github.event_name == 'schedule'" in job
+    assert "runs-on: ubuntu-24.04\n" in job
+    ccs = re.findall(r"\{ cc: ([\w.-]+),", job)
+    assert tuple(f"minimum {cc}" for cc in ccs) == EXPECTED["min-compilers"]
+    assert "scripts/test" in job

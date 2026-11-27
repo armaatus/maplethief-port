@@ -1,10 +1,10 @@
 """The weekly CI report (#339): the last job of CI's scheduled run on ``dev``.
 
 The schedule runs the manual-run profile (every OS, Debug and Release, iOS, the Switch,
-Android, ASan). This module lists that run's jobs through GitHub's API and checks that every
-job of the profile, :data:`EXPECTED`, ran and passed: a run has ended as a failure with jobs
-missing and no log, so the count of jobs is checked, not only the conclusion. A missing,
-skipped, cancelled or failed job fails the report.
+Android, ASan, the minimum compilers). This module lists that run's jobs through GitHub's API
+and checks that every job of the profile, :data:`EXPECTED`, ran and passed: a run has ended as
+a failure with jobs missing and no log, so the count of jobs is checked, not only the
+conclusion. A missing, skipped, cancelled or failed job fails the report.
 
 On a failure it opens one issue labelled :data:`LABEL` with the failed jobs' links and the
 missing jobs, or comments on the open one, so a break stays in one place until it is fixed. A
@@ -34,10 +34,17 @@ EXPECTED: dict[str, tuple[str, ...]] = {
     "scope": ("scope",),
     "build": tuple(
         f"{os_name} {config}"
-        for os_name in ("ubuntu-latest", "macos-latest", "windows-latest")
+        for os_name in (
+            "ubuntu-latest",
+            "macos-latest",
+            "windows-latest",
+            "ubuntu-24.04-arm",
+            "windows-11-arm",
+        )
         for config in ("debug", "release")
     ),
     "asan": ("linux asan+ubsan",),
+    "min-compilers": ("minimum gcc-13", "minimum clang-17"),
     "ios": ("ios arm64 (compile, no IPA, no signing)",),
     "switch": ("switch (NRO, devkitA64 container, no IPA)",),
     "android": ("android (APK, pinned SDK and NDK container, no IPA)",),

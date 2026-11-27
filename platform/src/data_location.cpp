@@ -24,6 +24,7 @@
 #endif
 
 #include "maplethief/saves.h"
+#include "run_recorder.h"
 
 namespace maplethief::frontend {
 
@@ -62,6 +63,7 @@ std::string errno_text(int err) { return std::generic_category().message(err); }
 // The resolver's cache (data_location()) and --data-location.
 struct State {
     std::optional<DataPlace> flag;
+    std::string dir; // set_data_location_dir: in place of MAPLETHIEF_DATA_DIR
     std::optional<DataLocation> resolved;
 };
 State &state() {
@@ -99,6 +101,8 @@ const char *data_reason_name(DataReason reason) {
         return "marker";
     case DataReason::kApplicationsFolder:
         return "applications-folder";
+    case DataReason::kFlatpak:
+        return "flatpak";
     case DataReason::kFallbackTranslocated:
         return "fallback-translocated";
     case DataReason::kFallbackNotWritable:
@@ -244,7 +248,10 @@ bool probe_data_dir(const std::string &data_dir, std::string *why) {
 
 DataInputs current_data_inputs() {
     DataInputs in;
-    if (const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR"); env != nullptr && *env != '\0') {
+    if (!state().dir.empty()) {
+        in.env = state().dir;
+    } else if (const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR");
+               env != nullptr && *env != '\0') {
         in.env = env;
     }
     in.flag = state().flag;
@@ -270,6 +277,13 @@ DataInputs current_data_inputs() {
     in.os = DataInputs::Os::kWindows;
 #elif defined(SDL_PLATFORM_LINUX)
     in.os = DataInputs::Os::kLinux;
+    // The AppImage runtime and Flatpak set these for the program they start (ADR 0193).
+    if (const char *appimage = SDL_getenv("APPIMAGE"); appimage != nullptr) {
+        in.appimage = appimage;
+    }
+    if (const char *flatpak = SDL_getenv("FLATPAK_ID"); flatpak != nullptr && *flatpak != '\0') {
+        in.flatpak = true;
+    }
 #endif
     in.user_dir = [] { return user_data_dir(true); };
 #endif
@@ -309,7 +323,12 @@ DataLocation resolve_data_location(const DataInputs &in) {
         return data_location_at(join(kSwitchBaseDir, kDataDirName), DataPlace::kSwitch,
                                 DataReason::kPlatform, kSwitchBaseDir);
     }
-    const std::string base = data_base_dir(in.base_path);
+    // An AppImage runs from a read-only mount: <base> is the folder of the .AppImage file.
+    const fs::path appimage = utf8_path(in.appimage);
+    const bool in_appimage = in.os == DataInputs::Os::kLinux && appimage.is_absolute() &&
+                             appimage.has_parent_path() && appimage.has_filename();
+    const std::string base =
+        in_appimage ? path_utf8(appimage.parent_path()) : data_base_dir(in.base_path);
     bool portable = false;
     bool marker = false;
     if (!base.empty()) {
@@ -358,12 +377,21 @@ DataLocation resolve_data_location(const DataInputs &in) {
         (base == "/Applications" || (!in.home.empty() && base == in.home + "/Applications"))) {
         return with_portable(user(DataReason::kApplicationsFolder, base));
     }
+    // 4. A Flatpak: /app is read-only, the sandbox's per-user folder is the player's.
+    if (in.os == DataInputs::Os::kLinux && in.flatpak) {
+        return with_portable(user(DataReason::kFlatpak, base));
+    }
     // 5 and 6. The game folder, or the fallback.
     return game(DataReason::kDefault);
 }
 
 void set_data_location_flag(std::optional<DataPlace> flag) {
     state().flag = flag;
+    state().resolved.reset();
+}
+
+void set_data_location_dir(const std::string &dir) {
+    state().dir = dir;
     state().resolved.reset();
 }
 
@@ -503,6 +531,7 @@ std::string migrate_gamecenter(const std::string &data_dir, const std::string &s
     if (!read(from, &bytes)) {
         return "data: cannot read " + path_utf8(from);
     }
+    run_refuse("a data folder switch"); // the saves move under the game (run_census.h)
     if (mt_saves_replace_file(path_utf8(to).c_str(), bytes.data(), bytes.size()) != 0) {
         return "data: cannot copy " + path_utf8(from) + " into " + saves_dir;
     }

@@ -39,6 +39,7 @@
 #include "hle/libc_internal.h"
 #include "maplethief/gcd.h"
 #include "maplethief/hle/abi.h"
+#include "maplethief/runtape.h"
 #include "maplethief/stubs.h"
 #include "snapshot/snapshot_internal.h"
 
@@ -286,6 +287,12 @@ extern "C" double mt_runloop_next_wake(double now) noexcept {
 extern "C" std::uint32_t mt_runloop_main(mt_cpu *cpu) noexcept { return main_loop(cpu); }
 
 extern "C" void mt_runloop_set_fire_tolerance(double seconds) noexcept {
+    mt_runtape_event e{};
+    e.kind = MT_RUNTAPE_FIRE_TOLERANCE;
+    std::memcpy(&e.value, &seconds, sizeof seconds);
+    if (mt_runtape_admit(&e) == 0) {
+        return; // a tape plays: the recorded run's tolerance comes from it
+    }
     g_fire_tolerance = seconds;
 }
 

@@ -35,8 +35,10 @@ On the first start the game asks for this file (on the Switch: finds it on the S
 | Your system | Download |
 |---|---|
 | Windows 10 or 11, 64-bit | `MapleThief-<version>-windows-x64.zip` |
+| Windows 11 on an ARM64 PC | `MapleThief-<version>-windows-arm64.zip` |
 | Mac, macOS 13 or later (Apple silicon or Intel) | `MapleThief-<version>-macos-universal.zip` |
-| Linux x86_64 with glibc 2.39 or later, Steam Deck | `MapleThief-<version>-linux-x86_64.tar.gz` |
+| Linux x86_64 with glibc 2.35 or later, Steam Deck | `MapleThief-<version>-linux-x86_64.tar.gz` |
+| Linux aarch64 (ARM64) with glibc 2.35 or later | `MapleThief-<version>-linux-aarch64.tar.gz` |
 | Nintendo Switch that runs homebrew from the Homebrew Menu | `MapleThief-<version>-switch.zip` |
 
 On a computer, the itch app installs and updates the right one for you. The Switch zip is copied to the SD card by hand (below). Each file is the same as on the project's [GitHub Releases page](https://github.com/armaatus/maplethief-port/releases), where `SHA256SUMS` lists its checksum.
@@ -101,7 +103,6 @@ The full list: [Controls](https://github.com/armaatus/maplethief-port/blob/main/
 
 - Text uses an open font instead of Apple's, so it looks a little plainer.
 - The cash shop can't take real money. A setting lets it pay in the game's meso instead.
-- The download accepts only the exact game file above; a repacked copy is refused. Building from source accepts it.
 - It hasn't been checked on a real Steam Deck yet.
 - The Switch build hasn't been checked on a console yet.
 - macOS and Windows warn the first time, because the port isn't signed or notarised with paid certificates.

@@ -1,0 +1,36 @@
+#!/usr/bin/python3
+"""bwrap without Flatpak's seccomp filter, for scripts/linux-game check-packages only.
+
+An x86_64 container emulated on an arm64 kernel (Rosetta on Apple silicon) can't load the
+x86_64 seccomp filter Flatpak hands bwrap ("prctl(PR_SET_SECCOMP): Invalid argument"). With
+FLATPAK_BWRAP pointing here, bwrap runs with every other part of the sandbox (namespaces, the
+filesystem view, the app's permissions) and without the filter. Flatpak may pass its arguments
+in a file (--args FD): they are read, filtered and passed on the command line.
+"""
+
+import os
+import sys
+
+
+def expand(args: list[str]) -> list[str]:
+    out = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--args":
+            with os.fdopen(int(args[i + 1]), "rb") as f:
+                raw = f.read()
+            parts = raw.split(b"\0")
+            if raw.endswith(b"\0"):
+                parts = parts[:-1]
+            out += expand([p.decode() for p in parts])
+            i += 2
+        elif args[i] in ("--seccomp", "--add-seccomp-fd"):
+            os.close(int(args[i + 1]))
+            i += 2
+        else:
+            out.append(args[i])
+            i += 1
+    return out
+
+
+os.execv("/usr/bin/bwrap", ["bwrap", *expand(sys.argv[1:])])

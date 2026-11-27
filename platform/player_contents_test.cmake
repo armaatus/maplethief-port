@@ -6,6 +6,9 @@
 #
 #   cmake -DPROGRAM=<MapleThief> -DWORK_DIR=<repo>/work -P player_contents_test.cmake
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 foreach(var PROGRAM WORK_DIR)
     if(NOT DEFINED ${var})
         message(FATAL_ERROR "player_contents_test: -D${var}=... is required")

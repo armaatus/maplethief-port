@@ -224,6 +224,9 @@ std::vector<Binding> default_keyboard_bindings() {
         // too, so that a press there says why it is refused. Unbound on pads.
         {key(SDLK_F5), MT_ACTION_QUICK_SAVE, MT_ACTION_QUICK_SAVE},
         {key(SDLK_F9), MT_ACTION_QUICK_LOAD, MT_ACTION_QUICK_LOAD},
+        // The speedrun timer's practice states (#409, the same gate), as F5 and F9.
+        {key(SDLK_F7), MT_ACTION_PRACTICE_PICK, MT_ACTION_PRACTICE_PICK},
+        {key(SDLK_F8), MT_ACTION_PRACTICE_LOAD, MT_ACTION_PRACTICE_LOAD},
     };
 }
 

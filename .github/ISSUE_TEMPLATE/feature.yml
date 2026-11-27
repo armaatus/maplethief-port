@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest something the port should do. For a question or a loose idea, use Discussions.
+title: "[feature] "
+labels: ["type:feature", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The port adds options around the original game and never changes the game itself ([Settings](https://github.com/armaatus/maplethief-port/blob/dev/docs/play/settings.md)). A loose idea fits better in [Discussions → Ideas](https://github.com/armaatus/maplethief-port/discussions/categories/ideas).
+
+        **Don't attach game files**: no IPA, nothing from the game's `game/` folder, no pictures, sounds or text taken out of the game.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to do
+      description: What you are trying to do, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Suggestion
+      description: How the port could help. A setting, a control, a build for another system.
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      description: Where you would use it.
+      multiple: true
+      options: [All, Windows, macOS, Linux, Steam Deck, iPhone or iPad, Nintendo Switch, Android]
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Other games or ports that do this well, links, sketches.

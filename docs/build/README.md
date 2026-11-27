@@ -137,7 +137,7 @@ It is safe to re-run and writes byte-identical outputs every time. The scripts o
 
 1. checks the IPA against `original/SHA256SUMS` (the exact file, or a [repacked copy](#build-from-your-own-copy-wherever-it-is) with the right main binary), then extracts it to `work/ipa/`. The IPA is treated as untrusted data: every entry name is checked before anything is written (no absolute paths, `..` or symbolic links), and nothing extracted is executed. `scripts/verify-original.sh` runs just this step (`--no-extract`: only the checks);
 2. splits the fat main binary into `work/slices/MapleThief.armv6` and `work/slices/MapleThief.armv7` with a portable splitter ([`tools/mtport/fat.py`](../../tools/mtport/fat.py), no `lipo` needed) and checks both slices. On macOS it also cross-checks them against `lipo -thin`;
-3. writes `work/slices/SHA256SUMS` and `work/bootstrap.json` (paths, sizes, hashes, fat offsets and the tool version). Other tools read `work/bootstrap.json` instead of hard-coding paths.
+3. writes `work/slices/SHA256SUMS` and `work/bootstrap.json` (paths, sizes, hashes, fat offsets and the tool version). Other tools read `work/bootstrap.json` instead of hard-coding paths. It also writes `work/gen/ipa_files.inc`, the SHA-256 of each bundle file the game reads ([`tools/mtport/ipa_files.py`](../../tools/mtport/ipa_files.py)), which a build compiles into the IPA import so that it accepts a repacked copy ([ADR 0135](../adr/0135-accept-an-ipa-by-its-main-binary.md)'s addendum); the player build needs it.
 
 Any failure (missing file, the wrong game or version, an encrypted copy, a tool that's too old) stops with an `error:` line and a non-zero exit.
 
@@ -160,7 +160,7 @@ python3 -m recomp all       # Windows: py -m recomp all
 
 This loads, discovers and lifts the armv7 slice in a few seconds. It writes the generated C into the ignored `work/gen/` (`mt_gen.h`, the translation units `fn_NNN.c`, `imports.c`, `dispatch.c` and `gen.cmake`) and its reports into `work/recomp/`. A file is rewritten only when its content changes, so the next build recompiles only what changed. `python3 -m recomp lift --units N` picks another number of translation units.
 
-When `work/gen/gen.cmake` exists, the build compiles it as the static library `maplethief_gen`, and the program runs the game. Without it, the build skips that target and the program shows a placeholder. `-DMAPLETHIEF_GEN_DIR=<dir>` builds another output directory, and `-DMAPLETHIEF_GEN_DIR=` leaves the generated code out ([ADR 0014](../adr/0014-recompiler-design.md), [ADR 0021](../adr/0021-generated-code-partition-and-build.md)).
+When `work/gen/gen.cmake` exists, the build compiles it as the static library `maplethief_gen`, and the program runs the game. Without it, the build skips that target and the program shows a placeholder. `-DMAPLETHIEF_GEN_DIR=<dir>` builds another output directory, and `-DMAPLETHIEF_GEN_DIR=` leaves the generated code out ([ADR 0014](../adr/0014-recompiler-design.md), [ADR 0021](../adr/0021-generated-code-partition-and-build.md)). The IPA import's per-file hash list is read from `<gen dir>/ipa_files.inc` the same way; `-DMAPLETHIEF_IPA_FILES=<file>` names another one ([ADR 0135](../adr/0135-accept-an-ipa-by-its-main-binary.md)'s addendum).
 
 ### 4. Configure, build and test
 
@@ -189,7 +189,9 @@ cmake --build --preset mac-debug --target smoke   # its headless smoke test, out
 | `mac-app` | macOS | Release, arm64 + x86_64, macOS 13+, the game app from your IPA ([below](#the-macos-app)) | `build/mac-app/platform/MapleThief.app` |
 | `win-debug` / `win-release` | Windows | Debug / Release, x64, MSVC | `build/win-*/platform/MapleThief.exe` |
 | `linux-debug` / `linux-release` | Linux | Debug / Release | `build/linux-*/platform/MapleThief` |
-| `mac-player` / `win-player` / `linux-player` | each OS | Release, the release's player build | see [Releases](releases.md) |
+| `win-arm64-debug` / `win-arm64-release` | Windows, from an [ARM64 developer environment](#windows-arm64) | Debug / Release, ARM64, MSVC | `build/win-arm64-*/platform/MapleThief.exe` |
+| `linux-arm64-debug` / `linux-arm64-release` | Linux on aarch64 (the default there; also the arm64 container) | Debug / Release; configure fails for another CPU | `build/linux-arm64-*/platform/MapleThief` |
+| `mac-player` / `win-player` / `linux-player`, `win-arm64-player` / `linux-arm64-player` | each OS | Release, the release's player build | see [Releases](releases.md) |
 | `android-debug` / `android-release` | the Mac with `scripts/android-sdk install`, or the Android container | Debug / Release, `arm64-v8a`, API 26+, `MAPLETHIEF_MEM_MODEL=checked` | `build/android-*/MapleThief.apk` ([Android](#android)) |
 | `switch-debug` / `switch-release` | the devkitA64 container (`DEVKITPRO` set) | Debug / Release, AArch64 `-mcpu=cortex-a57+crypto`, `MAPLETHIEF_MEM_MODEL=checked` | `build/switch-*/MapleThief.nro`; the tests as `build/switch-*/tests/<program>.nro` ([Nintendo Switch](#nintendo-switch)) |
 
@@ -201,13 +203,15 @@ Warnings in our own code are errors when `CI` is set in the environment, or with
 
 ### 5. Package a kit (optional)
 
-These five workflow presets also **package** a kit with CPack ([ADR 0023](../adr/0023-local-ci-and-packaging.md)): `cmake --workflow --preset <preset>` configures, builds, runs CTest and writes the package into `build/<preset>/`. `cpack --preset <preset>` repackages an existing build. A release carries only the first three, which `release.yml` builds ([Releases](releases.md)); the Switch and Android kits are built and tested in CI but never uploaded, and the Switch ships as a player zip instead.
+These workflow presets also **package** a kit with CPack ([ADR 0023](../adr/0023-local-ci-and-packaging.md)): `cmake --workflow --preset <preset>` configures, builds, runs CTest and writes the package into `build/<preset>/`. `cpack --preset <preset>` repackages an existing build. A release carries the macOS, Windows and Linux ones (Windows and Linux on x64 and ARM64), which `release.yml` builds ([Releases](releases.md)); the Switch and Android kits are built and tested in CI but never uploaded, and the Switch ships as a player zip instead.
 
 | Workflow preset | Package |
 |---|---|
 | `mac-release-universal` | `MapleThief-kit-<version>-macos-universal.zip` (the `.app` is ad-hoc signed) |
 | `win-release` | `MapleThief-kit-<version>-windows-x64.zip` |
 | `linux-release` | `MapleThief-kit-<version>-linux-x86_64.tar.gz` (built in the Linux container, [Testing and CI](testing.md#the-linux-container)) |
+| `win-arm64-release` | `MapleThief-kit-<version>-windows-arm64.zip` (on an ARM64 PC; CI's `windows-11-arm` runner) |
+| `linux-arm64-release` | `MapleThief-kit-<version>-linux-aarch64.tar.gz` (in the arm64 container: `scripts/test-linux --release --arch arm64`) |
 | `switch-release` | `MapleThief-kit-<version>-switch.zip` (`MapleThief.nro` and the docs; built in the Switch container) |
 | `android-release` | `MapleThief-kit-<version>-android-arm64.zip` (`MapleThief.apk`, debug-key signed, and the docs) |
 
@@ -218,6 +222,10 @@ The version is `MAPLETHIEF_VERSION` (`X.Y.Z` or `X.Y.Z-rc.N`, default `0.0.1`), 
 ## Windows: the x64 developer environment
 
 `just build` sets this up by itself. For anything else that compiles (the `win-*` presets, `scripts\test.ps1`) the presets use Ninja with MSVC, so they need the Visual Studio **x64** developer environment. Start "x64 Native Tools Command Prompt for VS 2022", or run `Enter-VsDevShell -Arch amd64` in PowerShell (the plain "Developer PowerShell" shortcut targets x86, which configure rejects), or open the folder in Visual Studio or VS Code, whose CMake integration sets it up from the presets. That environment also puts the CMake and Ninja that ship with Visual Studio on `PATH`.
+
+### Windows ARM64
+
+The `win-arm64-*` presets ([ADR 0194](../adr/0194-windows-arm64-and-linux-aarch64-builds.md)) need an **ARM64** developer environment, with the "MSVC ARM64 build tools" component of Visual Studio installed. On an ARM64 PC that is `vcvarsall.bat arm64` (or `Enter-VsDevShell -Arch arm64 -HostArch arm64`); there `scripts\test.ps1` picks the `win-arm64-*` presets by itself. On an x64 PC, `vcvarsall.bat x64_arm64` (the "ARM64 Cross Tools" prompt) cross-compiles: the build works, but the x64 PC can't run what it builds, so only the `win-arm64-player` workflow is useful there (its CTest preset runs only the check that reads the executable; [Releases](releases.md)). Configuring an ARM64 preset from the x64 environment fails with "This preset builds for arm64, but the compiler targets x86_64".
 
 ## The macOS app
 
@@ -238,7 +246,7 @@ An app you built yourself has no quarantine attribute, so it opens without askin
 
 ## Linux and Steam Deck
 
-`just build linux` (into `dist/linux/`), or `scripts/linux-game build` by hand (into `build/linux-game/`), builds the game in a pinned Ubuntu 24.04 container, on a Mac too, as `MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` ([ADR 0065](../adr/0065-linux-and-steam-deck-build.md)). It holds the launcher `MapleThief.sh`, the executable (static libstdc++, needs only glibc 2.39+) and a copy of your bundle. `scripts/linux-game check` runs it in a stock Ubuntu 24.04 image, and `--native` builds on your own Linux machine with your compiler. [Linux and Steam Deck](../play/linux-and-steam-deck.md) has the Steam Deck steps.
+`just build linux` (into `dist/linux/`), or `scripts/linux-game build` by hand (into `build/linux-game/`), builds the game in a pinned Ubuntu 22.04 container, on a Mac too, as `MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` ([ADR 0065](../adr/0065-linux-and-steam-deck-build.md)). It holds the launcher `MapleThief.sh`, the executable (static libstdc++, needs only glibc 2.35+) and a copy of your bundle. `scripts/linux-game check` runs it in a stock Ubuntu 22.04 image, and `--native` builds on your own Linux machine with your compiler. [Linux and Steam Deck](../play/linux-and-steam-deck.md) has the Steam Deck steps.
 
 ## Nintendo Switch
 

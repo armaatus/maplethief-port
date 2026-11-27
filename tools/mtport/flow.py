@@ -205,6 +205,17 @@ FLOW_NAMES: tuple[tuple[int, str, str], ...] = (
     (0x31E11, "CChatBox::GetAnswer", "modes 1/3: 1 = the first button; 2: the row's value"),
     (0x31D39, "CSelItem::CSelItem", "(item, key, value): key copied (strcpy)"),
     (0x31D95, "CMsg::CMsg", "(msg, kind, text, face): text copied (strcpy)"),
+    # The speakers (#391, docs/re/speech.md).
+    (0x32BBD, "CChatBox::paint", "page kind 0: the hero's caption; else NPC +0xAC's name"),
+    (0x35189, "CChatBox::drawChatBox", "(box, speaker, lines, n): a scene's speech box"),
+    (0x34FA1, "CChatBox::SetNpc", "(box, npc): CStateGame +0xAC = npc, +0x40 its sprite"),
+    (0x32B4D, "CChatBox::SetBossSpeaker", "CStateGame +0xAC = -1, +0x40 the boss's sprite"),
+    (0x37999, "CDataMgr::ReadString", "(mgr, table, col, row, width): new[] copy, NUL-ended"),
+    # The popup (#392, docs/re/speech.md#notify-lines-and-popups): the CMPopup at *0x11A96C.
+    (0xE861, "CMPopup::SetText", "(popup, text): +0x04 = a new[] copy of text, or 0"),
+    (0xE799, "CMPopup::SetKind", "(popup, kind): +0x10; the kind's two labels via SetButtons"),
+    (0xE781, "CMPopup::SetButtons", "(popup, a, b): the button labels +0x70, +0x74"),
+    (0xE8B5, "CMPopup::Layout", "(popup, w, h, max h, line h): wraps +0x04 into +0x08 / +0x0C"),
     # 0x22EC5 Text_Wrap and 0x6299D CHero::SetFace are named in scenes.py (the scenes use them too).
     # Text_Wrap's character steps (#189, docs/re/text.md): 3 bytes for any byte >= 0x80.
     (0x22989, "Text_CharCount", "(text): strlen, 3 bytes a character from a byte >= 0x80"),

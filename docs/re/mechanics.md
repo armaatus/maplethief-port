@@ -266,7 +266,9 @@ The best score of each mode is kept in the data manager (`+0x438`, `+0x43C`, `+0
 
 So the first scroll on any item always works, and a fixed-stat item can take at most 5 successful scrolls (its sixth and seventh chances are 0 %).
 
-**Special items (type 7).** 128 gives a level-up; 129 resets the skills (every point spent comes back, stats are recomputed); 131 gives 20 % of the current level's need as EXP; 132 gives one skill point. Item 130 ("Reverse") revives the hero from the death popup instead of returning to town ([cash-shop.md](cash-shop.md)).
+**From the item tab.** The checks are the item tab's, not `UseItem`'s: OK on a scroll's sub-list row 0 (`CDataMgr::keyPopupItemInven` `0x5285D`) opens popup 10 with no item in the target slot, popup `0x67` ("can't upgrade any more") with no slot left, and otherwise question `0x65`, whose Yes calls `UseItem`. `UseItem` stores the worn item at `CDataMgr +0x104` and the result at `+0x109` (1 success, 0 failure), sets `+0x108`, and plays the effect; `CHero::Flush` `0x62ADD` then shows popup `0x66` (success or failure text) and clears `+0x108`. A scroll's sub-list has two rows, use and throw away, so a scroll cannot go on a quick slot; `CHero::KeyAttack` `0x66DD9` would call `UseItem` from a quick slot with none of the checks. `play.systems2_scrolls_success_synthetic` and `_failure_synthetic` (real assets) use all ten scrolls: every one succeeds on items with no success yet, the five type-3 scrolls fail and the five type-8 ones succeed on items with 5 successes, each uses one slot, and with no slot left both kinds are refused with `0x67`.
+
+**Special items (type 7).** 128 gives a level-up; 129 resets the skills (every point spent comes back, stats are recomputed); 131 gives 20 % of the current level's need as EXP; 132 gives one skill point. Item 130 ("Reverse", type 5) is used only by the handler of popup `0x6B`, which revives the hero in place; nothing opens that popup, and no shop or monster gives the item ([Death](#death), [original-bugs.md](original-bugs.md#unreachable-content)).
 
 **Stars.** A star stack refills at a shop for its `unknown_84` × (`max_stack` − count) / 10 meso (`Shop_OnKey` `0x46DB9`); selling a stack pays its price plus `unknown_84` × count / 10. So `unknown_84` is the price of one star in tenths of a meso.
 
@@ -321,7 +323,7 @@ The values (`CHero` constructor `0x68A59` and the shared physics globals set in 
 The death popup (texts `CStateGame.OnKeyPressed.1` to `6`) offers:
 
 - **Return to town** (`0x8D4C9`): EXP minus the penalty (0 below level 10 or before the advancement), meso minus a tenth, then the hero goes to the nearest town (the same choice as return scroll 24) and is revived (`CHero::Revive` `0x6140D` restores full HP and MP).
-- **Revive here**, with Reverse (item 130) or a paid revive; see [cash-shop.md](cash-shop.md).
+- **Revive here**, a paid revive; see [cash-shop.md](cash-shop.md). The popup's Return to town (−5) always asks `0x69`, even with Reverse (item 130) in the bag: the Reverse's revive is the handler of popup `0x6B`, which none of `Popup_Open` `0x3EAA1`'s callers opens. `play.systems2_cash_tiles_synthetic` (real assets) falls with one Reverse: popups `0x68` and `0x69`, the hero back in town with a tenth of its meso gone, the Reverse still in the bag.
 
 In Monster Carnival a death costs carnival points instead (see above).
 

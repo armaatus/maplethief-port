@@ -22,7 +22,7 @@ Packs like these may exist elsewhere. The project doesn't host them, link them o
 ## How to post a pack
 
 1. Give the pack a `pack.strings` with at least `format`, `kind`, `id` and `name` ([ADR 0149](../adr/0149-pack-manifest-several-packs-and-what-the-project-hosts.md#the-manifest)), plus `content = "own";` and a `license`.
-2. Check it with the game's pack check, once there is one (#371), and play with it.
+2. Check it with the game's pack check (the settings menu's **Other → Check packs**, or `--check-pack`; [Making packs](packs.md#checking-a-pack)), and play with it.
 3. Start a discussion in **Packs** titled with the pack's name and version. Say what it changes, the game version and port version it was made for, and the licence. Attach the pack as a zip, or link to where you host it.
 4. By posting, you confirm that you made everything in it, or have the right to share it under the licence you name.
 

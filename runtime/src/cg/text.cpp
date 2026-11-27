@@ -26,12 +26,14 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include "cf/cf_objects.h"
 #include "cg/cg_objects.h"
 #include "cg/cg_snapshot.h"
+#include "maplethief/cg.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
 #include "maplethief/textpack.h"
@@ -236,6 +238,28 @@ std::u16string text_of(mt_cpu *cpu, u32 str) {
     return out;
 }
 
+// The draw observer (mt_cg_set_text_observer).
+mt_cg_text_observer_fn g_text_observer = nullptr;
+void *g_text_observer_user = nullptr;
+
+// Tells the observer about a text drawn at x `at_x`, `w` points wide, into a bitmap `limit`
+// points wide.
+void observe_text(const std::u16string &text, double at_x, float w, double limit) {
+    const std::string utf8 = mt_cf::to_utf8(text);
+    mt_cg_drawn_text t{};
+    t.utf8 = utf8.c_str();
+    t.right = static_cast<float>(at_x) + w;
+    t.limit = static_cast<float>(limit);
+    for (const int cp : code_points(text)) {
+        if (cp == '\n') {
+            t.newlines++;
+        } else if (!is_control(cp) && (cp == 0xFFFD || !font_has_glyph(cp))) {
+            t.missing++;
+        }
+    }
+    g_text_observer(g_text_observer_user, &t);
+}
+
 void return_size(mt_cpu *cpu, u32 result, float w, float h) {
     const float size[2] = {w, h};
     mt_ret_struct(cpu, result, size, sizeof size);
@@ -269,6 +293,9 @@ void string_draw_at_point(mt_cpu *cpu) {
             mt_textpack::note_drawn(utf8);
             mt_textpack::note_overflow(utf8, static_cast<float>(at.x) + w,
                                        static_cast<float>(s.width / ds));
+        }
+        if (ds > 0 && g_text_observer != nullptr) {
+            observe_text(text, at.x, w, s.width / ds);
         }
     } else {
         log_once(cpu, "NSString.drawAtPoint.context",
@@ -422,3 +449,53 @@ extern const mt_snap::StateOps k_snap_font;
 const mt_snap::StateOps k_snap_font = {&k_font_state, "UIFont", save_font, load_font, nullptr};
 
 } // namespace mt_cg
+
+extern "C" void mt_cg_set_text_observer(mt_cg_text_observer_fn fn, void *user) noexcept {
+    mt_cg::g_text_observer = fn;
+    mt_cg::g_text_observer_user = user;
+}
+
+// The bundled fonts for the frontend's overlays (#372, ADR 0206): their own FontFiles, behind a
+// lock, so the frontend's thread never touches the game's.
+extern "C" int mt_cg_bundled_glyph(uint32_t cp, int32_t em_pixels, int32_t max_width,
+                                   mt_cg_glyph *g, uint8_t *coverage, size_t capacity) noexcept {
+    static std::mutex lock;
+    static mt_cg::FontFile font, fallback;
+    *g = mt_cg_glyph{};
+    const int c = static_cast<int>(std::min<uint32_t>(cp, 0x10FFFF));
+    if (mt_cg::is_control(c) || em_pixels <= 0) {
+        return 0;
+    }
+    const std::lock_guard<std::mutex> hold(lock);
+    const mt_cg::FontFile *face = mt_cg::load(font, mt_cg_font_data, mt_cg_font_size);
+    int glyph = face != nullptr ? stbtt_FindGlyphIndex(&face->info, c) : 0;
+    if (glyph == 0) {
+        face = mt_cg::load(fallback, mt_cg_fallback_font_data, mt_cg_fallback_font_size);
+        glyph = face != nullptr ? stbtt_FindGlyphIndex(&face->info, c) : 0;
+    }
+    if (glyph == 0) {
+        return 0;
+    }
+    const float scale = stbtt_ScaleForMappingEmToPixels(&face->info, static_cast<float>(em_pixels));
+    int adv = 0, lsb = 0;
+    stbtt_GetGlyphHMetrics(&face->info, glyph, &adv, &lsb);
+    g->advance = static_cast<int32_t>(std::lround(static_cast<float>(adv) * scale));
+    if (stbtt_IsGlyphEmpty(&face->info, glyph) != 0) {
+        return 1;
+    }
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    stbtt_GetGlyphBitmapBox(&face->info, glyph, scale, scale, &x0, &y0, &x1, &y1);
+    float sx = scale;
+    if (max_width > 0 && x1 - x0 > max_width) {
+        sx = scale * static_cast<float>(max_width) / static_cast<float>(x1 - x0);
+        stbtt_GetGlyphBitmapBox(&face->info, glyph, sx, scale, &x0, &y0, &x1, &y1);
+    }
+    *g = {x1 - x0, y1 - y0, x0, y0, g->advance};
+    const std::size_t need =
+        static_cast<std::size_t>(g->width) * static_cast<std::size_t>(g->height);
+    if (coverage != nullptr && capacity >= need && need > 0) {
+        stbtt_MakeGlyphBitmap(&face->info, coverage, g->width, g->height, g->width, sx, scale,
+                              glyph);
+    }
+    return 1;
+}

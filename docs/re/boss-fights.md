@@ -59,4 +59,4 @@ entrance scene. On the maps with a map script the script also runs again after t
 
 The end scene's box closes only through `CStateGame::OnKeyPressed` `0x8D4C9`, which drops every
 key while the hero is knocked back: a boss killed then locks the game in the scene
-([original-bugs.md, 17](original-bugs.md#17-a-boss-killed-while-the-hero-is-knocked-back-locks-its-end-scene)).
+([original-bugs.md, 19](original-bugs.md#19-a-boss-killed-while-the-hero-is-knocked-back-locks-its-end-scene)).

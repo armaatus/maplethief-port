@@ -17,6 +17,9 @@
 #       home gesture: one message each, in order.
 #     - real time: --minimise 3,2 --quit 7 with the device stream: the same messages in order.
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 if(MODE STREQUAL "usage")
     foreach(flag --minimise --background)
         foreach(value "" 6 "6,0" "6,-1" "-1,2" "a,b" "6,4,1" "nan,1" "6,inf" "604801,1")

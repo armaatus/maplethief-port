@@ -58,6 +58,7 @@ add_library(
     src/gamepad.cpp
     src/gfx_backend.cpp
     src/gpu_screen.cpp
+    src/hang_watchdog.cpp
     src/glyphs.cpp
     src/hud_labels.cpp
     src/import_screen.cpp
@@ -87,9 +88,15 @@ add_library(
     src/render_scale.cpp
     src/replay.cpp
     src/rumble.cpp
+    src/run_census.cpp
+    src/run_file.cpp
+    src/run_recorder.cpp
+    src/run_timer.cpp
+    src/livesplit.cpp
     src/file_dialog.cpp
     src/save_menu.cpp
     src/save_state_input.cpp
+    src/practice_state.cpp
     src/quick_state.cpp
     src/recovery.cpp
     src/save_tools.cpp
@@ -100,14 +107,41 @@ add_library(
     src/settings.cpp
     src/settings_menu.cpp
     src/speech.cpp
+    src/speech_menus.cpp
+    src/speech_text.cpp
     src/start_question.cpp
     src/switch_pads.cpp
     src/pack_folders.cpp
+    src/pack_tools.cpp
+    src/packs.cpp
     src/list_keys.cpp
     src/thread_priority.cpp
     src/update_check.cpp
     src/update_fetch.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+# The shipped speedrun categories (#406, run_timer.h, docs/formats/run-category.md): each
+# categories/*.mtcat embedded as a raw string in a generated source, re-generated when a file
+# changes (the files are our own data, never game files).
+file(GLOB _maplethief_categories CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/categories/*.mtcat")
+list(SORT _maplethief_categories)
+set(_maplethief_category_entries "")
+foreach(_file IN LISTS _maplethief_categories)
+    get_filename_component(_name "${_file}" NAME_WE)
+    file(READ "${_file}" _text)
+    string(FIND "${_text}" ")mtcat\"" _bad)
+    if(NOT _bad EQUAL -1)
+        message(FATAL_ERROR "${_file}: holds the raw string's end )mtcat\"")
+    endif()
+    string(APPEND _maplethief_category_entries "        {\"${_name}\", R\"mtcat(${_text})mtcat\"},\n")
+endforeach()
+set(_maplethief_categories_cpp "${CMAKE_CURRENT_BINARY_DIR}/run_categories.cpp")
+file(
+    CONFIGURE
+    OUTPUT "${_maplethief_categories_cpp}"
+    CONTENT
+        "// Generated from platform/categories/*.mtcat by platform/CMakeLists.txt (#406).\n#include \"run_timer.h\"\n\nnamespace maplethief::frontend {\n\nstd::vector<std::pair<std::string, std::string>> shipped_run_category_files() {\n    return {\n${_maplethief_category_entries}    };\n}\n\n} // namespace maplethief::frontend\n"
+    @ONLY)
+target_sources(maplethief_frontend PRIVATE "${_maplethief_categories_cpp}")
 target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
 # The build type and optimisation level of the start-up log (#136, ADR 0134, build_info.h).
 if(MSVC)
@@ -163,6 +197,10 @@ if(APPLE)
 elseif(WIN32)
     target_link_libraries(maplethief_frontend PRIVATE winhttp)
 endif()
+# The LiveSplit link's TCP socket (#407, livesplit.h): Winsock on Windows.
+if(WIN32)
+    target_link_libraries(maplethief_frontend PRIVATE ws2_32)
+endif()
 # Text-to-speech's system voice (#390, ADR 0174, speech.h): AVSpeechSynthesizer on macOS and iOS
 # (Objective-C++ with ARC), SAPI 5 on Windows; Linux loads libspeechd at run time
 # (speech.cpp), so it is no build dependency.
@@ -199,6 +237,34 @@ if(NOT _maplethief_commit)
 endif()
 set_source_files_properties(src/player_log.cpp PROPERTIES COMPILE_DEFINITIONS
                                                           MT_COMMIT="${_maplethief_commit}")
+# The per-file hash list that lets the import take a repacked IPA (#350, ADR 0135's addendum):
+# <gen>/ipa_files.inc, which scripts/bootstrap writes from your own copy (mtport.ipa_files),
+# compiled into ipa_import.cpp when it is there. Hashes only. The player build needs it.
+set(MAPLETHIEF_IPA_FILES
+    ""
+    CACHE FILEPATH
+          "Per-file hash list for the import of a repacked IPA (mtport.ipa_files); empty: <gen>/ipa_files.inc")
+set(_maplethief_ipa_files "${MAPLETHIEF_IPA_FILES}")
+if(NOT _maplethief_ipa_files AND MAPLETHIEF_GEN_DIR)
+    set(_maplethief_ipa_files "${MAPLETHIEF_GEN_DIR}/ipa_files.inc")
+endif()
+if(_maplethief_ipa_files)
+    cmake_path(ABSOLUTE_PATH _maplethief_ipa_files BASE_DIRECTORY "${PROJECT_SOURCE_DIR}" NORMALIZE)
+endif()
+if(_maplethief_ipa_files AND EXISTS "${_maplethief_ipa_files}")
+    set_property(SOURCE src/ipa_import.cpp APPEND
+                 PROPERTY COMPILE_DEFINITIONS MT_IPA_FILES_INC="${_maplethief_ipa_files}")
+    set_property(SOURCE src/ipa_import.cpp APPEND PROPERTY OBJECT_DEPENDS "${_maplethief_ipa_files}")
+    message(STATUS "IPA import: accepts a repack (${_maplethief_ipa_files})")
+elseif(MAPLETHIEF_PLAYER_BUILD)
+    message(
+        FATAL_ERROR
+            "MAPLETHIEF_PLAYER_BUILD: the player build needs the per-file hash list "
+            "'${_maplethief_ipa_files}' (#350). From the repository: scripts/bootstrap writes it "
+            "into work/gen/, then configure again (docs/release-checklist.md).")
+else()
+    message(STATUS "IPA import: the exact IPA only (no ipa_files.inc)")
+endif()
 # The capture converts the mix to 16-bit the same way on every CPU (ADR 0045).
 maplethief_strict_fp(src/audio_out.cpp)
 

@@ -4,8 +4,8 @@
 #                            Debug build with the C/C++ tests. Feature and epic branches merge here.
 #   pull request into main   the full profile: the release pull request from dev (ADR 0126,
 #                            titled "Release vX.Y.Z"). Debug and Release builds with the C/C++
-#                            tests and the packaged kits on macOS, Windows and Linux, plus lint
-#                            and Python. release.yml checks the title and, after the merge, tags
+#                            tests and the packaged kits on macOS, Windows and Linux, and on
+#                            Windows ARM64 and Linux aarch64 (ADR 0194), plus lint and Python. release.yml checks the title and, after the merge, tags
 #                            and drafts the release.
 #   manual run               the full profile (Release unless its `release` input is off).
 #   weekly schedule          the full profile with Release, on dev (the default branch; issue #339):
@@ -31,6 +31,9 @@
 # The `asan` job (Linux) builds our own C/C++ with clang under ASan and UBSan and runs its tests
 # (preset linux-asan, ADR 0157) on every pull request and manual run that builds, then runs each
 # libFuzzer target of tests/fuzz/ for 30 s (preset linux-fuzz, ADR 0158).
+#
+# The `min-compilers` job builds and tests the Linux Debug build with ADR 0002's minimum Linux
+# compilers, GCC 13 and Clang 17, on ubuntu-24.04 (#341): on the weekly run and manual runs only.
 #
 # The `switch` job builds the Nintendo Switch homebrew (ADR 0138) on every pull request and manual
 # run: scripts/build-switch, the switch-release workflow in the pinned devkitA64 container, without
@@ -151,14 +154,14 @@ jobs:
     needs: scope
     if: needs.scope.outputs.native == 'true'
     # The hosted image, or on a manual self-hosted run the matching self-hosted labels.
-    runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && (matrix.os == 'macos-latest' && '["self-hosted","macOS","ARM64"]' || matrix.os == 'windows-latest' && '["self-hosted","Windows","X64"]' || '["self-hosted","Linux","X64"]') || format('"{0}"', matrix.os)) }}
+    runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && (matrix.os == 'macos-latest' && '["self-hosted","macOS","ARM64"]' || matrix.os == 'windows-latest' && '["self-hosted","Windows","X64"]' || matrix.os == 'windows-11-arm' && '["self-hosted","Windows","ARM64"]' || matrix.os == 'ubuntu-24.04-arm' && '["self-hosted","Linux","ARM64"]' || '["self-hosted","Linux","X64"]') || format('"{0}"', matrix.os)) }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         # Into dev: Linux only. Into main (the release pull request), manual and weekly runs:
-        # all three.
-        os: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref != 'main' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
+        # all three, and the ARM64 runners for Windows and Linux (#362, ADR 0194).
+        os: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref != 'main' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest","ubuntu-24.04-arm","windows-11-arm"]') }}
         # Release builds and kits on the release pull request, the weekly run, and manual runs
         # unless the `release` input is off (ADR 0126).
         config: ${{ fromJSON(((github.event_name == 'pull_request' && github.base_ref == 'main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release)) && '["debug","release"]' || '["debug"]') }}
@@ -211,7 +214,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/_downloads
-          key: downloads-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          key: downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
 
       - &linux-deps
         name: Install SDL3 build dependencies (Linux)
@@ -225,15 +228,22 @@ jobs:
             libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl1-mesa-dev \
             libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev libdbus-1-dev libudev-dev
 
+      - name: Install the software Vulkan driver (Linux x86_64 debug, the gpu tests)
+        if: matrix.os == 'ubuntu-latest' && matrix.config == 'debug'
+        # Mesa's lavapipe, a Vulkan device on the CPU: the synthetic gpu-labelled tests
+        # (gfx_gpu_test) run on it instead of skipping (#364, ADR 0202); their GPU-time limits
+        # are not checked on a software device. libvulkan1 is the loader SDL opens.
+        run: sudo apt-get install -y mesa-vulkan-drivers libvulkan1
+
       - name: Install Ninja (macOS)
         if: runner.os == 'macOS'
         run: command -v ninja >/dev/null || brew install ninja
 
-      - name: Set up the Visual Studio x64 developer environment (Windows)
+      - name: Set up the Visual Studio developer environment (Windows; x64, or ARM64 native)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
-          arch: x64
+          arch: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
 
       - name: Show toolchain versions
         shell: bash
@@ -242,6 +252,7 @@ jobs:
           echo "ninja $(ninja --version)"
           "$PYTHON" --version
           if command -v uv >/dev/null 2>&1; then uv --version; fi
+          echo "runner $RUNNER_OS $RUNNER_ARCH"
           case "$RUNNER_OS" in
             Windows) cl 2>&1 | head -n 1 ;;
             macOS) clang++ --version | head -n 1; sw_vers -productVersion ;;
@@ -250,14 +261,44 @@ jobs:
         env:
           PYTHON: ${{ steps.python.outputs.python-path }}
 
+      - name: Run a shell script from the fresh checkout (Windows, .gitattributes)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # The runner's git has core.autocrlf=true; .gitattributes keeps the scripts LF (#328).
+          # A CRLF checkout fails here with "set: pipefail: invalid option name".
+          set -euo pipefail
+          out=$(printf 'docs/README.md\n' | bash scripts/ci-scope)
+          echo "$out"
+          [ "$out" = "$(printf 'native=false\nswitch=false\nandroid=false')" ]
+
       - name: Build and run all tests (scripts/test)
         if: matrix.config == 'debug' && runner.os != 'Windows'
         run: scripts/test
+        env:
+          # Linux x86_64: the gpu tests on lavapipe, a missing device fails them (#364); only its
+          # ICD, so the loader never picks another driver. Elsewhere they skip on GitHub Actions,
+          # ubuntu-24.04-arm too: its older Mesa samples two golden scenes differently (ADR 0202).
+          MAPLETHIEF_GPU_TESTS: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
+          VK_DRIVER_FILES: ${{ matrix.os == 'ubuntu-latest' && '/usr/share/vulkan/icd.d/lvp_icd.json' || '' }}
 
       - name: Build and run all tests (scripts/test.ps1)
         if: matrix.config == 'debug' && runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/test.ps1
+
+      # The Windows runner has no GPU; its only DXGI adapter is Direct3D's WARP (the Microsoft
+      # Basic Render Driver), which SDL GPU's D3D12 backend takes as adapter 0. A try (#364, ADR
+      # 0202): the gpu tests on it, after scripts/test.ps1 skipped them. It never fails the job;
+      # its log names the device ("gfx_gpu: device name") and each case's result.
+      - name: Try - gpu tests on D3D12's WARP adapter (Windows debug, never fails the job)
+        if: matrix.config == 'debug' && runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: ctest --preset $env:PRESET -L gpu -R '^gfx_gpu\.' -V
+        env:
+          MAPLETHIEF_GPU_TESTS: "1"
+          PRESET: ${{ runner.arch == 'ARM64' && 'win-arm64-debug' || 'win-debug' }}
 
       - name: Release build, C/C++ tests and package
         if: matrix.config == 'release'
@@ -266,7 +307,7 @@ jobs:
         shell: pwsh
         run: cmake --workflow --preset $env:PRESET
         env:
-          PRESET: ${{ runner.os == 'macOS' && 'mac-release-universal' || runner.os == 'Windows' && 'win-release' || 'linux-release' }}
+          PRESET: ${{ runner.os == 'macOS' && 'mac-release-universal' || format('{0}{1}-release', runner.os == 'Windows' && 'win' || 'linux', runner.arch == 'ARM64' && '-arm64' || '') }}
 
       - name: Check the universal binary (macOS)
         if: matrix.config == 'release' && runner.os == 'macOS'
@@ -345,6 +386,83 @@ jobs:
             build/test-output/
             build/linux-asan/Testing/Temporary/LastTest*.log
             build/linux-fuzz/Testing/Temporary/LastTest*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The minimum compilers (#341, ADR 0002, ADR 0006): the Linux Debug build and every test with
+  # GCC 13 and with Clang 17 on the pinned ubuntu-24.04 image, whose defaults they are, so a
+  # language or library feature the newest compilers accept but a minimum doesn't shows up. The
+  # Python tests run too: the recompiler's snippet tests compile C with $CC. Only on the runs that
+  # build every OS but the release pull request (the weekly run and manual runs), on hosted runners.
+  min-compilers:
+    name: minimum ${{ matrix.cc }}
+    needs: scope
+    if: needs.scope.outputs.native == 'true' && inputs.runners != 'self-hosted' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { cc: gcc-13, cxx: g++-13, packages: "gcc-13 g++-13" }
+          - { cc: clang-17, cxx: clang++-17, packages: "clang-17" }
+    steps:
+      - name: Check out (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - *ipa-guard
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Cache third-party downloads (build/_downloads)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/_downloads
+          key: downloads-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - *linux-deps
+
+      - name: Install ${{ matrix.cc }}
+        run: sudo apt-get install -y ${{ matrix.packages }}
+
+      - name: Show toolchain versions
+        run: |
+          cmake --version | head -n 1
+          echo "ninja $(ninja --version)"
+          "$CC" --version | head -n 1
+          "$CXX" --version | head -n 1
+          python3 --version
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+
+      - name: Build and run all tests (scripts/test)
+        run: scripts/test
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+
+      - name: Upload test logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-logs-minimum-${{ matrix.cc }}
+          path: |
+            build/test-output/
+            build/linux-debug/Testing/Temporary/LastTest*.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -610,7 +728,7 @@ jobs:
   # skipped by the scope, and fails on any failure or cancellation.
   ci-result:
     name: CI result
-    needs: [scope, build, asan, ios, switch, android, lint-python, clang-tidy]
+    needs: [scope, build, asan, min-compilers, ios, switch, android, lint-python, clang-tidy]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -635,7 +753,7 @@ jobs:
   # those runs, and isn't a check of a pull request.
   weekly-report:
     name: weekly report
-    needs: [scope, build, asan, ios, switch, android, lint-python, clang-tidy, ci-result]
+    needs: [scope, build, asan, min-compilers, ios, switch, android, lint-python, clang-tidy, ci-result]
     if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.report) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

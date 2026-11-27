@@ -1,6 +1,6 @@
 // The opt-in update notice (#199, ADR 0137): a player on a downloaded build learns that a newer
-// port release exists, if they chose to. The game itself is offline (ADR 0034); this is the
-// port's only network use. It never downloads anything.
+// port release exists, if they chose to. The game itself is offline (ADR 0034); this and the
+// LiveSplit link (livesplit.h, #407) are the port's only network use. It never downloads anything.
 //
 //   update_check = off | on   (settings.h: Other, off by default, not in the presets)
 //

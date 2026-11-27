@@ -58,7 +58,7 @@ constexpr float kBoxPad = 4;
 
 // The box of draw_box's lines (scaling.h's place_text_box), 2 font pixels in from the edges.
 TextBox place_lines(const std::vector<std::string> &text, const TextFrame &frame,
-                    bool from_bottom) {
+                    TextCorner corner) {
     std::size_t longest = 0;
     for (const std::string &line : text) {
         longest = std::max(longest, line.size());
@@ -66,15 +66,13 @@ TextBox place_lines(const std::vector<std::string> &text, const TextFrame &frame
     const float glyph = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
     const float line_h = glyph + 2;
     return place_text_box(frame, glyph * static_cast<float>(longest) + 2 * kBoxPad,
-                          line_h * static_cast<float>(text.size()) - 2 + 2 * kBoxPad,
-                          from_bottom ? TextCorner::kBottomLeft : TextCorner::kTopLeft, 2);
+                          line_h * static_cast<float>(text.size()) - 2 + 2 * kBoxPad, corner, 2);
 }
 
-// Lines of SDL's debug font in a dark translucent box at the top left (or the bottom left when
-// `from_bottom`) of the frame's area. Leaves the renderer's draw colour, blend mode and scale as
-// they were.
+// Lines of SDL's debug font in a dark translucent box at the `corner` of the frame's area. Leaves
+// the renderer's draw colour, blend mode and scale as they were.
 void draw_box(SDL_Renderer *renderer, const std::vector<std::string> &text, const TextFrame &frame,
-              bool from_bottom) {
+              TextCorner corner) {
     const float line_h = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE + 2;
     const float pad = kBoxPad;
 
@@ -87,7 +85,7 @@ void draw_box(SDL_Renderer *renderer, const std::vector<std::string> &text, cons
     SDL_GetRenderDrawBlendMode(renderer, &blend);
 
     // A dark translucent box behind light text: readable over any art.
-    const TextBox placed = place_lines(text, frame, from_bottom);
+    const TextBox placed = place_lines(text, frame, corner);
     const float k = static_cast<float>(placed.scale);
     SDL_SetRenderScale(renderer, k, k);
     const SDL_FRect box = {placed.box.x, placed.box.y, placed.box.w, placed.box.h};
@@ -112,7 +110,7 @@ void PerfOverlay::draw(SDL_Renderer *renderer, const FrameStats &stats,
     if (!visible() || renderer == nullptr) {
         return;
     }
-    draw_box(renderer, lines(stats.recent(), stats.last(), note_), frame, false);
+    draw_box(renderer, lines(stats.recent(), stats.last(), note_), frame, TextCorner::kTopLeft);
 }
 
 void PerfOverlay::draw_notice(SDL_Renderer *renderer, const std::string &text,
@@ -120,7 +118,7 @@ void PerfOverlay::draw_notice(SDL_Renderer *renderer, const std::string &text,
     if (renderer == nullptr || text.empty()) {
         return;
     }
-    draw_box(renderer, {text}, frame, true);
+    draw_box(renderer, {text}, frame, TextCorner::kBottomLeft);
 }
 
 void PerfOverlay::draw_notice(SDL_Renderer *renderer, const std::vector<std::string> &lines,
@@ -128,11 +126,19 @@ void PerfOverlay::draw_notice(SDL_Renderer *renderer, const std::vector<std::str
     if (renderer == nullptr || lines.empty()) {
         return;
     }
-    draw_box(renderer, lines, frame, true);
+    draw_box(renderer, lines, frame, TextCorner::kBottomLeft);
+}
+
+void PerfOverlay::draw_lines(SDL_Renderer *renderer, const std::vector<std::string> &lines,
+                             const TextFrame &frame, TextCorner corner) {
+    if (renderer == nullptr || lines.empty()) {
+        return;
+    }
+    draw_box(renderer, lines, frame, corner);
 }
 
 Rect PerfOverlay::notice_rect(const std::string &text, const TextFrame &frame) {
-    const TextBox placed = place_lines({text}, frame, true);
+    const TextBox placed = place_lines({text}, frame, TextCorner::kBottomLeft);
     const float k = static_cast<float>(placed.scale);
     return Rect{placed.box.x * k, placed.box.y * k, placed.box.w * k, placed.box.h * k};
 }

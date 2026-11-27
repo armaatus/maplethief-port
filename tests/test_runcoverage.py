@@ -329,6 +329,6 @@ def test_run_tests_gives_each_test_its_own_coverage_directory(tmp_path):
     assert not stale.exists()
     cmd, path = calls[2]
     assert cmd[cmd.index("-R") + 1] == r"^menus\.title$" and "-FA" in cmd
-    assert path.endswith("runs/menus.title/coverage-%p.txt")
+    assert Path(path).parts[-3:] == ("runs", "menus.title", "coverage-%p.txt")
     cov = rc.load([tmp_path / "runs"])
     assert set(cov.runs) == {"play.save_quit", "input.menu_x", "menus.title"}

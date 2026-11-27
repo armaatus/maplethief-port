@@ -54,6 +54,19 @@ A few tests measure time: `gfx_gpu_test`'s GPU time checks (the busy frame, the 
 
 `scripts/timing-stress` checks this: a busy loop on every core and a second process drawing on the GPU, while the time checks (and with `--game-speed`, `platform.game_speed`) run 20 times in a row (`--passes N`). Each pass prints its load average; the readings go to `build/test-output/<preset>/timing_stress/`.
 
+### GPU tests
+
+`gfx_gpu_test` (CTest label `gpu`, cases `gfx_gpu.*`) checks the GPU backend against the software rasterizer ([ADR 0060](../adr/0060-gpu-rendering-backend.md)): the synthetic golden scenes within ADR 0060's tolerance, the sync points, batching, the present filters and the border, the colour-blind filter, the grade, widescreen and GPU presentation. It runs on whatever device SDL GPU opens: Metal on the Mac, Vulkan or D3D12 elsewhere. Without a device every case prints `gfx_gpu: skipped` and CTest reports it as skipped. `MAPLETHIEF_GPU_TESTS=1` makes a missing device a failure, `=0` skips; on GitHub Actions they skip unless the job sets `=1`. Without a display the test falls back to SDL's offscreen video driver; nothing opens a window.
+
+CI's Linux debug job and the Linux container run them on Mesa's **lavapipe**, a Vulkan driver on the CPU (`mesa-vulkan-drivers`, `VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json`; [ADR 0202](../adr/0202-gpu-tests-on-a-software-vulkan-device-in-ci.md)). On a software device (llvmpipe, SwiftShader or Direct3D's WARP, by SDL's device name; the log line `gfx_gpu: device name`):
+
+- the time-only cases skip (the present filters', the border blur's, the colour-blind filter's and the wide picture's GPU time), and the batching case prints its time without the 2 ms limit. The time limits are the Mac's and stay a local check;
+- every picture comparison runs. The lines scene alone may move a line's pixel by one, since Vulkan's lines are not GL ES's diamond-exit lines, with ADR 0060's 0.5% for anything else.
+
+The cases take about two minutes on lavapipe, one at a time (one `RESOURCE_LOCK`); the slowest take 35 to 46 s, under the 300 s timeout. A failure leaves its `.actual.png` and `.diff.png` in the job's uploaded `build/test-output/`.
+
+On Windows, the runner's only adapter is WARP. The Windows debug jobs (on the runs that build every OS) try the cases on it after `scripts/test.ps1`, in the step "Try - gpu tests on D3D12's WARP adapter", which never fails the job; the outcome is recorded on [#364](https://github.com/armaatus/maplethief-port/issues/364) and in ADR 0202.
+
 ### Run coverage
 
 `python3 -m mtport.runcoverage run` builds the `mac-coverage` preset (the entry counters) and runs the baseline tests one at a time with `MAPLETHIEF_COVERAGE` set, then writes `work/coverage/run-coverage.md` and `.json`: the guest functions executed per function tag, the unexecuted ones, and the scripts, natives, maps, imports and selectors the runs used ([ADR 0160](../adr/0160-run-coverage-entry-counters-and-hit-recorders.md)). How, and the baseline's numbers: [testing/run-coverage.md](../testing/run-coverage.md).
@@ -130,7 +143,7 @@ Linux runs in a container, x86_64 like `ubuntu-latest` (Rosetta under [OrbStack]
 scripts/test-linux               # Debug workflow + pytest on a clean export of HEAD
 scripts/test-linux --release     # linux-release workflow; the kit lands in build/linux-release/
 scripts/test-linux --worktree    # uncommitted changes to tracked files included
-scripts/test-linux --arch arm64  # native on Apple silicon: faster, but not what CI runs
+scripts/test-linux --arch arm64  # aarch64 (linux-arm64-* presets), native on Apple silicon: CI's ubuntu-24.04-arm
 scripts/test-linux --real-assets # mount work/ read-only, so the real_assets tests run too
 ```
 
@@ -145,13 +158,13 @@ Windows has no container: run `scripts\test.ps1` (Debug and pytest) and `scripts
 | Pull request into | Runs |
 |---|---|
 | `dev` | lint and Python 3.10 and latest (Linux), clang-tidy, the Linux Debug build with the C/C++ tests, the same tests under ASan and UBSan with the fuzz smoke, the Switch NRO and the Android APK |
-| `main` | lint and Python, clang-tidy, Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux, the ASan and UBSan tests, the iOS compile, the Switch NRO and the Android APK |
+| `main` | lint and Python, clang-tidy, Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux, and on Windows and Linux ARM64, the ASan and UBSan tests, the iOS compile, the Switch NRO and the Android APK |
 | manual run | the full set, Release unless its `release` input is off |
 | weekly, on `dev` | the full set with Release, then the `weekly report` job ([below](#the-weekly-run)) |
 
 `scripts/ci-scope` skips the native jobs when a pull request touches only docs or compendium work, and the Switch or Android job when the native paths touch only another platform's own files.
 
-GitHub's hosted runners are free for this public repository, so use them. To run all three OSes on any branch:
+GitHub's hosted runners are free for this public repository, so use them. To run all three OSes, and Windows and Linux on ARM64 too, on any branch:
 
 ```sh
 gh workflow run ci.yml --ref <branch>
@@ -160,7 +173,7 @@ gh run watch
 
 A pull request is merged only when its checks are green (`gh pr checks --watch`).
 
-- **The `build` jobs** run the same `scripts/test` and `scripts/test.ps1` as above: the Debug build, CTest (including the headless `platform.smoke`) and pytest, with warnings as errors. The Release jobs run the release workflows and package the kits; the universal binary must contain both `arm64` and `x86_64`.
+- **The `build` jobs** run the same `scripts/test` and `scripts/test.ps1` as above: the Debug build, CTest (including the headless `platform.smoke`) and pytest, with warnings as errors. The Release jobs run the release workflows and package the kits; the universal binary must contain both `arm64` and `x86_64`. On the runs that build every OS, `windows-11-arm` and `ubuntu-24.04-arm` run the same jobs with the `win-arm64-*` and `linux-arm64-*` presets ([ADR 0194](../adr/0194-windows-arm64-and-linux-aarch64-builds.md)).
 - **The `asan` job** (Linux, on every pull request and manual run that builds) runs the `linux-asan` workflow: the C/C++ tests built with clang under ASan and UBSan, no recovery, the guest memory model checked ([Sanitizers](#sanitizers-asan-and-ubsan)). Then the fuzz smoke: the `linux-fuzz` workflow runs every target of `tests/fuzz/` for 30 s from its seeds ([Fuzzing](#fuzzing)); a finding fails the job, and its input is in the uploaded `build/test-output/linux-fuzz/fuzz/NAME/`.
 - **The `lint (clang-tidy)` job** (Linux, on every pull request and manual run that builds) runs `scripts/lint` in full, clang-tidy included, after installing the SDL3 build dependencies and clang for the compile database. It runs beside the build jobs and takes about 6 minutes, most of it clang-tidy.
 - **The `lint + Python min/latest` job** (Linux) runs `scripts/lint --no-tidy`, then `scripts/test --python-only` on Python 3.10 and the latest Python, and the guard that no compendium output is tracked ([ADR 0121](../adr/0121-public-compendium-site.md)).
@@ -198,5 +211,7 @@ A manual run with input `runners: self-hosted` sends the same jobs to self-hoste
 | macOS | `self-hosted`, `macOS`, `ARM64` | a Mac |
 | Windows | `self-hosted`, `Windows`, `X64` | a Windows PC with Visual Studio 2022+ and its C++ workload |
 | Linux, lint and Python | `self-hosted`, `Linux`, `X64` | a Linux x86_64 runner, for example the [actions/runner image](https://github.com/actions/runner/blob/main/images/Dockerfile) in OrbStack with `--platform linux/amd64` |
+| Windows ARM64 (`windows-11-arm`) | `self-hosted`, `Windows`, `ARM64` | an ARM64 Windows PC with Visual Studio 2022+, its C++ workload and the MSVC ARM64 build tools |
+| Linux aarch64 (`ubuntu-24.04-arm`) | `self-hosted`, `Linux`, `ARM64` | a Linux aarch64 runner, for example the actions/runner image in OrbStack with `--platform linux/arm64` |
 
 To set one up, Settings → Actions → Runners → New self-hosted runner gives the download and a registration token. Run `./config.sh --url https://github.com/armaatus/maplethief-port --token <token> --labels <labels>` and install it as a service (`./svc.sh install && ./svc.sh start` on macOS and Linux, `config.cmd --runasservice` on Windows). Keep the runner's directory away from your checkout, so its jobs never see `work/` or your IPA. Settings → Actions → General must keep "Run workflows from fork pull requests" off. The Linux runner needs `sudo` for the apt step.

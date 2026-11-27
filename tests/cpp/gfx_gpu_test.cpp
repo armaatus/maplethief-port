@@ -9,9 +9,12 @@
 // 2 ms on the Mac). Further down: #88's present filters, and GPU presentation (#130, ADR 0068:
 // the GL frame copied on the GPU and composed with an overlay, without a read-back).
 //
-// Local only. CI has no GPU: every case passes as "skipped" (the "gfx_gpu: skipped" line,
-// which CTest's SKIP_REGULAR_EXPRESSION turns into a skip) when there is no GPU device, and on
-// GitHub Actions. MAPLETHIEF_GPU_TESTS=1 makes a missing device a failure, =0 skips.
+// Without a GPU device every case passes as "skipped" (the "gfx_gpu: skipped" line, which
+// CTest's SKIP_REGULAR_EXPRESSION turns into a skip), and so it does on GitHub Actions unless
+// the job asks for the tests. MAPLETHIEF_GPU_TESTS=1 makes a missing device a failure, =0
+// skips. CI's Linux job sets =1 on Mesa's software Vulkan driver, lavapipe (#364): on a
+// software device the GPU-time limits (written for the Mac's GPU) are not checked, and the
+// cases that only measure time are skipped; every picture comparison runs.
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
@@ -65,6 +68,12 @@ SDL_GPUDevice *device() {
         if (want == "0" || (want != "1" && std::string(env("GITHUB_ACTIONS")) == "true")) {
             return static_cast<SDL_GPUDevice *>(nullptr);
         }
+        // Without a display (CI's Linux runner) SDL's offscreen video driver, which the device
+        // and the offscreen renderers need no more of: nothing here opens a window.
+        if (!SDL_WasInit(SDL_INIT_VIDEO) && env("SDL_VIDEO_DRIVER")[0] == '\0' &&
+            !SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+            SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "offscreen");
+        }
         SDL_GPUDevice *d = mt_gfx_gpu_create_device();
         if (d == nullptr && want == "1") {
             FAIL("MAPLETHIEF_GPU_TESTS=1 but there is no GPU device: " << SDL_GetError());
@@ -81,6 +90,38 @@ SDL_GPUDevice *device() {
     do {                                                                                           \
         if (device() == nullptr) {                                                                 \
             std::printf("gfx_gpu: skipped: no GPU device (CI, or MAPLETHIEF_GPU_TESTS=0)\n");      \
+            return;                                                                                \
+        }                                                                                          \
+    } while (0)
+
+// The device rasterizes on the CPU (#364): Mesa's lavapipe (llvmpipe), SwiftShader, or
+// Direct3D's WARP adapter (the Microsoft Basic Render Driver), by SDL's name for the device.
+// Its GPU time says nothing about a GPU's, so the time limits are not checked on it.
+bool software_device() {
+    static const bool soft = [] {
+        const char *name = device() != nullptr
+                               ? SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device()),
+                                                       SDL_PROP_GPU_DEVICE_NAME_STRING, "")
+                               : "";
+        const std::string n = name != nullptr ? name : "";
+        const bool s = n.find("llvmpipe") != std::string::npos ||
+                       n.find("SwiftShader") != std::string::npos ||
+                       n.find("Basic Render Driver") != std::string::npos;
+        if (device() != nullptr) {
+            std::printf("gfx_gpu: device name \"%s\"%s\n", n.c_str(),
+                        s ? ", a software device: the GPU-time limits are not checked" : "");
+        }
+        return s;
+    }();
+    return soft;
+}
+
+// A case that only measures GPU time: skipped on a software device.
+#define REQUIRE_HARDWARE_GPU()                                                                     \
+    do {                                                                                           \
+        REQUIRE_GPU();                                                                             \
+        if (software_device()) {                                                                   \
+            std::printf("gfx_gpu: skipped: GPU time on a software device\n");                      \
             return;                                                                                \
         }                                                                                          \
     } while (0)
@@ -186,6 +227,7 @@ struct SceneSpec {
     u32 w, h;
     golden::Rgba fill;
     Scene draw;
+    bool lines = false; // a scene of lines: see check_scene
 };
 
 void blend_factors_scene(mt_gfx_target *t) {
@@ -409,6 +451,58 @@ void check_scene(const SceneSpec &s) {
     const auto r = golden::check_golden(gpu, path, std::string("gfx_gpu/") + s.golden, k_tolerance,
                                         golden::Update::Never);
     std::printf("gfx_gpu: %s: %s\n", s.golden, describe(r.comparison).c_str());
+    if (s.lines && software_device() && !r.passed) {
+        // Mesa's lavapipe rasterizes Vulkan's lines, not GL ES's diamond-exit ones that the
+        // backend's line shift aims at (ADR 0060), so a line takes some of its steps a pixel
+        // away from the reference's (#364, ADR 0202). There every pixel beyond the tolerance
+        // must be a line's pixel moved by one: its colour within the tolerance somewhere in
+        // the reference's 3 x 3 neighbourhood, and the reference's colour in the GPU's.
+        // A missing or extra line, a wrong colour or blend still fails.
+        const golden::Image &ref = sw;
+        auto near = [](const golden::Image &img, int x, int y, golden::Rgba c) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    const int nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= img.width() || ny >= img.height()) {
+                        continue;
+                    }
+                    const golden::Rgba n = img.at(nx, ny);
+                    if (std::abs(n.r - c.r) <= k_tolerance.channel &&
+                        std::abs(n.g - c.g) <= k_tolerance.channel &&
+                        std::abs(n.b - c.b) <= k_tolerance.channel &&
+                        std::abs(n.a - c.a) <= k_tolerance.channel) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+        std::size_t moved = 0, other = 0;
+        for (int y = 0; y < gpu.height(); y++) {
+            for (int x = 0; x < gpu.width(); x++) {
+                const golden::Rgba a = gpu.at(x, y), e = ref.at(x, y);
+                if (std::max({std::abs(a.r - e.r), std::abs(a.g - e.g), std::abs(a.b - e.b),
+                              std::abs(a.a - e.a)}) <= k_tolerance.channel) {
+                    continue;
+                }
+                if (near(gpu, x, y, e) && near(ref, x, y, a)) {
+                    moved++;
+                } else {
+                    other++;
+                    std::printf("gfx_gpu: %s: (%d, %d) is %d,%d,%d,%d, the reference %d,%d,%d,%d\n",
+                                s.golden, x, y, a.r, a.g, a.b, a.a, e.r, e.g, e.b, e.a);
+                }
+            }
+        }
+        const std::size_t total = static_cast<std::size_t>(gpu.width()) * gpu.height();
+        std::printf("gfx_gpu: %s on a software device: %zu pixel(s) of a line a pixel away, %zu "
+                    "other(s) (at most %.1f%% of the pixels)\n",
+                    s.golden, moved, other, 100.0 * k_tolerance.max_differing_ratio);
+        CHECK_MESSAGE(static_cast<double>(other) <=
+                          k_tolerance.max_differing_ratio * static_cast<double>(total),
+                      r.message);
+        return;
+    }
     CHECK_MESSAGE(r.passed, r.message);
 }
 
@@ -457,7 +551,7 @@ TEST_CASE("golden scenes on the GPU: the perspective floor (gfx_perspective)") {
 TEST_CASE("golden scenes on the GPU: lines (gfx_lines)") {
     REQUIRE_GPU();
     Fresh fresh;
-    check_scene({"gfx_lines", 96, 64, {}, lines_scene});
+    check_scene({"gfx_lines", 96, 64, {}, lines_scene, true});
 }
 
 TEST_CASE("internal scale 4: the prototype scene and a busy frame on both backends") {
@@ -521,8 +615,11 @@ TEST_CASE("batching: a busy frame is two batches, and its GPU time at scale 4") 
     // with the machine's load (median 3.23 ms at load average 17 against 0.57 ms alone), so
     // the check uses the best of the frames: every frame is the same work, and each reading is
     // an upper bound on it, so the smallest is the tightest. A real regression (more than
-    // 2 ms of GPU work) still fails, because then every frame reads over 2 ms.
-    CHECK(best_ms < 2.0);
+    // 2 ms of GPU work) still fails, because then every frame reads over 2 ms. Not on a
+    // software device (#364), whose time is the CPU's.
+    if (!software_device()) {
+        CHECK(best_ms < 2.0);
+    }
 }
 
 TEST_CASE("sync points: CPU writes and reads between draws") {
@@ -1099,7 +1196,7 @@ TEST_CASE("present filters: lcd darkens the cell edges on texel boundaries") {
 }
 
 TEST_CASE("present filters: GPU time per frame at 1080p, 1800p and 4K outputs (under 1 ms)") {
-    REQUIRE_GPU();
+    REQUIRE_HARDWARE_GPU();
     // A busy image (every texel its own colour), so no filter takes an early way out.
     golden::Image img(480, 320);
     for (int y = 0; y < 320; y++) {
@@ -1187,7 +1284,7 @@ TEST_CASE("present border: blur on SDL's GPU renderer under every filter, 16:9 a
 }
 
 TEST_CASE("present border: the blur's GPU time at 1080p and 21:9 (under 1 ms a frame)") {
-    REQUIRE_GPU();
+    REQUIRE_HARDWARE_GPU();
     golden::Image img(480, 320);
     for (int y = 0; y < 320; y++) {
         for (int x = 0; x < 480; x++) {
@@ -1386,7 +1483,7 @@ TEST_CASE("present grade: the picture adjustments on the GPU way, with and witho
 
 TEST_CASE(
     "present colorblind: GPU time at 1080p, 21:9 and 4K, render scales 1 and 3 (under 1 ms)") {
-    REQUIRE_GPU();
+    REQUIRE_HARDWARE_GPU();
     struct Size {
         int w, h;
     };
@@ -1613,7 +1710,7 @@ TEST_CASE("present widescreen: the key pad's strips and a narrow view in the wid
 }
 
 TEST_CASE("present widescreen: the wide picture's GPU time at 1080p and 1800p (under 1 ms)") {
-    REQUIRE_GPU();
+    REQUIRE_HARDWARE_GPU();
     struct Size {
         int w, h;
     };

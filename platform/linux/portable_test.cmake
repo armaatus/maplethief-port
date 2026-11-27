@@ -4,7 +4,10 @@
 #   - needs no GLIBCXX, CXXABI or GCC symbol version (a dynamic libstdc++ or libgcc_s), and
 #   - when GLIBC_FLOOR is not empty, no GLIBC symbol version newer than GLIBC_FLOOR.
 #
-#   cmake -DPROGRAM=<MapleThief> -DREADELF=<readelf> [-DGLIBC_FLOOR=2.39] -P portable_test.cmake
+#   cmake -DPROGRAM=<MapleThief> -DREADELF=<readelf> [-DGLIBC_FLOOR=2.35] -P portable_test.cmake
+
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
 
 set(allowed_needed
     libc.so.6

@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
+#include <vector>
 
 namespace maplethief::frontend {
 
@@ -19,10 +21,21 @@ bool fits(double frontend_ms, double render_ms) {
     return frontend_ms <= kFrontendBudgetMs && render_ms <= kRenderBudgetMs;
 }
 
-std::string costs(double frontend_ms, double render_ms) {
-    char b[160];
-    std::snprintf(b, sizeof b, "frontend %.2f ms, with mt_gfx %.2f ms a frame (budget %g / %g ms)",
-                  frontend_ms, render_ms, kFrontendBudgetMs, kRenderBudgetMs);
+// What the render budget holds (#365): the CPU's frontend + mt_gfx, or the GPU's time if longer.
+double render_cost(double cpu_ms, double gpu_ms) { return std::max(cpu_ms, gpu_ms); }
+
+std::string costs(double frontend_ms, double cpu_ms, double gpu_ms) {
+    char b[200];
+    if (gpu_ms > 0) {
+        std::snprintf(b, sizeof b,
+                      "frontend %.2f ms, with mt_gfx %.2f ms, GPU %.2f ms a frame (budget %g / %g "
+                      "ms)",
+                      frontend_ms, cpu_ms, gpu_ms, kFrontendBudgetMs, kRenderBudgetMs);
+    } else {
+        std::snprintf(b, sizeof b,
+                      "frontend %.2f ms, with mt_gfx %.2f ms a frame (budget %g / %g ms)",
+                      frontend_ms, cpu_ms, kFrontendBudgetMs, kRenderBudgetMs);
+    }
     return b;
 }
 
@@ -71,7 +84,8 @@ std::uint32_t RenderScaleGovernor::update(const RecentStats &recent, double now)
         return 0; // too little to judge (a pause, a load)
     }
     const double fe = recent.frontend_ms;
-    const double total = recent.frontend_ms + recent.gfx_ms;
+    const double cpu = recent.frontend_ms + recent.gfx_ms;
+    const double total = render_cost(cpu, recent.gpu_ms);
     const bool over = !fits(fe, total);
     over_ = over ? over_ + 1 : 0;
     if (!automatic_) {
@@ -81,7 +95,7 @@ std::uint32_t RenderScaleGovernor::update(const RecentStats &recent, double now)
                           "Render scale %ux is too slow here (%.0f ms a frame): try auto or less",
                           static_cast<unsigned>(scale_), std::max(fe, total));
             warning_ = b;
-            reason_ = costs(fe, total);
+            reason_ = costs(fe, cpu, recent.gpu_ms);
         }
         return 0;
     }
@@ -93,7 +107,7 @@ std::uint32_t RenderScaleGovernor::update(const RecentStats &recent, double now)
         char b[64];
         std::snprintf(b, sizeof b, " at %ux: down to %ux", static_cast<unsigned>(scale_),
                       static_cast<unsigned>(n));
-        reason_ = costs(fe, total) + b;
+        reason_ = costs(fe, cpu, recent.gpu_ms) + b;
         scale_ = n;
         last_change_ = now;
         retry_at_ = now + kRetrySeconds;
@@ -106,7 +120,7 @@ std::uint32_t RenderScaleGovernor::update(const RecentStats &recent, double now)
             char b[64];
             std::snprintf(b, sizeof b, " at %ux: %ux should fit", static_cast<unsigned>(scale_),
                           static_cast<unsigned>(n));
-            reason_ = costs(fe, total) + b;
+            reason_ = costs(fe, cpu, recent.gpu_ms) + b;
             scale_ = n;
             last_change_ = now;
             over_ = 0;
@@ -143,6 +157,44 @@ std::string RenderScaleGovernor::status() const {
         std::snprintf(b, sizeof b, "render %ux", static_cast<unsigned>(scale_));
     }
     return b;
+}
+
+bool GpuFrameTimer::arm() {
+    if (armed_) {
+        return false;
+    }
+    if (++ticks_ < kEvery) {
+        return false;
+    }
+    ticks_ = 0;
+    armed_ = true;
+    return true;
+}
+
+void GpuFrameTimer::add(std::uint64_t ns, double now) {
+    armed_ = false;
+    if (ns == 0) {
+        return;
+    }
+    samples_.emplace_back(now, static_cast<double>(ns) / 1e6);
+    while (samples_.size() > kMaxSamples || now - samples_.front().first > kWindowSeconds) {
+        samples_.pop_front();
+    }
+}
+
+double GpuFrameTimer::ms(double now) const {
+    std::vector<double> v;
+    for (const auto &[at, ms] : samples_) {
+        if (now - at <= kWindowSeconds) {
+            v.push_back(ms);
+        }
+    }
+    if (v.size() < kMinSamples) {
+        return 0;
+    }
+    const auto mid = v.begin() + static_cast<std::ptrdiff_t>(v.size() / 2);
+    std::nth_element(v.begin(), mid, v.end());
+    return *mid;
 }
 
 } // namespace maplethief::frontend

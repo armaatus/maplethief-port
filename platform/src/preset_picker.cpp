@@ -185,16 +185,17 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     const bool step2 = now == Step::kControls || (now == Step::kDone && offer_);
     const bool updates = now == Step::kUpdates;
     if (step2) {
-        c.text(kListX, 16, tr(Txt::picker_ready), kText, 2);
+        c.text(kListX, 16, Canvas::fit_width(tr(Txt::picker_ready), kListW, 2), kText, 2);
         // step() is past kPreset, so chosen_ is set.
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-        c.text(kListX, 40, tr(Txt::picker_is_set, {line_title(*chosen_)}), kDim);
+        const std::string is_set = tr(Txt::picker_is_set, {line_title(*chosen_)});
+        c.text(kListX, 40, Canvas::fit_width(is_set, kListW), kDim);
     } else if (updates) {
-        c.text(kListX, 16, tr(Txt::picker_updates_title), kText, 2);
-        c.text(kListX, 40, tr(Txt::picker_updates_help), kDim);
+        c.text(kListX, 16, Canvas::fit_width(tr(Txt::picker_updates_title), kListW, 2), kText, 2);
+        c.text(kListX, 40, Canvas::fit_width(tr(Txt::picker_updates_help), kListW), kDim);
     } else {
-        c.text(kListX, 16, tr(Txt::picker_title), kText, 2);
-        c.text(kListX, 40, tr(Txt::picker_help), kDim);
+        c.text(kListX, 16, Canvas::fit_width(tr(Txt::picker_title), kListW, 2), kText, 2);
+        c.text(kListX, 40, Canvas::fit_width(tr(Txt::picker_help), kListW), kDim);
     }
     for (std::size_t i = 0; i < count(); i++) {
         const int y = kListY + static_cast<int>(i) * kRowH;
@@ -215,8 +216,8 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
             updates ? tr(i == 0 ? Txt::picker_updates_no_help : Txt::picker_updates_yes_help)
             : step2 ? tr(i == 0 ? Txt::picker_show_controls_help : Txt::picker_start_help)
                     : preset_summary(lines_[i]);
-        c.text(kListX + 30, y + 7, title, kText, 2);
-        c.text(kListX + 30, y + 26, help, on ? kText : kDim);
+        c.text(kListX + 30, y + 7, Canvas::fit_width(title, kListW - 38, 2), kText, 2);
+        c.text(kListX + 30, y + 26, Canvas::fit_width(help, kListW - 38), on ? kText : kDim);
     }
     // The hints, with the pad's own glyphs.
     int x = kListX;
@@ -230,7 +231,13 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     const auto button = [&](int b) {
         x += draw_glyph(c, x, hy, Control{ControlKind::kGamepadButton, b}, type, face) + 2;
     };
-    const auto words = [&](const char *s) { x += c.text(x, hy + 3, s, kDim) + 8; };
+    // A translation longer than the room left is cut; none at all once the room is gone.
+    const auto words = [&](const char *s) {
+        const std::string fitted = Canvas::fit_width(s, kListX + kListW - x);
+        if (!fitted.empty()) {
+            x += c.text(x, hy + 3, fitted, kDim) + 8;
+        }
+    };
     key(SDLK_UP);
     key(SDLK_DOWN);
     x += draw_glyph(c, x, hy, Control{ControlKind::kDirection, static_cast<int>(Direction::kUp)},

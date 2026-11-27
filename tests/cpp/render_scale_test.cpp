@@ -2,8 +2,9 @@
 // image's place in the drawable; RenderScaleGovernor fed made-up seconds of FrameStats::recent()
 // (climbing from 1x while the scaled cost fits, the software backend's numbers stopping at 2x,
 // a drop after two seconds over the budget and the wait before climbing again, a resize, too
-// few frames, a fixed scale's warning given once); the overlay's line; and the `auto` value of
-// the render_scale row (the file, the flag, the presets).
+// few frames, a fixed scale's warning given once); the GPU's time in the budget (#365:
+// GpuFrameTimer's sampling and median, a slow injected GPU clock stepping auto down); the
+// overlay's line; and the `auto` value of the render_scale row (the file, the flag, the presets).
 #include <doctest/doctest.h>
 
 #include <string>
@@ -196,6 +197,106 @@ TEST_CASE("render_scale: a scale the frontend cannot set stops auto climbing") {
     CHECK(g.update(second(0.5, 0.5), 60.0) == 0);
     CHECK(g.set_cap(5, 61.0) == 0); // a bigger window: try again
     CHECK(g.update(second(0.5, 0.5), 62.5) == 2);
+}
+
+TEST_CASE("render_scale: the GPU timer times one GL frame in four and keeps a second's median") {
+    fe::GpuFrameTimer t;
+    CHECK(t.ms(0.0) == 0); // nothing measured: unknown
+    // Ticks 1 to 3: no timing; the 4th arms it for the next GL frame.
+    CHECK_FALSE(t.arm());
+    CHECK_FALSE(t.arm());
+    CHECK_FALSE(t.arm());
+    CHECK(t.arm());
+    CHECK(t.armed());
+    CHECK_FALSE(t.arm()); // not again while the timed frame is to come
+    t.add(5'000'000, 0.20);
+    CHECK_FALSE(t.armed());
+    CHECK(t.ms(0.20) == 0); // one sample is too few
+    for (int i = 0; i < 3; i++) {
+        CHECK_FALSE(t.arm());
+    }
+    CHECK(t.arm());
+    t.add(7'000'000, 0.40);
+    CHECK(t.ms(0.40) == doctest::Approx(7.0)); // the upper of two
+    t.arm();
+    t.add(0, 0.45); // no draws timed: no sample, but disarmed
+    CHECK_FALSE(t.armed());
+    t.add(6'000'000, 0.60);
+    t.add(90'000'000, 0.80); // one stalled frame does not move the median
+    CHECK(t.ms(0.80) == doctest::Approx(7.0));
+    // Samples older than a second drop out: unknown again when too few remain.
+    CHECK(t.ms(1.55) == doctest::Approx(90.0)); // 0.60 and 0.80 are left
+    CHECK(t.ms(1.70) == 0);                     // only 0.80 is left
+}
+
+TEST_CASE("render_scale: auto steps down on a slow injected GPU clock (#365)") {
+    // The GPU backend at 4x: the frontend and mt_gfx's recording are cheap on the CPU, the GPU
+    // takes 30 ms a GL frame. The frontend's loop, with made-up times: 20 ticks a second, the
+    // timed frames' GPU time from the injected clock.
+    RenderScaleGovernor g(true, 4);
+    g.set_cap(4, 0.0);
+    fe::GpuFrameTimer timer;
+    const auto gpu_clock_ns = [](double) { return std::uint64_t{30'000'000}; }; // a slow GPU
+    std::uint32_t got = 0;
+    double dropped_at = 0;
+    for (int tick = 1; tick <= 100 && got == 0; tick++) {
+        const double now = tick * 0.05;
+        if (timer.armed()) {
+            timer.add(gpu_clock_ns(now), now);
+        }
+        timer.arm();
+        fe::RecentStats r = second(1.5, 0.3);
+        r.gpu_ms = timer.ms(now);
+        got = g.update(r, now);
+        dropped_at = now;
+    }
+    // Two seconds over at 4x: 30 ms is 16.9 at 3x, within the 20 ms budget.
+    CHECK(got == 3);
+    CHECK(dropped_at <= 3.5);
+    CHECK(g.reason().find("GPU 30.00 ms") != std::string::npos);
+    CHECK(g.reason().find("at 4x: down to 3x") != std::string::npos);
+
+    // The same CPU numbers without a GPU time stay at 4x.
+    RenderScaleGovernor cpu_only(true, 4);
+    cpu_only.set_cap(4, 0.0);
+    for (int i = 1; i <= 5; i++) {
+        CHECK(cpu_only.update(second(1.5, 0.3), i) == 0);
+    }
+    CHECK(cpu_only.scale() == 4);
+
+    // Far too slow: past 3x to the largest scale whose scaled GPU time fits (70 ms at 4x: 39 at
+    // 3x, 17.5 at 2x).
+    RenderScaleGovernor slow(true, 4);
+    slow.set_cap(4, 0.0);
+    fe::RecentStats r = second(1.5, 0.3);
+    r.gpu_ms = 70.0;
+    slow.update(r, 1.0);
+    CHECK(slow.update(r, 2.0) == 2);
+}
+
+TEST_CASE("render_scale: the GPU's time keeps auto from climbing, and a fixed scale warns") {
+    // 2x on the GPU: the CPU predicts 4x fine, the GPU at 6 ms predicts 13.5 ms at 3x (fits) and
+    // 24 ms at 4x (does not).
+    RenderScaleGovernor g(true, 2);
+    g.set_cap(4, 0.0);
+    fe::RecentStats r = second(1.0, 0.2);
+    r.gpu_ms = 6.0;
+    CHECK(g.update(r, 1.0) == 3);
+    r.gpu_ms = 13.5;
+    CHECK(g.update(r, 2.5) == 0);
+    CHECK(g.update(r, 3.5) == 0);
+    CHECK(g.scale() == 3);
+
+    RenderScaleGovernor fixed(false, 4);
+    fixed.set_cap(4, 0.0);
+    r.gpu_ms = 33.0;
+    for (int i = 1; i <= 3; i++) {
+        fixed.update(r, i);
+    }
+    std::string text;
+    REQUIRE(fixed.take_warning(&text));
+    CHECK(text == "Render scale 4x is too slow here (33 ms a frame): try auto or less");
+    CHECK(fixed.reason().find("GPU 33.00 ms") != std::string::npos);
 }
 
 TEST_CASE("render_scale: the frame-time overlay shows the governor's line") {

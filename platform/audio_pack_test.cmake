@@ -16,6 +16,9 @@
 #
 #   cmake -DPROGRAM=<MapleThief> -DOUT=<dir> -DPYTHON=<python3> -P audio_pack_test.cmake
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 file(REMOVE_RECURSE "${OUT}")
 file(MAKE_DIRECTORY "${OUT}/pack_unplayed" "${OUT}/pack_corrupt" "${OUT}/pack_menu")
 
