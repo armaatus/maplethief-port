@@ -14,6 +14,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
+#include "maplethief/offline.h"
 #include "maplethief/runtape.h"
 #include "snapshot/snapshot_internal.h"
 #include "uikit/uikit_internal.h"
@@ -542,7 +543,9 @@ extern "C" uint32_t mt_input_action_named(const char *name) noexcept {
 }
 
 extern "C" void mt_input_press(uint32_t action) noexcept {
-    if (!guest_action(action) || !admit(MT_RUNTAPE_PRESS, action)) {
+    // The cash shop off with hide_online_ui (#400): its hidden buttons' keys send nothing.
+    if (!guest_action(action) || mt_offline_ui_drops_action(action) != 0 ||
+        !admit(MT_RUNTAPE_PRESS, action)) {
         return;
     }
     if (g.held[action]++ == 0) {

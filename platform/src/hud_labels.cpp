@@ -6,6 +6,7 @@
 
 #include "glyphs.h"
 #include "maplethief/input.h"
+#include "maplethief/offline.h"
 
 namespace maplethief::frontend {
 
@@ -104,8 +105,10 @@ std::vector<HudLabel> hud_labels(const KeypadLayout &layout, const KeypadWide &w
     out.reserve(kHudKeyCount);
     const float faded = std::clamp(pad_opacity, 0.0f, 1.0f);
     for (const HudKey &k : kHudKeys) {
-        out.push_back(
-            HudLabel{k.action, hud_key_rect(k, layout, wide), k.side, k.gl_icon ? 1.0f : faded});
+        // A key hidden with the dead cash buttons (#400): no label.
+        const float alpha =
+            mt_offline_ui_drops_action(k.action) != 0 ? 0.0f : (k.gl_icon ? 1.0f : faded);
+        out.push_back(HudLabel{k.action, hud_key_rect(k, layout, wide), k.side, alpha});
         if (k.action == MT_ACTION_MAP) {
             out.back().key.x += compass_dx;
         }
