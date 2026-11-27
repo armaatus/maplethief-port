@@ -22,9 +22,9 @@ ctest --preset mac-debug -R 'chapter_2' --output-on-failure
 
 Part B is **synthetic**: `starts.chapter_2_b` lays `tests/starts/raise/chapter_2_b.json` over
 part A's save (`savedata build --base`, [start-states.md](start-states.md#raised-starts-a-chained-save-with-a-few-fields-changed)):
-the hero levelled from 34 to 60 by the game's level-up rules, with item 4 and item 7 on quick
+the hero levelled from 35 to 60 by the game's level-up rules, with item 4 and item 7 on quick
 slots 1 and 2. Levels 34 to 60 take 385,050 EXP; mob 40 on 4.2 (level 56) gives about 90 and
-the level-34 hero killed about four a minute and fell every few minutes (its HP potion, item 3,
+a level-34 hero (an earlier chapter-1 chain's) killed about four a minute and fell every few minutes (its HP potion, item 3,
 heals 50 HP and area 4's shops sell none), so by play they would take game-days. Parts C–E go on
 from B's save as played.
 
@@ -38,16 +38,17 @@ is read first as a possible artefact of the raise.
 
 | Part | Test | Starts from | Covers | Game time | Falls |
 | --- | --- | --- | --- | ---: | ---: |
-| A | `play.chapter_2_a` | `starts.chapter_2` (4.1, level 34) | main 40, 0, 1; main 2 given | 334 s | 2 |
-| B | `play.chapter_2_b_synthetic` | `starts.chapter_2_b`: A's save, level 60 | main 2; the 3rd job | 1,027 s | 0 |
-| C | `play.chapter_2_c` | B's save | sides 0, 1, 37 (mob 66); main 3, 4 | 822 s | 0 |
-| D | `play.chapter_2_d` | C's save | main 5 (scene 20), side 2, main 6: to area 9 | 2,154 s | 6 |
-| E | `play.chapter_2_e` | D's save | main 7, sides 35, 36, main 71, 72 | 2,691 s | 0 |
-| F | `play.chapter_2_f_synthetic` | `starts.chapter_2_f`: E's save, level 70 | main 8 (mob 68), main 9, the trip to chapter 3 | 1,007 s | 3 |
+| A | `play.chapter_2_a` | `starts.chapter_2` (4.1, level 35) | main 40, 0, 1; main 2 given | 337 s | 0 |
+| B | `play.chapter_2_b_synthetic` | `starts.chapter_2_b`: A's save, level 60 | main 2; the 3rd job | 1,048 s | 0 |
+| C | `play.chapter_2_c` | B's save | sides 0, 1, 37 (mob 66); main 3, 4 | 1,274 s | 0 |
+| D | `play.chapter_2_d` | C's save | main 5 (scene 20), side 2, main 6: to area 9 | 556 s | 0 |
+| E | `play.chapter_2_e` | D's save | main 7, sides 35, 36, main 71, 72 | 2,580 s | 0 |
+| F | `play.chapter_2_f_synthetic` | `starts.chapter_2_f`: E's save, level 70 | main 8 (mob 68), main 9, the trip to chapter 3 | 775 s | 0 |
 
-The six parts took 8,036 game-s (2.2 game-hours). The whole chain, with `play.bot_world`, ran
-in 2,444 s of wall time on an Apple M4 (`ctest --preset mac-debug -R chapter_2`, 2026-11-27,
-10 of 10 passed).
+The six parts took 6,570 game-s (1.8 game-hours) and 1,475 s of wall time on an Apple M4
+(`mac-debug`, 2026-11-27, every part passed; A and B in one `ctest` run, C to F in the next).
+The start is the chapter-1 chain's part L save as this branch's bot plays it (level 35, 18,705
+meso); an earlier start (level 34, 9,710 meso) took 8,036 game-s, with 11 falls.
 
 Game time is the run's virtual clock (a game-second is 20 ticks); the same bot plays the same
 on every run.
@@ -98,15 +99,16 @@ chat. It changes nothing on the main line.
 
 - **Mob 66 on 4.17** (part C): portal4111 on 4.11 opens while side 37 is active and its kill is
   missing. `WolfMap`, 4.17's map script, plays the entrance scene first (panel 3, game mode 9).
-  The level-60 hero beat it in 118 game-s with no fall.
+  The level-60 hero beat it in 309 game-s with no fall (118 in an earlier run).
 - **Mob 68 on 9.5** (part F): chapter 2's portal942 on 9.4 opens while main 8 is active and its
   kill is missing. 9.5 has no map script (`YetiMap.out` is never named by a map object), so the
   fight starts with no scene and no message: the boss is one of the map's spawns, there from the
   first tick. Part F checks it (`ok: 9.5 after 3 s: mob 68 there, boss scene none`). Before it
   the bot buys dagger 34 at Equip90 and wears it, puts skill 21 (attack and accuracy up) on quick
   slot 4 and casts it every 20 s in the fight, and drinks to full HP on 9.4. The level-70 hero
-  beat it in 322 game-s, falling 3 times (the death popup's OK returns it to 9.0; the bot walks
-  back and the fight goes on). Its death plays end scene 8 (from the program, `CMob::Die`, not a
+  beat it in 12 game-s with no fall in the last run; an earlier run took 322, falling 3 times
+  (the death popup's OK returns it to 9.0; the bot walks back and the fight goes on). The last
+  run killed it with the hero knocked back, and the run's *end scene* step cleared bug 17 (below). Its death plays end scene 8 (from the program, `CMob::Die`, not a
   script). How the fights start and end is written up in
   [re/boss-fights.md](../re/boss-fights.md).
 
@@ -150,9 +152,9 @@ did in the coverage run below (`play.chapter_2_f_synthetic` under `mac-coverage`
 19 s fight, one on the kill's tick, then 15 minutes in game mode 9). So part F has a step after
 the kill, *mob 68's end scene*: when A has not moved the scene on for 5 s with `+0x119` still set,
 the run prints `original bug 17: …` and clears that byte, as #420's fix will. The scene, the talk
-with Alchester and the chapter change after it are the game's own. The two `mac-debug` reruns of
-part F after the change did not hit the bug (350 s and 365 s); a run with the byte forced at the
-scene's start took the step and went on to chapter 3.
+with Alchester and the chapter change after it are the game's own. Two `mac-debug` reruns of part F
+after the change did not hit the bug; a run with the byte forced at the scene's start, and the
+last chain's part F, which hit it in play, took the step and went on to chapter 3.
 
 The bot needed new moves for chapter 2's maps (none is a port bug, each with a test):
 
@@ -190,7 +192,7 @@ The bot needed new moves for chapter 2's maps (none is a port bug, each with a t
 ## What the runs showed about the game
 
 - **Levels.** Chapter 2's first field mobs are level 56 (mob 40); the chapter-1 hero reaches
-  chapter 2 at level 34. The hero gains 2 SP a level from 30, and HP and MP rise by `hero.dat`'s
+  chapter 2 at level 34 or 35. The hero gains 2 SP a level from 30, and HP and MP rise by `hero.dat`'s
   gains.
 - **Bosses are spawns.** Both bosses are their maps' own spawns; the map script (4.17) only
   adds the message and the entrance scene, and 9.5 has none.
