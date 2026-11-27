@@ -384,7 +384,11 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # The speedrun timer (#406, ADR 0156, run_timer_test.cpp): synthetic run events and a fake clock
 # (start, splits, end, reset, the personal best), an Assist set and reset mid-run, every Assists
 # row of the registry, the run variables, the category parser's refusals by line, the shipped
-# categories, the run log's round trip.
+# categories, the run log's round trip; practice (#409, ADR 0189): a load marks the run as
+# practice, segment times, best segments and the sum of best, the .segments file.
+# Practice states (#409, practice_state_test.cpp): practice_pick F7 and practice_load F8, the
+# state per category, slot and split, armed by a split and taken at the first safe turn, the pick,
+# and a load with the quick-load's refusals.
 # The first-launch IPA import (#182, ipa_import_test.cpp): synthetic IPAs refused with each
 # reason, unsafe entries writing nothing, an interrupted import leaving no game/, a re-import,
 # the bundle lookup's order, and the import screen's input and loop on a dummy-driver window.
@@ -438,6 +442,7 @@ maplethief_add_cpp_test(
             cpp/switch_input_test.cpp
             cpp/gfx_dksh_test.cpp
             cpp/run_timer_test.cpp
+            cpp/practice_state_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -1519,6 +1524,19 @@ foreach(part IN LISTS _chapter_1_parts)
                    FIXTURES_SETUP play_chapter_1_${part} ENVIRONMENT "${_env}")
     set(_previous ${part})
 endforeach()
+# Practice states per split (#409, practice_state.h, ADR 0189): from part c's save, a synthetic
+# category of map changes (1.2, back to 1.0): two splits take two states in the run's data
+# directory; F7 picks the first, F8 loads it: the guest digest (a save right after the load) is
+# the state file's as taken, the timer is practice with its segment timer back at zero, and the
+# way back to 1.0 ends the practised segment.
+add_test(NAME play.practice_state
+         COMMAND play_real_test practice_state "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_practice_state")
+set_tests_properties(
+    play.practice_state
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_chapter_1_c
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_1_c")
 # The popup menu's skill, quest and option tabs by the d-pad (#164, prompts.h): from part c's
 # save, each list shows and the port's frame sits on its cursor, in each tab's window shot; A
 # opens each quest's page and B closes it (#167, the quest page fix).

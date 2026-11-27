@@ -39,6 +39,18 @@
 // category, by real time; the overlay compares the last split reached with the best's same
 // split. write_run keeps it beside the logs (runs/<category>.best, the same text as a log).
 //
+// Practice (#409, ADR 0189). With save_states on, game.cpp keeps a save state after each split
+// (practice_state.h) and loads the one a player picks; start_practice then marks the timer as
+// practice: a run in progress ends as reset, and from the load the timer times segments, each from
+// the split before it to the next split's event, until the category's last split. A practice is
+// never a run: it writes no run log and makes no personal best.
+//
+// Best segments (#409). A segment is the time from one split to the next (from the start for the
+// first). Its best is the shortest by real time, from runs (each split's time less the one before)
+// and from practice alike; a segment counts when no Assist but save_states left its neutral value
+// during it and every run variable stayed inside the category. The sum of best adds up every
+// split's best segment once each has one. game.cpp keeps them in runs/<category>.segments.
+//
 // Single thread: the frontend's. on_event is called from a game-event listener, on the guest
 // thread inside the guest's call (maplethief/events.h), which is the frontend's in the turn hook.
 #ifndef MAPLETHIEF_PLATFORM_RUN_TIMER_H
@@ -178,6 +190,36 @@ bool write_run(const std::string &data_dir, const RunRecord &r, const RunRecord 
 // The personal best of `category` in <data_dir>/runs/, if there is one and it reads.
 std::optional<RunRecord> load_run_best(const std::string &data_dir, std::string_view category);
 
+// --- Best segments (#409) -----------------------------------------------------------------------
+
+// The best segment of each split of a category (docs/formats/run-category.md#best-segments).
+struct RunSegments {
+    std::string category;
+    std::vector<RunSplit> splits;             // the category's, when the bests were timed
+    std::vector<std::optional<RunTime>> best; // one per split: none until one is timed
+
+    // Every split's best added up; none while a split has no best (or there is no split).
+    std::optional<RunTime> sum_of_best() const;
+    // The splits with a best.
+    std::size_t known() const;
+    // Records `t` as split `i`'s segment if it is the first or faster by real time; true if so.
+    bool offer(std::size_t i, const RunTime &t);
+    bool operator==(const RunSegments &) const = default;
+};
+
+// Empty bests for the splits of `c`.
+RunSegments run_segments_for(const RunCategory &c);
+// The .segments file's text, and the bests read back from one (nothing for a malformed file:
+// `problems` says why, by line).
+std::string run_segments_text(const RunSegments &s);
+std::optional<RunSegments> parse_run_segments(std::string_view text,
+                                              std::vector<std::string> *problems);
+// <data_dir>/runs/<category>.segments: written whole through a temporary file, read back (none
+// if there is no file, it does not read, or it is of another category).
+bool write_run_segments(const std::string &data_dir, const RunSegments &s, std::string *why);
+std::optional<RunSegments> load_run_segments(const std::string &data_dir,
+                                             std::string_view category);
+
 // The run's clocks: what now reads, and the wall-clock stamp a record's `started` gets.
 struct RunClock {
     std::function<RunInstant()> now;
@@ -193,9 +235,11 @@ class RunTimer {
     // The settings the clean check and the run variables read (game.cpp's g.settings); none:
     // a default Settings.
     void attach(const Settings *settings) { settings_ = settings; }
-    // The category to time, and its personal best (none: no comparison). A run in progress ends
-    // as reset; the timer then waits for the next start.
-    void set_category(RunCategory category, std::optional<RunRecord> best);
+    // The category to time, its personal best (none: no comparison) and its best segments
+    // (none, or of other splits: none yet). A run in progress ends as reset; the timer then waits
+    // for the next start.
+    void set_category(RunCategory category, std::optional<RunRecord> best,
+                      std::optional<RunSegments> segments = std::nullopt);
     const RunCategory &category() const { return category_; }
     const std::optional<RunRecord> &best() const { return best_; }
     // A new personal best made by this timer's last run (write_run said so).
@@ -212,10 +256,30 @@ class RunTimer {
     // Ends a run in progress as reset (nothing if none is). A finished run's display is cleared
     // back to waiting.
     void reset();
+    // Practice from the save state taken after split `split` (1-based: the splits reached then)
+    // was loaded, now (#409): a run in progress ends as reset, the timer is practice, and it times
+    // the next split's segment from now. False, changing nothing, for a split that has no next
+    // one (or no category).
+    bool start_practice(std::size_t split);
 
     State state() const { return state_; }
-    // The next split's index (splits reached so far).
-    std::size_t next_split() const { return times_.size(); }
+    // The next split's index (splits reached so far, in a practice from its loaded split).
+    std::size_t next_split() const { return practice_ ? segment_ : times_.size(); }
+    // The split reached since the last call (1-based), if one was: a run's or a practice's.
+    std::optional<std::size_t> take_reached();
+    // A practice (#409): since a load, until the next start, reset or category.
+    bool practice() const { return practice_; }
+    // The split the practice was loaded from (1-based); 0 outside a practice.
+    std::size_t practice_from() const { return practice_ ? practice_from_ : 0; }
+    // The last segment a practice timed, if it has timed one.
+    const std::optional<RunTime> &last_segment() const { return last_segment_; }
+    // The best segments; true once after a best improved (game.cpp then writes them).
+    const RunSegments &segments() const { return segments_; }
+    bool take_segments_changed();
+    // The split whose state practice_load would load (1-based; none: none picked), shown on the
+    // overlay.
+    void set_picked(std::optional<std::size_t> split) { picked_ = split; }
+    const std::optional<std::size_t> &picked() const { return picked_; }
     const std::vector<RunTime> &times() const { return times_; }
     // Real time and ticks since the start: up to now while running, the end once finished.
     RunTime elapsed() const;
@@ -238,6 +302,10 @@ class RunTimer {
     RunTime since_start(const RunInstant &now) const;
     void check();
     void end_run(bool finished, const RunInstant &now);
+    void practice_split(const RunInstant &now);
+    // Split `i`'s segment `t`, as a best if the segment counts; then a new segment starts.
+    void offer_segment(std::size_t i, const RunTime &t);
+    std::vector<std::string> practice_lines() const;
 
     RunClock clock_;
     const Settings *settings_ = nullptr;
@@ -254,6 +322,17 @@ class RunTimer {
     std::vector<std::pair<std::string, std::vector<std::string>>> variables_;
     bool in_category_ = true;
     std::vector<RunRecord> records_;
+    // Practice and best segments (#409).
+    bool practice_ = false;
+    std::size_t practice_from_ = 0; // the loaded split (1-based)
+    std::size_t segment_ = 0;       // the next split's index in a practice
+    RunInstant segment_start_;
+    std::optional<RunTime> last_segment_;
+    bool segment_counts_ = true; // no Assist but save_states, no variable outside, so far
+    RunSegments segments_;
+    bool segments_changed_ = false;
+    std::optional<std::size_t> reached_;
+    std::optional<std::size_t> picked_;
 };
 
 } // namespace maplethief::frontend

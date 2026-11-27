@@ -264,6 +264,25 @@ std::string time_text(const RunTime &t) {
     return std::to_string(t.ms) + " ms " + std::to_string(t.ticks) + " ticks";
 }
 
+// The time from `from` to `to` (none below zero).
+RunTime span(const RunInstant &from, const RunInstant &to) {
+    RunTime t;
+    t.ms = std::max<std::int64_t>(0, std::llround((to.seconds - from.seconds) * 1000.0));
+    t.ticks = to.ticks >= from.ticks ? to.ticks - from.ticks : 0;
+    return t;
+}
+
+// `b` less `a` (none below zero).
+RunTime minus(const RunTime &b, const RunTime &a) {
+    RunTime t;
+    t.ms = std::max<std::int64_t>(0, b.ms - a.ms);
+    t.ticks = b.ticks >= a.ticks ? b.ticks - a.ticks : 0;
+    return t;
+}
+
+// The one Assist a practice needs: its segments still count with it on (#409).
+constexpr std::string_view kPracticeAssist = "save_states";
+
 } // namespace
 
 // --- Categories ---------------------------------------------------------------------------------
@@ -667,6 +686,169 @@ std::optional<RunRecord> load_run_best(const std::string &data_dir, std::string_
     return r;
 }
 
+// --- Best segments -------------------------------------------------------------------------------
+
+std::optional<RunTime> RunSegments::sum_of_best() const {
+    if (best.empty()) {
+        return std::nullopt;
+    }
+    RunTime sum;
+    for (const std::optional<RunTime> &b : best) {
+        if (!b) {
+            return std::nullopt;
+        }
+        sum.ms += b->ms;
+        sum.ticks += b->ticks;
+    }
+    return sum;
+}
+
+std::size_t RunSegments::known() const {
+    return static_cast<std::size_t>(
+        std::count_if(best.begin(), best.end(), [](const auto &b) { return b.has_value(); }));
+}
+
+bool RunSegments::offer(std::size_t i, const RunTime &t) {
+    if (i >= best.size()) {
+        return false;
+    }
+    if (const std::optional<RunTime> &b = best[i]; b.has_value() && b->ms <= t.ms) {
+        return false;
+    }
+    best[i] = t;
+    return true;
+}
+
+RunSegments run_segments_for(const RunCategory &c) {
+    RunSegments s;
+    s.category = c.id;
+    s.splits = c.splits;
+    s.best.resize(c.splits.size());
+    return s;
+}
+
+std::string run_segments_text(const RunSegments &s) {
+    std::string out = "# MapleThief best segments (docs/formats/run-category.md#best-segments)\n";
+    out += "category = " + s.category + "\n";
+    for (const RunSplit &split : s.splits) {
+        out += "split " + run_split_event_text(split) + " = " + split.title + "\n";
+    }
+    for (std::size_t i = 0; i < s.best.size(); i++) {
+        if (const std::optional<RunTime> &b = s.best[i]; b.has_value()) {
+            out += "segment " + std::to_string(i + 1) + " = " + time_text(*b) + "\n";
+        }
+    }
+    return out;
+}
+
+std::optional<RunSegments> parse_run_segments(std::string_view text,
+                                              std::vector<std::string> *problems) {
+    const std::size_t before = problems->size();
+    RunSegments s;
+    bool have_category = false;
+    std::vector<std::pair<std::size_t, RunTime>> times; // (split index, time), checked at the end
+    const std::vector<std::string_view> lines = split_lines(text);
+    for (std::size_t i = 0; i < lines.size(); i++) {
+        const std::size_t n = i + 1;
+        const std::string_view line = trim(lines[i]);
+        if (line.empty() || line.front() == '#') {
+            continue;
+        }
+        const std::size_t eq = line.find('=');
+        const std::vector<std::string_view> left =
+            words(line.substr(0, eq == std::string_view::npos ? 0 : eq));
+        const std::string_view right =
+            eq == std::string_view::npos ? std::string_view() : trim(line.substr(eq + 1));
+        if (left.empty()) {
+            problems->push_back(line_problem(n, "not 'key = value'"));
+            continue;
+        }
+        const std::string_view key = left[0];
+        if (key == "category" && left.size() == 1 && good_id(right) && !have_category) {
+            s.category = std::string(right);
+            have_category = true;
+        } else if (key == "split") {
+            RunSplit split;
+            std::string why;
+            if (s.splits.size() >= kMaxRunSplits ||
+                !parse_split_event({left.begin() + 1, left.end()}, &split, &why) ||
+                !good_title(right)) {
+                problems->push_back(line_problem(n, "a bad split line"));
+                continue;
+            }
+            split.title = std::string(right);
+            s.splits.push_back(std::move(split));
+        } else if (key == "segment" && left.size() == 2) {
+            std::uint64_t index = 0;
+            RunTime t;
+            if (!parse_number(left[1], 3, kMaxRunSplits, &index) || index == 0 ||
+                !parse_time(right, &t) ||
+                std::any_of(times.begin(), times.end(),
+                            [index](const auto &p) { return p.first == index - 1; })) {
+                problems->push_back(line_problem(
+                    n, "a bad segment line (segment N = MS ms TICKS ticks, N from 1, once each)"));
+                continue;
+            }
+            times.emplace_back(static_cast<std::size_t>(index - 1), t);
+        } else {
+            problems->push_back(line_problem(n, "unknown or bad line '" + printable(line) + "'"));
+        }
+    }
+    if (problems->size() == before) {
+        if (!have_category || s.splits.empty()) {
+            problems->push_back("no category or split line");
+        } else {
+            s.best.resize(s.splits.size());
+            for (const auto &[index, t] : times) {
+                if (index >= s.best.size()) {
+                    problems->push_back("segment " + std::to_string(index + 1) +
+                                        " of a category with " + std::to_string(s.splits.size()) +
+                                        " splits");
+                    break;
+                }
+                s.best[index] = t;
+            }
+        }
+    }
+    if (problems->size() != before) {
+        return std::nullopt;
+    }
+    return s;
+}
+
+bool write_run_segments(const std::string &data_dir, const RunSegments &s, std::string *why) {
+    if (!good_id(s.category)) {
+        *why = "no category";
+        return false;
+    }
+    std::error_code ec;
+    const fs::path dir = utf8_path(data_dir) / "runs";
+    fs::create_directories(dir, ec);
+    if (!fs::is_directory(dir, ec)) {
+        *why = "cannot make " + dir.string();
+        return false;
+    }
+    return write_file(dir / (s.category + ".segments"), run_segments_text(s), why);
+}
+
+std::optional<RunSegments> load_run_segments(const std::string &data_dir,
+                                             std::string_view category) {
+    if (!good_id(category)) {
+        return std::nullopt;
+    }
+    std::string text;
+    if (!read_file(utf8_path(data_dir) / "runs" / (std::string(category) + ".segments"),
+                   kMaxRunCategoryFileBytes * 4, &text)) {
+        return std::nullopt;
+    }
+    std::vector<std::string> problems;
+    std::optional<RunSegments> s = parse_run_segments(text, &problems);
+    if (!s || s->category != category) {
+        return std::nullopt;
+    }
+    return s;
+}
+
 // --- The timer -----------------------------------------------------------------------------------
 
 const Settings &RunTimer::settings() const {
@@ -674,21 +856,28 @@ const Settings &RunTimer::settings() const {
     return settings_ != nullptr ? *settings_ : defaults;
 }
 
-RunTime RunTimer::since_start(const RunInstant &now) const {
-    RunTime t;
-    t.ms = std::max<std::int64_t>(0, std::llround((now.seconds - start_.seconds) * 1000.0));
-    t.ticks = now.ticks >= start_.ticks ? now.ticks - start_.ticks : 0;
-    return t;
-}
+RunTime RunTimer::since_start(const RunInstant &now) const { return span(start_, now); }
 
-void RunTimer::set_category(RunCategory category, std::optional<RunRecord> best) {
-    if (state_ == State::kRunning) {
+void RunTimer::set_category(RunCategory category, std::optional<RunRecord> best,
+                            std::optional<RunSegments> segments) {
+    if (state_ == State::kRunning && !practice_) {
         end_run(false, clock_.now());
     }
     category_ = std::move(category);
     best_ = std::move(best);
     state_ = State::kWaiting;
     times_.clear();
+    practice_ = false;
+    last_segment_.reset();
+    reached_.reset();
+    picked_.reset();
+    segments_changed_ = false;
+    if (segments && segments->category == category_.id && segments->splits == category_.splits &&
+        segments->best.size() == category_.splits.size()) {
+        segments_ = std::move(*segments);
+    } else {
+        segments_ = run_segments_for(category_);
+    }
 }
 
 void RunTimer::on_event(const mt_game_event &e) {
@@ -696,16 +885,85 @@ void RunTimer::on_event(const mt_game_event &e) {
         start();
         return;
     }
-    if (state_ != State::kRunning || times_.size() >= category_.splits.size() ||
-        !category_.splits[times_.size()].matches(e)) {
+    const std::size_t next = next_split();
+    if (state_ != State::kRunning || next >= category_.splits.size() ||
+        !category_.splits[next].matches(e)) {
         return;
     }
     const RunInstant now = clock_.now();
+    if (practice_) {
+        practice_split(now);
+        return;
+    }
     times_.push_back(since_start(now));
     check();
+    const std::size_t i = times_.size() - 1;
+    offer_segment(i, i == 0 ? times_[0] : minus(times_[i], times_[i - 1]));
+    reached_ = times_.size();
     if (times_.size() == category_.splits.size()) {
         end_run(true, now);
     }
+}
+
+void RunTimer::practice_split(const RunInstant &now) {
+    check();
+    const RunTime t = span(segment_start_, now);
+    last_segment_ = t;
+    offer_segment(segment_, t);
+    segment_++;
+    reached_ = segment_;
+    segment_start_ = now;
+    if (segment_ == category_.splits.size()) {
+        state_ = State::kFinished;
+    }
+}
+
+void RunTimer::offer_segment(std::size_t i, const RunTime &t) {
+    if (segment_counts_ && segments_.offer(i, t)) {
+        segments_changed_ = true;
+    }
+    segment_counts_ = true;
+    check(); // the next segment starts with the settings in effect now
+}
+
+bool RunTimer::start_practice(std::size_t split) {
+    const std::size_t n = category_.splits.size();
+    if (split == 0 || split >= n) {
+        return false;
+    }
+    const RunInstant now = clock_.now();
+    if (state_ == State::kRunning && !practice_) {
+        end_run(false, now);
+    }
+    state_ = State::kRunning;
+    practice_ = true;
+    practice_from_ = split;
+    segment_ = split;
+    segment_start_ = now;
+    last_segment_.reset();
+    times_.clear();
+    end_ = {};
+    assists_.clear();
+    variables_.clear();
+    for (const char *key : kRunVariables) {
+        variables_.emplace_back(key, std::vector<std::string>{});
+    }
+    in_category_ = true;
+    segment_counts_ = true;
+    check();
+    return true;
+}
+
+std::optional<std::size_t> RunTimer::take_reached() {
+    std::optional<std::size_t> out;
+    out.swap(reached_);
+    return out;
+}
+
+bool RunTimer::take_segments_changed() {
+    const bool changed = segments_changed_;
+    segments_changed_ = false;
+    return changed;
 }
 
 void RunTimer::turn() {
@@ -719,9 +977,12 @@ void RunTimer::start() {
         return; // no category: nothing to time
     }
     const RunInstant now = clock_.now();
-    if (state_ == State::kRunning) {
+    if (state_ == State::kRunning && !practice_) {
         end_run(false, now);
     }
+    practice_ = false;
+    last_segment_.reset();
+    segment_counts_ = true;
     state_ = State::kRunning;
     start_ = now;
     started_ = clock_.stamp ? clock_.stamp() : std::string();
@@ -738,7 +999,12 @@ void RunTimer::start() {
 }
 
 void RunTimer::reset() {
-    if (state_ == State::kRunning) {
+    if (practice_) {
+        practice_ = false; // a practice is never a run: nothing to record
+        last_segment_.reset();
+        state_ = State::kWaiting;
+        times_.clear();
+    } else if (state_ == State::kRunning) {
         end_run(false, clock_.now());
     } else {
         state_ = State::kWaiting;
@@ -752,9 +1018,14 @@ void RunTimer::check() {
         if (row.group != SettingGroup::kAssists) {
             continue;
         }
-        if (setting_text(s, row) != original_value(row) &&
-            std::find(assists_.begin(), assists_.end(), row.key) == assists_.end()) {
+        if (setting_text(s, row) == original_value(row)) {
+            continue;
+        }
+        if (std::find(assists_.begin(), assists_.end(), row.key) == assists_.end()) {
             assists_.emplace_back(row.key);
+        }
+        if (row.key != kPracticeAssist) {
+            segment_counts_ = false;
         }
     }
     for (auto &[key, values] : variables_) {
@@ -769,6 +1040,7 @@ void RunTimer::check() {
         const std::vector<std::string> ok = category_.allowed(key);
         if (std::find(ok.begin(), ok.end(), v) == ok.end()) {
             in_category_ = false;
+            segment_counts_ = false;
         }
     }
 }
@@ -802,9 +1074,9 @@ void RunTimer::end_run(bool finished, const RunInstant &now) {
 RunTime RunTimer::elapsed() const {
     switch (state_) {
     case State::kRunning:
-        return since_start(clock_.now());
+        return practice_ ? span(segment_start_, clock_.now()) : since_start(clock_.now());
     case State::kFinished:
-        return end_;
+        return practice_ ? last_segment_.value_or(RunTime{}) : end_;
     case State::kWaiting:
         break;
     }
@@ -835,10 +1107,17 @@ std::vector<RunRecord> RunTimer::take_records() {
 }
 
 std::vector<std::string> RunTimer::overlay_lines() const {
+    if (practice_) {
+        return practice_lines();
+    }
     std::vector<std::string> out;
     const std::string title = category_.title.empty() ? category_.id : category_.title;
     const std::size_t n = category_.splits.size();
     out.push_back(title + "  " + format_run_time(elapsed().ms));
+    if (picked_ && *picked_ >= 1 && *picked_ <= n) {
+        out.push_back("practice from: " + category_.splits[*picked_ - 1].title + " (" +
+                      std::to_string(*picked_) + "/" + std::to_string(n) + ")");
+    }
     if (state_ == State::kWaiting) {
         out.emplace_back(n == 0 ? "no category" : "a new character starts the run");
         return out;
@@ -864,6 +1143,47 @@ std::vector<std::string> RunTimer::overlay_lines() const {
         vars += (vars.empty() ? "" : "  ") + key + " " + (values.empty() ? "?" : values.back());
     }
     out.push_back(vars);
+    return out;
+}
+
+// A practice's overlay (#409): the segment's time, the split it was loaded from, the next split,
+// its best segment and the last one timed, the sum of best.
+std::vector<std::string> RunTimer::practice_lines() const {
+    std::vector<std::string> out;
+    const std::string title = category_.title.empty() ? category_.id : category_.title;
+    const std::size_t n = category_.splits.size();
+    const auto of = [n](std::size_t i) {
+        return " (" + std::to_string(i) + "/" + std::to_string(n) + ")";
+    };
+    out.push_back(title + " practice  " + format_run_time(elapsed().ms));
+    out.push_back("loaded: " + category_.splits[practice_from_ - 1].title + of(practice_from_));
+    if (picked_ && *picked_ != practice_from_ && *picked_ >= 1 && *picked_ <= n) {
+        out.push_back("practice from: " + category_.splits[*picked_ - 1].title + of(*picked_));
+    }
+    if (state_ == State::kRunning && segment_ < n) {
+        out.push_back("next: " + category_.splits[segment_].title + of(segment_ + 1));
+        const std::optional<RunTime> &b = segments_.best[segment_];
+        out.push_back(b ? "best segment " + format_run_time(b->ms)
+                        : std::string("no best segment yet"));
+    } else {
+        out.push_back("finished" + of(n));
+    }
+    if (last_segment_ && segment_ >= 1) {
+        const std::optional<RunTime> &b = segments_.best[segment_ - 1];
+        std::string line = "last segment " + format_run_time(last_segment_->ms);
+        if (b) {
+            line += " (" + format_run_time(last_segment_->ms - b->ms, true) + ")";
+        }
+        out.push_back(line);
+    }
+    if (const std::optional<RunTime> sob = segments_.sum_of_best()) {
+        out.push_back("sum of best " + format_run_time(sob->ms));
+    } else {
+        out.push_back("sum of best: " + std::to_string(segments_.known()) + " of " +
+                      std::to_string(n) + " segments");
+    }
+    out.emplace_back(segment_counts_ ? "practice, never a run"
+                                     : "practice: this segment does not count");
     return out;
 }
 
