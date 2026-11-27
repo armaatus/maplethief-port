@@ -11261,6 +11261,192 @@ void systems2_portal620(Run &r, u64) {
     then_finish(r);
 }
 void systems2_portal620_checks(Run &, u64) {}
+
+// --- the compendium's NPCs, shops and recipes in the port (#220) ---------------------------------
+//
+// compendium_npcs: from the start of chapter 2 (tests/starts/chapter_2.json, equal to part L's
+// save), five NPCs, two shops and two recipes of the compendium checked by play against the
+// knowledge base's own records (bot_world.txt's npc, shop and recipe lines, which the compendium
+// pages are built from; docs/testing/compendium-port-check.md):
+//   - an NPC: the hero goes to the map the compendium names; its object shows there at the tile
+//     the compendium gives (the live object, live_object), and up at it opens its chat or shop;
+//   - a shop: opened from its NPC, the Buy tab's rows (item, price) are the compendium's stock
+//     of that shop, row for row as a set, and of its kind (equipment or other items);
+//   - a recipe: crafted at the smith through his lists; the materials, the meso fee and the
+//     result the compendium gives are what leaves and enters the bag.
+
+// The compendium's record of the NPC object `object` on (area, map), nullptr if none.
+const world_map::Npc *kb_npc(int area, int map, const std::string &object) {
+    for (const world_map::Npc &n : world_map::npcs()) {
+        if (n.area == area && n.map == map && n.object == object) {
+            return &n;
+        }
+    }
+    return nullptr;
+}
+
+// Goes to the NPC, checks its live object against the compendium's tile, and presses up until
+// its chat or its shop opens (left open for the next step).
+void then_meet(Run &r, const std::string &name, int area, int map, const std::string &object) {
+    const world_map::Npc *n = kb_npc(area, map, object);
+    check(n != nullptr, name + ": the compendium places " + object + " on " + std::to_string(area) +
+                            "." + std::to_string(map));
+    if (n == nullptr) {
+        return;
+    }
+    const int want_x = n->column * 16 + 8, want_y = (n->row + 1) * 16 - 1;
+    quest_bot::then_go(r, name + " (" + object + ")", quest_bot::at_object(area, map, object, 6),
+                       600);
+    then_do(r, name + ": where the compendium puts it",
+            [name, object, want_x, want_y, area, map](mt_cpu *cpu) {
+                int x = -1, y = -1;
+                const bool seen = quest_bot::live_object(cpu, object, x, y);
+                check(hero(cpu).on(area, map) && seen && x == want_x && y == want_y,
+                      name + " (" + object + ") stands on " + std::to_string(area) + "." +
+                          std::to_string(map) + " at (" + std::to_string(x) + ", " +
+                          std::to_string(y) + "), the compendium's tile gives (" +
+                          std::to_string(want_x) + ", " + std::to_string(want_y) + ")");
+            });
+    then(r, name + ": up opens the chat or the shop", 20, [&r](mt_cpu *cpu, double el) {
+        if (quest_bot::chatting(cpu) || game_mode(cpu) == 2) {
+            hold(r, UP, false);
+            return true;
+        }
+        hold(r, UP, std::fmod(el, 1.0) < 0.2);
+        return false;
+    });
+    then_check(r, name + ": its chat or shop is open",
+               [](mt_cpu *cpu) { return quest_bot::chatting(cpu) || game_mode(cpu) == 2; });
+}
+
+// The chat opened by then_meet, A through to the field (any row of a list).
+void then_chat_closed(Run &r, const std::string &name, int area, int map,
+                      const std::string &object) {
+    quest_bot::then_talk_to(r, name + ": the chat closed", area, map, object, -1,
+                            [](mt_cpu *) { return true; });
+}
+
+// The shop opened by then_meet: its Buy rows against the compendium's stock, then B to the field.
+void then_shop_matches(Run &r, const std::string &name, int area, int map,
+                       const std::string &object) {
+    then_wait_for(r, name + ": the shop settled", 5, quest_bot::in_shop, 0.5);
+    then_do(r, name + ": the Buy tab is the compendium's stock", [=](mt_cpu *cpu) {
+        std::set<std::pair<i32, i32>> want;
+        std::set<int> numbers, tables;
+        for (const world_map::Shop &s : world_map::shops()) {
+            if (s.chapter == hero(cpu).chapter && s.area == area && s.map == map &&
+                s.npc == object) {
+                want.insert({s.item, s.price});
+                numbers.insert(s.shop);
+                tables.insert(s.table);
+            }
+        }
+        const Shop sh = shop(cpu);
+        std::set<std::pair<i32, i32>> got;
+        std::string rows;
+        for (i32 i = 0; i < sh.rows; i++) {
+            const ShopRow w = shop_row(cpu, sh, i);
+            got.insert({w.id, w.price});
+            rows += " " + std::to_string(w.id) + ":" + std::to_string(w.price);
+        }
+        const int table = tables.size() == 1 ? *tables.begin() : -1;
+        std::printf("%s: shop %d, kind %d, %d rows:%s\n", name.c_str(),
+                    numbers.size() == 1 ? *numbers.begin() : -1, sh.kind, sh.rows, rows.c_str());
+        check(numbers.size() == 1 && !want.empty() && got == want &&
+                  static_cast<std::size_t>(sh.rows) == want.size() &&
+                  (sh.kind == 1) == (table == 1),
+              name + ": " + std::to_string(sh.rows) +
+                  " rows, each item and price as the "
+                  "compendium's shop " +
+                  std::to_string(numbers.empty() ? -1 : *numbers.begin()) + " (" +
+                  std::to_string(want.size()) + " items) lists them");
+    });
+    then(r, name + ": B closes the shop", 10, [&r](mt_cpu *cpu, double el) {
+        if (field(cpu) && game_mode(cpu) != 2) {
+            hold(r, B, false);
+            return true;
+        }
+        hold(r, B, std::fmod(el, 0.6) < 0.1);
+        return false;
+    });
+}
+
+// Crafts the compendium's recipe for equipment `item` at the smith (0.0) through his lists
+// `choices`, and checks what left and entered the bag against the recipe.
+void then_craft(Run &r, const std::string &name, i32 item, std::vector<int> choices) {
+    const world_map::Recipe *rc = nullptr;
+    for (const world_map::Recipe &c : world_map::recipes()) {
+        if (c.chapter == 2 && c.table == 0 && c.item == item) {
+            rc = &c;
+        }
+    }
+    check(rc != nullptr && rc->area == 0 && rc->map == 0 && rc->npc == "smith",
+          name + ": the compendium has its chapter-2 recipe at the smith on 0.0");
+    if (rc == nullptr) {
+        return;
+    }
+    std::vector<i32> items;
+    for (const world_map::Material &m : rc->materials) {
+        items.push_back(m.item);
+    }
+    auto before = std::make_shared<Counts>();
+    then_do(r, name + ": before", [before, items, item](mt_cpu *cpu) {
+        *before = counts(cpu, items, {item});
+        std::printf("before %s\n", counts_text(*before).c_str());
+    });
+    quest_bot::then_talk_to(r, name + ": crafted at the smith", rc->area, rc->map, rc->npc,
+                            std::move(choices), [before, item](mt_cpu *cpu) {
+                                return quest_bot::equip_owned(cpu, hero(cpu), item) >
+                                       before->equip[item];
+                            });
+    const world_map::Recipe want = *rc;
+    then_do(r, name + ": after", [before, items, want, name](mt_cpu *cpu) {
+        Counts now = counts(cpu, items, {want.item});
+        bool ok = now.equip[want.item] == before->equip[want.item] + want.count &&
+                  now.meso == before->meso - want.meso;
+        std::string recipe = std::to_string(want.count) + " of equipment " +
+                             std::to_string(want.item) + " for " + std::to_string(want.meso) +
+                             " meso";
+        for (const world_map::Material &m : want.materials) {
+            ok = ok && m.table == 1 && now.items[m.item] == before->items[m.item] - m.count;
+            recipe += ", " + std::to_string(m.count) + " of item " + std::to_string(m.item);
+        }
+        check(ok, name + ": the compendium's recipe (" + recipe + "): before" +
+                      counts_text(*before) + "; after" + counts_text(now));
+    });
+}
+
+void compendium_npcs(Run &r, u64) {
+    from_save(r);
+    then_wait_field(r);
+    then_check(r, "chapter 2 on Orbis (4.1)",
+               [](mt_cpu *cpu) { return hero(cpu).chapter == 2 && hero(cpu).on(4, 1); });
+    // NPC 1: the Pirate on Orbis, whose list 1 takes the hero back to Henesys.
+    then_meet(r, "the Pirate", 4, 1, "Pirate_Orbis");
+    quest_bot::then_talk_to(r, "the Pirate: back to Henesys (list 1)", 4, 1, "Pirate_Orbis", 1,
+                            [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    // NPC 2: Chief Stan (2.0).
+    then_meet(r, "Chief Stan", 2, 0, "Stan");
+    then_chat_closed(r, "Chief Stan", 2, 0, "Stan");
+    // NPC 3 and shop 1: Mr. Wang's shop in Henesys (Etc20).
+    then_meet(r, "Mr. Wang", 2, 0, "Etc20");
+    then_shop_matches(r, "Mr. Wang's shop in Henesys", 2, 0, "Etc20");
+    // Shop 2: Mr. Lee's equipment shop in Henesys (Equip20).
+    then_meet(r, "Mr. Lee", 2, 0, "Equip20");
+    then_shop_matches(r, "Mr. Lee's shop in Henesys", 2, 0, "Equip20");
+    // NPC 4: Blackbull (the pig, Perion 1.0).
+    then_meet(r, "Blackbull", 1, 0, "pig");
+    then_chat_closed(r, "Blackbull", 1, 0, "pig");
+    // NPC 5: Mr. Smith (0.0), then two of his recipes: the shoes' list (5), its first pair, and
+    // the earrings' list (6), its first pair. His chat stays open for the first: any row of his
+    // first list crafts something.
+    then_meet(r, "Mr. Smith", 0, 0, "smith");
+    then_craft(r, "Lappy Boots", 51, {5, 1});
+    then_craft(r, "Lightning Earrings", 63, {6, 1});
+    then_bag(r, "the end");
+    then_finish(r);
+}
+void compendium_npcs_checks(Run &, u64) {}
 // --- Korean (#303, docs/testing/systems-sweep-1.md) ----------------------------------------------
 //
 // korean_*: MAPLETHIEF_LANGUAGE=ko. The terms are agreed by the pad (the data directory has no
@@ -12235,6 +12421,7 @@ constexpr Mode k_modes[] = {
     {"systems2_scrolls_failure", systems2_scrolls_failure, systems2_scrolls_checks, 1},
     {"systems2_pigmy", systems2_pigmy, systems2_pigmy_checks, 1},
     {"systems2_portal620", systems2_portal620, systems2_portal620_checks, 1},
+    {"compendium_npcs", compendium_npcs, compendium_npcs_checks, 1},
     {"korean_chapter_1_a", korean_chapter_1_a, korean_checks, 1, false, korean_setup},
     {"korean_offer_2", korean_offer_2, korean_checks, 1, false, korean_setup},
     {"korean_offer_3", korean_offer_3, korean_checks, 1, false, korean_setup},

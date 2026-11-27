@@ -13,6 +13,9 @@ tables:
 * **shops**: every shop an NPC opens (``npc.opens_shop``), per chapter: the map, the NPC's
   object (its script's base name, as the ``.obj`` names it), the shop number and each item it
   sells with its price.
+* **npcs**: where each NPC stands (``npc.stands_on``): the map, the object and its tile.
+* **recipes**: every crafting recipe (``recipe``), per chapter: the crafter's map and object,
+  the result, the meso fee and the materials. The compendium check of #220 crafts from them.
 
 The output is derived from the bundle, so it is written into the build tree at test time
 (CTest ``play.bot_world``) and never committed. Format, one record per line, fields separated
@@ -20,6 +23,8 @@ by spaces, ``#`` lines are comments::
 
     link <chapter> <area> <map> <portal> <to_area> <to_map> [<alternative> ...]
     shop <chapter> <area> <map> <object> <shop> <table> <item> <price>
+    npc <id> <area> <map> <object> <column> <row>
+    recipe <chapter> <area> <map> <object> <table> <item> <count> <meso> <table>:<item>:<count> ...
 
 No alternative means the link is always open. An alternative is terms joined by ``&``: a quest
 term is ``q<kind>.<number><op><value>`` (``q0.9==2``: main quest 9 is done; ``op`` one of
@@ -108,6 +113,39 @@ class Shop:
         )
 
 
+@dataclass(frozen=True, order=True)
+class Npc:
+    id: int
+    area: int
+    map: int
+    object: str  # the object's name on the map
+    column: int  # its tile
+    row: int
+
+    def line(self) -> str:
+        return f"npc {self.id} {self.area} {self.map} {self.object} {self.column} {self.row}"
+
+
+@dataclass(frozen=True, order=True)
+class Recipe:
+    chapter: int
+    area: int
+    map: int
+    npc: str  # the crafter's object name
+    table: int  # the result's table (0 equipment, 1 other items)
+    item: int
+    count: int
+    meso: int
+    materials: tuple[tuple[int, int, int], ...]  # (table, item, count), sorted
+
+    def line(self) -> str:
+        mats = " ".join(f"{t}:{i}:{n}" for t, i, n in self.materials)
+        return (
+            f"recipe {self.chapter} {self.area} {self.map} {self.npc} {self.table} {self.item} "
+            f"{self.count} {self.meso} {mats}"
+        )
+
+
 def map_numbers(map_id: str) -> tuple[int, int]:
     """``"10-3"`` -> ``(10, 3)``."""
     area, _, number = map_id.partition("-")
@@ -168,9 +206,7 @@ def shops(entities: Entities) -> list[Shop]:
     for shop in entities.get("shop", {}).values():
         for opener in shop.get("opened_by", []):
             area, number = map_numbers(opener["map"])
-            npc = _object_name(entities, opener["script"])
-            if not npc or any(c.isspace() for c in npc):
-                raise BotWorldError(f"shop {shop['id']}: object name {npc!r}")
+            npc = _check_name(f"shop {shop['id']}", _object_name(entities, opener["script"]))
             for chapter in opener.get("chapters", []):
                 for sold in shop.get("sells", []):
                     table, item = item_ref(sold["id"])
@@ -189,10 +225,71 @@ def shops(entities: Entities) -> list[Shop]:
     return sorted(out)
 
 
-def render(link_list: Sequence[Link], shop_list: Sequence[Shop]) -> str:
+def _check_name(what: str, name: str) -> str:
+    if not name or any(c.isspace() for c in name):
+        raise BotWorldError(f"{what}: object name {name!r}")
+    return name
+
+
+def npcs(entities: Entities) -> list[Npc]:
+    """Every NPC object a map places (one with no script is only in a scene), sorted."""
+    out: set[Npc] = set()
+    for npc in entities.get("npc", {}).values():
+        for place in npc.get("stands_on", []):
+            if not place.get("script"):
+                continue
+            area, number = map_numbers(place["id"])
+            column, row = place["tile"]
+            name = _check_name(f"npc {npc['id']}", str(place["script"]))
+            out.add(Npc(int(npc["id"]), area, number, name, int(column), int(row)))
+    return sorted(out)
+
+
+def recipes(entities: Entities) -> list[Recipe]:
+    """Every crafting recipe, at each crafter's object, sorted."""
+    places = {(n.id, n.area, n.map): n.object for n in npcs(entities)}
+    out: set[Recipe] = set()
+    for recipe in entities.get("recipe", {}).values():
+        result = recipe["result"]
+        if len(result) != 1 or result[0]["kind"] != "item":
+            raise BotWorldError(f"recipe {recipe['id']}: not one item made")
+        table, item = item_ref(result[0]["id"])
+        mats = tuple(sorted((*item_ref(m["id"]), int(m["count"])) for m in recipe["materials"]))
+        for crafter in recipe.get("crafted_by", []):
+            area, number = map_numbers(crafter["map"])
+            name = places.get((int(crafter["id"]), area, number))
+            if name is None:
+                raise BotWorldError(f"recipe {recipe['id']}: no crafter object on {crafter['map']}")
+            out.add(
+                Recipe(
+                    int(recipe["chapter"]),
+                    area,
+                    number,
+                    name,
+                    table,
+                    item,
+                    int(result[0]["count"]),
+                    int(recipe["meso"]),
+                    mats,
+                )
+            )
+    return sorted(out)
+
+
+@dataclass
+class Tables:
+    links: list[Link]
+    shops: list[Shop]
+    npcs: list[Npc]
+    recipes: list[Recipe]
+
+
+def render(tables: Tables) -> str:
     lines = [HEADER.rstrip("\n")]
-    lines += [lk.line() for lk in link_list]
-    lines += [s.line() for s in shop_list]
+    lines += [lk.line() for lk in tables.links]
+    lines += [s.line() for s in tables.shops]
+    lines += [n.line() for n in tables.npcs]
+    lines += [rc.line() for rc in tables.recipes]
     return "\n".join(lines) + "\n"
 
 
@@ -200,7 +297,7 @@ def generate(entities: Entities) -> str:
     link_list = links(entities)
     if not link_list:
         raise BotWorldError("the knowledge base has no portal warps")
-    return render(link_list, shops(entities))
+    return render(Tables(link_list, shops(entities), npcs(entities), recipes(entities)))
 
 
 def _parse_term(text: str) -> Term:
@@ -216,10 +313,15 @@ def _parse_term(text: str) -> Term:
     raise BotWorldError(f"term {text!r}: no operator")
 
 
-def parse(text: str) -> tuple[list[Link], list[Shop]]:
+def _material(text: str) -> tuple[int, int, int]:
+    table, item, count = (int(x) for x in text.split(":"))
+    return table, item, count
+
+
+def parse(text: str) -> Tables:
     """Read the tables back (the C++ reader in tests/cpp/world_map.h does the same)."""
-    link_list: list[Link] = []
-    shop_list: list[Shop] = []
+    t = Tables([], [], [], [])
+    link_list, shop_list = t.links, t.shops
     for n, line in enumerate(text.splitlines(), 1):
         f = line.split()
         if not f or f[0].startswith("#"):
@@ -231,11 +333,19 @@ def parse(text: str) -> tuple[list[Link], list[Shop]]:
             elif f[0] == "shop" and len(f) == 9:
                 nums = [int(x) for x in f[1:4]] + [f[4]] + [int(x) for x in f[5:9]]
                 shop_list.append(Shop(*nums))  # type: ignore[arg-type]
+            elif f[0] == "npc" and len(f) == 7:
+                head = [int(x) for x in f[1:4]]
+                t.npcs.append(Npc(head[0], head[1], head[2], f[4], int(f[5]), int(f[6])))
+            elif f[0] == "recipe" and len(f) >= 10:
+                head = [int(x) for x in f[1:4]]
+                made = [int(x) for x in f[5:9]]
+                mats = tuple(_material(x) for x in f[9:])
+                t.recipes.append(Recipe(*head, f[4], *made, mats))
             else:
                 raise BotWorldError("not a record")
         except (ValueError, BotWorldError) as e:
             raise BotWorldError(f"line {n}: {line!r}: {e}") from e
-    return link_list, shop_list
+    return t
 
 
 def open_now(link: Link, quest_state: Mapping[tuple[int, int], int]) -> bool:
@@ -313,8 +423,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     tmp = args.out.with_name(args.out.name + ".tmp")
     tmp.write_text(text, encoding="utf-8")
     tmp.replace(args.out)
-    link_list, shop_list = parse(text)
-    print(f"wrote {args.out}: {len(link_list)} links, {len(shop_list)} shop items")
+    t = parse(text)
+    print(
+        f"wrote {args.out}: {len(t.links)} links, {len(t.shops)} shop items, {len(t.npcs)} npcs, "
+        f"{len(t.recipes)} recipes"
+    )
     return 0
 
 
