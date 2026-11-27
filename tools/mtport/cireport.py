@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 # with the names its runs show. tests/test_ci_report.py checks the ids against ci.yml.
 EXPECTED: dict[str, tuple[str, ...]] = {
     "scope": ("scope",),
+    "guest-image": ("guest image (macOS, clang + Apple ld)",),
     "build": tuple(
         f"{os_name} {config}"
         for os_name in (

@@ -1,0 +1,10 @@
+--- !tapi-tbd
+# The guest program's link stub (#385, ADR 0213): the symbols it imports, under the install
+# name the game imports them from. Written by hand; no SDK file.
+tbd-version: 4
+targets: [ armv7-ios ]
+install-name: '/System/Library/Frameworks/OpenAL.framework/OpenAL'
+exports:
+  - targets: [ armv7-ios ]
+    symbols: [ _alBufferData, _alcCreateContext, _alcMakeContextCurrent, _alcOpenDevice, _alGenBuffers, _alGenSources, _alGetError, _alSourcei, _alSourcePlay ]
+...

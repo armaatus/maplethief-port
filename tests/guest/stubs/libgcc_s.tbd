@@ -1,0 +1,10 @@
+--- !tapi-tbd
+# The guest program's link stub (#385, ADR 0213): the symbols it imports, under the install
+# name the game imports them from. Written by hand; no SDK file.
+tbd-version: 4
+targets: [ armv7-ios ]
+install-name: '/usr/lib/libgcc_s.1.dylib'
+exports:
+  - targets: [ armv7-ios ]
+    symbols: [ __Unwind_SjLj_Register, __Unwind_SjLj_Unregister, __Unwind_SjLj_Resume ]
+...

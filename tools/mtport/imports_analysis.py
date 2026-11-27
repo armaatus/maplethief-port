@@ -104,6 +104,22 @@ def import_table(image: macho.MachO) -> list[Import]:
     return list(imports.values())
 
 
+def stub_pointer(image: macho.MachO, addr: int) -> int | None:
+    """The lazy pointer the ARM import stub at ``addr`` jumps through, or None if the stub has
+    none of the three shapes ld writes: the game's ``__symbolstub1`` (``ldr pc, [pc, #n]``), and
+    the guest program's (#385) ``__symbol_stub4`` (``ldr ip, [pc]; ldr pc, [ip]; .long ptr``,
+    no PIE) and ``__picsymbolstub4`` (``ldr ip, [pc, #4]; add ip, pc, ip; ldr pc, [ip];
+    .long ptr - (stub + 12)``)."""
+    word = image.u32(addr)
+    if word & 0xFFFFF000 == 0xE59FF000:  # ldr pc, [pc, #imm12]
+        return addr + 8 + (word & 0xFFF)
+    if word == 0xE59FC000 and image.u32(addr + 4) == 0xE59CF000:
+        return image.u32(addr + 8)
+    if (word, image.u32(addr + 4), image.u32(addr + 8)) == (0xE59FC004, 0xE08FC00C, 0xE59CF000):
+        return (addr + 12 + image.u32(addr + 12)) & 0xFFFFFFFF
+    return None
+
+
 def check_stubs(image: macho.MachO) -> list[str]:
     """Problems with the stub → lazy pointer → symbol mapping (empty when consistent)."""
     problems = []
@@ -111,11 +127,11 @@ def check_stubs(image: macho.MachO) -> list[str]:
     lazy_binds = {b.address: b.symbol for b in image.binds if b.kind in ("lazy", "weak")}
     for s in image.indirect_slots:
         if s.kind == "stub":
-            word = image.u32(s.address)
-            if word & 0xFFFFF000 != 0xE59FF000:  # ldr pc, [pc, #imm12]
-                problems.append(f"stub {hexaddr(s.address)}: not ldr pc, [pc, #n]")
+            pointer = stub_pointer(image, s.address)
+            if pointer is None:
+                problems.append(f"stub {hexaddr(s.address)}: not an ARM import stub ld writes")
                 continue
-            target = slots.get(s.address + 8 + (word & 0xFFF))
+            target = slots.get(pointer)
             if target is None or target.kind != "lazy" or target.symbol != s.symbol:
                 problems.append(f"stub {hexaddr(s.address)} ({s.symbol}): bad lazy pointer")
         elif s.kind == "lazy" and lazy_binds.get(s.address) != s.symbol:

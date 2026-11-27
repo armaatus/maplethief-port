@@ -71,3 +71,24 @@ def test_the_runtime_knows_the_same_functions() -> None:
     assert all(ptr & 1 for ptr in HOOKED)
     assert all(h.name and h.why for h in HOOKED.values())
     assert MAY_RETURN == {0x22954}
+
+
+def test_another_program_lifts_without_the_games_hooks(tmp_path) -> None:
+    # recomp all --no-hooks (the guest program, #385): nothing observed or hooked, every
+    # output under --work.
+    from machofixtures import thin_image
+    from recomp.__main__ import main
+    from recomp.prototype import PLAIN_OPTIONS
+
+    assert PLAIN_OPTIONS.hook == frozenset() and PLAIN_OPTIONS.observe == frozenset()
+    image = tmp_path / "image"
+    image.write_bytes(thin_image([0x1401], b"\x01\x20\x70\x47" * 32))
+    work = tmp_path / "work"
+    main(["all", "--slice", str(image), "--work", str(work), "--no-hooks", "--units", "2"])
+    for name in ("loader.json", "functions.json", "discovery-report.md", "coverage.json"):
+        assert (work / "recomp" / name).is_file(), name
+    gen = work / "gen"
+    assert (gen / "gen.cmake").is_file()
+    source = "".join(p.read_text(encoding="utf-8") for p in sorted(gen.glob("fn_*.c")))
+    assert "f_00001401" in source
+    assert "MT_FN_HOOK" not in source and "MT_FN_OBSERVE" not in source

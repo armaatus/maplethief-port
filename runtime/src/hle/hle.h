@@ -70,6 +70,11 @@ void mt_hle_Znam(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_ZdlPv(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_ZdaPv(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_cxa_pure_virtual(mt_cpu *cpu, std::uint32_t id) noexcept;
+// The throw and catch helpers only the guest program calls (#385, ADR 0213).
+void mt_hle_cxa_allocate_exception(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_cxa_throw(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_cxa_begin_catch(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_cxa_end_catch(mt_cpu *cpu, std::uint32_t id) noexcept;
 
 // stubs/network.cpp: CFSocket and SCNetworkReachability, offline (#52).
 void mt_hle_CFSocketCreate(mt_cpu *cpu, std::uint32_t id) noexcept;

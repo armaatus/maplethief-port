@@ -118,7 +118,11 @@ constexpr mt_hle_entry k_registry[] = {
     {"__ZdlPv", mt_hle_ZdlPv, nullptr},
     {"__Znam", mt_hle_Znam, nullptr},
     {"__Znwm", mt_hle_Znwm, nullptr},
+    {"___cxa_allocate_exception", mt_hle_cxa_allocate_exception, nullptr}, // guest program only
+    {"___cxa_begin_catch", mt_hle_cxa_begin_catch, nullptr},               // guest program only
+    {"___cxa_end_catch", mt_hle_cxa_end_catch, nullptr},                   // guest program only
     {"___cxa_pure_virtual", mt_hle_cxa_pure_virtual, nullptr},
+    {"___cxa_throw", mt_hle_cxa_throw, nullptr}, // guest program only (#385, ADR 0213)
     // CoreFoundation (runtime/src/cf/, #48, ADR 0032); ___CFConstantStringClassReference is
     // bound by the ObjC start-up as the class object of __NSCFConstantString
     {"_CFAbsoluteTimeGetCurrent", mt_hle_CFAbsoluteTimeGetCurrent, nullptr},

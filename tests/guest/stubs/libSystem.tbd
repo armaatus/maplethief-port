@@ -1,0 +1,10 @@
+--- !tapi-tbd
+# The guest program's link stub (#385, ADR 0213): the symbols it imports, under the install
+# name the game imports them from. Written by hand; no SDK file.
+tbd-version: 4
+targets: [ armv7-ios ]
+install-name: '/usr/lib/libSystem.B.dylib'
+exports:
+  - targets: [ armv7-ios ]
+    symbols: [ dyld_stub_binder, _exit, _printf, _puts, _malloc, _free, _memcpy, _memcmp ]
+...

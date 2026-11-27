@@ -638,19 +638,26 @@ const char *launch(mt_cpu *cpu, const mt_app_main_args *args) {
     }
     NibResult nib;
     std::string error;
-    if (!load_nib(cpu, nib_name, app, &nib, &error)) {
+    char detail[160] = {};
+    const bool delegate_named = args != nullptr && args->delegate_class_name != 0;
+    if (value == 0 && delegate_named && mt_cf::bundle_find(cpu, nib_name, "nib", "", "").empty()) {
+        // No NSMainNibFile and no MainWindow.nib, and UIApplicationMain names the delegate's
+        // class: UIKit loads no nib, and that delegate makes its window in code. The guest
+        // program does that (#385, ADR 0213); the game names its nib and passes nil.
+        mt_process_milestone("nib", 0, "no main nib (Info.plist names none)");
+    } else if (!load_nib(cpu, nib_name, app, &nib, &error)) {
         log(cpu, "UIApplicationMain: %s", error.c_str());
         mt_objc_pool_pop(rt, pool);
         return "UIApplicationMain: the main nib could not be loaded";
+    } else {
+        std::snprintf(detail, sizeof detail,
+                      "%s.nib: %u archive objects -> %u guest objects, window 0x%08X, delegate "
+                      "0x%08X",
+                      nib_name.c_str(), static_cast<unsigned>(nib.archive_objects),
+                      static_cast<unsigned>(nib.objects), static_cast<unsigned>(nib.window),
+                      static_cast<unsigned>(st.delegate));
+        mt_process_milestone("nib", nib.archive_objects, detail);
     }
-    char detail[160] = {};
-    std::snprintf(detail, sizeof detail,
-                  "%s.nib: %u archive objects -> %u guest objects, window 0x%08X, delegate "
-                  "0x%08X",
-                  nib_name.c_str(), static_cast<unsigned>(nib.archive_objects),
-                  static_cast<unsigned>(nib.objects), static_cast<unsigned>(nib.window),
-                  static_cast<unsigned>(st.delegate));
-    mt_process_milestone("nib", nib.archive_objects, detail);
     if (args != nullptr && args->delegate_class_name != 0) {
         const std::string name = mt_ns::string_utf8(cpu, args->delegate_class_name);
         const u32 dcls = mt_objc_class_named(rt, name.c_str());

@@ -82,6 +82,8 @@ while IFS= read -r path || [ -n "$path" ]; do
         scripts/linux-game) ;;
         tests/fuzz/*) ;;               # libFuzzer targets: the asan job's linux-fuzz (ADR 0158)
         scripts/fuzz) ;;
+        tests/guest/*) ;;              # the guest program (ADR 0213): desktop builds only
+        scripts/guest-image) ;;
         *) switch=true ;;
     esac
     # And the Android build?
@@ -107,6 +109,8 @@ while IFS= read -r path || [ -n "$path" ]; do
         scripts/linux-game) ;;
         tests/fuzz/*) ;;
         scripts/fuzz) ;;
+        tests/guest/*) ;;
+        scripts/guest-image) ;;
         *) android=true ;;
     esac
 done

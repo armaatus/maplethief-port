@@ -299,6 +299,12 @@ endfunction()
 maplethief_python_target(tools tools)
 maplethief_python_target(recomp recomp)
 maplethief_symbols() # <build dir>/maplethief.sym when the recompiler's outputs exist (ADR 0030)
+# The guest program (#385, ADR 0213): MapleThiefGuest and platform.guest_program when
+# scripts/guest-image wrote build/guest/ (CI: the guest-image job's artifact).
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    include(cmake/GuestProgram.cmake)
+    maplethief_guest_program()
+endif()
 
 # An iOS app isn't packaged here: it holds the IPA's bundle and is installed from Xcode.
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")

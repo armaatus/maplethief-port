@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Build the guest program's image (#385, ADR 0213): tests/guest/ compiled with clang for armv7 iOS
+# 5.0 and linked with Apple's ld against the hand-written .tbd stubs, plus its bundle. macOS only:
+# no other linker writes 32-bit ARM Mach-O (LLVM's ld64.lld has no armv7).
+#
+# Usage: scripts/guest-image [OUT_DIR]     (default build/guest)
+#
+# Writes, all of it our own program and never committed (a built binary):
+#   OUT_DIR/MapleThiefGuest          the thin armv7 MH_EXECUTE (the --slice)
+#   OUT_DIR/Guest.app/               the bundle: Info.plist, tone.wav (the --bundle)
+# The build's MAPLETHIEF_GUEST_DIR (default build/guest) picks it up at the next configure:
+# cmake/GuestProgram.cmake recompiles it and adds MapleThiefGuest and platform.guest_program.
+set -euo pipefail
+
+repo=$(cd "$(dirname "$0")/.." && pwd)
+out=${1:-"$repo/build/guest"}
+src="$repo/tests/guest"
+
+if [ "$(uname -s)" != Darwin ]; then
+    echo "scripts/guest-image: macOS only: Apple's ld is the only linker for armv7 Mach-O." >&2
+    echo "  CI builds the image on its macOS runner (the guest-image job) and passes it on." >&2
+    exit 2
+fi
+for tool in clang clang++ ld python3; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "scripts/guest-image: $tool not found (install the Xcode Command Line Tools)" >&2
+        exit 2
+    fi
+done
+
+obj="$out/obj"
+mkdir -p "$obj" "$out/Guest.app"
+# The game's code is armv7 Thumb with VFP; NEON is left out so that clang saves registers the
+# way the game's compiler did (vpush, not vst1), and no jump table where a compare chain does.
+flags=(-target armv7-apple-ios5.0 -mthumb -mfpu=vfpv3 -O1 -g0 -nostdinc -I"$src/include"
+       -Wall -Wextra -Werror -Wno-incompatible-sysroot -fno-jump-tables)
+clang "${flags[@]}" -fobjc-runtime=ios-5.0 -fno-objc-arc -c "$src/main.m" -o "$obj/main.o"
+clang++ "${flags[@]}" -std=c++17 -nostdinc++ -fexceptions -c "$src/cxx.cpp" -o "$obj/cxx.o"
+clang -target armv7-apple-ios5.0 -Wno-incompatible-sysroot -c "$src/start.s" -o "$obj/start.o"
+# -no_pie: the image runs at its link addresses with no rebase (ADR 0025); -e start: crt1's
+# start of our own (start.s), so the boot finds main as it does in the game.
+ld -arch armv7 -platform_version ios 5.0 5.0 -no_pie -e start -o "$out/MapleThiefGuest" \
+    "$obj/start.o" "$obj/main.o" "$obj/cxx.o" "$src"/stubs/*.tbd
+cp "$src/Info.plist" "$out/Guest.app/Info.plist"
+python3 -I "$src/make_sound.py" "$out/Guest.app/tone.wav"
+rm -rf "$obj"
+echo "scripts/guest-image: wrote $out/MapleThiefGuest ($(wc -c < "$out/MapleThiefGuest" | tr -d ' ') bytes) and $out/Guest.app"

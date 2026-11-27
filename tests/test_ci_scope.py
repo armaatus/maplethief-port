@@ -105,6 +105,8 @@ def test_any_other_path_runs_the_build_and_the_switch_job(path):
         "tests/fuzz/zip_fuzz.cpp",
         "tests/fuzz/seeds/zip.py",
         "scripts/fuzz",
+        "tests/guest/main.m",
+        "scripts/guest-image",
     ],
 )
 def test_another_platforms_own_files_skip_the_switch_job(path):

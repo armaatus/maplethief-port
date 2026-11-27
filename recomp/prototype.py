@@ -22,6 +22,9 @@ OUT_DIR = REPO / "work" / "gen" / "proto"
 # The whole-image lift reports the observed functions' entries to the runtime (#72, ADR 0053)
 # and lets the host replace or wrap the hooked functions (#143, ADR 0069).
 IMAGE_OPTIONS = LiftOptions(observe=OBSERVED_PTRS, hook=HOOKED_PTRS)
+# Another program than the game (the guest program, #385, ADR 0213): the game's addresses mean
+# nothing there, so no function is observed or hooked.
+PLAIN_OPTIONS = LiftOptions()
 
 # (function pointer, name, what it exercises)
 FUNCTIONS = (
@@ -54,9 +57,11 @@ def lift(
     ptrs: list[int],
     names: dict[int, str] | None = None,
     discovery: Discovery | None = None,
+    options: LiftOptions = IMAGE_OPTIONS,
 ) -> list[Lifted]:
     """Lift ``ptrs`` from the whole-image discovery (#32: tables, noreturn calls, entries);
-    a pointer discovery does not know is discovered on its own."""
+    a pointer discovery does not know is discovered on its own. ``options``: the game's
+    (:data:`IMAGE_OPTIONS`) or, for another program, :data:`PLAIN_OPTIONS`."""
     imports = ImportTable.from_image(image)
     program = ImageProgram(image, set(ptrs), imports)
     found = discovery or discover(image)
@@ -67,7 +72,7 @@ def lift(
         )
         label = (names or {}).get(ptr)
         comment = f"{ptr:#x} {label}" if label else f"{ptr:#x}"
-        out.append(lift_function(fn, program, IMAGE_OPTIONS, comment=comment))
+        out.append(lift_function(fn, program, options, comment=comment))
     return out
 
 
