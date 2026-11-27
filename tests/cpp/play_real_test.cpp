@@ -11544,7 +11544,7 @@ void level_cap(Run &r, u64) {
 }
 void level_cap_checks(Run &, u64) {}
 
-// --- Quick slots and the trash (#303, docs/testing/systems-sweep-1.md) ----------------------------
+// --- Quick slots and the trash (#303, docs/testing/systems-sweep-1.md) ---------------------------
 //
 // quick_slots_trash_synthetic (tests/starts/systems_carry.json): a Bandit with Double Step
 // (skill 3) and Nimble Body (4) learned, by the pad only through the port's pick up and drop
