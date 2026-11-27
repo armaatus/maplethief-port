@@ -981,14 +981,15 @@ constexpr SettingInfo kRegistry[] = {
     // Video: the wider field (#86, ADR 0090). The GL layer's size is set at the start.
     {.key = "widescreen",
      .group = SettingGroup::kVideo,
-     .comment = "# the field up to 16:9 (568 x 320) on maps wide enough;\n# menus and narrow "
-                "maps stay 3:2: off | auto",
+     .comment = "# the field up to 16:9 (568 x 320) on maps wide enough, or (fill) as wide as "
+                "the\n# window up to 768 x 320; menus and narrow maps stay 3:2: off | auto | fill",
      .value = choice<&Settings::widescreen>(kWidescreenNames),
      .presets = {"off", "off", "auto"},
      .flag = "--widescreen",
      .game_only = true,
      .label = "Widescreen",
-     .help = "Shows more of the map beside the 3:2 picture where the map is wide enough"},
+     .help = "Shows more of the map beside the 3:2 picture where the map is wide enough. "
+             "Fill: as wide as the window allows"},
     // Video: where the HUD and the touch key pad go in the wide view (#168). Read every turn.
     {.key = "widescreen_hud",
      .group = SettingGroup::kVideo,

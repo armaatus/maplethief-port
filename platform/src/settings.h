@@ -448,8 +448,10 @@ inline constexpr const char *kAutosaveNames[] = {"off", "on_quit"};
 //   auto  a 568 x 320 GL layer: in the field (and the NPC chat) on a map wider than 480 points
 //         the engine draws up to 568 points wide (as wide as the map), the touch key pad shown
 //         or not (#168); menus, the title and narrow maps keep the 3:2 picture, centred
-enum class Widescreen { kOff, kAuto };
-inline constexpr const char *kWidescreenNames[] = {"off", "auto"};
+//   fill  a 768 x 320 GL layer (#425, ADR 0214): as auto, up to as wide as the window (or the
+//         phone's safe area) at 320 points high, at most 768 (21:9 is 747)
+enum class Widescreen { kOff, kAuto, kFill };
+inline constexpr const char *kWidescreenNames[] = {"off", "auto", "fill"};
 // widescreen_hud (#168, ADR 0090's addendum): where the touch key pad and its GL icons go when
 // the field is wider than 3:2. The bar is drawn in the middle either way.
 //   edges   the key pad's groups move to the wide view's edges, their icons with them: the
@@ -716,7 +718,7 @@ struct Settings {
     // Crash recovery points (#335, ADR 0151, recovery.h): crash_recovery, --crash-recovery
     // (on | off; off on the Switch: kPlatformDefaults).
     bool crash_recovery = platform_switch("crash_recovery", false);
-    // The wider field (#86, ADR 0090): widescreen, --widescreen (off | auto).
+    // The wider field (#86, ADR 0090): widescreen, --widescreen (off | auto | fill).
     Widescreen widescreen = Widescreen::kOff;
     // Where the HUD and the key pad go in the wide view (#168): widescreen_hud, --widescreen-hud.
     WidescreenHud widescreen_hud = WidescreenHud::kEdges;

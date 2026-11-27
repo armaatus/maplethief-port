@@ -175,6 +175,10 @@ int pick_display(std::string_view wanted, std::span<const std::string> names);
 // SDL's display for fullscreen_display `wanted`: 0 for `current` or a display that is not
 // connected (logged: "desktop: the display \"NAME\" is not connected: ...").
 SDL_DisplayID find_display(std::string_view wanted);
+// widescreen = fill (#425): the picture's width in points (fill_points, 480 ... `most`) for the
+// usable bounds of `window`'s display (the primary display's for nullptr): the window shape a
+// size key and the first start give. 480 without a display.
+int display_fill_points(SDL_Window *window, int most);
 
 // --- Screenshots ------------------------------------------------------------------------------
 
