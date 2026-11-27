@@ -13,7 +13,7 @@ The short fields of the itch.io project form for `armaatus.itch.io/maplethief` (
 | Pricing | $0 or donate, with a suggested amount |
 | Genre | Platformer |
 | Tags | `fan-port`, `2d`, `side-scroller`, `action`, `rpg`, `retro`, `open-source`, `controller-support`, `steam-deck`, `nintendo-switch`, `homebrew` |
-| Platforms (per upload, set by the butler channel) | `windows-x64`: Windows; `macos-universal`: macOS; `linux-x86_64`: Linux; `windows-arm64`: Windows; `linux-aarch64`: Linux (ADR 0194); `switch`: no platform tick (itch.io has none for consoles), display name "Nintendo Switch (homebrew)" |
+| Platforms (per upload, set by the butler channel) | `windows-x64`: Windows; `macos-universal`: macOS; `linux-x86_64`: Linux; `windows-arm64`: Windows; `linux-aarch64`: Linux (ADR 0194); `switch`: no platform tick (itch.io has none for consoles), display name "Nintendo Switch (homebrew, preview)" until [#245](https://github.com/armaatus/maplethief-port/issues/245) closes (ADR 0147), then "Nintendo Switch (homebrew)" |
 | AI generation disclosure | Joris's answer (the port's code and docs are written with an AI coding agent; the page's images are not) |
 | Community | Comments on |
 | Links | Source: https://github.com/armaatus/maplethief-port; Buy Me a Coffee: https://buymeacoffee.com/armaatus |
