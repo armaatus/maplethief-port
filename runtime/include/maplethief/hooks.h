@@ -117,9 +117,15 @@ MT_EXTERN_C_BEGIN
 /* CStateGame::OnKeyPressed (this, key): the field's keys and popups; #336 checks the autosave's
  * guards on the death popup's exit to the main menu (popup 0x6D) */
 #define MT_HOOK_FN_STATE_GAME_ON_KEY 0x8D4C9u
+/* ScriptNative_showMarket (L): the script native showMarket (39), the shop its argument names; #426
+ * offers a restored shop beside it (restored_content) */
+#define MT_HOOK_FN_LUA_SHOW_MARKET 0x998D1u
 /* Lua::execute (L, tfunc, base): the script VM's opcode loop (#386, ADR 0226: the host VM,
  * maplethief/scriptvm.h) */
 #define MT_HOOK_FN_LUA_EXECUTE 0x9BC11u
+/* Lua::runCallback (L): the dialogue box's close runs the script callback at L + 8; #426 opens
+ * the shop chosen in its own list box there (restored_content) */
+#define MT_HOOK_FN_LUA_RUN_CALLBACK 0x9CE2Du
 #define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u /* -[MainMenuView clickPlay:] */
 /* -[TouchKeyPadView colorAtPixel:onImage:] (self, _cmd, CGPoint in r2/r3, UIImage at sp) */
 #define MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL 0xB4DB5u
@@ -233,6 +239,36 @@ void mt_hooks_install_scene_knockback_fix(int enabled) MT_NOEXCEPT;
 void mt_hooks_install_text_wrap_guard(int enabled) MT_NOEXCEPT;
 /* Lines the guard cut, since the process started. */
 uint64_t mt_hooks_text_wrap_guarded(void) MT_NOEXCEPT;
+
+/* Shops 0, 1 and 16 from an existing merchant (#426, the setting restored_content;
+ * docs/re/original-bugs.md "Unreachable content"). The game ships their listings, and its shop
+ * screen 0x4628D opens any shop, but no script opens these three. A handler on the script native
+ * showMarket 0x998D1 knows three merchants by the shop they open and the map they stand on
+ * (mt_restored_shop_for): instead of their shop it opens a list box (the chat box's own
+ * functions, as a script's initMsg / regMsgNPC / regSelList / showMsg(2)) with the merchant's
+ * line and two rows, his usual shop and the restored one. A handler on Lua::runCallback 0x9CE2D,
+ * which the box's close runs after OK, opens the chosen shop as showMarket does. Back ends the
+ * conversation, as in any box. Registers both, `enabled` or not (off: the merchant opens his
+ * shop at once, the original). `texts` (UTF-8, copied; NULL or an empty text keeps the English)
+ * are the box's. */
+typedef struct mt_restored_shop_texts {
+    const char *line;  /* the merchant's line */
+    const char *usual; /* the row of his usual shop */
+    const char *shop0; /* the rows of the restored shops 0, 1 and 16 */
+    const char *shop1;
+    const char *shop16;
+} mt_restored_shop_texts;
+void mt_hooks_install_restored_shops(int enabled, const mt_restored_shop_texts *texts) MT_NOEXCEPT;
+/* The restored shop the merchant who opens `shop` on map (area, map) offers beside it: 16 for
+ * Etc00 (shop 5 on 0.0), 0 for Equip90 (shop 8 on 9.0), 1 for Etc90 (shop 13 on 9.0); -1 for
+ * every other shop and map. */
+int32_t mt_restored_shop_for(int32_t area, int32_t map, int32_t shop) MT_NOEXCEPT;
+typedef struct mt_restored_shop_stats {
+    uint64_t boxes;  /* list boxes opened in place of a shop */
+    uint64_t opened; /* shops opened from one (either row) */
+} mt_restored_shop_stats;
+/* The numbers since the process started. */
+mt_restored_shop_stats mt_hooks_restored_shop_stats(void) MT_NOEXCEPT;
 
 /* Every fix of an original bug (docs/re/original-bugs.md, #155), the setting fix_original_bugs
  * (on in the Enhanced preset): the portal items, the early Play guard, portal620 and the

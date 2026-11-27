@@ -80,6 +80,7 @@ add_library(
     src/hooks/builtin.cpp
     src/hooks/flashes.cpp
     src/hooks/hooks.cpp
+    src/hooks/restored_shops.cpp
     src/hooks/text_wrap.cpp
     src/hooks/widescreen.cpp
     src/hooks/widescreen_menus.cpp

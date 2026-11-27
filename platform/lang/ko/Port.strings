@@ -455,6 +455,11 @@
 "packs_verdict_problems" = "열림, {0}개 사용 가능, {1}개 거부";
 "packs_verdict_refused" = "거부됨";
 "packs_check_fine" = "{0}: 고칠 것 없음";
+"restored_shop_line" = "무엇을 찾으세요?";
+"restored_shop_usual" = "평소 물건";
+"restored_shop_0" = "모든 장비";
+"restored_shop_1" = "모든 소모품";
+"restored_shop_16" = "대장장이를 위한 광석과 보석";
 "setting.scale_mode.label" = "배율 모드";
 "setting.scale_mode.help" = "화면이 창을 채우는 방식: integer는 선명하고, fit은 더 넓게 채웁니다";
 "setting.border_color.label" = "테두리 색";

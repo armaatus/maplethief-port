@@ -88,6 +88,7 @@
 #include "quick_state.h"
 #include "remap.h"
 #include "render_scale.h"
+#include "restored_content.h"
 #include "rumble.h"
 #include "run_recorder.h"
 #include "run_timer.h"
@@ -4184,12 +4185,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     SDL_Log("game: the original bugs are %s", options.settings.fix_original_bugs
                                                   ? "fixed (fix_original_bugs = on)"
                                                   : "kept, as the original");
-    // restored_content (#389, docs/re/original-bugs.md "Unreachable content"): the switch only,
-    // off in every preset; each restore (shops, Monster Carnival, the unreached maps) reads it
-    // in its follow-up. Nothing is restored yet, so on and off run the same game.
-    SDL_Log("game: restored content is %s", options.settings.restored_content
-                                                ? "on (no restore implemented yet)"
-                                                : "off, as the original");
+    // restored_content (#389, docs/re/original-bugs.md "Unreachable content"): off in every
+    // preset. Shops 0, 1 and 16 from three merchants (#426); Monster Carnival and the unreached
+    // maps come in their own follow-ups.
+    install_restored_shops(options.settings.restored_content);
+    SDL_Log("game: restored content is %s",
+            options.settings.restored_content ? "on (shops 0, 1 and 16)" : "off, as the original");
     // The offline cash shop (#156, ADR 0072): sold for meso, or cancelled as the original
     // without a server (off, every preset).
     const bool cash_meso = options.settings.cash_shop == CashShop::kMeso;
