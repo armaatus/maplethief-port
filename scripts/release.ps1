@@ -29,13 +29,22 @@
     (.github/workflows/release.yml); -PlayersOnly skips step 3 and the kit, and builds,
     checks and uploads the player build only.
 
+    -Arch arm64 (ADR 0194) builds the Windows ARM64 player build instead,
+    MapleThief-<version>-windows-arm64.zip: the win-arm64-player workflow, cross-compiled from
+    the x64_arm64 Visual Studio developer environment. It implies -PlayersOnly (the ARM64 kit
+    is release.yml's, built on a hosted ARM64 runner). An x64 PC can't run the ARM64
+    executable, so step 5 checks its PE machine type (ARM64) instead of --version; --version
+    is checked on an ARM64 device (docs/release-checklist.md).
+
     `itch` (ADR 0146), after `scripts/release publish` on the Mac: downloads the published
     release's Windows player build and SHA256SUMS, checks the file against SHA256SUMS and the
-    content guard's player mode, and pushes it to the itch.io channel windows-x64 with the
-    pinned butler (python -m mtport.release itch TAG --platforms windows). butler reads its key
+    content guard's player mode, and pushes it to the itch.io channel windows-x64 (with -Arch
+    arm64: windows-arm64) with the pinned butler (python -m mtport.release itch TAG
+    --platforms windows). butler reads its key
     from $env:BUTLER_API_KEY. With -DryRun the butler commands are printed instead.
 
-    Run it from the x64 Visual Studio developer environment (docs/build/README.md), with gh logged in.
+    Run it from the x64 Visual Studio developer environment (docs/build/README.md), or for
+    -Arch arm64 the x64_arm64 one, with gh logged in.
     Needs Python 3.10+ (the py launcher, python3 or python on PATH, or $env:PYTHON), uv, and
     work/gen/ in this checkout (scripts\bootstrap.ps1, then python -m recomp all).
 
@@ -54,6 +63,9 @@
 .PARAMETER PlayersOnly
     The player build only; release.yml built and uploaded the kit.
 
+.PARAMETER Arch
+    x64 (the default) or arm64: the Windows ARM64 player build, cross-compiled (ADR 0194).
+
 .PARAMETER Keep
     Keep the clone build/release/<TAG>/src and its build tree.
 
@@ -62,6 +74,9 @@
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\release.ps1 build v0.0.1-rc.1
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File scripts\release.ps1 build v1.1.0 -PlayersOnly -Arch arm64
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\release.ps1 itch v1.0.0 -DryRun
@@ -73,6 +88,7 @@ param(
     [switch]$DryRun,
     [switch]$Replace,
     [switch]$PlayersOnly,
+    [ValidateSet('x64', 'arm64')][string]$Arch = 'x64',
     [switch]$Keep,
     [string]$From
 )
@@ -162,6 +178,37 @@ function Test-Version([string]$Zip, [string]$Name) {
     return $exe.FullName
 }
 
+# The machine type in a PE file's COFF header: 'x64' (0x8664), 'arm64' (0xAA64), or the number.
+function Get-PeMachine([string]$Path) {
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { Fail "$Path is not a PE file" }
+    $pe = [BitConverter]::ToInt32($bytes, 0x3C)
+    if ($pe -lt 0 -or $pe + 6 -gt $bytes.Length -or [BitConverter]::ToUInt32($bytes, $pe) -ne 0x4550) {
+        Fail "$Path has no PE header"
+    }
+    $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
+    switch ($machine) {
+        0x8664 { return 'x64' }
+        0xAA64 { return 'arm64' }
+        default { return ('0x{0:X4}' -f $machine) }
+    }
+}
+
+# Unpacks a zip into $out/unpack and checks that its MapleThief.exe is built for ARM64 (the x64
+# PC can't run it: --version is checked on an ARM64 device); returns the executable's path.
+function Test-Arm64([string]$Zip, [string]$Name) {
+    $unpack = Join-Path $out 'unpack'
+    if (Test-Path -LiteralPath $unpack) { Remove-Item -Recurse -Force -LiteralPath $unpack }
+    Expand-Archive -LiteralPath $Zip -DestinationPath $unpack
+    $exe = Get-ChildItem -LiteralPath $unpack -Recurse -File |
+        Where-Object { $_.Name -eq 'MapleThief.exe' } | Select-Object -First 1
+    if (-not $exe) { Fail "$Name has no MapleThief.exe" }
+    $machine = Get-PeMachine $exe.FullName
+    if ($machine -ne 'arm64') { Fail "$($Name): MapleThief.exe is built for $machine, not ARM64" }
+    Write-Host "   $($exe.FullName.Substring($unpack.Length + 1)): PE machine ARM64 (--version: on an ARM64 device)"
+    return $exe.FullName
+}
+
 # gh ARGS, or print it with -DryRun.
 function Invoke-Gh([string[]]$Arguments) {
     if ($DryRun) { Write-Host "   dry-run, not run: gh $($Arguments -join ' ')"; return }
@@ -176,9 +223,9 @@ $python = Find-Python
 if (-not $python) { Fail 'need Python 3.10+ (the py launcher, python3 or python on PATH, or $env:PYTHON)' }
 
 if ($Command -eq 'itch') {
-    # The Windows channel only; the Mac pushes macOS, Linux and the Switch (scripts/release itch,
-    # ADR 0146).
-    $itchArgs = @('itch', $Tag, '--platforms', 'windows')
+    # The Windows channel of -Arch only; the Mac pushes macOS, Linux and the Switch
+    # (scripts/release itch, ADR 0146).
+    $itchArgs = @('itch', $Tag, '--platforms', $(if ($Arch -eq 'arm64') { 'windows-arm64' } else { 'windows' }))
     if ($DryRun) { $itchArgs += '--dry-run' }
     if ($From) { $itchArgs += @('--from', $From) }
     # Run directly, not through Invoke-MtRelease, so the checks print as they go.
@@ -197,8 +244,17 @@ if ($Command -eq 'itch') {
 
 $parsed = @(Invoke-MtRelease @('tag', $Tag))
 $version = $parsed[0]
-$kitName = "MapleThief-kit-$version-windows-x64.zip"
-$playerName = "MapleThief-$version-windows-x64.zip"
+$kitName = "MapleThief-kit-$version-windows-$Arch.zip"
+$playerName = "MapleThief-$version-windows-$Arch.zip"
+$playerPreset = 'win-player'
+if ($Arch -eq 'arm64') {
+    # Cross-compiled on the x64 PC (ADR 0194): the kit, whose tests must run, is release.yml's.
+    $PlayersOnly = [switch]$true
+    $playerPreset = 'win-arm64-player'
+    if ($env:VSCMD_ARG_TGT_ARCH -ne 'arm64') {
+        Fail '-Arch arm64 needs the ARM64 Visual Studio developer environment (vcvarsall x64_arm64, docs/build/README.md)'
+    }
+}
 $out = Join-Path $Repo "build/release/$Tag"
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
@@ -264,7 +320,7 @@ if ($PlayersOnly) {
     if ($testStatus -ne 0) { Fail "scripts\test.ps1 -Release failed on $Tag" }
 }
 
-Step "cmake --workflow --preset win-player (MAPLETHIEF_VERSION=$version, CI=true)"
+Step "cmake --workflow --preset $playerPreset (MAPLETHIEF_VERSION=$version, CI=true)"
 # The clone's work/gen is this checkout's (a junction; the build only reads it). Nothing else
 # from work/ is linked: the player build needs no bundle.
 New-Item -ItemType Directory -Force -Path (Join-Path $src 'work') | Out-Null
@@ -274,14 +330,14 @@ $env:CI = 'true'
 $env:MAPLETHIEF_VERSION = $version
 Push-Location -LiteralPath $src
 try {
-    & cmake --workflow --preset win-player
+    & cmake --workflow --preset $playerPreset
     $playerStatus = $LASTEXITCODE
 } finally {
     Pop-Location
     $env:CI = $saved.ci
     $env:MAPLETHIEF_VERSION = $saved.version
 }
-if ($playerStatus -ne 0) { Fail "the win-player workflow failed on $Tag" }
+if ($playerStatus -ne 0) { Fail "the $playerPreset workflow failed on $Tag" }
 
 $kit = $null
 if (-not $PlayersOnly) {
@@ -297,12 +353,13 @@ if (-not $PlayersOnly) {
 }
 
 Step 'Player build'
-$built = Join-Path $src "build/win-player/$playerName"
+$built = Join-Path $src "build/$playerPreset/$playerName"
 if (-not (Test-Path -LiteralPath $built)) { Fail "no $built" }
 $player = Join-Path $out $playerName
 Copy-Item -LiteralPath $built -Destination $player -Force
 Write-Host "-- $player ($((Get-Item -LiteralPath $player).Length) bytes)"
-$exe = Test-Version $player $playerName
+if ($Arch -eq 'arm64') { $exe = Test-Arm64 $player $playerName }
+else { $exe = Test-Version $player $playerName }
 # Static MSVC runtime (win-player preset): a player needs no Visual C++ redistributable.
 if (Get-Command dumpbin -ErrorAction SilentlyContinue) {
     $deps = @(Invoke-Native 'dumpbin' @('/nologo', '/dependents', $exe) | Where-Object { $_ -match '\.dll\s*$' } |

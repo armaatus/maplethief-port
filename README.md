@@ -44,9 +44,9 @@ The game boots, plays and saves on Windows, macOS and Linux, with mouse, touch, 
 
 | System | |
 |---|---|
-| Windows 10/11 | x64 |
+| Windows 10/11 | x64 or ARM64 |
 | macOS 13+ | Universal (Apple silicon and Intel) |
-| Linux | x86_64, glibc 2.39+ |
+| Linux | x86_64 or aarch64, glibc 2.39+ |
 | Steam Deck | As a non-Steam game ([guide](docs/play/linux-and-steam-deck.md)); not yet checked on a real Deck |
 | iPhone | iOS 16 or later, built yourself on a Mac with Xcode ([guide](docs/play/iphone.md)); reaches the first map on an iPhone 12, the only device checked so far |
 | Nintendo Switch | Homebrew, from the Homebrew Menu ([guide](docs/play/switch.md)); a preview, not checked on a console yet |

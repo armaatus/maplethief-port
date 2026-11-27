@@ -189,7 +189,9 @@ cmake --build --preset mac-debug --target smoke   # its headless smoke test, out
 | `mac-app` | macOS | Release, arm64 + x86_64, macOS 13+, the game app from your IPA ([below](#the-macos-app)) | `build/mac-app/platform/MapleThief.app` |
 | `win-debug` / `win-release` | Windows | Debug / Release, x64, MSVC | `build/win-*/platform/MapleThief.exe` |
 | `linux-debug` / `linux-release` | Linux | Debug / Release | `build/linux-*/platform/MapleThief` |
-| `mac-player` / `win-player` / `linux-player` | each OS | Release, the release's player build | see [Releases](releases.md) |
+| `win-arm64-debug` / `win-arm64-release` | Windows, from an [ARM64 developer environment](#windows-arm64) | Debug / Release, ARM64, MSVC | `build/win-arm64-*/platform/MapleThief.exe` |
+| `linux-arm64-debug` / `linux-arm64-release` | Linux on aarch64 (the default there; also the arm64 container) | Debug / Release; configure fails for another CPU | `build/linux-arm64-*/platform/MapleThief` |
+| `mac-player` / `win-player` / `linux-player`, `win-arm64-player` / `linux-arm64-player` | each OS | Release, the release's player build | see [Releases](releases.md) |
 | `android-debug` / `android-release` | the Mac with `scripts/android-sdk install`, or the Android container | Debug / Release, `arm64-v8a`, API 26+, `MAPLETHIEF_MEM_MODEL=checked` | `build/android-*/MapleThief.apk` ([Android](#android)) |
 | `switch-debug` / `switch-release` | the devkitA64 container (`DEVKITPRO` set) | Debug / Release, AArch64 `-mcpu=cortex-a57+crypto`, `MAPLETHIEF_MEM_MODEL=checked` | `build/switch-*/MapleThief.nro`; the tests as `build/switch-*/tests/<program>.nro` ([Nintendo Switch](#nintendo-switch)) |
 
@@ -201,13 +203,15 @@ Warnings in our own code are errors when `CI` is set in the environment, or with
 
 ### 5. Package a kit (optional)
 
-These five workflow presets also **package** a kit with CPack ([ADR 0023](../adr/0023-local-ci-and-packaging.md)): `cmake --workflow --preset <preset>` configures, builds, runs CTest and writes the package into `build/<preset>/`. `cpack --preset <preset>` repackages an existing build. A release carries only the first three, which `release.yml` builds ([Releases](releases.md)); the Switch and Android kits are built and tested in CI but never uploaded, and the Switch ships as a player zip instead.
+These workflow presets also **package** a kit with CPack ([ADR 0023](../adr/0023-local-ci-and-packaging.md)): `cmake --workflow --preset <preset>` configures, builds, runs CTest and writes the package into `build/<preset>/`. `cpack --preset <preset>` repackages an existing build. A release carries the macOS, Windows and Linux ones (Windows and Linux on x64 and ARM64), which `release.yml` builds ([Releases](releases.md)); the Switch and Android kits are built and tested in CI but never uploaded, and the Switch ships as a player zip instead.
 
 | Workflow preset | Package |
 |---|---|
 | `mac-release-universal` | `MapleThief-kit-<version>-macos-universal.zip` (the `.app` is ad-hoc signed) |
 | `win-release` | `MapleThief-kit-<version>-windows-x64.zip` |
 | `linux-release` | `MapleThief-kit-<version>-linux-x86_64.tar.gz` (built in the Linux container, [Testing and CI](testing.md#the-linux-container)) |
+| `win-arm64-release` | `MapleThief-kit-<version>-windows-arm64.zip` (on an ARM64 PC; CI's `windows-11-arm` runner) |
+| `linux-arm64-release` | `MapleThief-kit-<version>-linux-aarch64.tar.gz` (in the arm64 container: `scripts/test-linux --release --arch arm64`) |
 | `switch-release` | `MapleThief-kit-<version>-switch.zip` (`MapleThief.nro` and the docs; built in the Switch container) |
 | `android-release` | `MapleThief-kit-<version>-android-arm64.zip` (`MapleThief.apk`, debug-key signed, and the docs) |
 
@@ -218,6 +222,10 @@ The version is `MAPLETHIEF_VERSION` (`X.Y.Z` or `X.Y.Z-rc.N`, default `0.0.1`), 
 ## Windows: the x64 developer environment
 
 `just build` sets this up by itself. For anything else that compiles (the `win-*` presets, `scripts\test.ps1`) the presets use Ninja with MSVC, so they need the Visual Studio **x64** developer environment. Start "x64 Native Tools Command Prompt for VS 2022", or run `Enter-VsDevShell -Arch amd64` in PowerShell (the plain "Developer PowerShell" shortcut targets x86, which configure rejects), or open the folder in Visual Studio or VS Code, whose CMake integration sets it up from the presets. That environment also puts the CMake and Ninja that ship with Visual Studio on `PATH`.
+
+### Windows ARM64
+
+The `win-arm64-*` presets ([ADR 0194](../adr/0194-windows-arm64-and-linux-aarch64-builds.md)) need an **ARM64** developer environment, with the "MSVC ARM64 build tools" component of Visual Studio installed. On an ARM64 PC that is `vcvarsall.bat arm64` (or `Enter-VsDevShell -Arch arm64 -HostArch arm64`); there `scripts\test.ps1` picks the `win-arm64-*` presets by itself. On an x64 PC, `vcvarsall.bat x64_arm64` (the "ARM64 Cross Tools" prompt) cross-compiles: the build works, but the x64 PC can't run what it builds, so only the `win-arm64-player` workflow is useful there (its CTest preset runs only the check that reads the executable; [Releases](releases.md)). Configuring an ARM64 preset from the x64 environment fails with "This preset builds for arm64, but the compiler targets x86_64".
 
 ## The macOS app
 

@@ -108,15 +108,18 @@ GEN_DISPATCH = "work/gen/dispatch.c"
 
 # vX.Y.Z or vX.Y.Z-rc.N (ADR 0024); the version is the tag without its "v".
 TAG = re.compile(r"v(?P<version>(?P<numeric>\d+\.\d+\.\d+)(?P<rc>-rc\.\d+)?)")
-# Kit file names per platform (cmake/Packaging.cmake), in the order a release lists them.
+# Kit file names per platform (cmake/Packaging.cmake), in the order a release lists them: the
+# ARM64 builds of Windows and Linux (#362, ADR 0194) after the x64 ones.
 KIT_PLATFORMS = (
     ("macos-universal", "zip"),
     ("linux-x86_64", "tar.gz"),
     ("windows-x64", "zip"),
+    ("linux-aarch64", "tar.gz"),
+    ("windows-arm64", "zip"),
 )
 # The player builds (MAPLETHIEF_PLAYER_BUILD, ADR 0125) use the same platforms, without "-kit",
 # plus the Nintendo Switch's (#243, ADR 0138), whose zip holds switch/maplethief/MapleThief.nro.
-# The release has no Switch kit: the kits are release.yml's three.
+# The release has no Switch kit: the kits are release.yml's.
 PLAYER_PLATFORMS = (*KIT_PLATFORMS, ("switch", "zip"))
 MODES = ("kit", "player")
 
