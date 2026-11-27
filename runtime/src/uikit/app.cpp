@@ -639,10 +639,11 @@ const char *launch(mt_cpu *cpu, const mt_app_main_args *args) {
     NibResult nib;
     std::string error;
     char detail[160] = {};
-    if (value == 0 && mt_cf::bundle_find(cpu, nib_name, "nib", "", "").empty()) {
-        // No NSMainNibFile and no MainWindow.nib: UIKit loads no nib, and the app delegate
-        // (UIApplicationMain's fourth argument) makes its window in code. The guest program
-        // does that (#385, ADR 0213); the game names its nib.
+    const bool delegate_named = args != nullptr && args->delegate_class_name != 0;
+    if (value == 0 && delegate_named && mt_cf::bundle_find(cpu, nib_name, "nib", "", "").empty()) {
+        // No NSMainNibFile and no MainWindow.nib, and UIApplicationMain names the delegate's
+        // class: UIKit loads no nib, and that delegate makes its window in code. The guest
+        // program does that (#385, ADR 0213); the game names its nib and passes nil.
         mt_process_milestone("nib", 0, "no main nib (Info.plist names none)");
     } else if (!load_nib(cpu, nib_name, app, &nib, &error)) {
         log(cpu, "UIApplicationMain: %s", error.c_str());

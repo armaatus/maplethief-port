@@ -32,7 +32,7 @@ function(maplethief_guest_program)
         message(STATUS "Guest program: none in '${dir}' (scripts/guest-image writes it); "
                        "platform.guest_program skips")
         add_test(NAME platform.guest_program COMMAND "${CMAKE_COMMAND}" -DPROGRAM= -P "${script}")
-        set_tests_properties(platform.guest_program PROPERTIES SKIP_RETURN_CODE 77)
+        set_tests_properties(platform.guest_program PROPERTIES SKIP_REGULAR_EXPRESSION "SKIPPED:")
         if(dir AND IS_DIRECTORY "${dir}")
             set_property(DIRECTORY "${PROJECT_SOURCE_DIR}" APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                                                                            "${dir}")
@@ -86,7 +86,7 @@ function(maplethief_guest_program)
             "-DBUNDLE=${dir}/Guest.app" "-DSLICE=${image}" "-DGOLDEN=${golden}"
             "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/guest_program" "-DTOOLS=${PROJECT_SOURCE_DIR}/tools"
             "-DPYTHON=${Python3_EXECUTABLE}" -P "${script}")
-    set_tests_properties(platform.guest_program PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60
+    set_tests_properties(platform.guest_program PROPERTIES SKIP_REGULAR_EXPRESSION "SKIPPED:" TIMEOUT 60
                                                            LABELS "guest")
     message(STATUS "Guest program: ${image} recompiled into ${work}/gen (target MapleThiefGuest, "
                    "test platform.guest_program)")
