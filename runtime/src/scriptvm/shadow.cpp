@@ -463,8 +463,10 @@ int shadow_execute(mt_cpu *cpu, const mt_hook_call *call) {
         d.rewrite = static_cast<u32>(s.next_native);
         note_difference(s, d, at_end, true);
     }
+    // r0, the callee-saved registers and sp. r9 is not one on iOS (Apple's armv7 ABI: a scratch
+    // register), and the original's natives leave it changed.
     const Regs regs2 = regs_of(cpu);
-    note_difference(s, register_difference(end1.regs, regs2, {0, 4, 5, 6, 7, 8, 9, 10, 11, 13}),
+    note_difference(s, register_difference(end1.regs, regs2, {0, 4, 5, 6, 7, 8, 10, 11, 13}),
                     at_end, true);
     note_difference(s, memory_difference(s, end1), at_end, true);
     if (s.first.found) {

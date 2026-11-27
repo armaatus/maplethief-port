@@ -45,7 +45,7 @@ DIGEST_LINE = re.compile(r"^regress: .*digest ([0-9a-f]{16})$", re.MULTILINE)
 SETTINGS_ENV = "MAPLETHIEF_SETTINGS"
 SCRIPT_VM_ENV = "MAPLETHIEF_NATIVE_SCRIPT_VM"
 SCRIPT_VM_MODES = ("on", "off", "shadow")
-SHADOW_LINE = re.compile(r"^(?:\w+\s+)?(scriptvm shadow: .*)$", re.MULTILINE)
+SHADOW_LINE = re.compile(r"^(?:\w+:\s+)?(scriptvm shadow: .*)$", re.MULTILINE)
 PRESETS = ("original", "original_controller", "enhanced", "custom")
 
 

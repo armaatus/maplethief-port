@@ -39,7 +39,7 @@ open(count, "w").write(str(n + 1))
 settings = os.environ.get("MAPLETHIEF_SETTINGS", "none").replace(",", ";").replace("=", ":")
 vm = os.environ.get("MAPLETHIEF_NATIVE_SCRIPT_VM", "")
 if vm == "shadow":
-    print("PASS   scriptvm shadow: 12 runs, 30 native calls replayed, 0 with a difference")
+    print("ok: scriptvm shadow: 12 runs, 30 native calls replayed, 0 with a difference")
 frame = "0123456789abcdef"
 if mode == "differs" and n == 2:
     frame = "0123456789abcdee"
