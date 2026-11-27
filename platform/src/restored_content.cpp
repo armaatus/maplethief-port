@@ -25,4 +25,6 @@ void install_restored_carnival(bool on) {
     mt_cf_set_literal_key_prefixes(on ? prefixes : nullptr);
 }
 
+void install_restored_maps(bool on) { mt_hooks_install_restored_maps(on ? 1 : 0); }
+
 } // namespace maplethief::frontend

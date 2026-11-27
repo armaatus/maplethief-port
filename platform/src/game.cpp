@@ -4187,12 +4187,14 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                                                   : "kept, as the original");
     // restored_content (#389, docs/re/original-bugs.md "Unreachable content"): off in every
     // preset. Shops 0, 1 and 16 from three merchants (#426), Monster Carnival from a Spiegelman
-    // NPC in three towns (#427); the unreached maps come in their own follow-up.
+    // NPC in three towns (#427), the unreached maps 4.5 and 4.8 from a portal on 4.3 (#428).
     install_restored_shops(options.settings.restored_content);
     install_restored_carnival(options.settings.restored_content);
-    SDL_Log("game: restored content is %s", options.settings.restored_content
-                                                ? "on (shops 0, 1 and 16, Monster Carnival)"
-                                                : "off, as the original");
+    install_restored_maps(options.settings.restored_content);
+    SDL_Log("game: restored content is %s",
+            options.settings.restored_content
+                ? "on (shops 0, 1 and 16, Monster Carnival, the maps 4.5 and 4.8)"
+                : "off, as the original");
     // The offline cash shop (#156, ADR 0072): sold for meso, or cancelled as the original
     // without a server (off, every preset).
     const bool cash_meso = options.settings.cash_shop == CashShop::kMeso;
