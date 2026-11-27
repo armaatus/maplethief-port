@@ -101,6 +101,8 @@ const char *data_reason_name(DataReason reason) {
         return "marker";
     case DataReason::kApplicationsFolder:
         return "applications-folder";
+    case DataReason::kFlatpak:
+        return "flatpak";
     case DataReason::kFallbackTranslocated:
         return "fallback-translocated";
     case DataReason::kFallbackNotWritable:
@@ -275,6 +277,13 @@ DataInputs current_data_inputs() {
     in.os = DataInputs::Os::kWindows;
 #elif defined(SDL_PLATFORM_LINUX)
     in.os = DataInputs::Os::kLinux;
+    // The AppImage runtime and Flatpak set these for the program they start (ADR 0193).
+    if (const char *appimage = SDL_getenv("APPIMAGE"); appimage != nullptr) {
+        in.appimage = appimage;
+    }
+    if (const char *flatpak = SDL_getenv("FLATPAK_ID"); flatpak != nullptr && *flatpak != '\0') {
+        in.flatpak = true;
+    }
 #endif
     in.user_dir = [] { return user_data_dir(true); };
 #endif
@@ -314,7 +323,12 @@ DataLocation resolve_data_location(const DataInputs &in) {
         return data_location_at(join(kSwitchBaseDir, kDataDirName), DataPlace::kSwitch,
                                 DataReason::kPlatform, kSwitchBaseDir);
     }
-    const std::string base = data_base_dir(in.base_path);
+    // An AppImage runs from a read-only mount: <base> is the folder of the .AppImage file.
+    const fs::path appimage = utf8_path(in.appimage);
+    const bool in_appimage = in.os == DataInputs::Os::kLinux && appimage.is_absolute() &&
+                             appimage.has_parent_path() && appimage.has_filename();
+    const std::string base =
+        in_appimage ? path_utf8(appimage.parent_path()) : data_base_dir(in.base_path);
     bool portable = false;
     bool marker = false;
     if (!base.empty()) {
@@ -362,6 +376,10 @@ DataLocation resolve_data_location(const DataInputs &in) {
     if (in.os == DataInputs::Os::kMacos && !base.empty() &&
         (base == "/Applications" || (!in.home.empty() && base == in.home + "/Applications"))) {
         return with_portable(user(DataReason::kApplicationsFolder, base));
+    }
+    // 4. A Flatpak: /app is read-only, the sandbox's per-user folder is the player's.
+    if (in.os == DataInputs::Os::kLinux && in.flatpak) {
+        return with_portable(user(DataReason::kFlatpak, base));
     }
     // 5 and 6. The game folder, or the fallback.
     return game(DataReason::kDefault);

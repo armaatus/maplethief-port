@@ -355,10 +355,12 @@ build_mac_player() {
 }
 
 # build_linux_player ARCH: the Linux player tarball in the linux-game container of ARCH (amd64
-# or arm64; glibc 2.39 floor, ADR 0065, ADR 0194) from a clean export of the tag; --version
-# checked in the CI container of the same CPU.
+# or arm64; one glibc 2.35 floor, ADR 0065, ADR 0193, ADR 0194) from a clean export of the tag;
+# --version checked in the CI container of the same CPU, then the tarball started in Ubuntu 22.04
+# and Debian 12. For amd64 also the AppImage and Flatpak bundle, run under Xvfb to the import
+# screen (ADR 0193: x86_64 only).
 build_linux_player() {
-    local arch="$1" cpu=x86_64
+    local arch="$1" cpu=x86_64 pkg
     [ "$arch" = amd64 ] || cpu=aarch64
     local dir="$out/linux-player-$arch" name="MapleThief-$version-linux-$cpu.tar.gz"
     rm -rf "$dir"
@@ -368,7 +370,17 @@ build_linux_player() {
     cp "$dir/$name" "$out/$name"
     echo "-- $out/$name ($(wc -c <"$out/$name" | tr -d ' ') bytes)"
     check_linux_kit "$out/$name" "$arch"
+    scripts/linux-game check-player "$out/$name" ||
+        die "$name does not start in Ubuntu 22.04 or Debian 12"
     players+=("$out/$name")
+    [ "$arch" = amd64 ] || return 0
+    for pkg in $(mtrelease linux-packages "$version"); do
+        [ -f "$dir/$pkg" ] || die "scripts/linux-game player wrote no $dir/$pkg"
+        cp "$dir/$pkg" "$out/$pkg"
+        echo "-- $out/$pkg ($(wc -c <"$out/$pkg" | tr -d ' ') bytes)"
+        players+=("$out/$pkg")
+    done
+    scripts/linux-game check-packages "$dir" || die "the AppImage or Flatpak bundle does not reach the import screen"
 }
 
 # build_switch_player: the Nintendo Switch's player zip (#243, ADR 0138) in the devkitA64
@@ -520,6 +532,9 @@ cmd_publish() {
         esac
         [ "$p" = switch ] || kits+=("$(grep -- "$key" <<<"$kit_all")")
         players+=("$(grep -- "$key" <<<"$player_all")")
+        if [ "$p" = linux ]; then
+            while IFS= read -r name; do players+=("$name"); done < <(mtrelease linux-packages "$version")
+        fi
     done
     names=("${kits[@]}" "${players[@]}")
 

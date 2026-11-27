@@ -5,7 +5,7 @@ The hand-offs that need a Steam Deck (or a Linux PC for #264), then the checks f
 ## Setup
 
 1. On the Mac: Docker (OrbStack) running, your copy at `original/MapleThief-1.5.ipa`, then `scripts/bootstrap && python3 -m recomp all`.
-2. `scripts/linux-game player`: it builds `build/linux-game/MapleThief-0.0.1-linux-x86_64.tar.gz` in the container (Ubuntu 24.04, about 5 minutes). It holds no game; the first start imports your IPA. Optional: `scripts/linux-game build` for the tarball with the game inside, and `scripts/linux-game check` to start it on a plain Ubuntu.
+2. `scripts/linux-game player`: it builds `build/linux-game/MapleThief-0.0.1-linux-x86_64.tar.gz` in the container (Ubuntu 22.04, about 5 minutes), with its `.AppImage` and `.flatpak`. It holds no game; the first start imports your IPA. Optional: `scripts/linux-game build` for the tarball with the game inside, and `scripts/linux-game check` to start it on a plain Ubuntu.
 3. A way to copy files to the Deck (a USB stick or the network), Desktop Mode and Konsole on the Deck.
 4. For #264's older saves: `gh release download v0.1.0 -p "MapleThief-0.1.0-linux-x86_64.tar.gz"`.
 

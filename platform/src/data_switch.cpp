@@ -131,6 +131,9 @@ DataLocationRow data_location_row(const DataLocation &loc, std::size_t max_note)
     case DataReason::kApplicationsFolder:
         row.help = tr(Txt::data_help_applications);
         break;
+    case DataReason::kFlatpak:
+        row.help = tr(Txt::data_help_flatpak);
+        break;
     case DataReason::kFallbackNotWritable:
         row.help = tr(Txt::data_help_not_writable, {loc.why});
         break;
@@ -199,6 +202,10 @@ DataSwitchPlan plan_data_switch(const DataLocation &cur, DataPlace to, const Dat
     }
     if (to == DataPlace::kGame && cur.reason == DataReason::kApplicationsFolder) {
         plan.refused = tr(Txt::data_refused_applications);
+        return plan;
+    }
+    if (to == DataPlace::kGame && cur.reason == DataReason::kFlatpak) {
+        plan.refused = tr(Txt::data_refused_flatpak);
         return plan;
     }
     plan.marker = path_utf8(utf8_path(cur.base) / kUserDataMarkerName);

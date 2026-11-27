@@ -8,6 +8,7 @@
 //   2. --data-location game|user (this run)             location game|user, reason flag
 //   3. <base>/user-data.txt                              location user, reason marker
 //   4. macOS: <base> is /Applications or ~/Applications  location user, reason applications-folder
+//      Linux in a Flatpak sandbox (FLATPAK_ID set)       location user, reason flatpak
 //   5. <base>/data, if the probe can create and remove a file in it
 //                                                        location game, reason default
 //   6. otherwise the per-user folder (SDL_GetPrefPath("", "MapleThief")), with the reason
@@ -23,7 +24,9 @@
 //
 // <base> is SDL_GetBasePath()'s folder: the folder of MapleThief.exe; the folder around
 // MapleThief.app (never inside it); on Linux the game folder, the parent of bin/ when it holds
-// MapleThief.sh. portable.txt there is accepted and does nothing (logged once).
+// MapleThief.sh; in an AppImage (APPIMAGE set by its runtime to the image's absolute path) the
+// folder that holds the .AppImage file, not the read-only mount it runs from (ADR 0193).
+// portable.txt there is accepted and does nothing (logged once).
 //
 // The layout under the data folder (ADR 0127's *Layout*):
 //
@@ -69,6 +72,7 @@ enum class DataReason {
     kFlag,
     kMarker,
     kApplicationsFolder,
+    kFlatpak, // the Flatpak bundle's /app is read-only: the sandbox's per-user folder (ADR 0193)
     kFallbackTranslocated,
     kFallbackNotWritable,
     kFallbackNoBase,
@@ -78,7 +82,7 @@ enum class DataReason {
 };
 // "game", "user", "env", "ios", "switch", "none".
 const char *data_place_name(DataPlace place);
-// "default", "flag", "marker", "applications-folder", "fallback-translocated",
+// "default", "flag", "marker", "applications-folder", "flatpak", "fallback-translocated",
 // "fallback-not-writable", "fallback-no-base", "env", "platform", "none".
 const char *data_reason_name(DataReason reason);
 // --data-location's values: "game" or "user"; nullopt otherwise.
@@ -132,6 +136,8 @@ struct DataInputs {
     std::optional<DataPlace> flag; // --data-location (kGame or kUser)
     std::string base_path;         // SDL_GetBasePath()'s answer ("": none)
     std::string home;              // the user's home folder (macOS ~/Applications)
+    std::string appimage;          // Linux: APPIMAGE, the running AppImage's path ("": none)
+    bool flatpak = false;          // Linux: in a Flatpak sandbox (FLATPAK_ID set)
     Os os = Os::kOther;
     std::string ios_documents; // iOS: the app's Documents/ (SDL_FOLDER_DOCUMENTS)
     // The per-user folder (SDL_GetPrefPath, which creates it); called only when it is used.

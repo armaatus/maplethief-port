@@ -24,7 +24,7 @@ When you build it yourself, the build checks the file in `original/` instead, an
 
 ### Linux: "version `GLIBC_2.xx' not found"
 
-Your system is older than the build needs (glibc 2.39, e.g. Ubuntu 24.04). Update your distribution or SteamOS. More Linux tips: [Linux and Steam Deck](linux-and-steam-deck.md#if-it-doesnt-start).
+Your system is older than the build needs (glibc 2.35, e.g. Ubuntu 22.04). Update your distribution or SteamOS, or use the Flatpak bundle, which brings its own runtime. More Linux tips: [Linux and Steam Deck](linux-and-steam-deck.md#if-it-doesnt-start).
 
 ## The game keeps its data in the user folder
 

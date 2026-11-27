@@ -256,6 +256,61 @@ TEST_CASE("data folder: macOS, the app alone in an Applications folder uses the 
     CHECK(loc.dir == str(fs::path("/Applications") / "data"));
 }
 
+TEST_CASE("data folder: an AppImage's <base> is the folder of the .AppImage file (ADR 0193)") {
+    const TempDir tmp("appimage");
+    const fs::path games = tmp.path / "Games";
+    // The runtime mounts the image read-only and runs AppRun's bin/MapleThief from there.
+    Fake f(fs::path("/tmp/.mount_MapleTabc123/bin"), tmp.path / "user", kLinux);
+    f.probe_says(true);
+    f.in.appimage = str(games / "MapleThief-1.0.0-linux-x86_64.AppImage");
+    fe::DataLocation loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kGame);
+    CHECK(loc.reason == Reason::kDefault);
+    CHECK(loc.base == str(games));
+    CHECK(loc.dir == str(games / "data"));
+    CHECK(loc.bundle_dir == str(games / "game"));
+    // user-data.txt next to the .AppImage file chooses the user folder, as next to any game.
+    write_text(games / fe::kUserDataMarkerName, "x");
+    loc = fe::resolve_data_location(f.in);
+    CHECK(loc.reason == Reason::kMarker);
+    CHECK(loc.base == str(games));
+    fs::remove(games / fe::kUserDataMarkerName);
+    // A relative APPIMAGE is not the runtime's: SDL's base path decides, as without one.
+    f.in.appimage = "MapleThief.AppImage";
+    loc = fe::resolve_data_location(f.in);
+    CHECK(loc.base == "/tmp/.mount_MapleTabc123/bin");
+    // Only on Linux.
+    f.in.appimage = str(games / "MapleThief.AppImage");
+    f.in.os = kWin;
+    f.in.probe = [](const std::string &, std::string *) { return true; };
+    loc = fe::resolve_data_location(f.in);
+    CHECK(loc.base == "/tmp/.mount_MapleTabc123/bin");
+}
+
+TEST_CASE("data folder: a Flatpak uses the sandbox's user folder (ADR 0193)") {
+    const TempDir tmp("flatpak");
+    write_text(tmp.path / "app" / "MapleThief.sh", "#!/bin/sh\n");
+    Fake f(tmp.path / "app" / "bin",
+           "/home/p/.var/app/io.github.armaatus.maplethief/data/MapleThief", kLinux);
+    f.probe_says(true);
+    f.in.flatpak = true;
+    fe::DataLocation loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kUser);
+    CHECK(loc.reason == Reason::kFlatpak);
+    CHECK(std::string(fe::data_reason_name(loc.reason)) == "flatpak");
+    CHECK(loc.dir == "/home/p/.var/app/io.github.armaatus.maplethief/data/MapleThief");
+    CHECK(loc.bundle_dir == str(fs::path(loc.dir) / "game"));
+    CHECK(loc.base == str(tmp.path / "app"));
+    CHECK_FALSE(loc.fallback()); // a normal state
+    CHECK(f.probe_calls == 0);
+    // --data-location game still tries the game folder (and its probe decides).
+    f.in.flag = Place::kGame;
+    f.probe_says(false, "Read-only file system");
+    loc = fe::resolve_data_location(f.in);
+    CHECK(loc.reason == Reason::kFallbackNotWritable);
+    CHECK(loc.why == "Read-only file system");
+}
+
 TEST_CASE("data folder: a game folder that can't be written falls back to the user folder") {
     const TempDir tmp("readonly");
     const fs::path kit = tmp.path / "kit", user = tmp.path / "user";
