@@ -3369,6 +3369,40 @@ void chapter_2_e_checks(Run &, u64) {}
 void chapter_2_f(Run &r, u64) {
     using namespace quest_bot;
     from_save(r);
+    // The speedrun timer (#434) on Any%'s chapter 2 splits, mob 68's death and chapter 2's end:
+    // the shipped category's splits from "Chapter 2 boss" to "Chapter 2" only (the ones before
+    // are earlier parts', the ones after chapter 3's), started now as part L's is.
+    namespace fe = maplethief::frontend;
+    static fe::RunTimer timer(fe::RunClock{[] {
+                                               return fe::RunInstant{
+                                                   static_cast<double>(SDL_GetTicksNS()) / 1e9,
+                                                   mt_input_get_stats().ticks};
+                                           },
+                                           [] { return std::string("2026-11-27 00:00:00"); }});
+    then_do(r, "the speedrun timer: Any%'s chapter 2 boss and chapter 2's end, from here",
+            [](mt_cpu *) {
+                std::vector<std::string> problems;
+                std::optional<fe::RunCategory> any;
+                for (const auto &[name, text] : fe::shipped_run_category_files()) {
+                    if (name == "any") {
+                        any = fe::parse_run_category(name, text, &problems);
+                    }
+                }
+                check(any.has_value() && problems.empty(), "the shipped any category parses");
+                auto &s = any->splits;
+                const auto first = std::find_if(s.begin(), s.end(), [](const fe::RunSplit &x) {
+                    return x.kind == MT_GAME_EVENT_BOSS_KILLED && x.a == 68;
+                });
+                check(first != s.end() && first + 1 != s.end() &&
+                          (first + 1)->kind == MT_GAME_EVENT_CHAPTER_END && (first + 1)->a == 2,
+                      "Any% splits on mob 68, then on chapter 2's end");
+                s.erase(first + 2, s.end());
+                s.erase(s.begin(), first);
+                timer.set_category(*any, std::nullopt);
+                g_run_timer = &timer;
+                timer.start();
+                check(timer.state() == fe::RunTimer::State::kRunning, "the timer runs");
+            });
     const FarmStyle fight = chapter_2_fight();
     then_spend_sp(r, "part F", k_chapter_2_build);
     then_stock(r, "item 4 for the boss (Etc90)", 9, 4, 300, 500, 900);
@@ -3447,6 +3481,15 @@ void chapter_2_f(Run &r, u64) {
     });
     then_run_event(r, "portal942 to 9.5", MT_GAME_EVENT_MAP_CHANGE, 9, {5});
     then_run_event(r, "mob 68 killed", MT_GAME_EVENT_BOSS_KILLED, 68);
+    then_do(r, "the speedrun timer: Any%'s Chapter 2 boss split fired", [](mt_cpu *) {
+        check(timer.state() == maplethief::frontend::RunTimer::State::kRunning &&
+                  timer.times().size() == 1 && timer.times()[0].ticks > 0,
+              "one split (Chapter 2 boss) at mob 68's death, " +
+                  std::to_string(timer.times().size()) + " split(s) so far");
+        std::printf("Any%% split Chapter 2 boss: %lld ms, %llu ticks\n",
+                    static_cast<long long>(timer.times()[0].ms),
+                    static_cast<unsigned long long>(timer.times()[0].ticks));
+    });
     then_talk_to(r, "Alchester: main 8 done, main 9 given", 9, 0, "Alchester", 5, main_quests(8, 9),
                  900);
     then_quests_are(r, "chapter 2 before the trip", {{0, 8, 2}, {0, 9, 1}});
@@ -3461,6 +3504,16 @@ void chapter_2_f(Run &r, u64) {
         900);
     then_run_event(r, "chapter 2 ends", MT_GAME_EVENT_CHAPTER_END, 2);
     then_run_event(r, "the trip to 6.0", MT_GAME_EVENT_MAP_CHANGE, 6, {0});
+    then_do(r, "the speedrun timer: Any%'s Chapter 2 split fired, the run finished", [](mt_cpu *) {
+        g_run_timer = nullptr;
+        const std::vector<maplethief::frontend::RunRecord> runs = timer.take_records();
+        check(timer.state() == maplethief::frontend::RunTimer::State::kFinished &&
+                  runs.size() == 1 && runs[0].finished && runs[0].times.size() == 2 &&
+                  runs[0].times[0].ticks < runs[0].times[1].ticks &&
+                  runs[0].times[1] == runs[0].end,
+              "the run finished at chapter 2's end, after the Chapter 2 boss split (" +
+                  std::to_string(runs.size()) + " records)");
+    });
     then_do(r, "chapter 3 on 6.0 in guest memory", [](mt_cpu *cpu) {
         const Hero h = hero(cpu);
         std::string q;
