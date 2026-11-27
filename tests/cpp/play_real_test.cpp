@@ -10600,15 +10600,17 @@ void jobs_2_2_bandit(Run &r, u64) { job_path(r, {{{7}, 2, 2, 28}}); }
 void jobs_2_3_assassin(Run &r, u64) { job_path(r, {{{-1}, 1, 3, -1}}); }
 void jobs_2_3_bandit(Run &r, u64) { job_path(r, {{{-1}, 2, 3, -1}}); }
 // 3-1-0, 3-2-1, 3-2-2, then 3-3-same and 3-4-same in one run (side quest 25 active from the
-// start: the script offers the 4th job only once the 3rd is taken, and hands side 25 in).
-void jobs_3_1(Run &r, u64) { job_path(r, {{{-1}, 0, 1, 36}}); }
-void jobs_3_2_assassin(Run &r, u64) { job_path(r, {{{6}, 1, 2, 40}}); }
-void jobs_3_2_bandit(Run &r, u64) { job_path(r, {{{7}, 2, 2, 28}}); }
+// start: the script offers the 4th job only once the 3rd is taken, and hands side 25 in). In
+// chapter 3 the advancements are side quests 1, 16 and 42 on the Dark Lord's path (#301: the
+// chain's hero has its jobs from earlier chapters, so these runs are where they reach state 2).
+void jobs_3_1(Run &r, u64) { job_path(r, {{{-1}, 0, 1, 36, {{1, 1, 2}}}}); }
+void jobs_3_2_assassin(Run &r, u64) { job_path(r, {{{6}, 1, 2, 40, {{1, 16, 2}}}}); }
+void jobs_3_2_bandit(Run &r, u64) { job_path(r, {{{7}, 2, 2, 28, {{1, 16, 2}}}}); }
 void jobs_3_4_assassin(Run &r, u64) {
-    job_path(r, {{{-1}, 1, 3, -1}, {{-1}, 1, 4, -1, {{1, 25, 2}}}});
+    job_path(r, {{{-1}, 1, 3, -1, {{1, 42, 2}}}, {{-1}, 1, 4, -1, {{1, 25, 2}}}});
 }
 void jobs_3_4_bandit(Run &r, u64) {
-    job_path(r, {{{-1}, 2, 3, -1}, {{-1}, 2, 4, -1, {{1, 25, 2}}}});
+    job_path(r, {{{-1}, 2, 3, -1, {{1, 42, 2}}}, {{-1}, 2, 4, -1, {{1, 25, 2}}}});
 }
 
 // --- every skill from built saves (#302) ---------------------------------------------------------

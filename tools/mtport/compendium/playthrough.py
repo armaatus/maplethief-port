@@ -112,6 +112,18 @@ RUNS: dict[str, str] = {
     "quest:3-main-7": _CH3 + "e_synthetic",  # from a raised save (levels 72-99)
     "event:chapter3-BalogMap-boss": _CH3 + "e_synthetic",
     "monster:69": _CH3 + "e_synthetic",
+    # Chapter 3's side quests (#301): sides 1 and 16 on BrokerHan's path, 42 the 3rd job below.
+    **{f"quest:3-sub-{n}": _CH3 + "sides_a" for n in (2, 3, 5, 16, 17)},
+    **{f"quest:3-sub-{n}": _CH3 + "sides_b" for n in (6, 7, 8, 10)},
+    **{f"quest:3-sub-{n}": _CH3 + "sides_c" for n in (9, 11, 12, 13, 18)},
+    "quest:3-sub-34": _CH3 + "climb",
+    "climb:6": _CH3 + "climb",
+    "quest:3-sub-14": _CH3 + "side_14",
+    # From a raised save (levels 73-99).
+    **{f"quest:3-sub-{n}": _CH3 + "sides_10_a_synthetic" for n in (20, 22, 23, 24)},
+    **{f"quest:3-sub-{n}": _CH3 + "sides_10_b_synthetic" for n in (26, 27, 28, 29, 30, 31)},
+    "quest:3-sub-1": "play.jobs_3_1_synthetic",  # the Dark Lord's path; BrokerHan's: sides_a
+    "quest:3-sub-42": "play.jobs_3_4_assassin_synthetic",
     # From built start states (#302, docs/testing/skills-and-jobs.md).
     "job_advancement:1-2-1": "play.jobs_1_2_assassin_synthetic",
     "job_advancement:2-2-1": "play.jobs_2_2_assassin_synthetic",
