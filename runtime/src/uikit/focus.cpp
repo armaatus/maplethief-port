@@ -6,11 +6,14 @@
 // the hit test: a hidden, transparent (alpha under 0.01) or non-interactive view hides its
 // subtree, and a view is only hit inside the bounds of every superview.
 //
+// mt_uikit_labels (#393) walks the same tree for the labels the player can see, for the speech.
+//
 // Single guest thread; sends no messages (it reads the host state of the views only).
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 
+#include "cf/cf_objects.h"
 #include "uikit/uikit_internal.h"
 
 namespace mt_ui {
@@ -133,6 +136,9 @@ void consider(Walk &w, const View &v, const Box &visible) {
         c.point[1] = static_cast<float>(py);
         mt_objc *rt = runtime(w.cpu);
         copy_name(c.view_class, mt_objc_class_name(rt, mt_objc_class_of(rt, v.obj)));
+        if (v.kind == Kind::button) {
+            copy_name(c.image, mt_cg::uiimage_name(w.cpu, v.images[0]).c_str());
+        }
         if (action != nullptr) {
             copy_name(c.action, mt_objc_sel_name(rt, action->action));
             copy_name(c.target, mt_objc_class_name(rt, mt_objc_class_of(rt, action->target)));
@@ -171,9 +177,72 @@ void walk(Walk &w, u32 obj, const Box &clip, int depth) {
     }
 }
 
+// The labels: every view visible, clipped to the screen only (a label takes no touches, and the
+// game's labels are not clipped by their superviews).
+struct LabelWalk {
+    mt_cpu *cpu;
+    mt_uikit_label *out;
+    u32 max;
+    u32 count = 0;
+    u32 order = 0;
+};
+
+// `text` as UTF-8, cut at a character's end to fit `size` bytes with the NUL.
+void copy_text(char *dst, std::size_t size, const std::string &text) {
+    std::size_t n = std::min(text.size(), size - 1);
+    while (n > 0 && n < text.size() && (static_cast<unsigned char>(text[n]) & 0xC0) == 0x80) {
+        n--; // text[n] continues a character: cut before its lead byte
+    }
+    std::memcpy(dst, text.data(), n);
+    dst[n] = 0;
+}
+
+void walk_labels(LabelWalk &w, u32 obj, int depth) {
+    const View *v = view_of(w.cpu, obj);
+    if (v == nullptr || depth > 64 || v->hidden || v->model.alpha < 0.01) {
+        return;
+    }
+    w.order++;
+    if (v->kind == Kind::label && !v->text.empty()) {
+        const Box screen{0, 0, MT_UIKIT_SCREEN_WIDTH, MT_UIKIT_SCREEN_HEIGHT};
+        const Box visible = intersect(screen, screen_box(w.cpu, *v));
+        if (!visible.empty()) {
+            if (w.count < w.max && w.out != nullptr) {
+                mt_uikit_label &l = w.out[w.count];
+                std::memset(&l, 0, sizeof l);
+                l.object = v->obj;
+                l.order = w.order;
+                l.rect[0] = static_cast<float>(visible.x0);
+                l.rect[1] = static_cast<float>(visible.y0);
+                l.rect[2] = static_cast<float>(visible.x1 - visible.x0);
+                l.rect[3] = static_cast<float>(visible.y1 - visible.y0);
+                copy_text(l.text, sizeof l.text, mt_cf::to_utf8(v->text));
+            }
+            w.count++;
+        }
+    }
+    const std::vector<u32> subs = v->subviews;
+    for (const u32 sub : subs) {
+        walk_labels(w, sub, depth + 1);
+    }
+}
+
 } // namespace
 
 } // namespace mt_ui
+
+uint32_t mt_uikit_labels(mt_cpu *cpu, mt_uikit_label *out, uint32_t max) noexcept {
+    using namespace mt_ui;
+    if (cpu == nullptr || runtime(cpu) == nullptr) {
+        return 0;
+    }
+    LabelWalk w{cpu, out, out != nullptr ? max : 0};
+    const std::vector<u32> windows = state(cpu).windows;
+    for (const u32 window : windows) {
+        walk_labels(w, window, 0);
+    }
+    return w.count;
+}
 
 uint32_t mt_uikit_controls(mt_cpu *cpu, mt_uikit_control *out, uint32_t max) noexcept {
     using namespace mt_ui;
