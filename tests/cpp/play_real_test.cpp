@@ -8332,6 +8332,46 @@ void regress_checks(Run &r, u64) {
                 named, r.checkpoints.digest().c_str());
 }
 
+// --- the playthrough's checkpoints (#306, docs/testing/regression-replay.md) -------------------
+//
+// MT_CHECKPOINTS=N (scripts/playthrough sets it): a mode the bot plays (a chapter's part, the
+// post-game) takes ADR 0104's checkpoints as the regression run does: the composited screen, the
+// audio so far, the GL frame and regress_state's line, every N steps (0: none) and one "end" at
+// the end of the turn the part is done in. It writes them to OUT_DIR/checkpoints_MODE.txt (the
+// post-game's processes share OUT_DIR) and prints their digest. The replay's own modes keep
+// their plan. MT_NUDGE_TICK=STEP moves the virtual clock one game tick more at that step: a
+// deliberate one-tick change, for checking that the comparison catches one.
+
+bool playthrough_setup(Run &r) {
+    if (const char *n = std::getenv("MT_NUDGE_TICK"); n != nullptr && *n != 0) {
+        r.nudge_step = std::strtoull(n, nullptr, 10);
+        std::printf("playthrough: the clock moves one tick more at step %llu (MT_NUDGE_TICK)\n",
+                    static_cast<unsigned long long>(r.nudge_step));
+    }
+    const char *every = std::getenv("MT_CHECKPOINTS");
+    if (every == nullptr || *every == 0 || r.replay != nullptr || r.record != nullptr) {
+        return false;
+    }
+    r.audio = std::make_unique<fe::AudioHash>();
+    if (!r.state) {
+        r.state = regress_state;
+    }
+    r.plan.set_every(std::strtoull(every, nullptr, 10));
+    r.end_checkpoint = true;
+    return true;
+}
+
+void playthrough_checks(Run &r) {
+    check(r.checkpoints.find("end") != nullptr, "the part's end checkpoint was taken");
+    const fs::path path = r.out / ("checkpoints_" + r.mode + ".txt");
+    std::ofstream log(path, std::ios::binary);
+    log << r.checkpoints.text();
+    log.close();
+    check(static_cast<bool>(log), path.filename().string() + " is written");
+    std::printf("playthrough: %s: %zu checkpoints, digest %s\n", r.mode.c_str(),
+                r.checkpoints.points().size(), r.checkpoints.digest().c_str());
+}
+
 // --- save states in process (#203, ADR 0105 and its addendum, docs/re/save-states.md) -----------
 //
 // save_state: the replay MT_REPLAY (tests/regress/title_to_combat.replay) with an in-process
@@ -14803,12 +14843,16 @@ int main(int argc, char **argv) {
         }
     }
     mode->queue(r, goal);
+    const bool part_checkpoints = playthrough_setup(r);
     std::stable_sort(r.steps.begin(), r.steps.end(),
                      [](const Step &a, const Step &b) { return a.at < b.at; });
     const int status = boot(r, read_file(MT_ARMV7_SLICE));
     if (status == 0) {
         common_checks(r, goal);
         mode->checks(r, goal);
+        if (part_checkpoints) {
+            playthrough_checks(r);
+        }
     }
     g_run = nullptr;
     SDL_Quit();

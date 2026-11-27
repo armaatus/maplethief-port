@@ -272,6 +272,12 @@ struct Run {
     std::function<std::string(mt_cpu *)> state;
     bool checkpoint_shots = false; // each checkpoint's screen also to OUT_DIR/check_NAME.png
     u64 end_step = UINT64_MAX;
+    // A part of the playthrough (#306, MT_CHECKPOINTS): a checkpoint "end" at the end of the
+    // turn the run is done in.
+    bool end_checkpoint = false;
+    // The deliberate one-tick change (#306, MT_NUDGE_TICK): at the end of this step's turn the
+    // virtual clock moves one game tick (50 ms) more.
+    u64 nudge_step = UINT64_MAX;
     // The turn's step: turns from the first (0), one fixed step of virtual time each.
     u64 step() const { return turns == 0 ? 0 : turns - 1; }
 };
@@ -423,11 +429,15 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     }
     survey_shots(r, cpu);
     window_shots(r, cpu);
+    if (r.done && r.end_checkpoint) {
+        r.plan.add(r.step(), "end");
+        r.end_checkpoint = false;
+    }
     take_checkpoints(r, cpu);
     if (r.step() >= r.end_step) {
         r.done = true;
     }
-    r.clock.advance(r.step_ns);
+    r.clock.advance(r.step() == r.nudge_step ? r.step_ns + 50000000 : r.step_ns);
     if (r.audio) {
         r.audio->render_to(r.clock.elapsed_ns());
     }
