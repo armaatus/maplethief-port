@@ -285,6 +285,12 @@
 "disconnect_other_pad" = "또는 다른 패드의 버튼:";
 "glyph_hold" = "{0} 누르고 있기";
 "hud_exp" = "EXP";
+"input_jump" = "점프";
+"input_attack" = "공격";
+"input_ok" = "OK";
+"input_back" = "뒤로";
+"input_menu" = "메뉴";
+"input_map" = "맵";
 "price_shop" = "캐시샵 가격 (메소, 보유 {0})";
 "price_revive" = "부활 가격 (메소, 보유 {0})";
 "price_packs_not_sold" = "메소 패키지: 판매 안 함";
@@ -615,6 +621,8 @@
 "setting.livesplit.help" = "타이머의 시작, 구간, 리셋을 이 컴퓨터의 LiveSplit TCP 서버(localhost:16834)로 보냅니다; 스피드런 타이머가 켜져 있어야 함";
 "setting.livesplit_game_time.label" = "LiveSplit 게임 시간";
 "setting.livesplit_game_time.help" = "LiveSplit의 게임 시간은 컴퓨터 속도와 상관없이 게임 자체의 틱(각 50 ms)을 셉니다";
+"setting.input_display.label" = "입력 표시";
+"setting.input_display.help" = "방향, 점프, 공격, 퀵슬롯, 메뉴 키를 표시하고 누르는 동안 밝게 켭니다";
 "action.bindings.label" = "키 지정";
 "action.bindings.help" = "키와 게임패드 버튼을 다시 지정합니다 (키 지정 화면); 닌텐도 페이스 버튼";
 "action.bindings.button" = "열기...";

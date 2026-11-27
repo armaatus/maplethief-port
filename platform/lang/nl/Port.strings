@@ -283,6 +283,12 @@
 "disconnect_other_pad" = "Of een knop op een andere pad:";
 "glyph_hold" = "Houd {0} vast";
 "hud_exp" = "EXP";
+"input_jump" = "SPR";
+"input_attack" = "AANV";
+"input_ok" = "OK";
+"input_back" = "TRG";
+"input_menu" = "MENU";
+"input_map" = "KRT";
 "price_shop" = "Cash-shopprijzen in meso (je hebt {0})";
 "price_revive" = "Herleefprijzen in meso (je hebt {0})";
 "price_packs_not_sold" = "mesopakketten: niet te koop";
@@ -613,6 +619,8 @@
 "setting.livesplit.help" = "Stuurt start, splits en resets van de timer naar de TCP-server van LiveSplit op deze computer (localhost:16834); vereist de speedrun-timer";
 "setting.livesplit_game_time.label" = "LiveSplit-speltijd";
 "setting.livesplit_game_time.help" = "De speltijd van LiveSplit telt de eigen ticks van de game (elk 50 ms), hoe snel de computer ook is";
+"setting.input_display.label" = "Invoerweergave";
+"setting.input_display.help" = "Toont de richtingen, springen, aanvallen, de snelvakken en de menutoetsen, verlicht zolang ze ingedrukt zijn";
 "action.bindings.label" = "Toewijzingen";
 "action.bindings.help" = "Wijs de toetsen en gamepadknoppen opnieuw toe (het toewijzingsscherm); Nintendo-knoppen";
 "action.bindings.button" = "Openen...";
