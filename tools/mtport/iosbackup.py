@@ -781,23 +781,51 @@ def _env(data_dir: Path) -> dict[str, str]:
     return env
 
 
+def big_entries(files: Mapping[str, bytes], count: int = 3000) -> list[SyntheticFile]:
+    """``synthetic_entries`` among ``count`` files of another domain, one with a long path.
+
+    In Manifest.db that is a table three levels deep, with records that overflow their page:
+    the game's own SQLite reader (#374, platform/src/sqlite_read.h) walks all of it.
+    """
+    others = [
+        SyntheticFile("CameraRollDomain", f"Media/DCIM/100APPLE/IMG_{i:04}.JPG", b"j" * (i % 5))
+        for i in range(count)
+    ]
+    others.append(SyntheticFile("HomeDomain", "Library/" + "long/" * 2000 + "x", b"x"))
+    return others + synthetic_entries(files)
+
+
 def selftest(program: Sequence[str], work: Path) -> list[str]:
-    """Synthetic backups of both formats through ``import`` and the program; the problems."""
+    """Synthetic backups of both formats through the program; the problems.
+
+    Each backup goes two ways: ``import`` here, which hands the files to ``--import-saves``,
+    and the program's own reader, ``--import-ios-backup`` (#374: the Saves tab's iPhone
+    backup row). Both must leave saves/ the same.
+    """
     problems: list[str] = []
     want = sc.full_set()
     before = {"theif0": b"old character", "config": b"\x03\x01\x00\x01\x01\x01"}
     bad = dict(want, theif1=want["theif1"] + b"\0")
     cases = [
-        (fmt, enc, files, expect)
+        (fmt, enc, files, expect, False)
         for fmt in ("db", "mbdb")
         for enc, files, expect in ((False, want, 0), (True, want, 1), (False, bad, 3))
     ]
-    for fmt, encrypted, files, expect in cases:
-        name = f"{fmt}{'-encrypted' if encrypted else ''}{'-bad' if files is bad else ''}"
+    cases.append(("db", False, want, 0, True))
+    for (fmt, encrypted, files, expect, big), route in (
+        (c, r) for c in cases for r in ("python", "program")
+    ):
+        name = (
+            f"{fmt}{'-encrypted' if encrypted else ''}{'-bad' if files is bad else ''}"
+            f"{'-big' if big else ''}"
+        )
         backup = work / "backups" / name
-        if backup.exists():
-            shutil.rmtree(backup)
-        write_synthetic_backup(backup, synthetic_entries(files), fmt, encrypted=encrypted)
+        if route == "python":  # the first way: a fresh backup
+            if backup.exists():
+                shutil.rmtree(backup)
+            entries = big_entries(files) if big else synthetic_entries(files)
+            write_synthetic_backup(backup, entries, fmt, encrypted=encrypted)
+        name += f" ({route})"
         data = work / "data"
         if data.exists():
             shutil.rmtree(data)
@@ -805,9 +833,14 @@ def selftest(program: Sequence[str], work: Path) -> list[str]:
         docs.mkdir(parents=True)
         for n, b in before.items():
             (docs / n).write_bytes(b)
-        cmd = [sys.executable, "-m", "mtport.iosbackup", "import", str(backup)]
+        if route == "python":
+            cmd = [sys.executable, "-m", "mtport.iosbackup", "import", str(backup)]
+            cmd += ["--program", *program]
+        else:
+            cmd = [*program, "--import-ios-backup", str(backup)]
+            expect = 3 if expect else 0  # the program's one failure status
         res = subprocess.run(
-            [*cmd, "--program", *program],
+            cmd,
             capture_output=True,
             text=True,
             env=_env(data),
@@ -913,7 +946,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         for line in problems:
             print(line, file=sys.stderr)
-        print(f"selftest: 6 backups, {len(problems)} problems")
+        print(f"selftest: 7 backups, each two ways, {len(problems)} problems")
         return 1 if problems else 0
 
     docs = _load(args.backup)

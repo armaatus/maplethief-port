@@ -543,11 +543,12 @@ TEST_CASE("data switch: the Saves tab with a long path, as a row dump and a draw
           "  Backups per character | 10\n"
           "  Export saves... | Open...\n"
           "  Import saves... | Open...\n"
+          "  iPhone backup | not available\n"
+          "  Check saves | not available\n"
+          "  Saves from a folder | not available\n"
           "  Backups | List...\n"
           "> Data location | User folder\n"
           "  Open data folder | Open...\n"
-          "  Open logs folder | Open...\n"
-          "  Quit | not available\n"
           "help: Can't write next to the game (Permission denied). To keep your data\n"
           "help: there, move the game's folder somewhere you can write, such as Documents.\n");
     std::vector<std::uint8_t> px(480 * 320 * 4, 0);
@@ -564,6 +565,6 @@ TEST_CASE("data switch: the Saves tab with a long path, as a row dump and a draw
     char hex[32];
     std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(fnv1a(px)));
     MESSAGE("saves_data_location hash " << hex);
-    CHECK(fnv1a(px) == 0xad2550a9707117bbull);
+    CHECK(fnv1a(px) == 0x2171de3b901ca057ull);
     SDL_Quit();
 }

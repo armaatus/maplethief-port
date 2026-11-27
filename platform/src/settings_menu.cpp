@@ -66,6 +66,25 @@ constexpr MenuActionInfo kActions[] = {
      .label = "Import saves...",
      .help = "From the title: a zip of saves you choose (without a file dialog: the newest in "
              "the import folder); the old files are backed up"},
+    // #374 (save_menu.h): an iPhone backup, the checks and another folder's saves, as lists.
+    {.key = "ios_backup",
+     .group = SettingGroup::kSaves,
+     .label = "iPhone backup",
+     .help = "From the title: the saves in an unencrypted iPhone or iPod backup; the old files "
+             "are backed up",
+     .button = "List..."},
+    {.key = "check_saves",
+     .group = SettingGroup::kSaves,
+     .label = "Check saves",
+     .help = "Each save file through the checks an import uses, with the reason for a file "
+             "that fails",
+     .button = "Check..."},
+    {.key = "other_saves",
+     .group = SettingGroup::kSaves,
+     .label = "Saves from a folder",
+     .help = "From the title: the saves of the other data folder or an old one copied into "
+             "import/",
+     .button = "List..."},
     {.key = "backups",
      .group = SettingGroup::kSaves,
      .label = "Backups",

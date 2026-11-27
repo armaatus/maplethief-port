@@ -431,6 +431,321 @@ std::string import_saves_list_action(const SaveLocation &loc,
     return std::string();
 }
 
+// --- An iPhone backup, the checks, another folder (#374) ----------------------------------------
+
+namespace {
+
+// A manifest's time as local "YYYY-MM-DD HH:MM" ("" if unknown).
+std::string seconds_text(std::int64_t seconds) {
+    SDL_DateTime dt{};
+    if (seconds <= 0 || !SDL_TimeToDateTime(SDL_SECONDS_TO_NS(seconds), &dt, true)) {
+        return std::string();
+    }
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%04d-%02d-%02d %02d:%02d", dt.year, dt.month, dt.day, dt.hour,
+                  dt.minute);
+    return buf;
+}
+
+// The folders in <data>/import/ (not links, not dot names), newest first.
+std::vector<fs::path> import_folders(const SaveLocation &loc) {
+    struct Found {
+        fs::path path;
+        fs::file_time_type time;
+    };
+    std::vector<Found> found;
+    std::error_code ec;
+    for (const fs::directory_entry &e :
+         fs::directory_iterator(utf8_path(loc.data_dir) / "import", ec)) {
+        const std::string name = path_utf8(e.path().filename());
+        std::error_code fec;
+        if (name.empty() || name.front() == '.' || e.is_symlink(fec) || !e.is_directory(fec)) {
+            continue;
+        }
+        found.push_back(Found{e.path(), e.last_write_time(fec)});
+    }
+    std::sort(found.begin(), found.end(), [](const Found &a, const Found &b) {
+        return a.time != b.time ? a.time > b.time : a.path > b.path;
+    });
+    std::vector<fs::path> out;
+    for (Found &f : found) {
+        out.push_back(std::move(f.path));
+    }
+    return out;
+}
+
+// The question and the import of a list of sources, as import_list does.
+MenuList import_choices(std::string title, std::string help, std::vector<MenuListRow> rows,
+                        std::function<std::string(std::size_t)> question,
+                        std::function<std::string(std::size_t, const std::string &)> run,
+                        std::function<std::int32_t()> panel, std::function<std::string()> stamp) {
+    MenuList list;
+    list.title = std::move(title);
+    list.help = std::move(help);
+    const std::size_t count = rows.size();
+    list.rows = std::move(rows);
+    list.question = [count, panel, question = std::move(question)](std::size_t i) {
+        if (i >= count || (panel && panel() >= 0)) {
+            return std::string(); // refused at once (choose says why)
+        }
+        return question(i);
+    };
+    list.choose = [count, panel, stamp, run = std::move(run)](std::size_t i) {
+        if (i >= count) {
+            return std::string();
+        }
+        if (panel && panel() >= 0) {
+            return std::string(tr(Txt::saves_import_loaded));
+        }
+        return run(i, stamp ? stamp() : backup_stamp_now());
+    };
+    return list;
+}
+
+} // namespace
+
+std::vector<IosBackupInfo> ios_backup_sources(const SaveLocation &loc,
+                                              const std::vector<std::string> &roots) {
+    std::vector<std::string> all = roots;
+    if (!loc.data_dir.empty()) {
+        for (const fs::path &p : import_folders(loc)) {
+            all.push_back(path_utf8(p));
+        }
+    }
+    std::vector<IosBackupInfo> found;
+    std::vector<std::string> seen;
+    for (IosBackupInfo &b : find_ios_backups(all)) {
+        if (std::find(seen.begin(), seen.end(), b.path) == seen.end()) {
+            seen.push_back(b.path);
+            found.push_back(std::move(b));
+        }
+    }
+    std::stable_sort(found.begin(), found.end(),
+                     [](const IosBackupInfo &a, const IosBackupInfo &b) {
+                         return a.time != b.time ? a.time > b.time : a.path < b.path;
+                     });
+    return found;
+}
+
+std::string import_ios_backup_status(const SaveLocation &loc, const std::string &dir,
+                                     const std::string &stamp) {
+    IosBackupFiles backup;
+    std::string why;
+    if (!read_ios_backup(dir, &backup, &why)) {
+        return tr(Txt::saves_not_imported, {why});
+    }
+    for (const std::string &w : backup.warnings) {
+        SDL_Log("saves: %s: %s", dir.c_str(), w.c_str());
+    }
+    for (const std::string &name : backup.ignored) {
+        SDL_Log("saves: %s: ignored %s", dir.c_str(), name.c_str());
+    }
+    const std::string label = ios_backup_label(backup.info);
+    ImportResult result;
+    if (!import_save_set(loc, backup.files, label, stamp, &result, &why)) {
+        return tr(Txt::saves_not_imported, {why});
+    }
+    SDL_Log("saves: imported %zu files from the iPhone backup %s", result.imported.size(),
+            dir.c_str());
+    return tr(Txt::saves_ios_imported, {std::to_string(result.imported.size()), label});
+}
+
+MenuList ios_backup_list(const SaveLocation &loc, std::vector<IosBackupInfo> backups,
+                         std::function<std::int32_t()> panel, std::function<std::string()> stamp) {
+    auto rows = std::make_shared<std::vector<IosBackupInfo>>(std::move(backups));
+    std::vector<MenuListRow> shown;
+    for (const IosBackupInfo &b : *rows) {
+        std::string value = seconds_text(b.time);
+        if (b.encrypted) {
+            value = tr(Txt::saves_ios_encrypted);
+        }
+        shown.push_back(MenuListRow{ios_backup_label(b), value});
+    }
+    return import_choices(
+        tr(Txt::saves_ios_title), tr(Txt::saves_ios_help), std::move(shown),
+        [rows](std::size_t i) {
+            const IosBackupInfo &b = (*rows)[i];
+            std::string what = ios_backup_label(b);
+            if (const std::string when = seconds_text(b.time); !when.empty()) {
+                what += " (" + when + ")";
+            }
+            return tr(Txt::saves_ios_question, {what});
+        },
+        [rows, loc](std::size_t i, const std::string &stamp_now) {
+            return import_ios_backup_status(loc, (*rows)[i].path, stamp_now);
+        },
+        std::move(panel), std::move(stamp));
+}
+
+std::string ios_backup_action(const SaveLocation &loc, const std::vector<std::string> &roots,
+                              const std::function<std::int32_t()> &panel,
+                              const std::function<std::string()> &stamp,
+                              const std::function<void(MenuList)> &open) {
+    if (loc.data_dir.empty()) {
+        return tr(Txt::saves_no_folder_import);
+    }
+    if (panel && panel() >= 0) {
+        return tr(Txt::saves_import_loaded);
+    }
+    std::error_code ec;
+    fs::create_directories(utf8_path(loc.data_dir) / "import", ec);
+    std::vector<IosBackupInfo> backups = ios_backup_sources(loc, roots);
+    if (backups.empty()) {
+        return tr(Txt::saves_ios_none);
+    }
+    if (open) {
+        open(ios_backup_list(loc, std::move(backups), panel, stamp));
+    }
+    return std::string();
+}
+
+MenuList check_saves_list(const SaveLocation &loc) {
+    const SaveSet files = read_save_dir(loc.documents_dir);
+    const std::vector<SaveProblem> problems = check_save_set(files);
+    MenuList list;
+    list.help = tr(Txt::saves_check_help);
+    auto reasons = std::make_shared<std::vector<std::string>>();
+    std::size_t pass = 0;
+    for (const SaveFile &f : files) {
+        const auto bad = std::find_if(problems.begin(), problems.end(),
+                                      [&f](const SaveProblem &p) { return p.file == f.name; });
+        if (bad == problems.end()) {
+            pass++;
+            list.rows.push_back(MenuListRow{f.name, "ok"});
+            reasons->push_back(tr(Txt::saves_check_ok, {f.name}));
+        } else {
+            list.rows.push_back(MenuListRow{f.name, bad->code});
+            reasons->push_back(bad->line());
+        }
+    }
+    for (const SaveProblem &p : problems) {
+        if (p.file == "set") {
+            list.rows.push_back(MenuListRow{p.file, p.code});
+            reasons->push_back(p.line());
+        }
+    }
+    list.title = tr(Txt::saves_check_title, {std::to_string(pass), std::to_string(files.size())});
+    list.choose = [reasons](std::size_t i) {
+        return i < reasons->size() ? (*reasons)[i] : std::string();
+    };
+    return list;
+}
+
+std::string check_saves_action(const SaveLocation &loc, const std::function<void(MenuList)> &open) {
+    MenuList list = check_saves_list(loc);
+    if (list.rows.empty()) {
+        return tr(Txt::saves_check_none);
+    }
+    for (std::size_t i = 0; i < list.rows.size(); i++) {
+        SDL_Log("saves: check: %s", list.choose(i).c_str());
+    }
+    if (open) {
+        open(std::move(list));
+    }
+    return std::string();
+}
+
+std::vector<OtherSaveFolder>
+other_save_folders(const SaveLocation &loc,
+                   const std::vector<std::pair<std::string, std::string>> &other_data_dirs) {
+    // Where a folder's saves are: itself, its saves/ (a data folder) or its Documents/ (an old
+    // one); "" without a game file.
+    const auto saves_in = [](const fs::path &dir) {
+        for (const fs::path &p : {dir / "saves", dir / "Documents", dir}) {
+            std::error_code ec;
+            if (!fs::is_directory(p, ec)) {
+                continue;
+            }
+            if (!read_save_dir(path_utf8(p)).empty()) {
+                return path_utf8(p);
+            }
+        }
+        return std::string();
+    };
+    std::vector<OtherSaveFolder> out;
+    for (const auto &[dir, label] : other_data_dirs) {
+        std::error_code ec;
+        if (dir.empty() || (!loc.data_dir.empty() &&
+                            fs::equivalent(utf8_path(dir), utf8_path(loc.data_dir), ec))) {
+            continue;
+        }
+        if (std::string source = saves_in(utf8_path(dir)); !source.empty()) {
+            out.push_back(OtherSaveFolder{dir, std::move(source), label, dir});
+        }
+    }
+    if (!loc.data_dir.empty()) {
+        for (const fs::path &p : import_folders(loc)) {
+            if (std::string source = saves_in(p); !source.empty()) {
+                out.push_back(OtherSaveFolder{path_utf8(p), std::move(source),
+                                              path_utf8(p.filename()), "import/"});
+            }
+        }
+    }
+    return out;
+}
+
+MenuList other_folders_list(const SaveLocation &loc, std::vector<OtherSaveFolder> folders,
+                            std::function<std::int32_t()> panel,
+                            std::function<std::string()> stamp) {
+    auto rows = std::make_shared<std::vector<OtherSaveFolder>>(std::move(folders));
+    std::vector<MenuListRow> shown;
+    for (const OtherSaveFolder &f : *rows) {
+        shown.push_back(MenuListRow{f.name, f.where});
+    }
+    return import_choices(
+        tr(Txt::saves_other_title), tr(Txt::saves_other_help), std::move(shown),
+        [rows](std::size_t i) { return tr(Txt::saves_other_question, {(*rows)[i].name}); },
+        [rows, loc](std::size_t i, const std::string &stamp_now) {
+            const OtherSaveFolder &f = (*rows)[i];
+            ImportResult result;
+            std::string why;
+            if (!import_saves(loc, f.source, stamp_now, &result, &why)) {
+                SDL_Log("saves: import from %s: %s", f.source.c_str(), why.c_str());
+                return tr(Txt::saves_not_imported, {why});
+            }
+            SDL_Log("saves: %zu files imported from %s", result.imported.size(), f.source.c_str());
+            return tr(Txt::saves_imported, {std::to_string(result.imported.size()), f.name});
+        },
+        std::move(panel), std::move(stamp));
+}
+
+std::vector<std::pair<std::string, std::string>>
+other_data_dirs(const DataLocation &loc, const std::function<std::string()> &user_dir) {
+    std::vector<std::pair<std::string, std::string>> out;
+    if (loc.place == DataPlace::kGame && user_dir) {
+        if (std::string dir = user_dir(); !dir.empty()) {
+            out.emplace_back(std::move(dir), tr(Txt::saves_other_place_user));
+        }
+    } else if (loc.place == DataPlace::kUser && !loc.base.empty()) {
+        out.emplace_back(path_utf8(utf8_path(loc.base) / kDataDirName),
+                         tr(Txt::saves_other_place_game));
+    }
+    return out;
+}
+
+std::string other_folder_action(const SaveLocation &loc,
+                                const std::vector<std::pair<std::string, std::string>> &other_dirs,
+                                const std::function<std::int32_t()> &panel,
+                                const std::function<std::string()> &stamp,
+                                const std::function<void(MenuList)> &open) {
+    if (loc.data_dir.empty()) {
+        return tr(Txt::saves_no_folder_import);
+    }
+    if (panel && panel() >= 0) {
+        return tr(Txt::saves_import_loaded);
+    }
+    std::error_code ec;
+    fs::create_directories(utf8_path(loc.data_dir) / "import", ec);
+    std::vector<OtherSaveFolder> folders = other_save_folders(loc, other_dirs);
+    if (folders.empty()) {
+        return tr(Txt::saves_other_none);
+    }
+    if (open) {
+        open(other_folders_list(loc, std::move(folders), panel, stamp));
+    }
+    return std::string();
+}
+
 std::string open_data_folder_action(FileDialogs &dialogs, const SaveLocation &loc) {
     if (loc.data_dir.empty()) {
         return tr(Txt::saves_no_data_folder);

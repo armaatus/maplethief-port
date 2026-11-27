@@ -448,20 +448,32 @@ def test_the_fixture_command_writes_a_backup(tmp_path: Path) -> None:
 
 def test_selftest_with_a_fake_program_that_imports(tmp_path: Path) -> None:
     """selftest's own logic, with a stand-in that copies into MAPLETHIEF_DATA_DIR like the
-    real import (CTest saves.ios_backup_import runs it on the real program)."""
+    real import, and reads a backup itself for --import-ios-backup (CTest
+    saves.ios_backup_import runs it on the real program)."""
     script = tmp_path / "fake.py"
     script.write_text(
         "import os, pathlib, sys\n"
-        "src = pathlib.Path(sys.argv[sys.argv.index('--import-saves') + 1])\n"
+        f"sys.path.insert(0, {str(REPO / 'tools')!r})\n"
+        "from mtport import iosbackup as ib, savecheck as sc\n"
+        "if '--import-ios-backup' in sys.argv:\n"
+        "    try:\n"
+        "        files = ib.read_app_documents(pathlib.Path(sys.argv[-1])).files\n"
+        "    except ib.IosBackupError:\n"
+        "        sys.exit(3)\n"
+        "    if ib.check(files):\n"
+        "        sys.exit(3)\n"
+        "else:\n"
+        "    src = pathlib.Path(sys.argv[sys.argv.index('--import-saves') + 1])\n"
+        "    files = {p.name: p.read_bytes() for p in src.iterdir()}\n"
         "data = pathlib.Path(os.environ['MAPLETHIEF_DATA_DIR'])\n"
         "docs = data / 'saves'\n"
         "docs.mkdir(parents=True, exist_ok=True)\n"
         "bk = data / 'backups' / 'import' / '20260101-000000-000'\n"
         "bk.mkdir(parents=True)\n"
-        "for p in src.iterdir():\n"
-        "    if (docs / p.name).exists():\n"
-        "        (bk / p.name).write_bytes((docs / p.name).read_bytes())\n"
-        "    (docs / p.name).write_bytes(p.read_bytes())\n",
+        "for name, b in files.items():\n"
+        "    if (docs / name).exists():\n"
+        "        (bk / name).write_bytes((docs / name).read_bytes())\n"
+        "    (docs / name).write_bytes(b)\n",
         encoding="utf-8",
     )
     assert ib.selftest([sys.executable, str(script)], tmp_path / "work") == []

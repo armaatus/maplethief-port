@@ -122,3 +122,39 @@ The game keeps each character in two raw files, `theif<n>` and `quest<n>`, with 
 ## Addendum: a folder of saves is read without following links (#413, 2026-11-13)
 
 [ADR 0154](0154-threat-model-for-player-supplied-files.md) (b): a save export unpacked from an archive can hold symbolic links, and the import's folder source followed them, so a shared folder could make the port read any local file as a save. The folder source (`read_save_source` in `platform/src/save_tools.cpp`) now looks at each entry with `symlink_status`: a linked file, or a `Documents/` that is a link, is not read, and is listed among the ignored files as "a symbolic link: not followed" and logged. The player's own `saves/` and `backups/` are read as before (a link a player made there is their choice). **Verification** (CI): `save tools: a symbolic link in a folder of saves is not followed (#413)`, which failed before the change; the test skips itself where links cannot be made (Windows without the privilege).
+
+## Addendum: an iPhone backup, the checks and another folder's saves in the game (#374, 2026-11-27)
+
+**Status:** Accepted (delegated by Joris, 2026-11-27).
+
+**Context.** Bringing a save over from an iPhone backup needed Python and a checkout (`python3 -m mtport.iosbackup`, #149). `--check-saves` and `--migrate-from` were command-line only. A current backup's file list is `Manifest.db`, an SQLite database, so reading it in the game needs a reader.
+
+**Options considered.**
+
+- **Where the backup is read.**
+  1. *A small standalone tool in the download* (the Python module frozen, or a second executable). Another program to build, sign and ship per OS, and still a command line. Rejected.
+  2. *The SQLite library* (the amalgamation, public domain) under ADR 0003. About 250,000 lines and a pinned download, for one table scan of a file the port only reads. Rejected.
+  3. **A read-only SQLite table scanner of our own** (chosen), like the zip reader above: the header, the schema on page 1, interior and leaf table pages, overflow chains and records, about 400 lines, every read bounds-checked. Plus the `Manifest.mbdb` parser (iOS 4–9) in C++. Both formats are taken, as the Python tool takes them.
+- **Which backup formats.** iOS 4 to the present (`Manifest.mbdb`, `Manifest.db`). iOS 3's `.mdinfo` backups and encrypted backups are refused with what to do, as in Python.
+- **How a player picks the backup.** A file dialog can't pick a folder on every platform, and the acceptance criterion is a controller. **A list** (chosen), like Backups and the Switch's import list: every backup in Finder's, iTunes' and Apple Devices' folders, plus every backup folder copied into the data folder's `import/` (the way on Linux, the Deck, the Switch, and on macOS when its privacy protection keeps the game out of `MobileSync`).
+- **"Bring saves over from an old folder".** `copy_player_data` (`--migrate-from`) replaces the data folder the running game is using, settings and backups included, by renaming it. From the menu it would need the restart the *Data location* switch has. **An import of the other folder's saves** (chosen): the other data folder (user ↔ game folder) and every folder in `import/` that holds saves (itself, its `saves/` or `Documents/`), checked and backed up as any import, the game running on. `--migrate-from` stays for a whole data folder.
+
+**Decision.**
+
+- `platform/src/sqlite_read.{h,cpp}`: `SqliteReader` (`open`, `open_file`, `table`, `scan`), `sqlite_record`, `sqlite_create_columns`. UTF-8 databases and rowid tables only; a `-wal` file is ignored (immutable mode); a page reached twice, a tree over 20 levels, a record over 4 MiB, a cell outside its page or an overflow chain longer than the file are errors naming the page.
+- `platform/src/ios_backup.{h,cpp}`: `read_ios_backup` with [formats/ios-backup.md](../formats/ios-backup.md)'s rules (the same as `iosbackup.py`'s `read_app_documents`), `find_ios_backups`, `default_ios_backup_roots`, `ios_backup_info` (`IsEncrypted` through a new `plist_bool`, the device's name and iOS version, `Status.plist`), SHA-1 for the file IDs.
+- `save_tools.h`: `import_save_set` imports a set already read, through the same checks, backup, roll-back and counters rule as `import_saves` (which now reads, then calls the same code).
+- The Saves tab (`save_menu.h`), on every platform, three rows after *Import saves...*:
+  - **iPhone backup** (*List...*): the backups, newest first (`<device>, iOS <version>` and the manifest's time; *encrypted* where it is). Choosing one asks (No focused), then reads and imports it. Only with no character loaded.
+  - **Check saves** (*Check...*): every file in `saves/` with its verdict (`ok`, or `check_save_set`'s code); choosing a row shows the reason; the title counts the files that pass. Nothing is written; each line also goes to the log.
+  - **Saves from a folder** (*List...*): the other data folder and `import/`'s folders with saves; choosing one asks, then imports its saves.
+- Command line: `--check-ios-backup DIR` (the files with their verdicts, exit 3 if one fails or the backup can't be read) and `--import-ios-backup DIR`.
+
+**Consequences.**
+
+- A player with only the download, a Mac or PC and the device brings a character over in the game: make the backup, then Saves → iPhone backup → the row → Yes. Nothing else to install.
+- The game parses a database it didn't write. The scanner reads less than SQLite does (no WAL, no UTF-16, no `WITHOUT ROWID`), all of which iOS's `Manifest.db` never uses; anything else is refused with a reason, never read past.
+- On macOS the backup folder needs Full Disk Access; without it the list says so, and a copy in `import/` works.
+- Two readers of one format must agree: `saves.ios_backup_import` runs Python's synthetic backups through both, and the C++ tests write their own databases.
+- **Tests (CI):** `ios_backup_test.cpp`: SHA-1 and the spec's file IDs; records and `CREATE TABLE` columns; a 300-row table over an interior page with overflow chains; damaged databases (bad header, page size, UTF-16, a cycle, a page past the end, a wrong page type, cells outside the page, too many cells, a cut file, 200 random mutations); backups of both formats (another domain's files, subfolders, `*.mt-tmp` and other names ignored); refusals (encrypted by plist, by database and by mbdb key, a broken tree, a cut mbdb, a size mismatch, a file listed twice, a link, a missing data file, no saves, no game, a non-plist, iOS 3) with nothing written; the Saves tab's **iPhone backup** with only a gamepad (refused with a character loaded; a damaged backup refused with its reason and nothing changed; the good one imported with what it replaced backed up); a backup whose saves fail the checks; **Check saves** and **Saves from a folder** with a gamepad. `saves.ios_backup_import`: 7 backups (both formats, encrypted, failing, a 3,000-file `Manifest.db`) each through Python and through `--import-ios-backup`.
+- **needs-human (#149):** a real device's backup through the Saves tab.

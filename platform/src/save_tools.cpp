@@ -446,17 +446,11 @@ bool export_saves(const SaveLocation &loc, const std::string &dest,
 
 namespace {
 
-// import_saves, which may throw std::bad_alloc.
-bool import_set(const SaveLocation &loc, const std::string &source, const std::string &stamp,
-                ImportResult *result, std::string *why) {
+// The import of a set read from `source` (a path, or the words for where it came from), into
+// `r`, which already holds the ignored names; may throw std::bad_alloc.
+bool apply_set(const SaveLocation &loc, const SaveSet &files, const std::string &source,
+               const std::string &stamp, ImportResult &r, std::string *why) {
     run_refuse("a save import or backup restore"); // the game's files change (run_census.h)
-    ImportResult local;
-    ImportResult &r = result != nullptr ? *result : local;
-    r = ImportResult{};
-    SaveSet files;
-    if (!read_save_source(source, &files, &r.ignored, why)) {
-        return false;
-    }
     if (files.empty()) {
         return fail(why, "there are no save files in " + source);
     }
@@ -547,6 +541,19 @@ bool import_set(const SaveLocation &loc, const std::string &source, const std::s
     return true;
 }
 
+// import_saves, which may throw std::bad_alloc.
+bool import_set(const SaveLocation &loc, const std::string &source, const std::string &stamp,
+                ImportResult *result, std::string *why) {
+    ImportResult local;
+    ImportResult &r = result != nullptr ? *result : local;
+    r = ImportResult{};
+    SaveSet files;
+    if (!read_save_source(source, &files, &r.ignored, why)) {
+        return false;
+    }
+    return apply_set(loc, files, source, stamp, r, why);
+}
+
 } // namespace
 
 bool import_saves(const SaveLocation &loc, const std::string &source, const std::string &stamp,
@@ -555,6 +562,18 @@ bool import_saves(const SaveLocation &loc, const std::string &source, const std:
         return import_set(loc, source, stamp, result, why);
     } catch (const std::bad_alloc &) {
         return fail(why, "out of memory while importing " + source);
+    }
+}
+
+bool import_save_set(const SaveLocation &loc, const SaveSet &files, const std::string &from,
+                     const std::string &stamp, ImportResult *result, std::string *why) {
+    ImportResult local;
+    ImportResult &r = result != nullptr ? *result : local;
+    r = ImportResult{};
+    try {
+        return apply_set(loc, files, from, stamp, r, why);
+    } catch (const std::bad_alloc &) {
+        return fail(why, "out of memory while importing " + from);
     }
 }
 

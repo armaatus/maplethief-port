@@ -3454,6 +3454,19 @@ void start_menu(Game &g, const GameOptions &options) {
         g.menu.open_list(std::move(list));
         return std::string();
     });
+    // #374 (save_menu.h): an iPhone backup, the checks and another folder's saves, as lists the
+    // controller drives on every platform.
+    const auto open_list = [&g](MenuList list) { g.menu.open_list(std::move(list)); };
+    g.menu.set_action("ios_backup", [open_list] {
+        return ios_backup_action(save_location(), default_ios_backup_roots(), mt_input_panel,
+                                 backup_stamp_now, open_list);
+    });
+    g.menu.set_action("check_saves",
+                      [open_list] { return check_saves_action(save_location(), open_list); });
+    g.menu.set_action("other_saves", [open_list] {
+        return other_folder_action(save_location(), other_data_dirs(data_location()),
+                                   mt_input_panel, backup_stamp_now, open_list);
+    });
     // #241 (platform_caps.h, ADR 0142): with neither dialogs nor the Files app (the Switch), the
     // import is a list to choose from with the controller (save_menu.h), and the pack rows offer
     // their folders beside game/ (pack_folders.h).

@@ -266,6 +266,10 @@
 //                     passes, copy them into Documents/ after backing up what they replace
 //   --check-saves ZIP|DIR   each file's verdict ("theif0: ok", "config: bad_config: ...")
 //   --list-backups    every backup folder, newest first
+//   --check-ios-backup DIR   the game's files in an iPhone or iPod backup's folder (#374,
+//                     ios_backup.h), each with its verdict, and the names ignored
+//   --import-ios-backup DIR  the same files imported as --import-saves imports a folder (the
+//                     Saves tab's iPhone backup row)
 // The pack tools (#371, ADR 0205, pack_tools.h) run alone too, print the report and exit (status
 // 3 when the game would reject a file or refuse the pack, or the tool failed); --bundle names
 // the game's folder (else it is found as for the game):
@@ -349,6 +353,7 @@
 #include "gfx_backend.h"
 #include "gfx_prototype.h"
 #include "import_screen.h"
+#include "ios_backup.h"
 #include "ipa_import.h"
 #include "maplethief/audio.h"
 #include "maplethief/gfx.h"
@@ -427,9 +432,9 @@ struct Options {
     std::string bindings_file;  // --bindings (empty: <data dir>/bindings.ini)
     bool save_bindings = false; // --save-bindings
     // The save tools (#148, save_tools.h): one of them runs, prints to stdout and exits.
-    enum class SaveAction { kNone, kExport, kImport, kCheck, kListBackups };
+    enum class SaveAction { kNone, kExport, kImport, kCheck, kListBackups, kCheckIos, kImportIos };
     SaveAction save_action = SaveAction::kNone;
-    std::string save_action_path; // --export-saves, --import-saves, --check-saves
+    std::string save_action_path; // --export-saves, --import-saves, --check-saves, *-ios-backup
     std::string import_ipa;       // --import-ipa FILE (#182): import it and exit
     // The pack tools (#371, ADR 0205, pack_tools.h): one of them runs, prints and exits.
     enum class PackTool { kNone, kCheck, kBuild, kExport };
@@ -623,6 +628,7 @@ void print_usage() {
             "[--preset original|original_controller|enhanced|custom] [--pacing display|wall] "
             "[--save-dir DIR] [--save-backups N] [--export-saves ZIP|DIR] "
             "[--import-saves ZIP|DIR] [--check-saves ZIP|DIR] [--list-backups] "
+            "[--check-ios-backup DIR] [--import-ios-backup DIR] "
             "[--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off] "
             "[--language en|ko] "
             "[--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR] "
@@ -753,16 +759,19 @@ bool parse_options(int argc, char **argv, Options &options) {
         } else if (arg == "--save-bindings") {
             options.save_bindings = true;
             options.game_option = true;
-        } else if ((arg == "--export-saves" || arg == "--import-saves" || arg == "--check-saves") &&
+        } else if ((arg == "--export-saves" || arg == "--import-saves" || arg == "--check-saves" ||
+                    arg == "--check-ios-backup" || arg == "--import-ios-backup") &&
                    has_value) {
             if (options.save_action != Options::SaveAction::kNone) {
-                SDL_Log("only one of --export-saves, --import-saves, --check-saves and "
-                        "--list-backups");
+                SDL_Log("only one of --export-saves, --import-saves, --check-saves, "
+                        "--check-ios-backup, --import-ios-backup and --list-backups");
                 return false;
             }
-            options.save_action = arg == "--export-saves"   ? Options::SaveAction::kExport
-                                  : arg == "--import-saves" ? Options::SaveAction::kImport
-                                                            : Options::SaveAction::kCheck;
+            options.save_action = arg == "--export-saves"        ? Options::SaveAction::kExport
+                                  : arg == "--import-saves"      ? Options::SaveAction::kImport
+                                  : arg == "--check-ios-backup"  ? Options::SaveAction::kCheckIos
+                                  : arg == "--import-ios-backup" ? Options::SaveAction::kImportIos
+                                                                 : Options::SaveAction::kCheck;
             options.save_action_path = argv[++i];
             if (options.save_action_path.empty()) {
                 SDL_Log("%s needs a path", std::string(arg).c_str());
@@ -1251,6 +1260,52 @@ int run_save_action(const Options &options) {
         for (const std::string &name : result.ignored) {
             std::printf("ignored: %s\n", name.c_str());
         }
+        for (const std::string &name : result.imported) {
+            std::printf("imported: %s\n", name.c_str());
+        }
+        for (const std::string &name : result.removed) {
+            std::printf("removed: %s\n", name.c_str());
+        }
+        if (ok) {
+            std::printf("into %s\n", loc.documents_dir.c_str());
+            if (!result.backup.empty()) {
+                std::printf("the files it replaced are in %s\n", result.backup.c_str());
+            }
+        }
+        break;
+    }
+    case Options::SaveAction::kCheckIos:
+    case Options::SaveAction::kImportIos: {
+        IosBackupFiles backup;
+        if (!read_ios_backup(path, &backup, &why)) {
+            break;
+        }
+        std::printf("backup: %s (Manifest.%s)\n", ios_backup_label(backup.info).c_str(),
+                    backup.info.manifest.c_str());
+        for (const std::string &w : backup.warnings) {
+            std::printf("warning: %s\n", w.c_str());
+        }
+        const std::vector<SaveProblem> problems = check_save_set(backup.files);
+        for (const SaveFile &f : backup.files) {
+            const auto bad = std::find_if(problems.begin(), problems.end(),
+                                          [&](const SaveProblem &p) { return p.file == f.name; });
+            std::printf("%s\n",
+                        bad != problems.end() ? bad->line().c_str() : (f.name + ": ok").c_str());
+        }
+        for (const SaveProblem &p : problems) {
+            if (p.file == "set") {
+                std::printf("%s\n", p.line().c_str());
+            }
+        }
+        for (const std::string &name : backup.ignored) {
+            std::printf("ignored: %s\n", name.c_str());
+        }
+        if (options.save_action == Options::SaveAction::kCheckIos) {
+            ok = problems.empty();
+            break;
+        }
+        ImportResult result;
+        ok = import_save_set(loc, backup.files, path, backup_stamp_now(), &result, &why);
         for (const std::string &name : result.imported) {
             std::printf("imported: %s\n", name.c_str());
         }

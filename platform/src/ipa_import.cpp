@@ -186,8 +186,8 @@ class BinaryPlist {
         return true;
     }
 
-    // The value of `key` in the dictionary object `ref`, as a string.
-    bool dict_string(u64 ref, std::string_view key, std::string *value) const {
+    // The object that `key` maps to in the dictionary object `ref`.
+    bool dict_value(u64 ref, std::string_view key, u64 *value) const {
         u8 type = 0;
         u64 count = 0;
         std::size_t body = 0;
@@ -201,10 +201,27 @@ class BinaryPlist {
             if (!string(k, &name) || name != key) {
                 continue;
             }
-            const u64 v = be_uint(b_.data() + body + (count + i) * ref_size_, ref_size_);
-            return string(v, value);
+            *value = be_uint(b_.data() + body + (count + i) * ref_size_, ref_size_);
+            return true;
         }
         return false;
+    }
+
+    // The value of `key` in the dictionary object `ref`, as a string.
+    bool dict_string(u64 ref, std::string_view key, std::string *value) const {
+        u64 v = 0;
+        return dict_value(ref, key, &v) && string(v, value);
+    }
+
+    // The value of `key` in the dictionary object `ref`, as a bool (the markers 0x08 and 0x09).
+    bool dict_bool(u64 ref, std::string_view key, bool *value) const {
+        u64 v = 0;
+        const std::size_t at = dict_value(ref, key, &v) ? offset(v) : 0;
+        if (at == 0 || (b_[at] != 0x08 && b_[at] != 0x09)) {
+            return false;
+        }
+        *value = b_[at] == 0x09;
+        return true;
     }
 
   private:
@@ -923,6 +940,35 @@ bool plist_string(std::span<const std::uint8_t> plist, std::string_view key, std
         return false;
     }
     return xml_plist_string(text, key, value);
+}
+
+bool plist_bool(std::span<const std::uint8_t> plist, std::string_view key, bool *value) {
+    BinaryPlist binary(plist);
+    if (binary.open()) {
+        return binary.dict_bool(binary.top(), key, value);
+    }
+    const std::string_view xml(reinterpret_cast<const char *>(plist.data()), plist.size());
+    if (xml.find("<plist") == std::string_view::npos) {
+        return false;
+    }
+    const std::string open = "<key>" + std::string(key) + "</key>";
+    const std::size_t at = xml.find(open);
+    if (at == std::string_view::npos) {
+        return false;
+    }
+    std::size_t p = at + open.size();
+    while (p < xml.size() &&
+           (xml[p] == ' ' || xml[p] == '\t' || xml[p] == '\r' || xml[p] == '\n')) {
+        p++;
+    }
+    for (const bool b : {true, false}) {
+        const std::string_view tag = b ? "<true/>" : "<false/>";
+        if (xml.substr(p, tag.size()) == tag) {
+            *value = b;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool macho_cryptid(std::span<const std::uint8_t> macho, std::uint32_t *cryptid) {

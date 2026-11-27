@@ -408,6 +408,33 @@ MT_TEXT(saves_no_backups_yet, "No backups yet: one is kept after each save")
 MT_TEXT(saves_count_imports, "imports")
 MT_TEXT(saves_count_slot, "slot {0}")
 MT_TEXT(saves_backups_count, "Backups: {0} (in backups/)")
+// An iPhone backup, the checks and another folder's saves (#374, save_menu.h).
+MT_TEXT(saves_ios_title, "IPHONE BACKUPS, newest first: choose one to import its saves")
+MT_TEXT(saves_ios_help,
+        "From Finder, iTunes or Apple Devices, or a backup's folder copied into import/. The "
+        "files an import replaces are backed up first")
+MT_TEXT(saves_ios_question,
+        "Import the saves of {0}? The files they replace are backed up first.")
+MT_TEXT(saves_ios_none,
+        "No iPhone backup found: make an unencrypted one, or copy its folder into import/")
+MT_TEXT(saves_ios_imported, "Imported {0} files from {1}")
+MT_TEXT(saves_ios_unknown_device, "a device")
+MT_TEXT(saves_ios_encrypted, "encrypted")
+MT_TEXT(saves_check_title, "CHECK: {0} of {1} files pass")
+MT_TEXT(saves_check_help,
+        "Each file in saves/ through the checks an import uses. Choose one for the reason")
+MT_TEXT(saves_check_none, "No saves to check yet")
+MT_TEXT(saves_check_ok, "{0} passes the checks")
+MT_TEXT(saves_other_title, "OTHER FOLDERS: choose one to bring its saves here")
+MT_TEXT(saves_other_help,
+        "The other data folder, and folders copied into import/. The files an import replaces "
+        "are backed up first")
+MT_TEXT(saves_other_question, "Bring the saves of {0} here? The files they replace are backed "
+                              "up first.")
+MT_TEXT(saves_other_none,
+        "No other folder with saves: copy the old data folder into import/")
+MT_TEXT(saves_other_place_user, "user folder")
+MT_TEXT(saves_other_place_game, "game folder")
 
 // The data folder (#263, ADR 0127, data_switch.h): the Saves tab's Data location row, the
 // switch, the fallback's title notice.

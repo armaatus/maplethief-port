@@ -58,6 +58,7 @@ add_library(
     src/gamepad.cpp
     src/gfx_backend.cpp
     src/gpu_screen.cpp
+    src/ios_backup.cpp
     src/hang_watchdog.cpp
     src/glyphs.cpp
     src/hud_labels.cpp
@@ -108,6 +109,7 @@ add_library(
     src/settings_menu.cpp
     src/speech.cpp
     src/speech_menus.cpp
+    src/sqlite_read.cpp
     src/speech_text.cpp
     src/start_question.cpp
     src/switch_pads.cpp
