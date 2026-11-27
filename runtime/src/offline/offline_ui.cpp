@@ -1,5 +1,5 @@
-// The dead online UI of the title menu, hidden by host overrides (#154, ADR 0084); see
-// maplethief/offline.h.
+// The dead online UI of the title menu (#154, ADR 0084) and the dead cash buttons of the key pad
+// (#400, ADR 0084's addendum), hidden by host overrides; see maplethief/offline.h.
 //
 // Facts (Ghidra 12.2 decompiles of the armv7 slice, docs/re/objc-shell.md#mainmenuview):
 //   -[MainMenuView initWithFrame:] 0xAD9F9 makes the menu's image views, among them `moregame`
@@ -15,6 +15,13 @@
 // button (-clickMoreGame:); About's links are invisible buttons (-clickLinkURL1:-4:) over the
 // addresses written as text. Every one of them opens a dead page (docs/re/network.md#urls).
 //
+// The key pad's helpers have the same selector: -[TouchKeyPadView addButtonWithImageName:…]
+// 0xBBF51 makes panel 0's Map, Bag and Cash buttons (-initKeyPadType0: 0xBA6A1; Cash:
+// -releaseCashButton:, -26) and -[PopupKeyPadView addButtonWithImageName:…] 0xB1865 every button
+// of panel 7 (-initWithFrame: 0xB33F9; Revival: -releaseRevivalButton: 0xB1B45, -25; Grade
+// revival: -releaseGradeRevivalButton: 0xB1AD1, -35). Neither class sends -setHidden: (the
+// engine only moves the popup's buttons, with -setFrame:), and neither keeps the Cash button.
+//
 // Each override runs the game's own method first, then hides what it made with -setHidden:YES.
 // The game never shows them again (-clickADOrigin and -clickADClose: only move the banner), and
 // UIKit neither draws, hits nor focuses a hidden view.
@@ -23,6 +30,7 @@
 #include <cstring>
 
 #include "maplethief/hle/abi.h"
+#include "maplethief/input.h"
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
@@ -34,7 +42,7 @@ namespace {
 
 using u32 = std::uint32_t;
 
-constexpr const char *k_class = "MainMenuView";
+constexpr const char *k_menu = "MainMenuView";
 constexpr const char *k_init = "initWithFrame:";
 constexpr const char *k_add_button = "addButtonWithImageName:selectedImageName:withFrame:"
                                      "withEdgeInsets:actionForTouchDown:actionForTouchUpInside:";
@@ -48,11 +56,33 @@ struct DeadAction {
     u32 flag;
 };
 constexpr DeadAction k_dead[] = {
-    {"clickADButton:", MT_OFFLINE_HIDE_LINKS}, {"clickADClose:", MT_OFFLINE_HIDE_LINKS},
-    {"clickMoreGame:", MT_OFFLINE_HIDE_LINKS}, {"clickLinkURL1:", MT_OFFLINE_HIDE_LINKS},
-    {"clickLinkURL2:", MT_OFFLINE_HIDE_LINKS}, {"clickLinkURL3:", MT_OFFLINE_HIDE_LINKS},
-    {"clickLinkURL4:", MT_OFFLINE_HIDE_LINKS}, {"clickGameCenter:", MT_OFFLINE_HIDE_GAME_CENTER},
+    {"clickADButton:", MT_OFFLINE_HIDE_LINKS},
+    {"clickADClose:", MT_OFFLINE_HIDE_LINKS},
+    {"clickMoreGame:", MT_OFFLINE_HIDE_LINKS},
+    {"clickLinkURL1:", MT_OFFLINE_HIDE_LINKS},
+    {"clickLinkURL2:", MT_OFFLINE_HIDE_LINKS},
+    {"clickLinkURL3:", MT_OFFLINE_HIDE_LINKS},
+    {"clickLinkURL4:", MT_OFFLINE_HIDE_LINKS},
+    {"clickGameCenter:", MT_OFFLINE_HIDE_GAME_CENTER},
+    {"releaseCashButton:", MT_OFFLINE_HIDE_CASH},
+    {"releaseRevivalButton:", MT_OFFLINE_HIDE_CASH},
+    {"releaseGradeRevivalButton:", MT_OFFLINE_HIDE_CASH},
 };
+
+// The classes whose -addButtonWithImageName:… is wrapped, and the flags that need it.
+struct ButtonClass {
+    const char *name;
+    u32 flags;
+};
+constexpr ButtonClass k_button_classes[] = {
+    {k_menu, MT_OFFLINE_HIDE_LINKS | MT_OFFLINE_HIDE_GAME_CENTER},
+    {"TouchKeyPadView", MT_OFFLINE_HIDE_CASH},
+    {"PopupKeyPadView", MT_OFFLINE_HIDE_CASH},
+};
+constexpr std::size_t k_button_class_count = sizeof k_button_classes / sizeof k_button_classes[0];
+
+// The actions the hidden cash buttons sent: the keys that reach them send nothing either.
+constexpr u32 k_cash_actions[] = {MT_ACTION_CASH_SHOP, MT_ACTION_REVIVE, MT_ACTION_GRADE_REVIVE};
 
 // The method an override replaced: an image IMP (the game's), or a host function (a test's).
 struct Original {
@@ -62,7 +92,7 @@ struct Original {
 
 u32 g_flags = 0;
 Original g_init{};
-Original g_add_button{};
+Original g_add_button[k_button_class_count]{};
 mt_offline_ui_stats g_stats{};
 
 void log(mt_objc *rt, const char *text) {
@@ -118,14 +148,14 @@ void init_with_frame(mt_cpu *cpu) {
     cpu->r[0] = self;
 }
 
-// -[MainMenuView addButtonWithImageName:...actionForTouchUpInside:] -> the UIButton
-void add_button(mt_cpu *cpu) {
+// -[<class I> addButtonWithImageName:...actionForTouchUpInside:] -> the UIButton
+template <std::size_t I> void add_button(mt_cpu *cpu) {
     mt_args a = mt_objc_args(cpu);
     for (int i = 0; i < 2 + 8 + 1; i++) { // the image names, the frame and insets, touch down
         mt_arg_u32(&a);
     }
     const u32 up = mt_arg_u32(&a);
-    call_original(cpu, g_add_button);
+    call_original(cpu, g_add_button[I]);
     const u32 button = cpu->r[0];
     const char *name = mt_objc_sel_name(mt_objc_current(), up);
     if (name != nullptr && mt_offline_ui_hides_action(g_flags, name) != 0 && hide(cpu, button)) {
@@ -134,25 +164,29 @@ void add_button(mt_cpu *cpu) {
     cpu->r[0] = button;
 }
 
-bool wrap(mt_objc *rt, u32 cls, const char *selector, mt_guest_fn fn, Original *out) {
+bool wrap(mt_objc *rt, const char *class_name, u32 cls, const char *selector, mt_guest_fn fn,
+          Original *out) {
     mt_objc_method m{};
     const u32 sel = mt_objc_sel(rt, selector);
     if (sel == 0 || mt_objc_lookup(rt, cls, sel, &m) == 0 ||
         (m.guest_imp == 0 && m.fn == nullptr)) {
         char text[200];
-        std::snprintf(text, sizeof text, "-[%s %.120s] not found: not overridden", k_class,
+        std::snprintf(text, sizeof text, "-[%s %.120s] not found: not overridden", class_name,
                       selector);
         log(rt, text);
         return false;
     }
     *out = Original{m.guest_imp, m.guest_imp != 0 ? nullptr : m.fn};
-    return mt_objc_override(rt, k_class, 0, selector, fn) == 0;
+    return mt_objc_override(rt, class_name, 0, selector, fn) == 0;
 }
+
+constexpr mt_guest_fn k_add_button_fns[k_button_class_count] = {add_button<0>, add_button<1>,
+                                                                add_button<2>};
 
 } // namespace
 
 extern "C" void mt_offline_ui_configure(std::uint32_t flags) noexcept {
-    g_flags = flags & (MT_OFFLINE_HIDE_LINKS | MT_OFFLINE_HIDE_GAME_CENTER);
+    g_flags = flags & (MT_OFFLINE_HIDE_LINKS | MT_OFFLINE_HIDE_GAME_CENTER | MT_OFFLINE_HIDE_CASH);
 }
 
 extern "C" std::uint32_t mt_offline_ui_flags(void) noexcept { return g_flags; }
@@ -169,29 +203,63 @@ extern "C" int mt_offline_ui_hides_action(std::uint32_t flags, const char *selec
     return 0;
 }
 
+extern "C" int mt_offline_ui_drops_action(std::uint32_t action) noexcept {
+    if ((g_flags & MT_OFFLINE_HIDE_CASH) == 0) {
+        return 0;
+    }
+    for (const u32 a : k_cash_actions) {
+        if (a == action) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 extern "C" std::uint32_t mt_offline_ui_install(mt_objc *rt) noexcept {
     g_stats.installed = 0;
     if (g_flags == 0 || rt == nullptr) {
         return 0;
     }
-    const u32 cls = mt_objc_class_named(rt, k_class);
-    if (cls == 0) {
-        log(rt, "no MainMenuView in the image: the online UI is not hidden");
-        return 0;
+    u32 menu = 0;
+    u32 pads = 0;
+    for (std::size_t i = 0; i < k_button_class_count; i++) {
+        const ButtonClass &c = k_button_classes[i];
+        if ((g_flags & c.flags) == 0) {
+            continue;
+        }
+        const u32 cls = mt_objc_class_named(rt, c.name);
+        if (cls == 0) {
+            char text[160];
+            std::snprintf(text, sizeof text, "no %s in the image: its dead buttons are not hidden",
+                          c.name);
+            log(rt, text);
+            continue;
+        }
+        u32 &n = i == 0 ? menu : pads;
+        if (i == 0) {
+            n += wrap(rt, c.name, cls, k_init, init_with_frame, &g_init) ? 1u : 0u;
+        }
+        n += wrap(rt, c.name, cls, k_add_button, k_add_button_fns[i], &g_add_button[i]) ? 1u : 0u;
     }
-    u32 n = 0;
-    n += wrap(rt, cls, k_init, init_with_frame, &g_init) ? 1u : 0u;
-    n += wrap(rt, cls, k_add_button, add_button, &g_add_button) ? 1u : 0u;
+    const u32 n = menu + pads;
     g_stats.installed = n;
     char text[200];
-    std::snprintf(
-        text, sizeof text, "%u MainMenuView overrides hide %s%s", static_cast<unsigned>(n),
-        (g_flags & MT_OFFLINE_HIDE_LINKS) != 0 ? "the banner, More Games and About's links" : "",
-        (g_flags & MT_OFFLINE_HIDE_GAME_CENTER) != 0
-            ? ((g_flags & MT_OFFLINE_HIDE_LINKS) != 0 ? " and the Game Center button"
-                                                      : "the Game Center button")
-            : "");
-    log(rt, text);
+    if (menu != 0) {
+        const bool links = (g_flags & MT_OFFLINE_HIDE_LINKS) != 0;
+        const bool gc = (g_flags & MT_OFFLINE_HIDE_GAME_CENTER) != 0;
+        std::snprintf(text, sizeof text, "%u MainMenuView overrides hide %s%s%s",
+                      static_cast<unsigned>(menu),
+                      links ? "the banner, More Games and About's links" : "",
+                      links && gc ? " and " : "", gc ? "the Game Center button" : "");
+        log(rt, text);
+    }
+    if (pads != 0) {
+        std::snprintf(text, sizeof text,
+                      "%u key pad overrides hide the Cash button and the death popup's two revive "
+                      "buttons; their keys send nothing",
+                      static_cast<unsigned>(pads));
+        log(rt, text);
+    }
     return n;
 }
 

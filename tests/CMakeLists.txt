@@ -1352,8 +1352,10 @@ set_tests_properties(
 # POW! Package for meso after the tutorial (the meso down by the price line's quote, the grant,
 # the receipt lists empty again, theif0 saved), is refused SP Marble for lack of meso, and sees
 # the revive dearer at the next fall; play.cash_shop_off makes the same taps with cash_shop = off
-# (ADR 0034: every payment cancelled, nothing changes). TICKS 1: no play time is asked for.
-foreach(mode cash_shop_meso cash_shop_off)
+# (ADR 0034: every payment cancelled, nothing changes). play.cash_buttons_hidden (#400): with
+# hide_online_ui and cash_shop = off the Cash button and the death popup's revives are hidden and
+# their keys do nothing; the other two check them shown. TICKS 1: no play time is asked for.
+foreach(mode cash_shop_meso cash_shop_off cash_buttons_hidden)
     add_test(NAME play.${mode} COMMAND play_real_test ${mode}
                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_${mode}" 1)
     set_tests_properties(

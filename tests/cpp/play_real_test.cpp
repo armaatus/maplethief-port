@@ -115,6 +115,7 @@
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/hooks.h"
 #include "maplethief/objc/host.h"
+#include "maplethief/offline.h"
 #include "maplethief/saves.h"
 #include "maplethief/snapshot.h"
 #include "maplethief/texpack.h"
@@ -136,6 +137,7 @@
 #include "skill_rules.h"
 #include "speech.h"
 #include "speech_text.h"
+#include "uikit/uikit_internal.h"
 
 namespace {
 
@@ -1778,6 +1780,10 @@ std::string lines_text(const mt_cash_view &v) {
     return s;
 }
 
+// The key pad button with target-action `action`: 1 shown, 0 hidden, -1 none (#400, below).
+int pad_button(mt_cpu *cpu, const char *action);
+void then_touch(Run &r, std::string what, float x, float y); // below
+
 struct CashRun {
     bool meso = false;
     i32 meso0 = 0, level0 = 0, exp0 = 0, elixirs0 = 0;
@@ -1806,10 +1812,16 @@ void cash_shop_run(Run &r, bool meso) {
     knobs.resale[MT_CASH_POW] = knobs.resale[MT_CASH_COMEBACK] = 0;
     mt_cash_shop_set_knobs(&knobs);
     mt_cash_shop_install(meso ? MT_CASH_SHOP_MESO : MT_CASH_SHOP_OFF);
+    // No MT_OFFLINE_HIDE_CASH: Original, or hide_online_ui with the cash shop selling (the frontend
+    // sets the flag only with cash_shop = off; game.cpp). The Cash button and the revives stay.
+    mt_offline_ui_configure(0);
     attach_pad(r);
     r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
     then_new_game(r);
     then_tutorial(r);
+    then_wait_field(r);
+    then_check(r, "the Cash button is shown (#400)",
+               [](mt_cpu *cpu) { return pad_button(cpu, "releaseCashButton:") == 1; });
     then_cash_shop_open(r);
     then_do(r, "the cash shop's prices, before any tap", [&r, meso](mt_cpu *cpu) {
         const Hero h = hero(cpu);
@@ -1936,6 +1948,10 @@ void cash_shop_run(Run &r, bool meso) {
         }
         std::printf("death popup: %s\n", lines_text(v).c_str());
     });
+    then_check(r, "the two revive buttons are shown (#400)", [](mt_cpu *cpu) {
+        return pad_button(cpu, "releaseRevivalButton:") == 1 &&
+               pad_button(cpu, "releaseGradeRevivalButton:") == 1;
+    });
     then_press(r, X, 0.1, 0.2); // -25: the POW! Package
     if (meso) {
         then_wait_for(
@@ -1990,7 +2006,130 @@ void cash_shop_run(Run &r, bool meso) {
 
 void cash_shop_meso(Run &r, u64) { cash_shop_run(r, true); }
 void cash_shop_off(Run &r, u64) { cash_shop_run(r, false); }
-void cash_shop_checks(Run &, u64) { mt_cash_shop_uninstall(); }
+void cash_shop_checks(Run &, u64) {
+    mt_cash_shop_uninstall();
+    mt_offline_ui_configure(0);
+}
+
+// --- the dead cash buttons hidden (#400, ADR 0084's addendum) ----------------------------------
+//
+// cash_buttons_hidden: hide_online_ui with cash_shop = off (MT_OFFLINE_HIDE_CASH, as in the
+// Enhanced preset), a new game through the tutorial. In Henesys the Cash button is hidden
+// (Map and Bag are not), a tap where it was and the pad's LT open no cash shop. A fall: the death
+// popup's two revive buttons are hidden (Return to town and Go to main menu are not), the pad's X
+// and Y do nothing, A returns to town; a second fall, B opens "go to the main menu?" (0x6D).
+// cash_shop_off and cash_shop_meso check the buttons shown (Original; hide_online_ui with meso).
+
+// The state of the key pad's button whose target-action is `action`: 1 shown, 0 hidden, -1 none.
+int pad_button(mt_cpu *cpu, const char *action) {
+    mt_objc *rt = mt_objc_current();
+    std::vector<u32> todo{mt_input_pad_view()};
+    while (!todo.empty()) {
+        const u32 obj = todo.back();
+        todo.pop_back();
+        const mt_ui::View *v = obj != 0 ? mt_ui::view_of(cpu, obj) : nullptr;
+        if (v == nullptr) {
+            continue;
+        }
+        for (const mt_ui::TargetAction &t : v->actions) {
+            const char *name = mt_objc_sel_name(rt, t.action);
+            if (name != nullptr && std::strcmp(name, action) == 0) {
+                return v->hidden ? 0 : 1;
+            }
+        }
+        todo.insert(todo.end(), v->subviews.begin(), v->subviews.end());
+    }
+    return -1;
+}
+
+std::string pad_buttons_text(mt_cpu *cpu, std::initializer_list<const char *> actions) {
+    std::string s;
+    for (const char *a : actions) {
+        const int st = pad_button(cpu, a);
+        s += (s.empty() ? "" : ", ") + std::string(a) +
+             (st == 1   ? " shown"
+              : st == 0 ? " hidden"
+                        : " absent");
+    }
+    return s;
+}
+
+void cash_buttons_hidden(Run &r, u64) {
+    mt_cash_shop_install(MT_CASH_SHOP_OFF);
+    // The cash flag alone: the new game's driver closes the promo banner, which the links' flag
+    // hides (the title's overrides are menus.offline_ui's).
+    mt_offline_ui_configure(MT_OFFLINE_HIDE_CASH);
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_new_game(r);
+    then_tutorial(r);
+    then_wait_field(r);
+    then_do(r, "the field's key pad", [&r](mt_cpu *cpu) {
+        check(logged(r, 0, "offline: 2 key pad overrides hide the Cash button"),
+              "the two key pad overrides are installed");
+        check(pad_button(cpu, "releaseCashButton:") == 0 &&
+                  pad_button(cpu, "releaseAsteriskButton:") == 1 &&
+                  pad_button(cpu, "releaseClearButton:") == 1,
+              "the Cash button is hidden, Map and Bag are not: " +
+                  pad_buttons_text(cpu, {"releaseCashButton:", "releaseAsteriskButton:",
+                                         "releaseClearButton:"}));
+        save_shot(r, cpu, "field");
+        g_cash.log0 = r.log.size();
+        g_cash.stats0 = mt_cash_shop_get_stats();
+    });
+    then_touch(r, "a tap where the Cash button was (456, 26)", 456, 26);
+    then_wait(r, 2.0);
+    then_check(r, "the tap opens no cash shop: the field, panel 0", [](mt_cpu *cpu) {
+        return field(cpu) && game_mode(cpu) == 0 && mt_input_panel() == 0;
+    });
+    then_trigger(r, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 1.5);
+    then_check(r, "the pad's LT (cash_shop) opens no cash shop", [](mt_cpu *cpu) {
+        return field(cpu) && game_mode(cpu) == 0 && mt_input_panel() == 0;
+    });
+    then_do(r, "the hero falls (CHero::TakeDamage)", [](mt_cpu *cpu) {
+        g_cash.meso0 = hero(cpu).meso;
+        g_cash.elixirs0 = item_count(cpu, hero(cpu), 10);
+        fall(cpu);
+    });
+    then_wait_for(
+        r, "the death popup (0x68)", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+    then_do(r, "the death popup's buttons", [&r](mt_cpu *cpu) {
+        check(pad_button(cpu, "releaseRevivalButton:") == 0 &&
+                  pad_button(cpu, "releaseGradeRevivalButton:") == 0 &&
+                  pad_button(cpu, "releaseReturnTownButton:") == 1 &&
+                  pad_button(cpu, "releaseGoMainMenuButton:") == 1,
+              "the two revives are hidden, Return to town and Go to main menu are not: " +
+                  pad_buttons_text(cpu, {"releaseGradeRevivalButton:", "releaseRevivalButton:",
+                                         "releaseReturnTownButton:", "releaseGoMainMenuButton:"}));
+        save_shot(r, cpu, "death_popup");
+    });
+    then_press(r, X, 0.1, 0.4); // revive (-25): dropped
+    then_press(r, Y, 0.1, 0.4); // grade revive (-35): dropped
+    then_wait(r, 2.0);
+    then_do(r, "X and Y do nothing", [&r](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const mt_cash_stats st = mt_cash_shop_get_stats();
+        check(popup_id(cpu) == 0x68 && h.hp <= 0 && h.meso == g_cash.meso0 &&
+                  item_count(cpu, h, 10) == g_cash.elixirs0,
+              "the death popup stays, the hero down, nothing bought (" + where(cpu) + ")");
+        check(!logged(r, g_cash.log0, "the payment is cancelled") &&
+                  st.refused == g_cash.stats0.refused,
+              "no payment was asked for: the game never saw -25 or -35");
+    });
+    // Return to town (OK, then OK on its confirmation).
+    then(r, "return to town", 40, [&r](mt_cpu *cpu, double el) {
+        hold(r, A, popup_id(cpu) != -1 && std::fmod(el, 1.0) < 0.1);
+        return field(cpu) && hero(cpu).hp > 0;
+    });
+    then_wait_field(r);
+    then_do(r, "the hero falls again", [](mt_cpu *cpu) { fall(cpu); });
+    then_wait_for(
+        r, "the death popup again", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+    then_press(r, B); // Go to main menu
+    then_wait_for(r, "\"Do you really want to go MainMenu?\" (popup 0x6D)", 5,
+                  [](mt_cpu *cpu) { return popup_id(cpu) == 0x6D; });
+    then_finish(r);
+}
 
 // --- the popup confirm guard (#147, menu_input.h) ---------------------------------------------
 //
@@ -13433,6 +13572,7 @@ constexpr Mode k_modes[] = {
     {"game_speed", game_speed, game_speed_checks, 1},
     {"cash_shop_meso", cash_shop_meso, cash_shop_checks, 1},
     {"cash_shop_off", cash_shop_off, cash_shop_checks, 1},
+    {"cash_buttons_hidden", cash_buttons_hidden, cash_shop_checks, 1},
     {"chapter_1_a", chapter_1_a, chapter_1_a_checks, 1},
     {"chapter_1_b", chapter_1_b, chapter_1_b_checks, 1},
     {"chapter_1_c", chapter_1_c, chapter_1_c_checks, 1},

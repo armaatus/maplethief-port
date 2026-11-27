@@ -8,6 +8,11 @@
  *                        which open dead Nexon or App Store pages (docs/re/network.md#urls).
  *                        With MT_OFFLINE_HIDE_GAME_CENTER the Game Center button and its image
  *                        go too: without the local leaderboard it closes as soon as it opens.
+ *                        With MT_OFFLINE_HIDE_CASH (#400, the cash shop off) the same wrap on
+ *                        TouchKeyPadView and PopupKeyPadView hides the field's Cash button
+ *                        (-releaseCashButton:) and the death popup's Revival and Grade revival
+ *                        (-releaseRevivalButton:, -releaseGradeRevivalButton:), and the keys
+ *                        that sent their codes (cash_shop, revive, grade_revive) send nothing.
  *                        A hidden view is not drawn, not hit and not focused (UIKit, #69).
  *   achievements         a table of local achievements, unlocked from the game events of the
  *                        observed functions (maplethief/events.h, ADR 0053) and kept in
@@ -37,6 +42,8 @@ enum mt_offline_ui_flags {
     MT_OFFLINE_HIDE_LINKS = 1u,
     /* The Game Center button and its image (when the local leaderboard is off). */
     MT_OFFLINE_HIDE_GAME_CENTER = 2u,
+    /* The field's Cash button and the death popup's two revive buttons (the cash shop off). */
+    MT_OFFLINE_HIDE_CASH = 4u,
 };
 
 /* What the next boot hides (mt_offline_ui_flags; 0, the default: nothing). Kept across
@@ -44,11 +51,12 @@ enum mt_offline_ui_flags {
 void mt_offline_ui_configure(uint32_t flags) MT_NOEXCEPT;
 uint32_t mt_offline_ui_flags(void) MT_NOEXCEPT;
 
-/* Installs the overrides on `rt`'s MainMenuView when the flags ask for any (the boot calls it
- * after mt_objc_install_overrides): -initWithFrame: and
+/* Installs the overrides on `rt` when the flags ask for any (the boot calls it after
+ * mt_objc_install_overrides): MainMenuView's -initWithFrame: (the links or Game Center) and
  * -addButtonWithImageName:selectedImageName:withFrame:withEdgeInsets:actionForTouchDown:
- * actionForTouchUpInside: each run the game's own method first. Returns the number installed:
- * 0 with no flags, or when the image has no MainMenuView (logged). */
+ * actionForTouchUpInside: on MainMenuView (the links or Game Center) and on TouchKeyPadView and
+ * PopupKeyPadView (MT_OFFLINE_HIDE_CASH), each running the game's own method first. Returns the
+ * number installed: 0 with no flags; a class missing from the image is skipped (logged). */
 uint32_t mt_offline_ui_install(mt_objc *rt) MT_NOEXCEPT;
 
 typedef struct mt_offline_ui_stats {
@@ -58,8 +66,13 @@ typedef struct mt_offline_ui_stats {
 } mt_offline_ui_stats;
 mt_offline_ui_stats mt_offline_ui_get_stats(void) MT_NOEXCEPT;
 
-/* 1 if a MainMenuView button whose touch-up action is `selector` is hidden with `flags`. */
+/* 1 if a button (MainMenuView's, TouchKeyPadView's or PopupKeyPadView's) whose touch-up action
+ * is `selector` is hidden with `flags`. */
 int mt_offline_ui_hides_action(uint32_t flags, const char *selector) MT_NOEXCEPT;
+/* 1 if the configured flags drop the key pad action `action` (mt_input_action) before the guest:
+ * with MT_OFFLINE_HIDE_CASH, cash_shop (-26), revive (-25) and grade_revive (-35), whose buttons
+ * are hidden. mt_input_press drops them; the frontend draws no label for them. */
+int mt_offline_ui_drops_action(uint32_t action) MT_NOEXCEPT;
 
 /* --- local achievements ----------------------------------------------------------------------- */
 

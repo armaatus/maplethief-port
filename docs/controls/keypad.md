@@ -62,6 +62,8 @@ Built by `initKeyPadType0:` `0xBA6A1`. Images are bundle PNGs (CgBI); buttons ma
 
 The images only show the pad; the **hit areas come from the mask**. `colorAtPixel:onImage:` `0xB4DB5` draws `KeyPadArea.png` (480 × 320) into a 1 × 1 `CGBitmapContext`, which is bottom-up, so screen point (x, y) reads file row 319 − y. Each colour is one pad key; everything else (alpha 0) is no key. The regions are not rectangles (the d-pad arms are cut diagonally), so the table gives the bounding box in screen points and the pixel count. `tests/test_keypad_real.py` checks this table against the shipped mask. Because the hit areas come from the mask and not from the images, the port can hide panel 0 in its compositor while the pad keeps working: `hide_keypad`, [ADR 0052](../adr/0052-hiding-the-on-screen-key-pad.md) (#71).
 
+**Hidden while dead (#400).** With `hide_online_ui = on` and `cash_shop = off` the Cash button, and panel 7's Revival and Grade revival, are hidden by host overrides of the two classes' `addButtonWithImageName:…`, and the keys bound to −26, −25 and −35 send nothing ([ADR 0084's addendum](../adr/0084-offline-polish-hidden-online-ui-local-game-center.md#addendum-the-dead-cash-buttons-2026-11-27)). The death popup's other two buttons keep their places.
+
 <!-- keypad-mask-table -->
 | Colour (RGB) | Pad key (type) | Screen x | Screen y | Pixels |
 |---|---|---|---|---|

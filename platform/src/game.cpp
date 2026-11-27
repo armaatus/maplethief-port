@@ -4109,13 +4109,17 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     SDL_Log("game: the cash shop %s",
             cash_meso ? "sells for meso (cash_shop = meso)" : "is off: every payment is cancelled");
     // Offline polish (#154, ADR 0084): the title menu's dead online buttons, and Game Center on
-    // this computer. Without the local leaderboard the Game Center button is dead too.
+    // this computer. Without the local leaderboard the Game Center button is dead too, and
+    // without the cash shop the Cash button and the death popup's revives (#400).
     const bool local_gc = options.settings.local_game_center;
     std::uint32_t hide = 0;
     if (options.settings.hide_online_ui) {
         hide = MT_OFFLINE_HIDE_LINKS;
         if (!local_gc) {
             hide |= MT_OFFLINE_HIDE_GAME_CENTER;
+        }
+        if (!cash_meso) {
+            hide |= MT_OFFLINE_HIDE_CASH;
         }
     }
     mt_offline_ui_configure(hide);
@@ -4127,6 +4131,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                                     "Center)"),
             local_gc ? "on this computer (the leaderboard, achievements)"
                      : "closes at once, as offline");
+    SDL_Log("game: the Cash button and the death popup's revives %s",
+            (hide & MT_OFFLINE_HIDE_CASH) != 0
+                ? "are hidden, their keys send nothing (hide_online_ui, cash_shop = off)"
+                : "are shown, as the original");
     mt_process *p = mt_process_load(&cfg, program.program, file.data() + offset, length);
     if (p == nullptr) {
         SDL_Log("game: the boot could not load the slice");

@@ -27,6 +27,7 @@
 #include "input.h"
 #include "keypad_layout.h"
 #include "maplethief/input.h"
+#include "maplethief/offline.h"
 #include "prompts.h"
 #include "remap.h"
 #include "scaling.h"
@@ -292,6 +293,30 @@ TEST_CASE("hud labels: beside each key in the original layout, for both devices"
                 CHECK(gap(l, d.box) <= 2.0f);
             }
         }
+    }
+}
+
+TEST_CASE("hud labels: no label on the Cash key while it is hidden (#400)") {
+    mt_offline_ui_configure(MT_OFFLINE_HIDE_LINKS | MT_OFFLINE_HIDE_CASH);
+    const std::vector<HudLabel> hidden = fe::hud_labels(KeypadLayout{}, KeypadWide{}, 1);
+    mt_offline_ui_configure(MT_OFFLINE_HIDE_LINKS);
+    const std::vector<HudLabel> shown = fe::hud_labels(KeypadLayout{}, KeypadWide{}, 1);
+    mt_offline_ui_configure(0);
+    REQUIRE(hidden.size() == fe::kHudKeyCount);
+    for (std::size_t i = 0; i < hidden.size(); i++) {
+        CAPTURE(hidden[i].action);
+        CHECK(hidden[i].alpha == (hidden[i].action == MT_ACTION_CASH_SHOP ? 0.0f : 1.0f));
+        CHECK(shown[i].alpha == 1.0f);
+    }
+    for (const PromptStyle &s : {kKeys, kXbox}) {
+        for (const fe::HudLabelDrawn &d : place_all(hidden, s, 0, 480, 2)) {
+            CHECK(hidden[d.label].action != MT_ACTION_CASH_SHOP);
+        }
+        bool cash = false;
+        for (const fe::HudLabelDrawn &d : place_all(shown, s, 0, 480, 2)) {
+            cash = cash || shown[d.label].action == MT_ACTION_CASH_SHOP;
+        }
+        CHECK(cash);
     }
 }
 
