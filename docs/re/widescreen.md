@@ -215,3 +215,38 @@ Only drawing code reads the width. The paints see the same 480 as the original, 
 | Title, main menu, character select | not a `CStateGame`; UIKit views laid out for 480 |
 | Loading (modes 6–8), the scripted modes 9 and 10, the waiting box (5) | see [the table above](#the-screens-over-the-field-169) |
 | The field while the touch key pad shows | the pad is UIKit at 3:2; the GL quick slots would leave its keys (#168) |
+
+## Past 568 points (#387)
+
+[ADR 0214](../adr/0214-widescreen-past-568-points.md) decides it. Measured 2026-11-27 on the port's own runs (the window shots local only).
+
+**The engine has no limit at 568.** Every guest-side piece reads the configured width: the renderbuffer's storage (`eagl.cpp`), `mt_widescreen_decide`'s clamp, the backdrop's stretch k = E / 480 and the HUD's move of (E − 480) / 2 points. A local build with `MT_WIDESCREEN_WIDE` at 768 (not committed) ran `play.widescreen_on`: the view was 768 on 2.0 and 2.3 and 480 on 2.8 and 2.9, and the hero's and the mobs' state at every one of 2,985 ticks equalled the 3:2 run's. `play.widescreen_pad_on` at 768 held left, attack and right by touch, partly in the wings (touches at x −109 and 584 of the screen image): the hero equalled the off run's at all 119 ticks of the hold, and the d-pad and the right-hand groups sat at the 768-point picture's edges. Its only failure was the test's literal "groups 44 points out", which is (568 − 480) / 2.
+
+**What bounds it is data.** How many of the 90 maps fill each width (a map fills a view E when it is at least E points wide; tile steps of 16 points):
+
+| View width, points | Aspect at 320 high | Maps that fill it |
+|---:|---|---:|
+| 512 | 16:10 | 76 |
+| 568 … 576 | 16:9 | 74 |
+| 584 … 608 | | 70 |
+| 616 … 640 | | 65 |
+| 648 … 672 | | 55 |
+| 680 … 704 | 19.5:9 (iPhone X and later, 693) | 52 |
+| 712 … 720 | 20:9 (most Android phones, 711) | 51 |
+| 728 … 736 | | 35 |
+| 744 … 768 | 21:9 (747) | 32 |
+| 776 … 800 | | 21 |
+
+The tile widths behind it: 14 maps of 30 tiles, one each of 32 and 35, then 36 (4 maps), 38 (5), 40 (10), 42 (3), 44 (1), 45 (16), 46 (3), 48 (11), 50 (12), 51 (2), 54, 55 (3), 57, 58 and 60 (one each). A map narrower than the view is drawn as wide as it is, centred, with black wings beside it (today only maps 36 and 37). At 768 that is 42 maps between 36 and 47 tiles, each with its own picture width; on the 11 maps exactly 48 tiles wide the whole map fits and the camera stops scrolling sideways.
+
+**The backdrop tiles.** The 11 backdrops (`map/back/<n>.png`, each 480 × 320) were compared column by column with themselves shifted by 32 … 400 points. Nine (0, 1, 2, 3, 4, 6, 7, 9, 10) repeat exactly every 160 points: shifted by 160 the pixels are identical, and 480 is three periods, so a copy of the image drawn at x = 480 continues it with no seam and no distortion at any width. Backdrops 11 and 12 repeat exactly in their top 96 rows and their bottom rows but not in a middle band (rows 96 … 224, mean difference up to 19 per channel), so a copy beside them shows a step there. The options, judged on window shots of 2.3 at 768:
+
+| Option | At 568 | At 768 | Verdict |
+|---|---|---|---|
+| Stretch to E (today) | 18 % wider | 60 % wider: hills and trees visibly broad | fine for 11 and 12 |
+| Tile by the 160-point period | exact | exact, no seam (a local hook drawing the image again at x = 480) | **best** for the nine periodic backdrops |
+| Mirror at the edges | — | a symmetry axis at each edge of the 480-point image, obvious in clouds and cave roots | rejected |
+| Clamp or blur the edge column | — | horizontal streaks | rejected |
+| A per-area cap at 568 | — | the extra width wasted on the maps it would suit | not needed once the backdrop tiles |
+
+**What else reads 568:** `MT_WIDESCREEN_WIDE` (the renderbuffer, the start window's size in `game.cpp`, `mt_widescreen_configure`); the `widescreen` setting (`off` / `auto`) and its comment; the comments in `keypad_layout.h` and `minimap.h` (the corner's narrowing applies only below 568, so a wider view has more room); and the real-asset tests, which use the constant except for the literal 44-point offset ((568 − 480) / 2) in `play.widescreen_pad_on` and the key pad's label check (`hud_labels`), and the unit tests of the key pad's move (`keypad_layout_test`, `hud_labels_test`, `ui_scaling_test`) that are written at 568. `gl_screen_columns`, the presenter's wings and their pass (`upload_wings`), frame interpolation (it compares each tick's view width) and the key pad's move all take the width as a value. Bag, Cash and the compass are `UIButton`s in the 480-point screen image and stay at their 3:2 places: at 768 they sit 144 points in from the picture's edges.
