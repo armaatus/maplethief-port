@@ -163,6 +163,50 @@ TEST_CASE("a ledge beside a rope is reached by a rope jump") {
     CHECK(path[0].edge.move == wm::Move::rope_jump);
 }
 
+// Steps 32 px wide and 32 px apart, like 5.3's: a running jump from a step's end carries the hero
+// 42 px, past the next step's far end, so it leaves from further back and comes down on it.
+TEST_CASE("a jump onto a narrow step leaves from far enough back to land on it") {
+    namespace wm = world_map;
+    wm::Map m;
+    m.w = 30;
+    m.h = 20;
+    m.att.assign(static_cast<std::size_t>(m.w * m.h), wm::k_air);
+    auto set = [&m](int c, int r, wm::u8 v) { m.att[static_cast<std::size_t>(r * m.w + c)] = v; };
+    for (int c = 0; c < m.w; c++) {
+        set(c, 18, wm::k_foothold); // the floor: y 143
+    }
+    for (int c = 4; c <= 7; c++) {
+        set(c, 14, wm::k_foothold); // the low step: y 111, x 32..63
+    }
+    for (int c = 8; c <= 11; c++) {
+        set(c, 10, wm::k_foothold); // the high step: y 79, x 64..95
+    }
+    wm::build(m);
+    REQUIRE(m.platforms.size() == 3);
+    int low = -1, high = -1;
+    for (std::size_t i = 0; i < m.platforms.size(); i++) {
+        const int row = m.platforms[i].row;
+        if (row == 14) {
+            low = static_cast<int>(i);
+        } else if (row == 10) {
+            high = static_cast<int>(i);
+        }
+    }
+    const wm::Platform &h = m.platforms[static_cast<std::size_t>(high)];
+    bool jump = false;
+    for (const wm::Edge &e : m.edges[static_cast<std::size_t>(low)]) {
+        if (e.move == wm::Move::jump && e.to == high) {
+            jump = true;
+            CHECK(e.dir == 1);
+            CHECK(e.x + wm::jump_travel(32) >= h.x0() + 4);
+            CHECK(e.x + wm::jump_travel(32) <= h.x1() - 4);
+        }
+    }
+    CHECK(jump);
+    CHECK(wm::jump_travel(32) == 42);
+    CHECK(wm::jump_travel(0) == 49);
+}
+
 // A rope hanging from a high platform, 64 px above the floor (too high to grab from it) and
 // 11 px beside a ledge 48 px below the top (too high to jump), like 5.1's rope to portal510: the
 // ledge reaches the top by a rope grab (a jump toward the rope, up in the air), and the top comes

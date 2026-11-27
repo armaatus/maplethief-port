@@ -161,6 +161,18 @@ struct Map {
 // in the air carries the hero a few cells sideways). Kept inside what always works.
 constexpr int k_jump_up = 44;    // px a jump reaches up onto a platform
 constexpr int k_jump_side = 40;  // px a running jump crosses sideways over a gap
+// Sideways px a running jump has carried the hero when it comes down onto a platform `rise` px
+// above its start: 7 px a tick, the hero 25, 42, 50, 49, 41, 24 px up, then 2 px below the start
+// (mechanics.md, Movement). 42 px for a step 32 px up, 49 px on the level.
+inline int jump_travel(int rise) {
+    constexpr int k_up[] = {25, 42, 50, 49, 41, 24, -2};
+    for (int t = 3; t < 7; t++) {
+        if (k_up[t] <= rise) {
+            return 7 * (t + 1);
+        }
+    }
+    return 49;
+}
 constexpr int k_fall_reach = 24; // px a walk off an edge drifts sideways before landing
 // A ladder or rope is grabbed higher than a platform is reached: up in the air looks for a ladder
 // cell a quarter of the hero's height (+0x34) above its feet (CHero::KeyUpDown 0x63665 through
@@ -391,8 +403,16 @@ inline void build(Map &m) {
                 // The hero comes down on q, not on a platform above it in the way.
                 const int land_in = land_x + dir * 2;
                 clear = clear && m.platform_below(land_in, std::min(p.y(), q.y()) - k_cell) == j;
+                // A narrow q (5.3's steps, 32 px): from p's end the jump would carry the hero past
+                // q's far end, so it leaves from further back, to come down on q's middle.
+                int take_off = from_x;
+                const int far_x = dir < 0 ? q.x0() : q.x1();
+                if (rise > 4 && (from_x + dir * jump_travel(rise) - far_x) * dir > -6) {
+                    const int mid = (q.x0() + q.x1()) / 2;
+                    take_off = std::clamp(mid - dir * jump_travel(rise), p.x0() + 2, p.x1() - 2);
+                }
                 if (clear) {
-                    add(i, {j, Move::jump, from_x, dir, -1, 30 + std::max(0, rise) / 4 + gap / 8});
+                    add(i, {j, Move::jump, take_off, dir, -1, 30 + std::max(0, rise) / 4 + gap / 8});
                 }
             }
         }
