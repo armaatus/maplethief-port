@@ -366,6 +366,8 @@ inline bool ice_approach(Run &r, Nav &n, const Hero &h, double el, int d, int to
 
 // Every requirement of active quest (sort, n) met (below).
 inline bool requirements_met(mt_cpu *cpu, i32 sort, i32 n);
+// The item_equip id worn in slot `slot` (below).
+inline i32 worn(mt_cpu *cpu, i32 slot);
 
 // One turn toward goal g. True once the hero stands within g.tol of g.x on g's platform. On
 // another map it goes to the portal toward g's map (wm::links() of the hero's chapter) and up
@@ -403,15 +405,15 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
         release_all(r);
         return false;
     }
-    // The hero's speed a tick. Area 9's ground is ice (mechanics.md, Movement); the bot wears no
-    // Snowshoes.
+    // The hero's speed a tick. Area 9's ground is ice (mechanics.md, Movement), unless the hero
+    // wears Snowshoes (shoes 52), which turn the slide off.
     if (r.ticks != n.tick) {
         n.prev_vx = n.vx;
         n.vx = n.tick_x == INT32_MIN ? 0 : h.x - n.tick_x;
         n.tick_x = h.x;
         n.tick = r.ticks;
     }
-    n.ice = h.area == 9;
+    n.ice = h.area == 9 && worn(cpu, 4) != 52;
     const wm::Map &m = wm::get(h.area, h.map);
     if (!m.ok) {
         say(n, "no map data for " + std::to_string(h.area) + "." + std::to_string(h.map));
@@ -541,8 +543,11 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     // the hero past the end (2.2's platform 4: off it, and down two floors). Within one tick's
     // walk (7 px) of the edge's x: from 11 px early the jump from 1.0's platform 7 to 5 (33 px
     // across, 16 up) passed the far end 1 px short.
+    // A long hop (wm::k_jump_level: from the very end, 40 px or more across) starts within 4 px:
+    // from 7 px early the hero came down 1 px short (9.9's platform 17 to 18), and a walk's 5 px
+    // steps still meet those 5 px before the end.
     const bool on_the_run = e.move == wm::Move::jump && e.dir != 0 && d * e.dir >= 0 &&
-                            std::abs(d) <= 7 && h.state != 2;
+                            std::abs(d) <= (e.long_hop ? 4 : 7) && h.state != 2;
     if (n.ice && !on_the_run) {
         if (ice_approach(r, n, h, el, d, ladder ? 4 : step_tol)) {
             return false;
@@ -688,16 +693,19 @@ inline bool live_object(const mt_cpu *cpu, const std::string &name, int &x, int 
 // A through the pages; on a list of rows it picks the row whose value is `choose` (any row
 // when -1), with up / down, and A. Accept / Refuse: A (Accept). With a list of choices, the
 // n-th list of one chat takes the n-th (the last for the lists after it): an NPC whose list
-// leads to another (the chapter-2 smith: the kind, then the item).
+// leads to another (the chapter-2 smith: the kind, then the item). With `min_talks`, `done` counts
+// only after that many chats (a talk that changes nothing the predicate could see).
 inline void then_talk_to(Run &r, std::string what, int area, int map, const std::string &npc,
-                         std::vector<int> choices, Pred done, double timeout = 300) {
+                         std::vector<int> choices, Pred done, double timeout = 300,
+                         int min_talks = 0) {
     struct S {
         Nav nav;
         double chat = -1, field = -1, pressed = -10;
-        int talks = 0;
+        int talks = 0, min_talks = 0;
         std::size_t lists = 0; // the lists answered in this chat
     };
     auto s = std::make_shared<S>();
+    s->min_talks = min_talks;
     const Goal g = at_object(area, map, npc, 6);
     if (choices.empty()) {
         choices.push_back(-1);
@@ -758,7 +766,7 @@ inline void then_talk_to(Run &r, std::string what, int area, int map, const std:
         if (s->field < 0) {
             s->field = el;
         }
-        if (el - s->field >= 0.5 && done(cpu)) {
+        if (el - s->field >= 0.5 && s->talks >= s->min_talks && done(cpu)) {
             release_all(r);
             std::printf("talk done after %d talk(s): %s\n", s->talks, where(cpu).c_str());
             return true;

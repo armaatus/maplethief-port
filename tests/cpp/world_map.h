@@ -90,6 +90,7 @@ struct Edge {
     int dir = 0; // -1 / +1: the direction held for a jump or a fall (0: straight up)
     int ladder = -1;
     int cost = 0;
+    bool long_hop = false; // a running jump across k_jump_side to k_jump_level px
 };
 
 struct Map {
@@ -161,6 +162,15 @@ struct Map {
 // in the air carries the hero a few cells sideways). Kept inside what always works.
 constexpr int k_jump_up = 44;   // px a jump reaches up onto a platform
 constexpr int k_jump_side = 40; // px a running jump crosses sideways over a gap
+// Onto a step up to 16 px higher (the hero is still 24 px up after 6 ticks), on the level or
+// lower, a running jump from a platform's very end comes down 49 px out or more (jump_travel),
+// so it crosses a gap of up to 45 px to the next one's end: 9.9's and 9.10's steps are 40 px of
+// air apart, 9.10's floor reaches the rest only by hops 16 px down and its top (the Miner) is 16 px
+// above the step before it (#299). Only taken where nothing shorter goes (k_long_hop_cost).
+constexpr int k_jump_level = 45;
+constexpr int k_long_hop_rise = 16;
+constexpr int k_long_hop_drop = 32;
+constexpr int k_long_hop_cost = 200;
 // Sideways px a running jump has carried the hero when it comes down onto a platform `rise` px
 // above its start: 7 px a tick, the hero 25, 42, 50, 49, 41, 24 px up, then 2 px below the start
 // (mechanics.md, Movement). 42 px for a step 32 px up, 49 px on the level.
@@ -378,7 +388,10 @@ inline void build(Map &m) {
                 const int from_x = dir < 0 ? p.x0() + 4 : p.x1() - 4;
                 const int land_x = dir < 0 ? q.x1() : q.x0();
                 const int gap = (land_x - from_x) * dir;
-                if (gap < -4 || gap > k_jump_side || rise < -k_cell * 40) {
+                const bool long_hop =
+                    gap > k_jump_side && rise >= -k_long_hop_drop && rise <= k_long_hop_rise;
+                if (gap < -4 || (gap > k_jump_side && !(long_hop && gap <= k_jump_level)) ||
+                    rise < -k_cell * 40) {
                     continue;
                 }
                 // A drop down: the fall edge covers it, unless that fall lands elsewhere (3.4:
@@ -411,12 +424,49 @@ inline void build(Map &m) {
                     const int mid = (q.x0() + q.x1()) / 2;
                     take_off = std::clamp(mid - dir * jump_travel(rise), p.x0() + 2, p.x1() - 2);
                 }
+                // Level or up, from the very end; down, the fall carries the hero further, so
+                // from 4 px in (on ice the approach to the end slid off it: 9.10's 28 to 31).
+                if (long_hop && rise >= -4) {
+                    take_off = dir < 0 ? p.x0() + 1 : p.x1() - 1;
+                }
                 if (clear) {
-                    add(i,
-                        {j, Move::jump, take_off, dir, -1, 30 + std::max(0, rise) / 4 + gap / 8});
+                    add(i, {j, Move::jump, take_off, dir, -1,
+                            30 + std::max(0, rise) / 4 + gap / 8 + (long_hop ? k_long_hop_cost : 0),
+                            long_hop});
                 }
             }
         }
+    }
+    // A long hop stays only where nothing else leads from its platform to the far one, so maps
+    // that had a way keep their moves.
+    const auto reaches = [&m](std::size_t from, int to) {
+        std::vector<char> seen(m.platforms.size(), 0);
+        std::vector<std::size_t> todo = {from};
+        seen[from] = 1;
+        while (!todo.empty()) {
+            const std::size_t k = todo.back();
+            todo.pop_back();
+            for (const Edge &e : m.edges[k]) {
+                const auto t = static_cast<std::size_t>(e.to);
+                if (!e.long_hop && seen[t] == 0) {
+                    if (e.to == to) {
+                        return true;
+                    }
+                    seen[t] = 1;
+                    todo.push_back(t);
+                }
+            }
+        }
+        return false;
+    };
+    for (std::size_t i = 0; i < m.edges.size(); i++) {
+        std::vector<Edge> keep;
+        for (const Edge &e : m.edges[i]) {
+            if (!e.long_hop || !reaches(i, e.to)) {
+                keep.push_back(e);
+            }
+        }
+        m.edges[i] = std::move(keep);
     }
 }
 
@@ -751,8 +801,8 @@ inline std::string describe(const Map &m) {
         std::snprintf(buf, sizeof buf, "platform %zu: y %d x %d..%d:", i, p.y(), p.x0(), p.x1());
         s += buf;
         for (const Edge &e : m.edges[i]) {
-            std::snprintf(buf, sizeof buf, " [%s@%d%s -> %d]", move_name(e.move), e.x,
-                          e.dir < 0 ? "<" : (e.dir > 0 ? ">" : ""), e.to);
+            std::snprintf(buf, sizeof buf, " [%s%s@%d%s -> %d]", e.long_hop ? "long " : "",
+                          move_name(e.move), e.x, e.dir < 0 ? "<" : (e.dir > 0 ? ">" : ""), e.to);
             s += buf;
         }
         s += "\n";
