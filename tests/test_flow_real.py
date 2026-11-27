@@ -38,7 +38,7 @@ def test_generator_agrees_with_the_other_names_files(image):
         pytest.skip("work/re/names/ is not populated (see tools/ghidra/README.md)")
     entries = flow.build(image, names.other_names(NAMES_DIR, Path(flow.NAMES_OUT).name))
     keyed = [e for e in entries if e["comment"].startswith("looks up ")]
-    assert len(keyed) == 42
+    assert len(keyed) == 40  # #391 names CChatBox::paint and ::drawChatBox outright
     assert {e["name"] for e in keyed} >= {
         "CAniManager::makeAniChapter1",
         "CHero::setExp",
