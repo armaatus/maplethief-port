@@ -36,6 +36,22 @@ that the saved game holds the new job.
 | `3-3-same` | `play.jobs_3_4_assassin_synthetic`, `play.jobs_3_4_bandit_synthetic` (first talk) | `jobs_ch3_assassin_60`, `jobs_ch3_bandit_60` | tier 3, branch kept |
 | `3-4-same` | the same tests (second talk) | the same | tier 4, branch kept, side quest 25 handed in |
 
+### Against the compendium
+
+Each talk also writes one line to the run's `jobs.txt`: the chapter, level, branch, tier and
+quest states the guest held before it, and the job after it. `tests/test_compendium_skills_port.py`
+([#222](https://github.com/armaatus/maplethief-port/issues/222), `real_assets`, skipped without
+the runs) matches every line with its row of the Skills and jobs section's advancement table
+(`skills/index.html`, built from the knowledge base): exactly one row of that chapter has the
+tier and job the port reached; the guest before the talk meets each of the row's conditions a
+line can show (level, advancement count, quest states; a quest's requirement, an unclaimed
+reward and free bag slots are left to the start); the page's row names that job and level. All
+11 rows are reached by a run.
+
+```sh
+ctest --preset mac-debug -R "play\.jobs_" && pytest tests/test_compendium_skills_port.py
+```
+
 ## Skills
 
 Two level-50 tier-4 heroes on map 1.3 (mobs `12` and `16`) with free SP and
