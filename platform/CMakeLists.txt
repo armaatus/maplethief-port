@@ -58,6 +58,7 @@ add_library(
     src/gamepad.cpp
     src/gfx_backend.cpp
     src/gpu_screen.cpp
+    src/hang_watchdog.cpp
     src/glyphs.cpp
     src/hud_labels.cpp
     src/import_screen.cpp

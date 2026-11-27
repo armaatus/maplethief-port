@@ -37,6 +37,7 @@
 //              [--switch-data-location game|user]
 //              [--migrate-from DIR [--force]]
 //              [--safe-start] [--force-crash host|trap] [--crash-dialog FILE]
+//              [--force-hang] [--hang-seconds S] [--hang-dialog FILE]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -293,6 +294,12 @@
 //                     guest trap (to see the dialog: a test aid)
 //   --crash-dialog FILE  shows the crash dialog for FILE and exits: what a crashed process
 //                     starts, since it cannot use SDL any more
+// The hang watchdog (hang_watchdog.h, #337): a run-loop turn that takes 15 s or more writes a
+// hang report to <data dir>/crashes/<time>.txt and asks Keep waiting or Quit.
+//   --hang-seconds S  the watchdog's limit (0: no watchdog; default 15, none with --fixed-step)
+//   --force-hang      the run-loop turn never ends 2 s after the first (a test aid)
+//   --hang-dialog FILE  shows the hang question for FILE and exits 3 for Quit, else 0: what the
+//                     watchdog starts, since the hung main thread cannot show it
 // Exit statuses: game.h (ExitStatus).
 
 #include <SDL3/SDL.h>
@@ -411,6 +418,7 @@ struct Options {
     bool force = false;                            // --force (with --migrate-from)
     bool safe_start = false;                       // --safe-start (#198)
     std::string crash_dialog;                      // --crash-dialog FILE: show it and exit
+    std::string hang_dialog;                       // --hang-dialog FILE: ask, exit with it
     GameOptions game;
 };
 
@@ -596,7 +604,8 @@ void print_usage() {
             "[--hold-fast-forward T,S]... [--restore-backup T,N]... "
             "[--autosave off|on_quit] [--import-ipa FILE] [--print-data-dir] "
             "[--data-location game|user] [--switch-data-location game|user] "
-            "[--migrate-from DIR [--force]] [--safe-start] [--force-crash host|trap]");
+            "[--migrate-from DIR [--force]] [--safe-start] [--force-crash host|trap] "
+            "[--force-hang] [--hang-seconds S]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -744,6 +753,20 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.game_option = true;
         } else if (arg == "--crash-dialog" && has_value) {
             options.crash_dialog = argv[++i];
+        } else if (arg == "--hang-dialog" && has_value) {
+            options.hang_dialog = argv[++i];
+        } else if (arg == "--force-hang") {
+            options.game.force_hang = true;
+            options.game_option = true;
+        } else if (arg == "--hang-seconds" && has_value) {
+            double seconds = 0;
+            if (!parse_double(argv[++i], &seconds) || !(seconds >= 0) || seconds > kMaxSeconds) {
+                SDL_Log("--hang-seconds needs seconds from 0 to %g, got '%s'", kMaxSeconds,
+                        argv[i]);
+                return false;
+            }
+            options.game.hang_seconds = seconds;
+            options.game_option = true;
         } else if (arg == "--force-crash" && has_value) {
             const std::string_view value = argv[++i];
             if (value != "host" && value != "trap") {
@@ -1308,6 +1331,9 @@ int main(int argc, char *argv[]) {
     }
     if (!options.crash_dialog.empty()) {
         return run_crash_dialog_tool(options.crash_dialog); // a crashed process's helper
+    }
+    if (!options.hang_dialog.empty()) {
+        return run_hang_dialog_tool(options.hang_dialog); // a hung process's helper
     }
     if (options.version) {
         // stdout, not SDL_Log (stderr): scripts read it. A Windows GUI program prints only

@@ -34,6 +34,7 @@
 #include "gamepad.h"
 #include "gfx_backend.h"
 #include "gpu_screen.h"
+#include "hang_watchdog.h"
 #include "hud_labels.h"
 #include "input.h"
 #include "ipa_import.h"
@@ -1018,6 +1019,7 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
 }
 
 void pump_events(Game &g) {
+    hang_watchdog_beat(); // a loop that pumps is alive (#337)
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         handle_event(g, e);
@@ -1065,6 +1067,7 @@ void run_script(Game &g, double t) {
 // goes straight to the next scripted event (or --seconds), in whole steps, with the capture's
 // audio up to it; with nothing scripted to come, only a quit ends the wait.
 void wait_hidden(Game &g) {
+    const HangPause background; // hidden is not hung (#337)
     const double from = mt_cf_absolute_time();
     SDL_Log("lifecycle: hidden at %.3f s: nothing is presented, the guest waits (window frame "
             "%llu, GL frame %u)",
@@ -2385,6 +2388,7 @@ void run_overlays(Game &g) {
     g.presenter.set_veil(kOverlayBackdropAlpha);
     bool redraw = true;
     while (overlay_open(g) && !g.quit && !g.lifecycle.terminating()) {
+        hang_watchdog_beat(); // the overlay holds the turn, a menu may sit idle (#337)
         redraw = redraw || g.remap.dirty() || g.menu.dirty() || g.disconnect.dirty() ||
                  g.card.dirty() || g.event_seen;
         g.event_seen = false;
@@ -2507,6 +2511,7 @@ void run_keypad_editor(Game &g, mt_cpu *cpu, double now) {
     g.rumble.stop();
     bool redraw = true;
     while (g.keypad_editor.is_open() && !g.quit && !g.lifecycle.terminating()) {
+        hang_watchdog_beat(); // the editor holds the turn (#337)
         if (g.keypad_editor.version() != g.keypad_edit_version) {
             g.keypad_edit_version = g.keypad_editor.version();
             install_keypad_layout(g.keypad_editor.layout());
@@ -2857,6 +2862,7 @@ void run_recovery(Game &g, mt_cpu *cpu, double now, bool quick_ran) {
 int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     Game &g = *static_cast<Game *>(user);
     const HostCall host(g.stats);
+    hang_watchdog_beat(); // the run loop turns (#337)
     if (g.turns++ == 0) {
         g.first_turn = now;
         if (g.audio != nullptr) {
@@ -2874,6 +2880,13 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         } else {
             SDL_Log("game: --force-crash trap: a guest trap");
             mt_trap(cpu, MT_TRAP_UDF, cpu->r[MT_LR], 0x7E57u);
+        }
+    }
+    // --force-hang (#337): what a hang does, on purpose: this turn never ends.
+    if (g.options->force_hang && now - g.first_turn >= g.options->force_crash_at) {
+        SDL_Log("game: --force-hang: the run-loop turn never ends");
+        for (;;) {
+            SDL_Delay(100);
         }
     }
     g.game_center.tick(SDL_GetTicksNS()); // the leaderboard's state, the next toast (#154)
@@ -3748,7 +3761,17 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         follow_ui_animations(g);
         const Uint64 started = SDL_GetTicksNS();
         g.stats.start(started, refresh_hz, g.vsync, gfx_total_ns());
+        // The hang watchdog (#337): from the boot to the end of the run, never the import.
+        hang_watchdog_start(mt_process_cpu(p),
+                            hang_watch_seconds(options.hang_seconds, options.fixed_step_us != 0,
+                                               options.force_hang));
         const std::uint32_t outcome = mt_process_run(p);
+        hang_watchdog_stop();
+        if (const HangStats hang = hang_watchdog_stats(); hang.seconds > 0) {
+            SDL_Log("hang: the longest run-loop turn took %.2f s (the watchdog waits %g s); %u "
+                    "hang report(s)",
+                    hang.longest_gap, hang.seconds, hang.hangs);
+        }
         const mt_process_result *r = mt_process_result_of(p);
         const double seconds = static_cast<double>(SDL_GetTicksNS() - started) / 1e9;
         const mt_gles_stats stats = mt_gles_get_stats();
