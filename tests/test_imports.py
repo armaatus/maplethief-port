@@ -140,7 +140,12 @@ class ImportTableTest(unittest.TestCase):
         pie = [
             w
             for i in range(3)
-            for w in (0xE59FC004, 0xE08FC00C, 0xE59CF000, fx.LAZY + 4 * i - (fx.STUBS + 16 * i + 12))
+            for w in (
+                0xE59FC004,
+                0xE08FC00C,
+                0xE59CF000,
+                fx.LAZY + 4 * i - (fx.STUBS + 16 * i + 12),
+            )
         ]
         for words, size in ((no_pie, 12), (pie, 16)):
             m = macho.MachO(fx.build(b"\x80\xbd", [fx.TEXT | 1], words, stub_size=size))

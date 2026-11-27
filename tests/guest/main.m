@@ -6,7 +6,8 @@
  * "guest:" line that the test platform.guest_program checks. Built by scripts/guest-image. */
 #include "guest_objc.h"
 
-/* --- a class hierarchy of its own: messaging, super, a category, a class method ---------------- */
+/* --- a class hierarchy of its own: messaging, super, a category, a class method ----------------
+ */
 
 @interface Shape : NSObject {
     int _corners;
@@ -62,20 +63,24 @@ static int g_made;
 }
 @end
 
-/* --- the sound: a WAV from the bundle (the game's CFBundle read), played by OpenAL ------------- */
+/* --- the sound: a WAV from the bundle (the game's CFBundle read), played by OpenAL -------------
+ */
 
 static uint32_t rd32(const uint8_t *p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
 
 static void play_sound(void) {
-    CFStringRef name = CFStringCreateWithCString(kCFAllocatorDefault, "tone", kCFStringEncodingASCII);
-    CFStringRef type = CFStringCreateWithCString(kCFAllocatorDefault, "wav", kCFStringEncodingASCII);
-    CFURLRef url = CFBundleCopyResourceURLForLocalization(CFBundleGetMainBundle(), name, type, 0, 0);
+    CFStringRef name =
+        CFStringCreateWithCString(kCFAllocatorDefault, "tone", kCFStringEncodingASCII);
+    CFStringRef type =
+        CFStringCreateWithCString(kCFAllocatorDefault, "wav", kCFStringEncodingASCII);
+    CFURLRef url =
+        CFBundleCopyResourceURLForLocalization(CFBundleGetMainBundle(), name, type, 0, 0);
     CFDataRef data = 0;
     SInt32 error = 0;
-    if (url == 0 || !CFURLCreateDataAndPropertiesFromResource(kCFAllocatorDefault, url, &data, 0, 0,
-                                                              &error)) {
+    if (url == 0 ||
+        !CFURLCreateDataAndPropertiesFromResource(kCFAllocatorDefault, url, &data, 0, 0, &error)) {
         puts("guest: sound: tone.wav is not in the bundle");
         return;
     }
@@ -132,11 +137,13 @@ static void play_sound(void) {
     }
     CAEAGLLayer *layer = [self layer];
     [layer setOpaque:YES];
-    [layer setDrawableProperties:[NSDictionary dictionaryWithObjectsAndKeys:
-                                                  [NSNumber numberWithBool:NO],
-                                                  kEAGLDrawablePropertyRetainedBacking,
-                                                  kEAGLColorFormatRGBA8,
-                                                  kEAGLDrawablePropertyColorFormat, nil]];
+    [layer
+        setDrawableProperties:[NSDictionary
+                                  dictionaryWithObjectsAndKeys:[NSNumber numberWithBool:NO],
+                                                               kEAGLDrawablePropertyRetainedBacking,
+                                                               kEAGLColorFormatRGBA8,
+                                                               kEAGLDrawablePropertyColorFormat,
+                                                               nil]];
     _context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES1];
     [EAGLContext setCurrentContext:_context];
     glGenFramebuffersOES(1, &_framebuffer);
@@ -186,7 +193,8 @@ static void play_sound(void) {
 }
 @end
 
-/* --- the frame loop: a repeating CFRunLoop timer, as the game's RunLoopTimer_Arm ----------------- */
+/* --- the frame loop: a repeating CFRunLoop timer, as the game's RunLoopTimer_Arm -----------------
+ */
 
 static void on_timer(CFRunLoopTimerRef timer, void *info) {
     static int ticks;
@@ -229,8 +237,8 @@ static void on_timer(CFRunLoopTimerRef timer, void *info) {
     play_sound();
 
     CFRunLoopTimerContext context = {0, _view, 0, 0, 0};
-    CFRunLoopTimerRef timer = CFRunLoopTimerCreate(
-        kCFAllocatorDefault, CFAbsoluteTimeGetCurrent(), 1.0 / 30.0, 0, 0, on_timer, &context);
+    CFRunLoopTimerRef timer = CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent(),
+                                                   1.0 / 30.0, 0, 0, on_timer, &context);
     CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, kCFRunLoopDefaultMode);
     return YES;
 }

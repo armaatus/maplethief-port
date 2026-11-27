@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     p_all.add_argument("--units", type=int, default=DEFAULT_UNITS)
     p_all.add_argument("--work", type=Path, help="write recomp/ and gen/ here, not work/")
     p_all.add_argument("--no-hooks", action="store_true",
-                       help="another program: no game hooks, observers or may-return calls")  # fmt: skip
+                       help="another program: none of the game's hooks")  # fmt: skip
     _coverage_args(p_all, compile_default=False)
     p_cov = sub.add_parser("coverage", help="lift, compile and write work/recomp/coverage.md")
     p_cov.add_argument("--slice", type=Path, default=DEFAULT_SLICE)

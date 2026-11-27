@@ -96,9 +96,8 @@ void mt_hle_cxa_allocate_exception(mt_cpu *cpu, std::uint32_t) noexcept {
     mt_args a = mt_args_begin(cpu);
     const u32 size = mt_arg_u32(&a);
     mt_mem *mem = mt_mem_from_cpu(cpu);
-    const u32 block = mem != nullptr && size <= 0x100000u
-                          ? mt_heap_malloc(mem, k_exception_header + size)
-                          : 0u;
+    const u32 block =
+        mem != nullptr && size <= 0x100000u ? mt_heap_malloc(mem, k_exception_header + size) : 0u;
     if (block == 0u) {
         mt_libc_log("__cxa_allocate_exception(%u) called from 0x%08X: no guest memory "
                     "(std::terminate)",

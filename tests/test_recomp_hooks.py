@@ -77,7 +77,6 @@ def test_another_program_lifts_without_the_games_hooks(tmp_path) -> None:
     # recomp all --no-hooks (the guest program, #385): nothing observed or hooked, every
     # output under --work.
     from machofixtures import thin_image
-
     from recomp.__main__ import main
     from recomp.prototype import PLAIN_OPTIONS
 

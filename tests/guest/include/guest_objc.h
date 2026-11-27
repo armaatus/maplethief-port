@@ -26,7 +26,8 @@ typedef struct {
     CGSize size;
 } CGRect;
 
-__attribute__((objc_root_class)) @interface NSObject {
+__attribute__((objc_root_class))
+@interface NSObject {
     Class isa;
 }
 + (id)alloc;

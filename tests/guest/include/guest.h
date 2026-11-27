@@ -144,7 +144,7 @@ GUEST_C ALenum alGetError(void);
 GUEST_C int UIApplicationMain(int argc, char *argv[], const void *principal, const void *delegate);
 
 /* --- the C++ part (cxx.cpp) ----------------------------------------------------------------- */
-GUEST_C int guest_constructed(void);  /* the static constructor's value, 0 if it never ran */
+GUEST_C int guest_constructed(void);         /* the static constructor's value, 0 if it never ran */
 GUEST_C int guest_throw_and_catch(int code); /* throws code, returns what the catch saw */
 
 #endif
