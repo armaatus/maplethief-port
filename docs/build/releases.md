@@ -12,7 +12,7 @@ A release is a GitHub Release with, for each desktop platform, a **player build*
 | File | Built on | By |
 |---|---|---|
 | `MapleThief-<version>-macos-universal.zip` | the Mac | `scripts/release build TAG --players-only` |
-| `MapleThief-<version>-linux-x86_64.tar.gz` | the Mac, in the glibc 2.39 container | `scripts/release build TAG --players-only` |
+| `MapleThief-<version>-linux-x86_64.tar.gz`, `.AppImage`, `.flatpak` | the Mac, in the glibc 2.35 container (ADR 0193) | `scripts/release build TAG --players-only` |
 | `MapleThief-<version>-windows-x64.zip` | the Windows PC | `scripts\release.ps1 build TAG -PlayersOnly` |
 | `MapleThief-<version>-switch.zip` | the Mac, in the devkitA64 container | `scripts/release build TAG --players-only` |
 | `MapleThief-kit-<version>-macos-universal.zip` | hosted CI | `.github/workflows/release.yml` |

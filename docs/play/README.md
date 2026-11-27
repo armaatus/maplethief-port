@@ -13,7 +13,7 @@ MapleThief is MapleStory Thief Edition, the 2010 iPhone game, running natively o
    |---|---|
    | Windows | Windows 10 or 11, 64-bit |
    | Mac | macOS 13 Ventura or later (Apple silicon or Intel) |
-   | Linux | x86_64 with glibc 2.39 or later (Ubuntu 24.04, Fedora 40, current SteamOS) |
+   | Linux | x86_64 with glibc 2.35 or later (Ubuntu 22.04, Debian 12, current SteamOS): a tarball, an AppImage or a Flatpak bundle |
    | Steam Deck | Yes, as a non-Steam game ([Linux and Steam Deck](linux-and-steam-deck.md)) |
    | iPhone | iOS 16 or later, built yourself on a Mac with Xcode ([Playing on your iPhone](iphone.md)); checked on an iPhone 12 so far |
    | Nintendo Switch | One that runs homebrew from the Homebrew Menu ([Playing on the Nintendo Switch](switch.md)), not checked on a console yet |
@@ -31,7 +31,7 @@ MapleThief is MapleStory Thief Edition, the 2010 iPhone game, running natively o
    |---|---|
    | Windows | `MapleThief-<version>-windows-x64.zip` |
    | Mac | `MapleThief-<version>-macos-universal.zip` |
-   | Linux, Steam Deck | `MapleThief-<version>-linux-x86_64.tar.gz` |
+   | Linux, Steam Deck | `MapleThief-<version>-linux-x86_64.tar.gz` (or `.AppImage`, `.flatpak`) |
    | Nintendo Switch | `MapleThief-<version>-switch.zip`: copy and start it as [Playing on the Nintendo Switch](switch.md) says |
 
    The `MapleThief-kit-…` files are for developers; you don't need them.
@@ -68,7 +68,7 @@ The app runs natively on Apple silicon and on Intel Macs.
 2. Run `./MapleThief.sh` in the unpacked folder.
 3. To add it to your application menu, and through that to Steam's "Add a Non-Steam Game" list, run `./MapleThief.sh --install-desktop` once.
 
-It needs glibc 2.39 or later (Ubuntu 24.04, Fedora 40, current SteamOS). The Steam Deck steps and controller layout are in [Linux and Steam Deck](linux-and-steam-deck.md).
+It needs glibc 2.35 or later (Ubuntu 22.04, Debian 12, current SteamOS). The same game also comes as an `.AppImage` and a `.flatpak`; which to pick, and where each keeps your data, is in [Linux and Steam Deck](linux-and-steam-deck.md#play-it-on-linux). The Steam Deck steps and controller layout are in [Linux and Steam Deck](linux-and-steam-deck.md).
 
 ## Build it yourself
 
