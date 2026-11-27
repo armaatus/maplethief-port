@@ -2261,7 +2261,9 @@ void chapter_1_d(Run &r, u64) {
     then_gear(r, "the Triple-Tipped Zamadar (level 20)", 0, 26, 1);
     then_farm(r, "30 Leaves from the Dark Stumps on 1.2 (Missing Master)", 1, 2, {9}, ready(0, 10),
               2400, fight);
-    then_farm(r, "7,800 meso on 1.2", 1, 2, {9}, meso_at_least(7800), 3600, fight);
+    // The meso this starts with follows the earlier parts' moves: 5,350 took 3,114 game-s, 804
+    // more than 3,600 (#298's bot changes).
+    then_farm(r, "7,800 meso on 1.2", 1, 2, {9}, meso_at_least(7800), 5400, fight);
     then_spend_sp(r, "Perion", build);
     then_gear(r, "the Red Pao (level 20)", 1, 14, 2, 300);
     then_gear(r, "the Red Loose Cap (level 20)", 1, 2, 0, 300);
