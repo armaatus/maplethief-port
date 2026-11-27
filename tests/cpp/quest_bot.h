@@ -695,9 +695,18 @@ inline bool live_object(const mt_cpu *cpu, const std::string &name, int &x, int 
 // n-th list of one chat takes the n-th (the last for the lists after it): an NPC whose list
 // leads to another (the chapter-2 smith: the kind, then the item). With `min_talks`, `done` counts
 // only after that many chats (a talk that changes nothing the predicate could see).
+inline void then_talk_to(Run &r, std::string what, const Goal &g, const std::string &npc,
+                         std::vector<int> choices, Pred done, double timeout = 300,
+                         int min_talks = 0);
 inline void then_talk_to(Run &r, std::string what, int area, int map, const std::string &npc,
                          std::vector<int> choices, Pred done, double timeout = 300,
                          int min_talks = 0) {
+    then_talk_to(r, std::move(what), at_object(area, map, npc, 6), npc, std::move(choices),
+                 std::move(done), timeout, min_talks);
+}
+// The same at goal `g`: an NPC the map files do not place (restored_content, #427).
+inline void then_talk_to(Run &r, std::string what, const Goal &g, const std::string &npc,
+                         std::vector<int> choices, Pred done, double timeout, int min_talks) {
     struct S {
         Nav nav;
         double chat = -1, field = -1, pressed = -10;
@@ -706,7 +715,6 @@ inline void then_talk_to(Run &r, std::string what, int area, int map, const std:
     };
     auto s = std::make_shared<S>();
     s->min_talks = min_talks;
-    const Goal g = at_object(area, map, npc, 6);
     if (choices.empty()) {
         choices.push_back(-1);
     }

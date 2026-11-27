@@ -90,6 +90,15 @@ const char *mt_cf_language(void) MT_NOEXCEPT;
  * configurations. */
 void mt_cf_set_missing_key_fallback(int on) MT_NOEXCEPT;
 
+/* A script's literal text as a key (#427, restored_content): Monster Carnival's scripts
+ * (common/Spiegelman1-3) pass Korean text, not keys, while the strings tables hold the same
+ * lines under ChapterN_MonsterCarnival_Spiegelman.* keys. With `prefixes` (a NULL-terminated
+ * list, in order of preference), a key that <table>.strings lacks and that is, in
+ * ko.lproj/<table>.strings, the value of a key starting with one of the prefixes answers as that
+ * key (a text pack first, then the language's table). NULL (the default, the device): the key
+ * itself. The strings are copied. Kept across configurations. */
+void mt_cf_set_literal_key_prefixes(const char *const *prefixes) MT_NOEXCEPT;
+
 /* --- start-up ----------------------------------------------------------------------------- */
 
 /* Binds CF to the runtime `rt` (which has its host classes) and creates the objects of the

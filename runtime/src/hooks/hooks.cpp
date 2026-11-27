@@ -20,6 +20,7 @@ constexpr u32 k_hookable[] = {
     MT_HOOK_FN_FILL_RECT,                   // 0x8079
     MT_HOOK_FN_CAMERA_CLAMP,                // 0xC069
     MT_HOOK_FN_CAMERA_FOLLOW,               // 0xC175
+    MT_HOOK_FN_MAP_LOAD_OBJ,                // 0xD259
     MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT,    // 0x22955
     MT_HOOK_FN_TEXT_CHAR_COUNT,             // 0x22989
     MT_HOOK_FN_TEXT_SUB_CHARS,              // 0x22A1D

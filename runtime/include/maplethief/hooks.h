@@ -50,6 +50,9 @@ MT_EXTERN_C_BEGIN
 /* The map's camera (#86, ADR 0090): clamp (map), follow (map, x, y, smooth) */
 #define MT_HOOK_FN_CAMERA_CLAMP 0xC069u
 #define MT_HOOK_FN_CAMERA_FOLLOW 0xC175u
+/* CMMap::LoadObj (map, area, map): the map's .obj into its object list (#427: restored_content
+ * adds Monster Carnival's NPC after it) */
+#define MT_HOOK_FN_MAP_LOAD_OBJ 0xD259u
 #define MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT 0x22955u /* (owner, url) */
 /* The canvas's fills through FillRect (#186): Canvas_FillRect (x, y, w, h) in the canvas's
  * colour, Canvas_FillRectColor (x, y, w, h, colour at sp) */
@@ -269,6 +272,38 @@ typedef struct mt_restored_shop_stats {
 } mt_restored_shop_stats;
 /* The numbers since the process started. */
 mt_restored_shop_stats mt_hooks_restored_shop_stats(void) MT_NOEXCEPT;
+
+/* Monster Carnival from a Spiegelman NPC (#427, the setting restored_content;
+ * docs/re/original-bugs.md "Unreachable content"). The game ships the rounds, their rooms and
+ * three scripts that start them, common/Spiegelman1-3, but no map places the NPC (kind 42, the
+ * only kind CStateGame::StartMonsterCarnival 0x82271 takes the way back from) and no shop sells
+ * the tickets (item_etc 47-49). A wrapper on CMMap::LoadObj 0xD259 adds, after the original,
+ * one kind-42 object named for its script to the object list of Kerning City (0.0), Orbis
+ * Village (4.0) or Magatia Village (6.0) (mt_restored_carnival_npc_on), in new arrays from the
+ * guest's new[]; the map's file is not touched. The same call puts each ticket on an unused
+ * (all-zero) row of the guest's market.dat, sold by the town's etc merchant, and when the
+ * round's room loads (the carnival on, its phase -1) it sets the score CStateGame +0x434 to 0,
+ * which the original sets only after a round (the first round's starts from the state's memory,
+ * an uninitialised read). Registered
+ * `enabled` or not (off: every object list is its file's, no row is written). */
+void mt_hooks_install_restored_carnival(int enabled) MT_NOEXCEPT;
+typedef struct mt_restored_carnival_npc {
+    int32_t area, map; /* the town */
+    int32_t cell;      /* the object's tile, y * width + x of the map */
+    const char *script;
+    int32_t ticket; /* item_etc id the script takes */
+    int32_t shop;   /* the town's etc merchant's shop, which sells it */
+    int32_t price;  /* in meso */
+} mt_restored_carnival_npc;
+/* The NPC the wrapper adds on (area, map), or NULL. */
+const mt_restored_carnival_npc *mt_restored_carnival_npc_on(int32_t area, int32_t map) MT_NOEXCEPT;
+typedef struct mt_restored_carnival_stats {
+    uint64_t npcs;    /* objects added (one per load of a town) */
+    uint64_t tickets; /* market rows written */
+    uint64_t rounds;  /* rounds whose score the wrapper started from 0 */
+} mt_restored_carnival_stats;
+/* The numbers since the process started. */
+mt_restored_carnival_stats mt_hooks_restored_carnival_stats(void) MT_NOEXCEPT;
 
 /* Every fix of an original bug (docs/re/original-bugs.md, #155), the setting fix_original_bugs
  * (on in the Enhanced preset): the portal items, the early Play guard, portal620 and the

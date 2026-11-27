@@ -13057,9 +13057,17 @@ void then_shop_from(Run &r, const std::string &what, int area, int map, const st
     });
 }
 
-// The visit's shop against market.dat's listings of `shop`.
-void check_visit(const ShopVisit &v, i32 shop, const std::string &what) {
-    const std::vector<MarketListing> want = market_listings(shop);
+// The visit's shop against market.dat's listings of `shop`, and with restored_content (`on`) the
+// Monster Carnival ticket the town's etc merchant sells after them (#427: an unused row, the
+// file's last ones).
+void check_visit(const ShopVisit &v, i32 shop, const std::string &what, bool on = false) {
+    std::vector<MarketListing> want = market_listings(shop);
+    for (int area : {0, 4, 6}) {
+        const mt_restored_carnival_npc *npc = mt_restored_carnival_npc_on(area, 0);
+        if (on && npc != nullptr && npc->shop == shop) {
+            want.push_back({1, npc->ticket, npc->price});
+        }
+    }
     bool same = v.rows.size() == want.size();
     for (std::size_t i = 0; same && i < want.size(); i++) {
         same = v.rows[i].id == want[i].item && v.rows[i].price == want[i].price;
@@ -13105,13 +13113,13 @@ void restored_shops_run(Run &r, int area, bool on) {
                 check(restored->chatted && restored->values == rows,
                       npc + ": a list box of two rows, shop " + std::to_string(m.usual) +
                           " and shop " + std::to_string(m.restored));
-                check_visit(*restored, m.restored, npc + ", the restored row");
+                check_visit(*restored, m.restored, npc + ", the restored row", true);
             });
             auto usual = std::make_shared<ShopVisit>();
             then_shop_from(r, npc + ": the usual row", area, 0, npc, m.usual, usual);
             then_do(r, npc + ": shop " + std::to_string(m.usual), [=](mt_cpu *) {
                 check(usual->chatted, npc + ": the list box again");
-                check_visit(*usual, m.usual, npc + ", the usual row");
+                check_visit(*usual, m.usual, npc + ", the usual row", true);
                 const mt_restored_shop_stats after = mt_hooks_restored_shop_stats();
                 check(after.boxes - before->boxes == 2 && after.opened - before->opened == 2,
                       npc + ": two list boxes, a shop opened from each");
@@ -13138,6 +13146,277 @@ void systems2_restored_shops_0_off(Run &r, u64) { restored_shops_run(r, 0, false
 void systems2_restored_shops_9(Run &r, u64) { restored_shops_run(r, 9, true); }
 void systems2_restored_shops_9_off(Run &r, u64) { restored_shops_run(r, 9, false); }
 void systems2_restored_shops_checks(Run &, u64) {}
+
+// --- Monster Carnival from a Spiegelman NPC (restored_content, #427) ---------------------------
+//
+// docs/re/original-bugs.md "Unreachable content": with restored_content on, Kerning City (0.0)
+// has one object more than 00.obj, NPC 38 (kind 42) named Spiegelman1 at the table's cell
+// (mt_restored_carnival_npc_on), and its etc merchant sells ticket A (item_etc 47). The hero,
+// level 25 with one ticket (the start restored_carnival_0_0), talks to the NPC: its list's first
+// row, then Accept; the script takes the ticket and warps to the room 0.5 with the carnival on
+// (CStateGame +0x404, mode +0x40C 0). The round runs out (the bot answers the popups, nothing
+// else), the result box closes on A, CStateGame::resultMonCa 0x819E5 pays the EXP of the final
+// score's band, and the hero is back on 0.0. The NPC's pages are in English: the scripts' Korean
+// literals shown as their ChapterN_MonsterCarnival_Spiegelman keys (no Hangul in any page). The
+// score starts at 0 (the restore sets it as the room loads; the original leaves it unset).
+// systems2_restored_carnival_off: the same start with the setting off: 0.0's object list is
+// 00.obj's, record for record, and the merchant sells no ticket.
+
+// CStateGame's carnival (docs/re/mechanics.md): on +0x404 (a byte), the phase +0x400, the mode
+// +0x40C, the score +0x434.
+struct Carnival {
+    bool on = false;
+    i32 phase = -1, mode = -1, score = 0;
+};
+Carnival carnival(const mt_cpu *cpu) {
+    Carnival c;
+    const u32 game = game_state(cpu);
+    if (game != 0) {
+        c.on = cpu->mem[game + 0x404] != 0;
+        c.phase = rdi(cpu, game + 0x400);
+        c.mode = rdi(cpu, game + 0x40C);
+        c.score = rdi(cpu, game + 0x434);
+    }
+    return c;
+}
+
+// The current map's live object list (quest_bot.h's live_object: CMMap *(*0xF13C0)).
+struct LiveObject {
+    i32 cell = 0, kind = 0;
+    std::string name;
+};
+std::vector<LiveObject> live_objects(const mt_cpu *cpu) {
+    std::vector<LiveObject> out;
+    const u32 map = rd(cpu, rd(cpu, 0xF13C0));
+    const u32 objs = map != 0 ? rd(cpu, map + 0x48) : 0;
+    const u32 names = map != 0 ? rd(cpu, map + 0x54) : 0;
+    const i32 n = map != 0 ? std::min(rdi(cpu, map + 0x4C), 300) : 0;
+    for (i32 k = 0; objs != 0 && names != 0 && k < n; k++) {
+        const u32 o = rd(cpu, objs + 4 * static_cast<u32>(k));
+        const u32 at = rd(cpu, names + 4 * static_cast<u32>(k));
+        LiveObject l;
+        l.cell = o != 0 ? rd16(cpu, o) : -1;
+        l.kind = o != 0 ? rd16(cpu, o + 2) : -1;
+        for (u32 i = at; at != 0 && i < cpu->mem_size && cpu->mem[i] != 0 && i < at + 255; i++) {
+            l.name.push_back(static_cast<char>(cpu->mem[i]));
+        }
+        out.push_back(l);
+    }
+    return out;
+}
+
+// The objects of /map/<area><map>.obj, the map script left out (docs/formats/obj.md).
+std::vector<LiveObject> file_objects(int area, int map) {
+    const std::vector<std::uint8_t> raw = read_file(
+        (fs::path(MT_BUNDLE_DIR) / ("map/" + std::to_string(area) + std::to_string(map) + ".obj"))
+            .string());
+    std::vector<LiveObject> out;
+    std::size_t at = 1;
+    for (std::size_t i = 0; !raw.empty() && i < raw[0] && at + 4 <= raw.size(); i++) {
+        std::int16_t cell = 0;
+        std::memcpy(&cell, raw.data() + at, 2);
+        const std::size_t len = raw[at + 3];
+        if (cell != -1) {
+            out.push_back({cell, raw[at + 2] == 0xFF ? -1 : raw[at + 2],
+                           std::string(raw.begin() + static_cast<std::ptrdiff_t>(at + 4),
+                                       raw.begin() + static_cast<std::ptrdiff_t>(at + 4 + len))});
+        }
+        at += 4 + len;
+    }
+    return out;
+}
+
+struct CarnivalRun {
+    std::vector<std::string> pages; // the NPC's pages (NPC 38), as the text events read them
+    Carnival last;                  // the carnival as last seen on
+    Hero before;                    // the hero when the round ended
+    i32 need = 0;                   // the EXP its level needed then
+    i32 first_score = -1;           // the score when the round was first seen
+    std::size_t mobs = 0;           // the most monsters on the room's map during the round
+    bool started = false, ended = false;
+};
+CarnivalRun g_carnival;
+
+void record_carnival_page(void *, const mt_text_event *e) {
+    if ((e->kind == MT_TEXT_EVENT_PAGE || e->kind == MT_TEXT_EVENT_ANSWER) &&
+        e->speaker_kind == MT_TEXT_SPEAKER_NPC && e->speaker_id == 38) {
+        g_carnival.pages.emplace_back(e->text);
+    }
+}
+
+// Hangul in UTF-8: U+AC00..U+D7A3 start with 0xEA..0xED.
+bool has_hangul(const std::string &s) {
+    for (const char c : s) {
+        const auto b = static_cast<std::uint8_t>(c);
+        if (b >= 0xEA && b <= 0xED) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// resultMonCa's EXP for `mode` (the table at 0xEAD40; docs/re/mechanics.md): the score's band.
+i32 carnival_exp(i32 mode, i32 score) {
+    static const i32 bands[3][3] = {{1500, 2000, 2500}, {800, 1400, 2000}, {2000, 2500, 3000}};
+    static const i32 exp[3][4] = {
+        {250, 500, 1000, 1500}, {2700, 3500, 4000, 4700}, {4500, 6200, 7000, 7700}};
+    i32 band = 0;
+    while (band < 3 && score > bands[mode][band]) {
+        band++;
+    }
+    return exp[mode][band];
+}
+
+// The NPC on (area, 0) and its round: mode = the script's number - 1, its room.
+struct CarnivalTown {
+    i32 area, mode, room_area, room_map, width;
+};
+constexpr CarnivalTown k_carnival_towns[] = {{0, 0, 0, 5, 40}, {4, 1, 4, 18, 45}, {6, 2, 6, 3, 57}};
+
+void restored_carnival_run(Run &r, int area, bool on) {
+    using namespace quest_bot;
+    r.settings.restored_content = on;
+    g_carnival = CarnivalRun{};
+    from_save(r);
+    then_wait_field(r);
+    CarnivalTown town = k_carnival_towns[0];
+    for (const CarnivalTown &t : k_carnival_towns) {
+        town = t.area == area ? t : town;
+    }
+    const std::string where = std::to_string(area) + ".0";
+    const std::string room = std::to_string(town.room_area) + "." + std::to_string(town.room_map);
+    const mt_restored_carnival_npc *npc = mt_restored_carnival_npc_on(area, 0);
+    const std::string script = "Spiegelman" + std::to_string(town.mode + 1);
+    const i32 ticket = 47 + town.mode;
+    check(npc != nullptr && npc->script == script && npc->ticket == ticket,
+          where + "'s NPC is " + script + ", its ticket item_etc " + std::to_string(ticket));
+    if (npc == nullptr) {
+        then_finish(r);
+        return;
+    }
+    then_do(r, where + "'s object list", [on, npc, area, where](mt_cpu *cpu) {
+        const std::vector<LiveObject> live = live_objects(cpu);
+        const std::vector<LiveObject> file = file_objects(area, 0);
+        bool same = live.size() >= file.size();
+        for (std::size_t i = 0; same && i < file.size(); i++) {
+            same = live[i].cell == file[i].cell && live[i].kind == file[i].kind &&
+                   live[i].name == file[i].name;
+        }
+        std::printf("%s: %zu live objects, its .obj has %zu\n", where.c_str(), live.size(),
+                    file.size());
+        check(same, where + "'s objects begin with its .obj's, record for record");
+        if (on) {
+            check(live.size() == file.size() + 1 && live.back().kind == 42 &&
+                      live.back().cell == npc->cell && live.back().name == npc->script,
+                  "restored_content: one object more, kind 42 " + std::string(npc->script) +
+                      " at its cell");
+        } else {
+            check(live.size() == file.size(),
+                  "restored_content off: " + where + "'s list is its .obj's");
+        }
+    });
+    // The ticket in the town's etc merchant's shop (Etc00's list box's usual row with the
+    // setting on).
+    const std::string merchant = "Etc" + std::to_string(area) + "0";
+    auto visit = std::make_shared<ShopVisit>();
+    then_shop_from(r, merchant, area, 0, merchant, npc->shop, visit);
+    then_do(r, merchant + ": its shop", [on, visit, npc, merchant](mt_cpu *) {
+        check_visit(*visit, npc->shop, merchant + (on ? " with the ticket" : ", no ticket"), on);
+    });
+    if (!on) {
+        then_check(r, "restored_content off: no object added, no ticket listed", [](mt_cpu *) {
+            const mt_restored_carnival_stats s = mt_hooks_restored_carnival_stats();
+            return s.npcs == 0 && s.tickets == 0 && s.rounds == 0;
+        });
+        then_finish(r);
+        return;
+    }
+    then_do(r, "listen to the NPC's pages", [](mt_cpu *) {
+        mt_text_events_install(1);
+        mt_text_events_add_listener(record_carnival_page, nullptr);
+    });
+    const Goal g{area, 0, (npc->cell % town.width) * 16 + 8, (npc->cell / town.width + 1) * 16 - 1,
+                 6};
+    then_talk_to(
+        r, script + ": to the carnival", g, npc->script, {1},
+        [](mt_cpu *cpu) { return carnival(cpu).on; }, 120);
+    then_check(r, "the carnival is on in room " + room + ", the ticket taken",
+               [town, ticket](mt_cpu *cpu) {
+                   const Hero h = hero(cpu);
+                   const Carnival c = carnival(cpu);
+                   std::printf("carnival: map %d.%d x %d y %d mode %d phase %d, tickets %d\n",
+                               h.area, h.map, h.x, h.y, c.mode, c.phase,
+                               item_count(cpu, h, ticket));
+                   return c.on && c.mode == town.mode && h.on(town.room_area, town.room_map) &&
+                          item_count(cpu, h, ticket) == 0;
+               });
+    then(r, "the round runs out, the result box closes", 400, [&r, area](mt_cpu *cpu, double el) {
+        const Carnival c = carnival(cpu);
+        const Hero h = hero(cpu);
+        hold(r, A,
+             (popup_id(cpu) != -1 || chatting(cpu) || game_mode(cpu) != 0) &&
+                 std::fmod(el, 0.6) < 0.1);
+        if (c.on) {
+            if (!g_carnival.started) {
+                g_carnival.first_score = c.score;
+            }
+            g_carnival.started = true;
+            g_carnival.last = c;
+            if (c.phase == 1) {
+                g_carnival.mobs = std::max(g_carnival.mobs, mobs(cpu).size());
+            }
+            if (c.phase < 2) {
+                g_carnival.before = h;
+                g_carnival.need = exp_need(cpu);
+            }
+            return false;
+        }
+        if (g_carnival.started && field(cpu) && h.on(area, 0)) {
+            release_all(r);
+            g_carnival.ended = true;
+            return true;
+        }
+        return false;
+    });
+    then_do(r, "the round's EXP", [town, where, script](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const i32 gain = carnival_exp(town.mode, g_carnival.last.score);
+        const auto [level, exp] =
+            after_exp(g_carnival.before.level, g_carnival.before.exp, g_carnival.need, gain);
+        std::printf("carnival: score %d, EXP %d -> level %d EXP %d (was level %d EXP %d)\n",
+                    g_carnival.last.score, gain, h.level, h.exp, g_carnival.before.level,
+                    g_carnival.before.exp);
+        check(g_carnival.ended, "the round ended and the hero is back on " + where);
+        std::printf("carnival: at most %zu monsters in the room during the round\n",
+                    g_carnival.mobs);
+        check(g_carnival.mobs > 0, "the round's waves put monsters in the room");
+        check(g_carnival.first_score == 0,
+              "the round's score started at 0 (the original leaves it uninitialised before the "
+              "first round)");
+        check(h.level == level && h.exp == exp,
+              "resultMonCa paid the score band's EXP (" + std::to_string(gain) + ")");
+        mt_text_events_remove_listener(record_carnival_page, nullptr);
+        bool hangul = false;
+        for (const std::string &p : g_carnival.pages) {
+            hangul = hangul || has_hangul(p);
+        }
+        std::printf("carnival: %zu pages and answers of NPC 38\n", g_carnival.pages.size());
+        check(!g_carnival.pages.empty() && !hangul,
+              script + "'s pages are in the game's language (English), not its Korean literals");
+        const mt_restored_carnival_stats s = mt_hooks_restored_carnival_stats();
+        check(s.npcs >= 2 && s.tickets == 3 && s.rounds == 1,
+              "the NPC added on each load of " + where +
+                  ", the three tickets listed once, one round's score started from 0");
+    });
+    then_check(r, "the hero is alive in the field",
+               [](mt_cpu *cpu) { return hero(cpu).hp > 0 && field(cpu); });
+    then_finish(r);
+}
+void systems2_restored_carnival(Run &r, u64) { restored_carnival_run(r, 0, true); }
+void systems2_restored_carnival_off(Run &r, u64) { restored_carnival_run(r, 0, false); }
+void systems2_restored_carnival_4(Run &r, u64) { restored_carnival_run(r, 4, true); }
+void systems2_restored_carnival_6(Run &r, u64) { restored_carnival_run(r, 6, true); }
+void systems2_restored_carnival_checks(Run &, u64) {}
 
 // --- the compendium's NPCs, shops and recipes in the port (#220) ---------------------------------
 //
@@ -15053,6 +15332,14 @@ constexpr Mode k_modes[] = {
     {"systems2_restored_shops_9", systems2_restored_shops_9, systems2_restored_shops_checks, 1},
     {"systems2_restored_shops_9_off", systems2_restored_shops_9_off, systems2_restored_shops_checks,
      1},
+    {"systems2_restored_carnival", systems2_restored_carnival, systems2_restored_carnival_checks,
+     1},
+    {"systems2_restored_carnival_off", systems2_restored_carnival_off,
+     systems2_restored_carnival_checks, 1},
+    {"systems2_restored_carnival_4", systems2_restored_carnival_4,
+     systems2_restored_carnival_checks, 1},
+    {"systems2_restored_carnival_6", systems2_restored_carnival_6,
+     systems2_restored_carnival_checks, 1},
     {"compendium_npcs", compendium_npcs, compendium_npcs_checks, 1},
     {"map_page", map_page, map_page_checks, 1, false, map_page_setup},
     {"korean_chapter_1_a", korean_chapter_1_a, korean_checks, 1, false, korean_setup},

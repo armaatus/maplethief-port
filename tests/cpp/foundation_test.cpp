@@ -294,10 +294,20 @@ struct Bundle {
                                          {"Count", num(-7)},
                                          {"UIDeviceFamily", arr({num(1), num(2)})}})));
         write("en.lproj/InfoPlist.strings", bplist(dict({{"CFBundleDisplayName", str("Maple")}})));
-        write("en.lproj/Scripts.strings", bplist(dict({{"Bruce.dialog.1", str("I'm Bruce.")},
-                                                       {"empty", str("")},
-                                                       {"Chief.dialog.1", str("Welcome.")}})));
-        write("ko.lproj/Scripts.strings", bplist(dict({{"Bruce.dialog.1", ustr(u"브루스")}})));
+        write("en.lproj/Scripts.strings",
+              bplist(dict({{"Bruce.dialog.1", str("I'm Bruce.")},
+                           {"empty", str("")},
+                           {"Chief.dialog.1", str("Welcome.")},
+                           {"Chapter1_Fair_Host.greet.1", str("Hi.")},
+                           {"Chapter2_Fair_Host.greet.1", str("Hey.")},
+                           {"Chapter2_Fair_Host.greet.2", str("Buy a ticket.")},
+                           {"Other.line.1", str("Hello.")}})));
+        write("ko.lproj/Scripts.strings",
+              bplist(dict({{"Bruce.dialog.1", ustr(u"브루스")},
+                           {"Chapter1_Fair_Host.greet.1", ustr(u"어서 오게")},
+                           {"Chapter2_Fair_Host.greet.1", ustr(u"어서 오게")},
+                           {"Chapter2_Fair_Host.greet.2", ustr(u"표를 사게")},
+                           {"Other.line.1", ustr(u"안녕")}})));
         write("sound/bgm01.mp3", "mp3");
         write("broken.strings", "not a plist");
         mt_cf_config cfg = mt_cf_config_default();
@@ -852,6 +862,43 @@ TEST_CASE("Foundation: a key the language's table lacks, with and without the En
             CHECK(loc("missing") == "missing");
         }
         mt_cf_set_missing_key_fallback(0);
+    }
+}
+
+// A script's literal text as a key (#427, restored_content): a text no table has as a key, but
+// that ko.lproj's table has as the value of a key under one of the prefixes, answers as that key
+// (the first prefix that has one wins); off, as on the device, the text itself.
+TEST_CASE(
+    "Foundation: a literal text answers as the key it is the Korean value of, under a prefix") {
+    for (const char *language : {"en", "ko"}) {
+        Bundle b(language);
+        Ns w;
+        const u32 bundle = w.send(w.cls("NSBundle"), "mainBundle");
+        auto loc = [&w, bundle](const std::string &key) {
+            return w.text(w.send(bundle, "localizedStringForKey:value:table:",
+                                 {w.nsstr(key.c_str()), 0u, w.nsstr("Scripts")}));
+        };
+        const bool ko = std::string(language) == "ko";
+        const std::string welcome =
+            "\xEC\x96\xB4\xEC\x84\x9C \xEC\x98\xA4\xEA\xB2\x8C";                        // 어서 오게
+        const std::string ticket = "\xED\x91\x9C\xEB\xA5\xBC \xEC\x82\xAC\xEA\xB2\x8C"; // 표를 사게
+        const std::string hello = "\xEC\x95\x88\xEB\x85\x95";                           // 안녕
+        CAPTURE(language);
+        mt_cf_set_literal_key_prefixes(nullptr);
+        CHECK(loc(welcome) == welcome); // off: the text itself, as the device
+        const char *const prefixes[] = {"Chapter1_Fair_Host.", "Chapter2_Fair_Host.", nullptr};
+        mt_cf_set_literal_key_prefixes(prefixes);
+        CHECK(loc(welcome) == (ko ? welcome : "Hi.")); // the first prefix's key
+        CHECK(loc(ticket) == (ko ? ticket : "Buy a ticket."));
+        CHECK(loc(hello) == hello); // a value under no prefix: the text itself
+        CHECK(loc("Bruce.dialog.1") ==
+              (ko ? "\xEB\xB8\x8C\xEB\xA3\xA8\xEC\x8A\xA4" : "I'm Bruce."));
+        CHECK(loc("missing") == "missing");
+        const char *const second[] = {"Chapter2_Fair_Host.", nullptr};
+        mt_cf_set_literal_key_prefixes(second);
+        CHECK(loc(welcome) == (ko ? welcome : "Hey."));
+        mt_cf_set_literal_key_prefixes(nullptr);
+        CHECK(loc(ticket) == ticket);
     }
 }
 

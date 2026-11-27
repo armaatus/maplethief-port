@@ -214,7 +214,7 @@ Drops are skipped entirely in Monster Carnival.
 
 The mode where monster levels follow the hero is Spiegelman's Monster Carnival. Its flag is `CStateGame +0x404`.
 
-**Start.** The scripts `common/Spiegelman1.out`, `Spiegelman2.out` and `Spiegelman3.out` take a ticket (`item_etc` 47, 48 or 49), call the native `initMonCa` (`0x99545` to `CStateGame::StartMonsterCarnival` `0x82271`) with mode 0, 1 or 2 (`+0x40C`), and move the hero to map 0.5, 4.18 or 6.3. The round lasts 3 minutes (`+0x430` = 180 s).
+**Start.** The scripts `common/Spiegelman1.out`, `Spiegelman2.out` and `Spiegelman3.out` take a ticket (`item_etc` 47, 48 or 49), call the native `initMonCa` (`0x99545` to `CStateGame::StartMonsterCarnival` `0x82271`) with mode 0, 1 or 2 (`+0x40C`), and move the hero to map 0.5, 4.18 or 6.3. The round lasts 3 minutes (`+0x430` = 180 s). The start sets the flag, the phase `+0x400` (−1 until the room has loaded), the mode, the counters `+0x410`–`+0x42C` and the clock, and takes the first kind-42 object of the current map as the way back (`+0x43C`–`+0x448`); it does not set the score `+0x434`, which only the result box's close (`CStateGame::OnKeyPressed` `0x8D4C9`, at `0x92CFA`) sets to 0 after a round, so a run's first round starts from whatever the state's memory held ([original-bugs.md](original-bugs.md#monster-carnival-restored-427)). No shipped map places the NPC; `restored_content` adds one in three towns.
 
 **Scaling** (in `CMob::LoadStats` `0x73B51`, while the flag is set). Let H = (hero attack + hero defense), halved by a right shift.
 
