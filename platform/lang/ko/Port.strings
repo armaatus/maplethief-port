@@ -569,7 +569,7 @@
 "setting.crash_recovery.label" = "충돌 복구";
 "setting.crash_recovery.help" = "충돌 후 다음 실행에서 몇 분 전부터 이어서 할지 묻습니다. 맵을 불러올 때, 저장할 때, 5분마다 잠깐 멈춥니다";
 "setting.widescreen.label" = "와이드스크린";
-"setting.widescreen.help" = "맵이 충분히 넓은 곳에서 3:2 화면 옆으로 맵을 더 보여 줍니다";
+"setting.widescreen.help" = "맵이 충분히 넓은 곳에서 3:2 화면 옆으로 맵을 더 보여 줍니다. Fill: 창이 허용하는 만큼 넓게";
 "setting.widescreen_hud.label" = "와이드스크린 HUD";
 "setting.widescreen_hud.help" = "Edges: 키패드를 넓은 화면의 양옆에. Narrow: HUD와 키패드는 3:2 그대로";
 "setting.colorblind_filter.label" = "색각 이상 필터";

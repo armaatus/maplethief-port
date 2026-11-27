@@ -1,5 +1,5 @@
-// Widescreen (#86, ADR 0090): the engine's view width, its camera hooks and the backdrop's
-// stretch; see maplethief/widescreen.h and docs/re/widescreen.md.
+// Widescreen (#86, ADR 0090; fill #425, ADR 0214): the engine's view width, its camera hooks and
+// the backdrop's tile or stretch; see maplethief/widescreen.h and docs/re/widescreen.md.
 //
 // The guest words (docs/re/widescreen.md, docs/formats/mapprj.md):
 //   0x11A950            SkyCanvas::Instance: the canvas
@@ -16,6 +16,7 @@
 //   HUD_Paint 0x5A465   the field HUD, at fixed 480-point places (moved to the middle, #168)
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <iterator>
@@ -65,9 +66,23 @@ constexpr u32 k_wide_scenes[] = {
 
 std::atomic<u32> g_width{MT_WIDESCREEN_NARROW}; // configured; 480 = off
 std::atomic<u32> g_view{MT_WIDESCREEN_NARROW};  // applied
+std::atomic<u32> g_limit{0};                    // the host's cap on E (0: none, #425)
 std::atomic<bool> g_allow{false};               // the host's last word (mt_widescreen_turn)
 std::atomic<std::uint64_t> g_turns{0}, g_wide_turns{0}, g_changes{0}, g_camera{0}, g_backdrops{0},
-    g_huds{0};
+    g_huds{0}, g_tiles{0};
+
+// The backdrop's period and size, points (#425, docs/re/widescreen.md#past-568-points-387).
+constexpr u32 k_backdrop_period = 160u;
+constexpr u32 k_backdrop_height = 320u;
+
+// The last texture the backdrop's draw sampled and whether it repeats: measured once per image.
+struct BackdropCheck {
+    u32 gfx = 0;
+    const std::uint8_t *texels = nullptr;
+    u32 width = 0, height = 0;
+    bool repeats = false;
+};
+BackdropCheck g_check; // guest thread
 
 bool readable(const mt_cpu *cpu, u32 addr) {
     return cpu != nullptr && cpu->mem != nullptr && addr != 0u &&
@@ -118,7 +133,7 @@ u32 game_state(const mt_cpu *cpu) {
 }
 
 void decide_and_apply(mt_cpu *cpu) {
-    const u32 e = mt_widescreen_decide(cpu, g_width.load(), g_allow.load() ? 1 : 0);
+    const u32 e = mt_widescreen_decide(cpu, mt_widescreen_reach(), g_allow.load() ? 1 : 0);
     mt_widescreen_apply(cpu, e);
 }
 
@@ -131,9 +146,50 @@ int camera_hook(mt_cpu *cpu, const mt_hook_call *) {
     return MT_HOOK_PASS;
 }
 
-// 0x24DC9 (image, x, y): the field's backdrop at (0, 0) is stretched to the view's width, in
-// clip space: x' = k x + (k - 1) w with k = E / 480 keeps the left edge and moves column 480 to
-// column E. Every other image is drawn as the original draws it.
+// Whether the bound texture (the backdrop's draw samples it) repeats every 160 points: measured
+// when the texture or its texels change, else the last answer.
+bool bound_backdrop_repeats() {
+    const u32 gfx = mt_gles_bound_texture_gfx();
+    u32 w = 0, h = 0, lw = 0;
+    const std::uint8_t *texels = gfx != 0u ? mt_gfx_texture_texels(gfx, &w, &h) : nullptr;
+    if (texels == nullptr || mt_gfx_texture_size(gfx, &lw, nullptr) != 0 || lw == 0u) {
+        return false;
+    }
+    if (gfx != g_check.gfx || texels != g_check.texels || w != g_check.width ||
+        h != g_check.height) {
+        g_check = {gfx, texels, w, h,
+                   mt_widescreen_backdrop_repeats(texels, w, h, std::max(w / lw, 1u)) != 0};
+        mt_tracef("widescreen", "backdrop texture %u (%ux%u): %s", static_cast<unsigned>(gfx),
+                  static_cast<unsigned>(w), static_cast<unsigned>(h),
+                  g_check.repeats ? "repeats every 160 points, tiled" : "stretched");
+    }
+    return g_check.repeats;
+}
+
+// The backdrop's draw, filtered (mt_gles_set_draw_filter): a backdrop that repeats is drawn as
+// it is (the hook draws the copy), any other stretched by k = E / 480 in device coordinates.
+struct BackdropDraw {
+    float k = 1.0f;
+    bool repeats = false;
+};
+
+int backdrop_filter(void *user, const float *, float m[6]) {
+    auto *d = static_cast<BackdropDraw *>(user);
+    d->repeats = bound_backdrop_repeats();
+    if (d->repeats) {
+        return 0;
+    }
+    m[0] = d->k;
+    m[4] = d->k - 1.0f;
+    return 1;
+}
+
+// 0x24DC9 (image, x, y): the field's backdrop at (0, 0) fills the view's width (#425, ADR 0214).
+// One that repeats every 160 points is tiled: drawn as the original draws it, then again 480
+// points to the right (x' = x + 960 / width w in clip space; 480 is three periods, so the copy
+// continues it). Any other is stretched: x' = k x + (k - 1) w with k = E / 480 keeps the left
+// edge and moves column 480 to column E. Which one is read from the texture the draw samples,
+// in a draw filter. Every other image is drawn as the original draws it.
 int draw_image_hook(mt_cpu *cpu, const mt_hook_call *call) {
     const u32 e = g_view.load();
     if (e <= MT_WIDESCREEN_NARROW || cpu->r[1] != 0u || cpu->r[2] != 0u ||
@@ -144,11 +200,28 @@ int draw_image_hook(mt_cpu *cpu, const mt_hook_call *call) {
     if (state == 0u || cpu->r[0] != state + k_state_backdrop) {
         return MT_HOOK_PASS;
     }
-    const float k = static_cast<float>(e) / static_cast<float>(MT_WIDESCREEN_NARROW);
-    mt_gles_set_host_x_transform(k, k - 1.0f);
+    BackdropDraw d;
+    d.k = static_cast<float>(e) / static_cast<float>(MT_WIDESCREEN_NARROW);
+    void *old_user = nullptr;
+    const mt_gles_draw_filter old = mt_gles_get_draw_filter(&old_user);
+    u32 args[4];
+    std::memcpy(args, cpu->r, sizeof args); // the call clobbers them; the copy needs them again
+    mt_gles_set_draw_filter(backdrop_filter, &d);
     call->original(cpu);
-    mt_gles_set_host_x_transform(1.0f, 0.0f);
-    g_backdrops.fetch_add(1, std::memory_order_relaxed);
+    mt_gles_set_draw_filter(old, old_user);
+    if (d.repeats) {
+        u32 ret[4];
+        std::memcpy(ret, cpu->r, sizeof ret);
+        std::memcpy(cpu->r, args, sizeof args);
+        mt_gles_set_host_x_transform(1.0f, 2.0f * static_cast<float>(MT_WIDESCREEN_NARROW) /
+                                               static_cast<float>(g_width));
+        call->original(cpu);
+        mt_gles_set_host_x_transform(1.0f, 0.0f);
+        std::memcpy(cpu->r, ret, sizeof ret); // the first call's results, as the caller saw them
+        g_tiles.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        g_backdrops.fetch_add(1, std::memory_order_relaxed);
+    }
     return MT_HOOK_HANDLED;
 }
 
@@ -189,6 +262,7 @@ extern "C" void mt_widescreen_configure(std::uint32_t width) noexcept {
     const bool on = width > MT_WIDESCREEN_NARROW;
     g_width.store(on ? width : MT_WIDESCREEN_NARROW);
     g_view.store(MT_WIDESCREEN_NARROW);
+    g_limit.store(0);
     mt_hook_register(MT_HOOK_FN_CAMERA_CLAMP, camera_hook, nullptr, on ? 1 : 0);
     mt_hook_register(MT_HOOK_FN_CAMERA_FOLLOW, camera_hook, nullptr, on ? 1 : 0);
     mt_hook_register(MT_HOOK_FN_DRAW_IMAGE, draw_image_hook, nullptr, on ? 1 : 0);
@@ -198,6 +272,35 @@ extern "C" void mt_widescreen_configure(std::uint32_t width) noexcept {
 }
 
 extern "C" std::uint32_t mt_widescreen_width(void) noexcept { return g_width.load(); }
+
+extern "C" void mt_widescreen_set_limit(std::uint32_t points) noexcept { g_limit.store(points); }
+
+extern "C" std::uint32_t mt_widescreen_reach(void) noexcept {
+    const u32 width = g_width.load(), limit = g_limit.load();
+    return limit == 0u ? width : std::clamp(limit, MT_WIDESCREEN_NARROW, width);
+}
+
+extern "C" int mt_widescreen_backdrop_repeats(const std::uint8_t *rgba, std::uint32_t width,
+                                              std::uint32_t height, std::uint32_t scale) noexcept {
+    if (rgba == nullptr || scale == 0u) {
+        return 0;
+    }
+    const std::size_t period = std::size_t{k_backdrop_period} * scale;
+    const std::size_t cols =
+        std::min<std::size_t>(width, std::size_t{MT_WIDESCREEN_NARROW} * scale);
+    const std::size_t rows = std::min<std::size_t>(height, std::size_t{k_backdrop_height} * scale);
+    if (cols < 2u * period || rows == 0u) {
+        return 0;
+    }
+    const std::size_t span = (cols - period) * 4u; // the bytes of columns 0 ... cols - period
+    for (std::size_t y = 0; y < rows; y++) {
+        const std::uint8_t *row = rgba + y * std::size_t{width} * 4u;
+        if (std::memcmp(row, row + period * 4u, span) != 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
 
 extern "C" std::uint32_t mt_widescreen_decide(const mt_cpu *cpu, std::uint32_t width,
                                               int allow) noexcept {
@@ -293,12 +396,14 @@ extern "C" mt_widescreen_stats mt_widescreen_get_stats(void) noexcept {
     s.camera_calls = g_camera.load();
     s.backdrops = g_backdrops.load();
     s.huds = g_huds.load();
+    s.tiles = g_tiles.load();
     return s;
 }
 
 extern "C" void mt_widescreen_reset(void) noexcept {
     g_width.store(MT_WIDESCREEN_NARROW);
     g_view.store(MT_WIDESCREEN_NARROW);
+    g_limit.store(0);
     g_allow.store(false);
     g_turns.store(0);
     g_wide_turns.store(0);
@@ -306,6 +411,8 @@ extern "C" void mt_widescreen_reset(void) noexcept {
     g_camera.store(0);
     g_backdrops.store(0);
     g_huds.store(0);
+    g_tiles.store(0);
+    g_check = {};
     mt_hook_unregister(MT_HOOK_FN_HUD_PAINT);
     mt_hook_unregister(MT_HOOK_FN_CAMERA_CLAMP);
     mt_hook_unregister(MT_HOOK_FN_CAMERA_FOLLOW);

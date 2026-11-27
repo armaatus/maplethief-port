@@ -13,6 +13,7 @@
 
 #include "frame_stats.h"
 #include "game.h"
+#include "scaling.h"
 
 namespace maplethief::frontend {
 
@@ -426,6 +427,18 @@ void Desktop::list_displays() const {
         names.push_back(d.second);
     }
     set_display_choices(std::move(names));
+}
+
+int display_fill_points(SDL_Window *window, int most) {
+    const SDL_DisplayID id =
+        window != nullptr ? SDL_GetDisplayForWindow(window) : SDL_GetPrimaryDisplay();
+    SDL_Rect usable{};
+    if (id == 0 || !SDL_GetDisplayUsableBounds(id, &usable)) {
+        return kScreenWidth;
+    }
+    const int points =
+        fill_points(static_cast<float>(usable.w), static_cast<float>(usable.h), most);
+    return points > 0 ? points : kScreenWidth;
 }
 
 bool Desktop::size_window(int n, int picture_w, int picture_h) {

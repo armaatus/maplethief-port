@@ -321,40 +321,48 @@ TEST_CASE("hud labels: no label on the Cash key while it is hidden (#400)") {
 }
 
 TEST_CASE("hud labels: widescreen's edges and narrow, and the span over the wide picture") {
-    // 568 points: off 44. Edges: the d-pad 44 left, the others 44 right; Map, Bag, Cash stay.
-    const KeypadWide edges = fe::keypad_wide(568, 568, true);
-    const KeypadWide narrow = fe::keypad_wide(568, 568, false);
+    // At auto's 568 points and fill's 768 (#425): off = (E - 480) / 2. Edges: the d-pad off
+    // left, the others off right; Map, Bag, Cash stay.
+    std::uint32_t w = 568;
+    SUBCASE("568 points") { w = 568; }
+    SUBCASE("768 points") { w = 768; }
+    CAPTURE(w);
+    const float off = static_cast<float>(w - 480) / 2;
+    const KeypadWide edges = fe::keypad_wide(w, w, true);
+    const KeypadWide narrow = fe::keypad_wide(w, w, false);
     const std::vector<HudLabel> e = fe::hud_labels(KeypadLayout{}, edges, 1);
     const std::vector<HudLabel> n = fe::hud_labels(KeypadLayout{}, narrow, 1);
     for (std::size_t i = 0; i < fe::kHudKeyCount; i++) {
         const fe::HudKey &k = fe::hud_keys()[i];
-        CHECK(e[i].key.x == k.rect.x + (k.grouped ? 44.0f : 0.0f));
+        CHECK(e[i].key.x == k.rect.x + (k.grouped ? off : 0.0f));
         CHECK(n[i].key.x == k.rect.x);
     }
-    // The span of a 568-point picture at 2x in a 1136 x 640 window: [-44, 524].
-    const fe::Placement p = fe::place(fe::ScaleMode::kInteger, 1136, 640, 1136, 640, {}, 1, 1, 568);
+    // The span of a w-point picture at 2x in a 2w x 640 window: [-off, 480 + off].
+    const int ww = static_cast<int>(2 * w);
+    const fe::Placement p =
+        fe::place(fe::ScaleMode::kInteger, ww, 640, ww, 640, {}, 1, 1, static_cast<int>(w));
     fe::Placement img = p;
     const fe::Rect wide = p.rect;
-    img.rect = fe::Rect{wide.x + 88, wide.y, 960, 640};
+    img.rect = fe::Rect{wide.x + 2 * off, wide.y, 960, 640};
     float lo = 0, hi = 0;
     fe::hud_label_span(img, wide, &lo, &hi);
-    CHECK(lo == -44);
-    CHECK(hi == 524);
+    CHECK(lo == -off);
+    CHECK(hi == 480 + off);
     // Without widescreen: the screen image's [0, 480].
     fe::hud_label_span(img, img.rect, &lo, &hi);
     CHECK(lo == 0);
     CHECK(hi == 480);
     for (const PromptStyle &s : {kKeys, kXbox}) {
-        const std::vector<fe::HudLabelDrawn> de = place_all(e, s, -44, 524);
-        check_places(e, de, -44, 524);
-        // The quick slots' labels in the right wing's reach: left of keys at x 490.
+        const std::vector<fe::HudLabelDrawn> de = place_all(e, s, -off, 480 + off);
+        check_places(e, de, -off, 480 + off);
+        // The quick slots' labels in the right wing's reach: left of keys at x 446 + off.
         for (const fe::HudLabelDrawn &d : de) {
             if (e[d.label].action == MT_ACTION_SLOT1) {
-                CHECK(d.box.x + d.box.w <= 490.01f);
-                CHECK(d.box.x + d.box.w >= 488.0f);
+                CHECK(d.box.x + d.box.w <= 446 + off + 0.01f);
+                CHECK(d.box.x + d.box.w >= 444 + off);
             }
         }
-        check_places(n, place_all(n, s, -44, 524), -44, 524);
+        check_places(n, place_all(n, s, -off, 480 + off), -off, 480 + off);
     }
 }
 

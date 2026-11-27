@@ -415,6 +415,13 @@ bool Presenter::draw() {
     float dx = 1;
     float dy = 1;
     window_density(window, &dx, &dy);
+    if (fill_ > MT_UIKIT_SCREEN_WIDTH) {
+        // widescreen = fill (#425): the picture as wide as the safe area allows.
+        const Rect safe = safe_rect(ow, oh, insets_, dx, dy);
+        if (const int points = fill_points(safe.w, safe.h, static_cast<int>(fill_)); points > 0) {
+            wide_ = static_cast<std::uint32_t>(points);
+        }
+    }
     const bool wide = wide_ > MT_UIKIT_SCREEN_WIDTH;
     if (wide) {
         // Widescreen (#86): the wide picture placed, the screen image its centre 480 points.

@@ -1081,6 +1081,12 @@ uint32_t mt_gles_set_render_scale(uint32_t scale) noexcept {
     return remade;
 }
 
+std::uint32_t mt_gles_bound_texture_gfx(void) noexcept {
+    const mt_gles::State &s = mt_gles::state();
+    const auto t = s.textures.find(s.texture);
+    return t != s.textures.end() ? t->second.gfx : 0u;
+}
+
 mt_gles_stats mt_gles_get_stats(void) noexcept {
     State &s = state();
     mt_gles_stats st = s.stats;

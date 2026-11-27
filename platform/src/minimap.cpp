@@ -342,9 +342,8 @@ MinimapView read_minimap(const GuestSpan &mem, const MinimapExtras &extras) {
 }
 
 MinimapAnchor minimap_anchor(Widescreen widescreen, WidescreenHud hud) {
-    return widescreen == Widescreen::kAuto && hud == WidescreenHud::kEdges
-               ? MinimapAnchor::kCorner
-               : MinimapAnchor::kCompass;
+    return widescreen != Widescreen::kOff && hud == WidescreenHud::kEdges ? MinimapAnchor::kCorner
+                                                                          : MinimapAnchor::kCompass;
 }
 
 Rect minimap_visible(const Placement &image, const Rect &wide, std::uint32_t wide_points,

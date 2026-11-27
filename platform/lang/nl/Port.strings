@@ -567,7 +567,7 @@
 "setting.crash_recovery.label" = "Herstel na crash";
 "setting.crash_recovery.help" = "Na een crash biedt de volgende start aan verder te gaan van kort ervoor. Pauzeert even bij laden van kaarten, opslaan en elke 5 minuten";
 "setting.widescreen.label" = "Breedbeeld";
-"setting.widescreen.help" = "Toont meer van de kaart naast het 3:2-beeld waar de kaart breed genoeg is";
+"setting.widescreen.help" = "Toont meer van de kaart naast het 3:2-beeld waar de kaart breed genoeg is. Fill: zo breed als het venster toelaat";
 "setting.widescreen_hud.label" = "Breedbeeld-HUD";
 "setting.widescreen_hud.help" = "Edges: het toetsenpaneel aan de zijkanten van het brede beeld. Narrow: HUD en toetsenpaneel blijven op 3:2";
 "setting.colorblind_filter.label" = "Kleurenblindfilter";

@@ -878,13 +878,17 @@ void set_fullscreen_setting(Game &g, bool on) {
 }
 
 // A size key (#196): out of fullscreen (the setting's change, as F11's: one request), then the
-// window at `n` times the picture, 568 points wide with widescreen (ADR 0090; the start's
-// setting, which applies from the next start).
+// window at `n` times the picture, 568 points wide with widescreen = auto (ADR 0090), the
+// display's shape up to 768 with fill (#425, ADR 0214; the start's setting, which applies from
+// the next start).
 void size_window(Game &g, int n) {
     set_fullscreen_setting(g, false);
-    const bool wide = g.options != nullptr && g.options->settings.widescreen == Widescreen::kAuto;
-    g.desktop->size_window(n, wide ? static_cast<int>(MT_WIDESCREEN_WIDE) : kScreenWidth,
-                           kScreenHeight);
+    const Widescreen ws = g.options != nullptr ? g.options->settings.widescreen : Widescreen::kOff;
+    const int w = ws == Widescreen::kAuto ? static_cast<int>(MT_WIDESCREEN_WIDE)
+                  : ws == Widescreen::kFill
+                      ? display_fill_points(g.window, static_cast<int>(MT_WIDESCREEN_FILL))
+                      : kScreenWidth;
+    g.desktop->size_window(n, w, kScreenHeight);
 }
 
 // The mouse wheel (#145): in a menu, a notch is the gamepad's Up or Down (lists, shops and the
@@ -3322,6 +3326,9 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // pad's touches come in the engine's x, and may begin in the wings.
     if (mt_widescreen_width() > MT_WIDESCREEN_NARROW) {
         const bool narrow = g.settings.widescreen_hud == WidescreenHud::kNarrow;
+        // fill (#425): no wider than the picture the window shows (the presenter's last draw).
+        mt_widescreen_set_limit(mt_widescreen_width() > MT_WIDESCREEN_WIDE ? g.presenter.wide()
+                                                                           : 0u);
         mt_widescreen_turn(cpu, 1);
         g.input.set_side_margin(keypad_widescreen_turn(
             keypad_wide(mt_widescreen_view(), mt_widescreen_width(), !narrow)));
@@ -3969,13 +3976,19 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.renderer = renderer;
     g.vsync = vsync;
     // Widescreen (#86, ADR 0090): the GL layer's width, set before the boot makes its storage;
-    // the window shows a 568-point picture with the 480-point screen image in its centre.
-    mt_widescreen_configure(options.settings.widescreen == Widescreen::kAuto ? MT_WIDESCREEN_WIDE
-                                                                             : 0u);
+    // the window shows a 568-point picture with the 480-point screen image in its centre. fill
+    // (#425, ADR 0214): a 768-point layer, the picture as wide as the window (its safe area) at
+    // 320 points high, which caps the engine's view each turn.
+    const Widescreen ws = options.settings.widescreen;
+    mt_widescreen_configure(ws == Widescreen::kAuto   ? MT_WIDESCREEN_WIDE
+                            : ws == Widescreen::kFill ? MT_WIDESCREEN_FILL
+                                                      : 0u);
     g.presenter.set_wide(mt_widescreen_width() > MT_WIDESCREEN_NARROW ? mt_widescreen_width() : 0u);
-    SDL_Log("game: widescreen %s", mt_widescreen_width() > MT_WIDESCREEN_NARROW
-                                       ? "auto: a 568 x 320 GL layer, wide in the field"
-                                       : "off");
+    g.presenter.set_fill(ws == Widescreen::kFill ? MT_WIDESCREEN_FILL : 0u);
+    SDL_Log("game: widescreen %s",
+            ws == Widescreen::kAuto   ? "auto: a 568 x 320 GL layer, wide in the field"
+            : ws == Widescreen::kFill ? "fill: a 768 x 320 GL layer, as wide as the window"
+                                      : "off");
     start_presentation(g, renderer, options);
     if (g.presenter.texture() == nullptr) {
         return kExitSdlInitFailed;

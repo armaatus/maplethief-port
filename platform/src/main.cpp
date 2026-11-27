@@ -380,6 +380,7 @@
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/runtime.h"
 #include "maplethief/texpack.h"
+#include "maplethief/widescreen.h"
 #include "pack_tools.h"
 #include "packs.h"
 #include "player_log.h"
@@ -1935,6 +1936,12 @@ int main(int argc, char *argv[]) {
     // fullscreen_display (#196): a window that starts fullscreen opens on that display.
     const SDL_DisplayID start_display =
         game && !ios && settings.fullscreen ? find_display(settings.fullscreen_display) : 0;
+    // widescreen = fill (#425, ADR 0214): a first window (no --window, no window.ini) twice the
+    // picture the display's shape gives, so that it shows no bars.
+    if (game && !ios && !options.window_set && !window_state &&
+        settings.widescreen == Widescreen::kFill) {
+        options.window_w = 2 * display_fill_points(nullptr, static_cast<int>(MT_WIDESCREEN_FILL));
+    }
     SDL_Window *window = nullptr;
     if (window_state) {
         std::vector<SDL_Rect> displays;

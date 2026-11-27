@@ -177,7 +177,7 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `fast_forward` | off | off / off / off | Assist: holding the fast-forward key (Tab, the right stick's click) runs the game: off, x2, x3 (times as fast) |
 | `autosave` | off | off / off / on_quit | Save the game when it quits, goes to the background or exits to the main menu, where the game's own Save is allowed (not on boss maps, in a scene or with a popup open): off, on_quit |
 | `crash_recovery` | off | off / off / on | Keep a recovery point of the game at map loads, saves and every five minutes, offered at the next start after a crash: on, off. Off on the Switch in every preset |
-| `widescreen` | off | off / off / auto | The field up to 16:9 (568 x 320) on maps wide enough; menus and narrow maps stay 3:2: off, auto |
+| `widescreen` | off | off / off / auto | The field up to 16:9 (568 x 320) on maps wide enough, or (fill) as wide as the window up to 768 x 320; menus and narrow maps stay 3:2: off, auto, fill |
 | `widescreen_hud` | edges | edges / edges / edges | With widescreen, the touch key pad and its icons at the wide view's edges, or the HUD and the key pad kept at their 3:2 places in the middle: edges, narrow |
 | `colorblind_filter` | off | - | The picture's colours corrected for colour blindness: off, protanopia, deuteranopia, tritanopia |
 | `screen_shake` | 100 | - | How far the scenes shake the camera, 0 to 100 (percent of the game's) |
