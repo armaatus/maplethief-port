@@ -1015,6 +1015,35 @@ TEST_CASE("snapshot: textures come back with their texels; textures made since a
     mt_gfx_texture_destroy(tex);
 }
 
+TEST_CASE("snapshot: a state with three silent effects and two empty music voices restores") {
+    // #409: the audio section asked 30 bytes an effect voice and 43 a music voice, more than the
+    // smallest ones take (26, 39): a state with several such voices and little after them was
+    // refused ("a count of 2 runs past the section").
+    namespace mix = mt_audio::mix;
+    World w;
+    mix::Voices v;
+    for (u32 k = 1; k <= 3; k++) {
+        mix::Voices::Effect e;
+        e.key = k;
+        v.effects.push_back(e);
+    }
+    for (u32 k = 1; k <= 2; k++) {
+        mix::Voices::Music m;
+        m.key = k;
+        m.ended = true;
+        v.music.push_back(m);
+    }
+    save(w); // the audio state's first use in this process stops the voices before it
+    mix::voices_replace(v);
+    const Bytes state = save(w);
+    mix::reset();
+    CHECK(restore_why(w, state).empty());
+    const mix::Voices back = mix::voices_copy();
+    CHECK(back.effects.size() == 3);
+    CHECK(back.music.size() == 2);
+    mix::reset();
+}
+
 TEST_CASE("snapshot: the mixer's voices, copied and put back, play the same samples") {
     namespace mix = mt_audio::mix;
     mix::reset();
