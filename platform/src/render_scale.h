@@ -16,6 +16,10 @@
 // The budget per window frame (the means over the last second):
 //   frontend (taking the GL frame, the compositor, upload and draw)  <= kFrontendBudgetMs
 //   frontend + mt_gfx (the GL draws: rasterizing on the software backend)  <= kRenderBudgetMs
+//   the GPU's time per GL frame (RecentStats::gpu_ms, GpuFrameTimer)  <= kRenderBudgetMs
+// The CPU and the GPU work side by side, so the render budget holds the larger of the two
+// (#365, ADR 0203). On the GPU backend mt_gfx's CPU time is recording only and the cost is the
+// GPU's; without a GPU time (software backend, too few samples) the CPU's alone counts.
 //
 // Pure logic, no SDL and no clock: game.cpp passes recent() and SDL_GetTicksNS seconds, the
 // tests pass made-up numbers. The frontend applies the scale the governor returns
@@ -25,8 +29,11 @@
 #ifndef MAPLETHIEF_PLATFORM_RENDER_SCALE_H
 #define MAPLETHIEF_PLATFORM_RENDER_SCALE_H
 
+#include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <string>
+#include <utility>
 
 #include "frame_stats.h"
 
@@ -90,6 +97,37 @@ class RenderScaleGovernor {
     std::string reason_;
     std::string warning_;
     bool warning_taken_ = false;
+};
+
+// The GPU's time per GL frame for the governor (#365, ADR 0203). mt_gfx's GPU backend times a
+// frame by waiting for its flushes' fence (mt_gfx_gpu_set_timing), which stalls the CPU, so the
+// frontend times one GL frame in kEvery: after a window frame it asks arm() whether to turn
+// timing on for the next GL frame, and when that frame has arrived it hands its GPU time
+// (mt_gfx_gpu_stats::last_frame_gpu_ns) to add(). ms() is the median of the samples of the last
+// kWindowSeconds, or 0 (unknown) with fewer than kMinSamples. Pure logic: game.cpp passes
+// SDL_GetTicksNS seconds and the backend's numbers, the tests made-up ones.
+class GpuFrameTimer {
+  public:
+    static constexpr std::uint32_t kEvery = 4;       // GL frames: one timed in this many
+    static constexpr double kWindowSeconds = 1.0;    // the samples ms() looks at
+    static constexpr std::uint32_t kMinSamples = 2;  // fewer: unknown
+    static constexpr std::size_t kMaxSamples = 64;   // kept at most
+
+    // A window frame showed a new GL frame (a tick): whether to time the next GL frame. Every
+    // kEvery-th tick, and not while a timed frame is still to arrive.
+    bool arm();
+    // The timed frame arrived at `now` (seconds) with the GPU's time for it; ns 0 (no draws
+    // timed) is no sample.
+    void add(std::uint64_t ns, double now);
+    // Whether a timed frame is still to arrive (timing is on).
+    bool armed() const { return armed_; }
+    // The median GPU time of the last kWindowSeconds before `now`, in ms; 0 if unknown.
+    double ms(double now) const;
+
+  private:
+    std::uint32_t ticks_ = 0;
+    bool armed_ = false;
+    std::deque<std::pair<double, double>> samples_; // (when, ms)
 };
 
 } // namespace maplethief::frontend
