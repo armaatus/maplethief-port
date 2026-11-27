@@ -1696,8 +1696,8 @@ u32 pad_button(Env &e, const char *cls, const char *down, const char *up) {
     return e.send(view,
                   "addButtonWithImageName:selectedImageName:withFrame:withEdgeInsets:"
                   "actionForTouchDown:actionForTouchUpInside:",
-                  {0x1111u, 0x2222u, fbits(433), fbits(0), fbits(47), fbits(52), fbits(0),
-                   fbits(0), fbits(0), fbits(0), mt_objc_sel(e.rt, down), mt_objc_sel(e.rt, up)});
+                  {0x1111u, 0x2222u, fbits(433), fbits(0), fbits(47), fbits(52), fbits(0), fbits(0),
+                   fbits(0), fbits(0), mt_objc_sel(e.rt, down), mt_objc_sel(e.rt, up)});
 }
 
 bool is_hidden(Env &e, u32 v) { return e.send(v, "isHidden") != 0u; }
@@ -1726,8 +1726,8 @@ TEST_CASE("offline UI: the dead Cash and revive buttons are hidden with the cash
         const u32 before = mt_objc_get_stats(e.rt).overrides;
         CHECK(mt_offline_ui_install(e.rt) == 0u); // no MainMenuView here: nothing at all
         CHECK(mt_objc_get_stats(e.rt).overrides == before);
-        CHECK_FALSE(
-            is_hidden(e, pad_button(e, "TouchKeyPadView", "clickCashButton:", "releaseCashButton:")));
+        CHECK_FALSE(is_hidden(
+            e, pad_button(e, "TouchKeyPadView", "clickCashButton:", "releaseCashButton:")));
         CHECK_FALSE(is_hidden(
             e, pad_button(e, "PopupKeyPadView", "pressRevivalButton:", "releaseRevivalButton:")));
         CHECK(mt_offline_ui_drops_action(MT_ACTION_CASH_SHOP) == 0);
@@ -1739,8 +1739,8 @@ TEST_CASE("offline UI: the dead Cash and revive buttons are hidden with the cash
         REQUIRE(mt_objc_add_host_class(e.rt, &k_test_popup_pad, 0, 0) == 0);
         mt_offline_ui_configure(0);
         CHECK(mt_offline_ui_install(e.rt) == 0u);
-        CHECK_FALSE(
-            is_hidden(e, pad_button(e, "TouchKeyPadView", "clickCashButton:", "releaseCashButton:")));
+        CHECK_FALSE(is_hidden(
+            e, pad_button(e, "TouchKeyPadView", "clickCashButton:", "releaseCashButton:")));
         CHECK_FALSE(is_hidden(e, pad_button(e, "PopupKeyPadView", "pressGradeRevivalButton:",
                                             "releaseGradeRevivalButton:")));
         for (const u32 a : {MT_ACTION_CASH_SHOP, MT_ACTION_REVIVE, MT_ACTION_GRADE_REVIVE}) {
@@ -1756,8 +1756,7 @@ TEST_CASE("offline UI: the dead Cash and revive buttons are hidden with the cash
         const mt_offline_ui_stats was = mt_offline_ui_get_stats();
         CHECK(mt_offline_ui_install(e.rt) == 4u); // the menu's two, one on each key pad class
         g_menu = MenuCalls{};
-        const u32 cash =
-            pad_button(e, "TouchKeyPadView", "clickCashButton:", "releaseCashButton:");
+        const u32 cash = pad_button(e, "TouchKeyPadView", "clickCashButton:", "releaseCashButton:");
         REQUIRE(cash != 0u);
         CHECK(is_hidden(e, cash));
         // The game's helper ran first, with its arguments as sent.
@@ -1768,18 +1767,18 @@ TEST_CASE("offline UI: the dead Cash and revive buttons are hidden with the cash
         CHECK(g_menu.button_args[11] == mt_objc_sel(e.rt, "releaseCashButton:"));
         CHECK(is_hidden(
             e, pad_button(e, "PopupKeyPadView", "pressRevivalButton:", "releaseRevivalButton:")));
-        CHECK(is_hidden(e, pad_button(e, "PopupKeyPadView", "pressGradeRevivalButton:",
-                                      "releaseGradeRevivalButton:")));
+        CHECK(is_hidden(e, pad_button(e, "PopupKeyPadView",
+                                      "pressGradeRevivalButton:", "releaseGradeRevivalButton:")));
         CHECK(mt_offline_ui_get_stats().buttons_hidden == was.buttons_hidden + 3u);
         // The live buttons of both panels: Map and Bag; Return to town, Go to main menu, OK.
         CHECK_FALSE(is_hidden(
             e, pad_button(e, "TouchKeyPadView", "clickAsteriskButton:", "releaseAsteriskButton:")));
         CHECK_FALSE(is_hidden(
             e, pad_button(e, "TouchKeyPadView", "clickClearButton:", "releaseClearButton:")));
-        CHECK_FALSE(is_hidden(e, pad_button(e, "PopupKeyPadView", "pressReturnTownButton:",
-                                            "releaseReturnTownButton:")));
-        CHECK_FALSE(is_hidden(e, pad_button(e, "PopupKeyPadView", "pressGoMainMenuButton:",
-                                            "releaseGoMainMenuButton:")));
+        CHECK_FALSE(is_hidden(e, pad_button(e, "PopupKeyPadView",
+                                            "pressReturnTownButton:", "releaseReturnTownButton:")));
+        CHECK_FALSE(is_hidden(e, pad_button(e, "PopupKeyPadView",
+                                            "pressGoMainMenuButton:", "releaseGoMainMenuButton:")));
         CHECK_FALSE(
             is_hidden(e, pad_button(e, "PopupKeyPadView", "pressOkButton:", "releaseOkButton:")));
         // The keys that sent their codes are dropped; every other action goes through.
@@ -1791,8 +1790,8 @@ TEST_CASE("offline UI: the dead Cash and revive buttons are hidden with the cash
         }
         bool logged = false;
         for (const std::string &l : g_log) {
-            logged = logged || l.find("2 key pad overrides hide the Cash button") !=
-                                   std::string::npos;
+            logged =
+                logged || l.find("2 key pad overrides hide the Cash button") != std::string::npos;
         }
         CHECK(logged);
         CHECK(mt_objc_undeliverable_count(e.rt) == 0u);

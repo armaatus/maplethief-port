@@ -56,11 +56,16 @@ struct DeadAction {
     u32 flag;
 };
 constexpr DeadAction k_dead[] = {
-    {"clickADButton:", MT_OFFLINE_HIDE_LINKS}, {"clickADClose:", MT_OFFLINE_HIDE_LINKS},
-    {"clickMoreGame:", MT_OFFLINE_HIDE_LINKS}, {"clickLinkURL1:", MT_OFFLINE_HIDE_LINKS},
-    {"clickLinkURL2:", MT_OFFLINE_HIDE_LINKS}, {"clickLinkURL3:", MT_OFFLINE_HIDE_LINKS},
-    {"clickLinkURL4:", MT_OFFLINE_HIDE_LINKS}, {"clickGameCenter:", MT_OFFLINE_HIDE_GAME_CENTER},
-    {"releaseCashButton:", MT_OFFLINE_HIDE_CASH}, {"releaseRevivalButton:", MT_OFFLINE_HIDE_CASH},
+    {"clickADButton:", MT_OFFLINE_HIDE_LINKS},
+    {"clickADClose:", MT_OFFLINE_HIDE_LINKS},
+    {"clickMoreGame:", MT_OFFLINE_HIDE_LINKS},
+    {"clickLinkURL1:", MT_OFFLINE_HIDE_LINKS},
+    {"clickLinkURL2:", MT_OFFLINE_HIDE_LINKS},
+    {"clickLinkURL3:", MT_OFFLINE_HIDE_LINKS},
+    {"clickLinkURL4:", MT_OFFLINE_HIDE_LINKS},
+    {"clickGameCenter:", MT_OFFLINE_HIDE_GAME_CENTER},
+    {"releaseCashButton:", MT_OFFLINE_HIDE_CASH},
+    {"releaseRevivalButton:", MT_OFFLINE_HIDE_CASH},
     {"releaseGradeRevivalButton:", MT_OFFLINE_HIDE_CASH},
 };
 
@@ -176,7 +181,7 @@ bool wrap(mt_objc *rt, const char *class_name, u32 cls, const char *selector, mt
 }
 
 constexpr mt_guest_fn k_add_button_fns[k_button_class_count] = {add_button<0>, add_button<1>,
-                                                                 add_button<2>};
+                                                                add_button<2>};
 
 } // namespace
 
