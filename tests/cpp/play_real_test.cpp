@@ -13258,8 +13258,8 @@ bool has_hangul(const std::string &s) {
 // resultMonCa's EXP for `mode` (the table at 0xEAD40; docs/re/mechanics.md): the score's band.
 i32 carnival_exp(i32 mode, i32 score) {
     static const i32 bands[3][3] = {{1500, 2000, 2500}, {800, 1400, 2000}, {2000, 2500, 3000}};
-    static const i32 exp[3][4] = {{250, 500, 1000, 1500}, {2700, 3500, 4000, 4700},
-                                  {4500, 6200, 7000, 7700}};
+    static const i32 exp[3][4] = {
+        {250, 500, 1000, 1500}, {2700, 3500, 4000, 4700}, {4500, 6200, 7000, 7700}};
     i32 band = 0;
     while (band < 3 && score > bands[mode][band]) {
         band++;
@@ -13284,8 +13284,7 @@ void restored_carnival_run(Run &r, int area, bool on) {
         town = t.area == area ? t : town;
     }
     const std::string where = std::to_string(area) + ".0";
-    const std::string room =
-        std::to_string(town.room_area) + "." + std::to_string(town.room_map);
+    const std::string room = std::to_string(town.room_area) + "." + std::to_string(town.room_map);
     const mt_restored_carnival_npc *npc = mt_restored_carnival_npc_on(area, 0);
     const std::string script = "Spiegelman" + std::to_string(town.mode + 1);
     const i32 ticket = 47 + town.mode;
@@ -13336,10 +13335,11 @@ void restored_carnival_run(Run &r, int area, bool on) {
         mt_text_events_install(1);
         mt_text_events_add_listener(record_carnival_page, nullptr);
     });
-    const Goal g{area, 0, (npc->cell % town.width) * 16 + 8,
-                 (npc->cell / town.width + 1) * 16 - 1, 6};
-    then_talk_to(r, script + ": to the carnival", g, npc->script, {1},
-                 [](mt_cpu *cpu) { return carnival(cpu).on; }, 120);
+    const Goal g{area, 0, (npc->cell % town.width) * 16 + 8, (npc->cell / town.width + 1) * 16 - 1,
+                 6};
+    then_talk_to(
+        r, script + ": to the carnival", g, npc->script, {1},
+        [](mt_cpu *cpu) { return carnival(cpu).on; }, 120);
     then_check(r, "the carnival is on in room " + room + ", the ticket taken",
                [town, ticket](mt_cpu *cpu) {
                    const Hero h = hero(cpu);
@@ -13353,8 +13353,9 @@ void restored_carnival_run(Run &r, int area, bool on) {
     then(r, "the round runs out, the result box closes", 400, [&r, area](mt_cpu *cpu, double el) {
         const Carnival c = carnival(cpu);
         const Hero h = hero(cpu);
-        hold(r, A, (popup_id(cpu) != -1 || chatting(cpu) || game_mode(cpu) != 0) &&
-                       std::fmod(el, 0.6) < 0.1);
+        hold(r, A,
+             (popup_id(cpu) != -1 || chatting(cpu) || game_mode(cpu) != 0) &&
+                 std::fmod(el, 0.6) < 0.1);
         if (c.on) {
             if (!g_carnival.started) {
                 g_carnival.first_score = c.score;

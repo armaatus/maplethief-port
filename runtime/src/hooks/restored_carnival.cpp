@@ -53,7 +53,7 @@ constexpr u32 k_obj_kind = 2u;
 constexpr u32 k_obj_marker = 4u;
 constexpr u32 k_obj_visible = 6u;
 constexpr std::uint16_t k_carnival_kind = 42u; // NPC 38, the carnival's way back
-constexpr u32 k_canvas_global = 0x11A950u; // SkyCanvas: the engine's current state +0xC
+constexpr u32 k_canvas_global = 0x11A950u;     // SkyCanvas: the engine's current state +0xC
 constexpr u32 k_canvas_state = 0xCu;
 constexpr u32 k_game_vptr = 0x119B78u; // a CStateGame's vtable pointer
 constexpr u32 k_carnival_phase = 0x400u;
@@ -151,8 +151,8 @@ void add_npc(mt_cpu *cpu, u32 map, const mt_restored_carnival_npc &npc) {
     const u32 count = read_word(cpu, map + k_map_count);
     const u32 objs = read_word(cpu, map + k_map_objs);
     const u32 names = read_word(cpu, map + k_map_names);
-    if (count > 0xFFu || (count > 0u && (!in_guest(cpu, objs, 4u * count) ||
-                                         !in_guest(cpu, names, 4u * count)))) {
+    if (count > 0xFFu ||
+        (count > 0u && (!in_guest(cpu, objs, 4u * count) || !in_guest(cpu, names, 4u * count)))) {
         return; // not a list the loader built
     }
     for (u32 i = 0; i < count; i++) {
