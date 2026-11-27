@@ -4,7 +4,8 @@
 // HP +0x94; CHero::LevelUp 0x65089 raises the level +0x80 while it is below 99. Popup_Open
 // 0x3EAA1, the revive 0x6140D and CDataMgr::LoadSaveData 0x39989: docs/re/cash-shop.md. The
 // run events (#403): clearAll 0x996ED and setClassUp 0x997E1 (docs/re/script-vm.md), CMob::Die
-// 0x73349 (docs/re/mechanics.md), CMapleWorld::changeMap 0x81369 (docs/re/audio.md, Map music).
+// 0x73349 (docs/re/mechanics.md), CMapleWorld::changeMap 0x81369 (docs/re/audio.md, Map music),
+// CStateGame::LoadMap 0x868D5 and its two callers (docs/re/program-flow.md, #424).
 #include "maplethief/events.h"
 
 #include <cstdint>
@@ -147,6 +148,14 @@ void mob_die(const mt_cpu *cpu) {
     emit(e, "boss killed");
 }
 
+// The warp changeMap reported last, until the map load that follows it (load_map).
+struct Warp {
+    u32 world = 0;
+    i32 area = -1;
+    i32 map = -1;
+};
+Warp g_warp;
+
 // CMapleWorld::changeMap(world, area, map, portal, ...): not while a warp is pending.
 void change_map(const mt_cpu *cpu) {
     const u32 world = cpu->r[0];
@@ -164,7 +173,34 @@ void change_map(const mt_cpu *cpu) {
     e.more[0] = static_cast<i32>(cpu->r[2]);
     e.more[1] = static_cast<i32>(cpu->r[3]);
     g_stats.map_changes++;
+    g_warp = {world, e.value, e.more[0]};
     emit(e, "map change");
+}
+
+// CStateGame::LoadMap(world): every map load. From LoadGame (the bl at 0x87380) it is the game's
+// entry, no change; from the loader's mode 1 (CLoaderThread::Load, the bl at 0x6AEE6) it loads
+// the target +0x98/+0x9C, which changeMap stored (a warp, reported there) or a scene wrote
+// directly (commands 28 and 52, docs/re/qol.md): a map change with no portal.
+constexpr u32 k_world_target_area = 0x98;
+constexpr u32 k_world_target_map = 0x9C;
+constexpr u32 k_lr_from_loader = 0x6AEEB;
+
+void load_map(const mt_cpu *cpu) {
+    const u32 world = cpu->r[0];
+    const Warp warp = g_warp;
+    g_warp = {};
+    mt_game_event e{};
+    if (cpu->r[14] != k_lr_from_loader || !rd32(cpu, world + k_world_target_area, &e.value) ||
+        !rd32(cpu, world + k_world_target_map, &e.more[0]) ||
+        (warp.world == world && warp.area == e.value && warp.map == e.more[0])) {
+        g_stats.ignored++;
+        return;
+    }
+    e.kind = MT_GAME_EVENT_MAP_CHANGE;
+    e.hero = rdptr(cpu, world + k_world_hero);
+    e.more[1] = -1;
+    g_stats.map_changes++;
+    emit(e, "map change (a scene's load)");
 }
 
 } // namespace
@@ -189,6 +225,9 @@ void mt_observe_entry(mt_cpu *cpu, std::uint32_t fn) noexcept {
         return;
     case MT_EVENTS_FN_CHANGE_MAP:
         change_map(cpu);
+        return;
+    case MT_EVENTS_FN_LOAD_MAP:
+        load_map(cpu);
         return;
     default:
         break;

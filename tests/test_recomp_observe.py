@@ -58,7 +58,8 @@ def test_the_runtime_switches_on_the_same_functions() -> None:
     assert runtime["MT_EVENTS_FN_SET_CLASS_UP"] == 0x655AD
     assert runtime["MT_EVENTS_FN_MOB_DIE"] == 0x73349
     assert runtime["MT_EVENTS_FN_CHANGE_MAP"] == 0x81369
-    assert len(OBSERVED) == 9
+    assert runtime["MT_EVENTS_FN_LOAD_MAP"] == 0x868D5  # a scene's map load (#424)
+    assert len(OBSERVED) == 10
     # Function pointers of Thumb functions (bit 0 set), with a name each.
     assert all(ptr & 1 for ptr in OBSERVED)
     assert all(name and why for name, why in OBSERVED.values())

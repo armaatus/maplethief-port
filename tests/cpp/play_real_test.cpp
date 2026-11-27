@@ -3820,15 +3820,11 @@ void chapter_3_ending(Run &r, bool skip) {
     then_run_event(r, "portal1031 to the boss's map 10.5", MT_GAME_EVENT_MAP_CHANGE, 10, {5});
     then_run_event(r, "mob 69 killed", MT_GAME_EVENT_BOSS_KILLED, 69);
     // The ending's two map loads (scene 1's command 52 to 2.11, scene 2's command 28 to 2.0) go
-    // through world +0x98/+0x9C and game mode 8, not CMapleWorld::changeMap, so no run event
-    // reports them (ADR 0156 observes changeMap only; #424). The maps are read instead: scene 2's
-    // steps were counted on 2.11 and the field after it is 2.0.
+    // through world +0x98/+0x9C and game mode 8, not CMapleWorld::changeMap: the run event is
+    // CStateGame::LoadMap's (#424), with no portal.
+    then_run_event(r, "scene 1's command 52 to 2.11", MT_GAME_EVENT_MAP_CHANGE, 2, {11, -1});
+    then_run_event(r, "scene 2's command 28 to 2.0", MT_GAME_EVENT_MAP_CHANGE, 2, {0, -1});
     then_do(r, "the ending's maps: scene 2 on 2.11, then 2.0", [](mt_cpu *cpu) {
-        i32 n = 0;
-        for (const mt_game_event &e : g_run_events) {
-            n += e.kind == MT_GAME_EVENT_MAP_CHANGE && e.value == 2 ? 1 : 0;
-        }
-        std::printf("the ending's maps: %d run events for area 2 (none expected, #424)\n", n);
         check(g_ending.step_2 >= 0 && hero(cpu).on(2, 0), "scene 2 ran on 2.11 (to step " +
                                                               std::to_string(g_ending.step_2) +
                                                               ") and the field after it is 2.0");

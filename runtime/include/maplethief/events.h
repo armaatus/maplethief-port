@@ -39,6 +39,12 @@
  *                 (a portal, a script's changeMap). It does nothing while a warp is pending
  *                 (the byte world +0xB4), and neither does the event. `value` is the area,
  *                 `more[0]` the map, `more[1]` the portal; `hero` is world +0x30.
+ *                 And CStateGame::LoadMap(world) 0x868D5, every map load (#424): from the
+ *                 loader's mode 1 (its return address 0x6AEEB) it loads the target world
+ *                 +0x98/+0x9C, which a scene's end (commands 28 and 52, docs/re/qol.md) writes
+ *                 without changeMap: a map change too, `more[1]` -1 (no portal). A load of the
+ *                 target changeMap reported last is that warp's, and the load from LoadGame
+ *                 0x86C1D (entering the game) is no change; neither is an event.
  * The run events carry no HP (`hp` and `max_hp` 0).
  *
  * The recompiler reports the entry of these functions (recomp/observe.py, MT_FN_OBSERVE in
@@ -70,7 +76,8 @@ typedef enum mt_game_event_kind {
     MT_GAME_EVENT_CHAPTER_END = 7,    /* value: the chapter that ends (0 the tutorial) */
     MT_GAME_EVENT_JOB_ADVANCE = 8,    /* value: the branch; more[0]: the tier */
     MT_GAME_EVENT_BOSS_KILLED = 9,    /* value: the boss's mob id (64, 66-69) */
-    MT_GAME_EVENT_MAP_CHANGE = 10,    /* value: the area; more[0]: the map; more[1]: the portal */
+    MT_GAME_EVENT_MAP_CHANGE = 10,    /* value: the area; more[0]: the map; more[1]: the portal
+                                         (-1: a scene's load) */
 } mt_game_event_kind;
 
 typedef struct mt_game_event {
@@ -107,7 +114,8 @@ typedef struct mt_game_events_stats {
     uint64_t boss_kills;   /* boss-killed events */
     uint64_t map_changes;  /* map-change events */
     uint64_t ignored;      /* entries the function's guard turns away (a miss, a dead hero, 99,
-                              a mob that is no boss, a pending warp, a bad pointer) */
+                              a mob that is no boss, a pending warp, a map load that is no
+                              change, a bad pointer) */
 } mt_game_events_stats;
 
 /* The numbers since the start of the host process (or the last reset). */
@@ -133,6 +141,7 @@ void mt_run_hits_install(void) MT_NOEXCEPT;
 #define MT_EVENTS_FN_SET_CLASS_UP 0x655ADu
 #define MT_EVENTS_FN_MOB_DIE 0x73349u
 #define MT_EVENTS_FN_CHANGE_MAP 0x81369u
+#define MT_EVENTS_FN_LOAD_MAP 0x868D5u
 
 /* mt_observe_entry(cpu, fn) is declared in maplethief/recomp/calls.h: the generated code's ABI.
  * Tests call it as the generated code does. */

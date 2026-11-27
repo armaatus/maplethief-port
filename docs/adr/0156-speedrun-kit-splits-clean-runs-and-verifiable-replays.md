@@ -185,3 +185,13 @@ Built in [`platform/src/input_display.h`](../../platform/src/input_display.h) wi
 - **How it draws.** The port's Canvas (its 5x7 font and shapes, no game art) into a small texture, drawn after every read-back like the minimap and the EXP figure. It is never in a shot, a golden of the game, a `--capture` or the regression replay's digests, so it is not a run variable.
 
 **Evidence.** `tests/cpp/input_display_test.cpp` (CI): the action layer driven by keys and a pad lights exactly the delivered cells; the pad keys light theirs; the placement in a side bar, a bar below and over the picture; goldens `tests/golden/data/input_display_idle.png` and `input_display_held.png` of the panel alone on a synthetic frame. Locally with real assets, `scripts/regress --settings input_display=on` gives the same digests as with it off.
+
+## Addendum (#424): a scene's map load is a map change
+
+The Context above says every warp goes through `CMapleWorld::changeMap` `0x81369`. Not every map change does: a scene ends with command 28 (a warp) or 52 (the next scene's map) by writing the target `CStateGame +0x98`/`+0x9C` and game mode 8 directly ([qol.md](../re/qol.md#the-commands)). The ending's 2.11 and 2.0 and the Magatia scenes' 8.6, 7.6 and 8.4 load that way, so `split map_change 2.11` never split. The call (delegated by Joris, 2026-11-27): **a scene's map load is a map change.**
+
+- **Where.** Every map load runs `CStateGame::LoadMap` `0x868D5` ([program-flow.md](../re/program-flow.md)), which is now observed too. Its two callers are told apart by the return address the `bl` leaves in `lr`: `LoadGame` `0x86C1D` (`0x87385`, entering the game: no change) and `CLoaderThread::Load` `0x6AEB5` mode 1 (`0x6AEEB`, a map change).
+- **No double event for a portal.** A portal's warp keeps its event at `changeMap`, with its portal and its timing. The runtime remembers the target `changeMap` reported last; the load of that target is that warp's and reports nothing. Any other load from the loader is a `MAP_CHANGE` with `value` `+0x98`, `more[0]` `+0x9C` and `more[1]` −1: a scene sets the hero's place itself, there is no portal.
+- **Alternatives.** Moving the whole event to `LoadMap` would drop the portal (a scene's `+0xA0` is the last warp's) and move every portal split by the fade-out's frames. Leaving scenes out would make `map_change` silently miss five maps.
+
+**Evidence.** `tests/cpp/rumble_test.cpp` "events: LoadMap's entry is a scene's map change, not a warp's or the game's (#424)" (CI). Locally with real assets, `play.chapter_3_e_synthetic` hears `MAP_CHANGE 2 11 -1` and `2 0 -1` for the ending's two scenes.

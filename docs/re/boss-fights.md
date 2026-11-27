@@ -75,5 +75,5 @@ Played in the port ([#300](https://github.com/armaatus/maplethief-port/issues/30
   scene 2 and loads its map 2.11, and scene 2 ends with command 28, a warp to 2.0, where free
   play goes on in chapter 3. In the watched run the boss died with the hero knocked back, and
   original bug 19 locked scene 1 until the run cleared the byte. Neither map load is a
-  `changeMap`, so neither raises a run event
+  `changeMap`; the run event of each is `CStateGame::LoadMap`'s, with no portal
   ([#424](https://github.com/armaatus/maplethief-port/issues/424)).
