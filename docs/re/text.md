@@ -11,7 +11,7 @@ Research for text packs ([#189](https://github.com/armaatus/maplethief-port/issu
 | Names and descriptions of items, mobs, NPCs, skills | `<Language>/data/*.dat` (fixed records, [formats/data-tables.md](../formats/data-tables.md)) | the data manager's string accessor `0x37999` | the file's bytes as they are (English ASCII, Korean CP949) |
 | The quest log's requirements | the same tables, copied | `CChatBox::drawRequire` `0x3243D` | MacKorean (`kCFStringEncodingMacKorean`, `0x80000003`) |
 | Numbers, meso, counts | `sprintf` in the C++ code | (inline) | ASCII |
-| The port's own menus | `platform/src/port_text.def` | the frontend's overlays | ASCII (the port's 5x7 font, SDL's debug font) |
+| The port's own menus | `platform/src/port_text.def` | the frontend's overlays | UTF-8 (the port's 5x7 font for ASCII, the bundled fonts for the rest, ADR 0206; the price line's SDL debug font folds to ASCII) |
 
 ### LocalizedCString `0x6DD1`
 
@@ -56,7 +56,9 @@ The port draws all game text with NanumGothic, which has a glyph for every code 
 
 ### The port's own text
 
-The port's overlays (settings menu, preset picker, controls card, remap screen, key pad editor, disconnect pause, price line, Saves tab, the EXP figure's label, the held button's glyph) draw with the port's 5x7 font and SDL's debug font, which have ASCII only, and their width and wrap code counts bytes. Their text moved into one table (`platform/src/port_text.def`, `tr()`), which a pack's `Port.strings` translates; the translation is folded to ASCII (`ascii_fold`: "ö" to "o", "ß" to "ss", typographic quotes and dashes to ASCII, anything else to "?"). Logs stay English.
+The port's overlays (settings menu, preset picker, controls card, remap screen, key pad editor, disconnect pause, price line, Saves tab, the EXP figure's label, the held button's glyph) draw with the port's 5x7 font and SDL's debug font, which have ASCII only, and their width and wrap code counts bytes. Their text moved into one table (`platform/src/port_text.def`, `tr()`), which a pack's `Port.strings` translates; the translation was folded to ASCII (`ascii_fold`: "ö" to "o", "ß" to "ss", typographic quotes and dashes to ASCII, anything else to "?"). Logs stay English.
+
+Since [#372](https://github.com/armaatus/maplethief-port/issues/372) ([ADR 0206](../adr/0206-the-port-menus-draw-accents-and-hangul.md)) the Canvas draws every character outside printable ASCII from the bundled fonts (NanumGothic, else Fira Sans) through stb_truetype, as the game's text is drawn, and the overlays' layout counts cells (two for a Hangul syllable) and cuts at whole characters. Only the price line, drawn with SDL's debug font, still folds.
 
 ## Evidence
 

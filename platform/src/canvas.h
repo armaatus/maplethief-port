@@ -12,7 +12,9 @@
 #ifndef MAPLETHIEF_PLATFORM_CANVAS_H
 #define MAPLETHIEF_PLATFORM_CANVAS_H
 
+#include <cstddef>
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 namespace maplethief::frontend {
@@ -24,6 +26,22 @@ struct Rgba {
 // The port's overlays' backdrop over the game (the settings menu, the remap overlay): black at
 // this alpha; widescreen's wings get the same veil (Presenter::set_veil, ADR 0103).
 inline constexpr std::uint8_t kOverlayBackdropAlpha = 170;
+
+// The code point of the UTF-8 character at s[*at] (strict: no overlong forms, surrogates or
+// values past U+10FFFF), moving *at past it; for a byte that starts no such character, -1 and
+// *at moves one byte.
+std::int32_t next_code_point(std::string_view s, std::size_t *at);
+
+// Every text a Canvas draws, for tests (#372): its box in points (kGlyphHeight * size high) and
+// how many of its characters drew as '?' without being one.
+struct DrawnText {
+    int x = 0, y = 0, w = 0, h = 0;
+    std::string_view text;
+    int missing = 0;
+};
+using TextObserver = void (*)(void *user, const DrawnText &t);
+// Installs the observer (nullptr: none, the default).
+void set_text_observer(TextObserver fn, void *user);
 
 class Canvas {
   public:
@@ -51,12 +69,27 @@ class Canvas {
     void triangle(int x, int y, int w, int h, Rgba c);
     void triangle_outline(int x, int y, int w, int h, int t, Rgba c);
 
-    // Text in the 5x7 font (printable ASCII; anything else draws as '?'), each font pixel
-    // `size` points, top-left at (x, y). Returns the width drawn in points.
+    // UTF-8 text, top-left at (x, y), each font pixel `size` points. Printable ASCII is drawn in
+    // the 5x7 font; any other character with the bundled fonts (NanumGothic, else Fira Sans:
+    // mt_cg_bundled_glyph, #372, ADR 0206) at the image's resolution, centred in its cells, on
+    // the 5x7 font's baseline. A character neither has, a control character and each byte that
+    // is not UTF-8 draw as '?'. Returns the width drawn in points.
     int text(int x, int y, std::string_view s, Rgba c, int size = 1);
-    // The width `text` would draw: 6 * size per character, less the last character's gap.
+    // The width `text` would draw: 6 * size per cell, less the last cell's gap.
     static int text_width(std::string_view s, int size = 1);
+    // Text is laid out in cells of 6 x 9 font pixels: one per character, two for an East Asian
+    // wide one (Hangul, CJK, fullwidth forms). English is one cell per byte, as before.
+    static int char_columns(char32_t cp);
+    static int columns(std::string_view s);
+    // The bytes of the longest prefix of `s` that fits in `cols` cells, ending at a whole
+    // character.
+    static std::size_t fit_columns(std::string_view s, int cols);
+    // `s` if it draws at most `max_w` points wide at `size`, else its longest prefix that fits
+    // with "..." (cut at a whole character), else "" (a translation's room, #372).
+    static std::string fit_width(std::string_view s, int max_w, int size = 1);
     static constexpr int kGlyphHeight = 8; // with the descenders of g j p q y
+    // The bundled fonts' em, in font pixels: a Hangul syllable fills the 5x7 font's height.
+    static constexpr int kFontEm = 9;
 
   private:
     // Blends `c` into the pixel (px, py) of the image, if it is inside.

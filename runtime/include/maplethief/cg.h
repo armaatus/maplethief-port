@@ -137,6 +137,25 @@ int mt_cg_color_rgba(mt_cpu *cpu, uint32_t color, float rgba[4]) MT_NOEXCEPT;
  * could claim 2 GiB; with this walk no chunk claims more than the file holds. */
 const char *mt_cg_png_check(const uint8_t *data, size_t size) MT_NOEXCEPT;
 
+/* --- The bundled fonts for the port's own text (#372, ADR 0206) ------------------------------
+ *
+ * The frontend's overlays draw the characters their 5x7 font lacks (accented Latin, Hangul) with
+ * the game's glyph path: NanumGothic, else the fallback Fira Sans, rasterized by stb_truetype.
+ * One glyph at a time, for a frontend that composites the coverage itself. */
+typedef struct mt_cg_glyph {
+    int32_t width, height; /* the coverage's size in pixels; 0 x 0 for a blank glyph (a space) */
+    int32_t left, top;     /* its top-left from the pen on the baseline, in pixels (top < 0) */
+    int32_t advance;       /* the pen advance in pixels, rounded */
+} mt_cg_glyph;
+
+/* Fills *g for code point `cp` at an em of `em_pixels` pixels; a glyph whose coverage would be
+ * wider than `max_width` pixels (> 0) is narrowed to it. With `coverage` (at least width *
+ * height bytes, `capacity`), writes the coverage too: 0 to 255, rows top first. Returns 1, or 0
+ * (*g zeroed) when neither font has a glyph for `cp`, or for a control character. Any thread:
+ * the fonts used here are not the game's (the text the game draws keeps its own). */
+int mt_cg_bundled_glyph(uint32_t cp, int32_t em_pixels, int32_t max_width, mt_cg_glyph *g,
+                        uint8_t *coverage, size_t capacity) MT_NOEXCEPT;
+
 MT_EXTERN_C_END
 
 #endif /* MAPLETHIEF_CG_H */
