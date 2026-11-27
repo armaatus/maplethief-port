@@ -130,11 +130,11 @@ No trap, no unimplemented call and no error line in either run. Two findings:
   in the watched run mob 69 died with the hero knocked back, and scene 1's box took no key. After
   5 s the run clears `CHero +0x119`, as #420's fix will, and prints so. The skipped run's kill
   did not hit it.
-- **No run event for the ending's maps** ([#424](https://github.com/armaatus/maplethief-port/issues/424)):
+- **The ending's maps are run events** ([#424](https://github.com/armaatus/maplethief-port/issues/424)):
   the scenes load 2.11 and 2.0 through world `+0x98`/`+0x9C` and game mode 8, not
-  `CMapleWorld::changeMap`, so the `MAP_CHANGE` observer of ADR 0156 does not see them. Part E
-  reads the maps instead and prints the event count. No shipped speedrun category splits on a
-  map change; Any% ends on mob 69's kill, which is reported.
+  `CMapleWorld::changeMap`. Since #424 the runtime also observes `CStateGame::LoadMap`
+  `0x868D5` (ADR 0156's addendum), and part E hears `MAP_CHANGE` 2.11 and 2.0, each with
+  portal −1.
 
 ## After the ending
 

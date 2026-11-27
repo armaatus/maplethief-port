@@ -45,6 +45,11 @@ OBSERVED: dict[int, tuple[str, str]] = {
         "CMapleWorld::changeMap",
         "(world, area, map, portal): a map-change event unless a warp is pending (+0xB4)",
     ),
+    0x868D5: (
+        "CStateGame::LoadMap",
+        "(world): a map-change event for a scene's load (from the loader, a target changeMap "
+        "did not report)",
+    ),
 }
 
 OBSERVED_PTRS: frozenset[int] = frozenset(OBSERVED)

@@ -195,3 +195,13 @@ Accepted (delegated by Joris, 2026-11-27). The #406 addendum left mob 68 out of 
 - A personal best or a `.segments` file saved with the six-split Any% no longer lines up with the category; no release shipped one (#406 and #434 are in the same unreleased line).
 
 **Evidence.** `tests/cpp/run_timer_test.cpp`, `run categories: both shipped categories parse` (CI): Any%'s split list, in order, with 68 fourth. Locally with real assets, `play.chapter_2_f_synthetic` times Any%'s splits from `Chapter 2 boss` to `Chapter 2`: the 68 split fires on `run event mob 68 killed` and the run finishes at chapter 2's end.
+
+## Addendum (#424): a scene's map load is a map change
+
+The Context above says every warp goes through `CMapleWorld::changeMap` `0x81369`. Not every map change does: a scene ends with command 28 (a warp) or 52 (the next scene's map) by writing the target `CStateGame +0x98`/`+0x9C` and game mode 8 directly ([qol.md](../re/qol.md#the-commands)). The ending's 2.11 and 2.0 and the Magatia scenes' 8.6, 7.6 and 8.4 load that way, so `split map_change 2.11` never split. The call (delegated by Joris, 2026-11-27): **a scene's map load is a map change.**
+
+- **Where.** Every map load runs `CStateGame::LoadMap` `0x868D5` ([program-flow.md](../re/program-flow.md)), which is now observed too. Its two callers are told apart by the return address the `bl` leaves in `lr`: `LoadGame` `0x86C1D` (`0x87385`, entering the game: no change) and `CLoaderThread::Load` `0x6AEB5` mode 1 (`0x6AEEB`, a map change).
+- **No double event for a portal.** A portal's warp keeps its event at `changeMap`, with its portal and its timing. The runtime remembers the target `changeMap` reported last; the load of that target is that warp's and reports nothing. Any other load from the loader is a `MAP_CHANGE` with `value` `+0x98`, `more[0]` `+0x9C` and `more[1]` −1: a scene sets the hero's place itself, there is no portal.
+- **Alternatives.** Moving the whole event to `LoadMap` would drop the portal (a scene's `+0xA0` is the last warp's) and move every portal split by the fade-out's frames. Leaving scenes out would make `map_change` silently miss five maps.
+
+**Evidence.** `tests/cpp/rumble_test.cpp` "events: LoadMap's entry is a scene's map change, not a warp's or the game's (#424)" (CI). Locally with real assets, `play.chapter_3_e_synthetic` hears `MAP_CHANGE 2 11 -1` and `2 0 -1` for the ending's two scenes.

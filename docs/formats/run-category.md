@@ -36,7 +36,7 @@ A run variable without an `allow` line may only take its Original preset value (
 | `chapter_end N` | `MT_GAME_EVENT_CHAPTER_END` with `value` N, the chapter that ends (0 is the tutorial) | `split chapter_end 1 = Orbis` |
 | `job_advance BRANCH TIER` | `MT_GAME_EVENT_JOB_ADVANCE` with `value` BRANCH and `more[0]` TIER | `split job_advance 2 2 = Bandit` |
 | `boss_killed MOB` | `MT_GAME_EVENT_BOSS_KILLED` with `value` MOB (64, 66 to 69) | `split boss_killed 69 = Last boss` |
-| `map_change AREA.MAP` | `MT_GAME_EVENT_MAP_CHANGE` with `value` AREA and `more[0]` MAP (any portal) | `split map_change 4.1 = Orbis` |
+| `map_change AREA.MAP` | `MT_GAME_EVENT_MAP_CHANGE` with `value` AREA and `more[0]` MAP: a warp (any portal) or a scene's map load (the ending's 2.11 and 2.0, Magatia's 8.6, 7.6, 8.4; ADR 0156, #424) | `split map_change 4.1 = Orbis` |
 
 Refused, each with its line number (`line 4: ...`), and the file as a whole then left out: a line without `=`, nothing before `=`, an unknown line, a second `title`, a bad title, an `allow` of anything but a run variable or a value that variable cannot take, a second `allow` of one variable, an unknown event (`load_character` only in a `start` line), the wrong count of values or a value outside 0 to 255, a second `start` or anything before its `=`, a 65th split. A file larger than 16 KiB, without a `title` or without a `split` is refused as a whole. Every bad line is reported, not only the first.
 

@@ -356,6 +356,60 @@ TEST_CASE("events: changeMap's entry is a map change, not while a warp is pendin
     CHECK(st.entries == 7);
 }
 
+TEST_CASE("events: LoadMap's entry is a scene's map change, not a warp's or the game's (#424)") {
+    Hero h;
+    RunGuest g(h);
+    const auto load = [&](u32 lr, u32 world) {
+        h.cpu.r[14] = lr;
+        g.enter(MT_EVENTS_FN_LOAD_MAP, world);
+    };
+    constexpr u32 from_loader = 0x6AEEB, from_load_game = 0x87385;
+    // Entering the game: LoadGame loads the saved map, no change.
+    g.put(g.world + 0x98, 2);
+    g.put(g.world + 0x9C, 0);
+    load(from_load_game, g.world);
+    CHECK(g_events.empty());
+    // A portal: changeMap's event, then its load, which is not a second one.
+    g.enter(MT_EVENTS_FN_CHANGE_MAP, g.world, 3, 8, 1);
+    g.put(g.world + 0x98, 3);
+    g.put(g.world + 0x9C, 8);
+    const std::vector<std::uint8_t> before = g.bytes();
+    load(from_loader, g.world);
+    REQUIRE(g_events.size() == 1);
+    // A scene's end (command 52 to 2.11, then 28 to 2.0) writes the target without changeMap.
+    g.put(g.world + 0x98, 2);
+    g.put(g.world + 0x9C, 11);
+    load(from_loader, g.world);
+    g.put(g.world + 0x9C, 0);
+    load(from_loader, g.world);
+    REQUIRE(g_events.size() == 3);
+    for (std::size_t i = 1; i < 3; i++) {
+        CHECK(g_events[i].kind == MT_GAME_EVENT_MAP_CHANGE);
+        CHECK(g_events[i].hero == h.addr);
+        CHECK(g_events[i].value == 2);
+        CHECK(g_events[i].more[1] == -1);
+    }
+    CHECK(g_events[1].more[0] == 11);
+    CHECK(g_events[2].more[0] == 0);
+    // A warp whose load never came (the game left first): the next scene load is still one.
+    g.enter(MT_EVENTS_FN_CHANGE_MAP, g.world, 2, 0, 0);
+    load(from_load_game, g.world);
+    load(from_loader, g.world);
+    REQUIRE(g_events.size() == 5);
+    CHECK(g_events[4].value == 2);
+    CHECK(g_events[4].more[0] == 0);
+    for (const u32 bad : k_bad_pointers) {
+        load(from_loader, bad);
+    }
+    CHECK(g_events.size() == 5);
+    g.put(g.world + 0x98, 3);
+    g.put(g.world + 0x9C, 8);
+    CHECK(g.bytes() == before);
+    const mt_game_events_stats st = mt_game_events_get_stats();
+    CHECK(st.map_changes == 5);
+    CHECK(st.ignored == 2 + 1 + 4);
+}
+
 // --- the frontend: Rumble on virtual pads -----------------------------------------------------
 
 namespace {
