@@ -61,13 +61,13 @@ for name, mode in chain:
             f"end step 99999 frame 9e9fed904d7c4375 audio a3378409895b2259/33 gl 1559 "
             f"| map=2.9 mode={mode} ticks={ticks}\n")
     if fake != "nolog":
-        open(os.path.join(out, mode, f"checkpoints_{mode}.txt"), "w").write(text)
+        open(os.path.join(out, mode, f"checkpoints_{mode}.txt"), "w", encoding="utf-8").write(text)
     if fake == "fail" and mode == "chapter_1_b":
         cases.append(f'<testcase name="{name}" time="2.0" status="fail">'
                      '<failure message="Failed"/></testcase>')
     else:
         cases.append(f'<testcase name="{name}" time="2.0" status="run"/>')
-open(junit, "w").write('<?xml version="1.0"?><testsuite>' + "".join(cases) + "</testsuite>")
+open(junit, "w", encoding="utf-8").write('<?xml version="1.0"?><testsuite>' + "".join(cases) + "</testsuite>")
 sys.exit(0)
 """
 
@@ -75,7 +75,7 @@ sys.exit(0)
 @pytest.fixture
 def fake(tmp_path: Path) -> list[str]:
     script = tmp_path / "fake_ctest.py"
-    script.write_text(FAKE)
+    script.write_text(FAKE, encoding="utf-8")
     return [sys.executable, str(script)]
 
 
@@ -157,7 +157,7 @@ def test_a_run_prints_each_part_and_the_chains_digest(fake, tmp_path, monkeypatc
     for name in ("play.chapter_1_a", "play.chapter_1_b", "play.chapter_2_a"):
         assert f"PASS    {name}" in text
     assert "starts.chapter_2" not in text  # a start state has no checkpoints
-    chain = (tmp_path / "pt" / "run_01" / "chain.txt").read_text()
+    chain = (tmp_path / "pt" / "run_01" / "chain.txt").read_text(encoding="utf-8")
     assert chain.splitlines()[0].startswith("play.chapter_1_a s60000 step 60000")
     assert text.strip().splitlines()[-1] == f"playthrough: digest {digest(chain)}"
 
