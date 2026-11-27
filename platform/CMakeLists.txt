@@ -145,6 +145,47 @@ file(
         "// Generated from platform/categories/*.mtcat by platform/CMakeLists.txt (#406).\n#include \"run_timer.h\"\n\nnamespace maplethief::frontend {\n\nstd::vector<std::pair<std::string, std::string>> shipped_run_category_files() {\n    return {\n${_maplethief_category_entries}    };\n}\n\n} // namespace maplethief::frontend\n"
     @ONLY)
 target_sources(maplethief_frontend PRIVATE "${_maplethief_categories_cpp}")
+# The port's own translations (#373, ADR 0222, port_text.h): each lang/<tag>/ is a text pack of
+# our own text only (textpack.strings and Port.strings), embedded as bytes in a generated source
+# (no string literal: MSVC caps those at 64 KiB), re-generated when a file changes.
+file(GLOB _maplethief_langs CONFIGURE_DEPENDS LIST_DIRECTORIES true "${CMAKE_CURRENT_SOURCE_DIR}/lang/*")
+list(SORT _maplethief_langs)
+set(_maplethief_lang_arrays "")
+set(_maplethief_lang_entries "")
+foreach(_dir IN LISTS _maplethief_langs)
+    if(NOT IS_DIRECTORY "${_dir}")
+        continue()
+    endif()
+    get_filename_component(_tag "${_dir}" NAME)
+    string(MAKE_C_IDENTIFIER "${_tag}" _id)
+    foreach(_part manifest port)
+        if(_part STREQUAL "manifest")
+            set(_file "${_dir}/textpack.strings")
+        else()
+            set(_file "${_dir}/Port.strings")
+        endif()
+        if(NOT EXISTS "${_file}")
+            message(FATAL_ERROR "${_dir}: has no ${_file}")
+        endif()
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_file}")
+        file(READ "${_file}" _hex HEX)
+        string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _hex "${_hex}")
+        # Sixteen bytes per line.
+        string(REPEAT "0x[0-9a-f][0-9a-f]," 16 _line)
+        string(REGEX REPLACE "(${_line})" "\\1\n" _hex "${_hex}")
+        string(APPEND _maplethief_lang_arrays "const unsigned char k_${_id}_${_part}[] = {\n${_hex}0};\n")
+    endforeach()
+    string(APPEND _maplethief_lang_entries
+           "        {\"${_tag}\", {reinterpret_cast<const char *>(k_${_id}_manifest), sizeof k_${_id}_manifest - 1}, {reinterpret_cast<const char *>(k_${_id}_port), sizeof k_${_id}_port - 1}},\n")
+endforeach()
+set(_maplethief_langs_cpp "${CMAKE_CURRENT_BINARY_DIR}/port_languages.cpp")
+file(
+    CONFIGURE
+    OUTPUT "${_maplethief_langs_cpp}"
+    CONTENT
+        "// Generated from platform/lang/*/ by platform/CMakeLists.txt (#373).\n#include \"port_text.h\"\n\nnamespace maplethief::frontend {\n\nnamespace {\n\n${_maplethief_lang_arrays}\n} // namespace\n\nstd::vector<ShippedLanguageFiles> shipped_port_language_files() {\n    return {\n${_maplethief_lang_entries}    };\n}\n\n} // namespace maplethief::frontend\n"
+    @ONLY)
+target_sources(maplethief_frontend PRIVATE "${_maplethief_langs_cpp}")
 target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
 # The build type and optimisation level of the start-up log (#136, ADR 0134, build_info.h).
 if(MSVC)

@@ -62,41 +62,14 @@ std::string quoted(const std::string &s) {
 
 // The port's English by key, for Port.strings and its check: built once.
 struct PortEnglish {
-    std::vector<std::pair<std::string, std::string>> rows; // in the export's order
-    std::set<std::string> keys;
+    std::vector<std::pair<std::string, std::string>> rows;   // in the export's order
     std::vector<std::pair<std::string, std::string>> sorted; // for lookups
 };
 
 const PortEnglish &port_english() {
     static const PortEnglish table = [] {
         PortEnglish t;
-        const auto add = [&t](std::string key, const char *english) {
-            if (english != nullptr && t.keys.insert(key).second) {
-                t.rows.emplace_back(std::move(key), english);
-            }
-        };
-        for (std::size_t i = 0; i < static_cast<std::size_t>(Txt::kCount); ++i) {
-            add(port_text_key(static_cast<Txt>(i)), port_text_english(static_cast<Txt>(i)));
-        }
-        for (const SettingInfo &r : settings_registry()) {
-            add(std::string("setting.") + r.key + ".label", r.label);
-            add(std::string("setting.") + r.key + ".help", r.help);
-            if (r.help_pad != nullptr) {
-                add(std::string("setting.") + r.key + ".help_pad", r.help_pad);
-            }
-        }
-        for (const MenuActionInfo &a : menu_actions()) {
-            const std::string base = std::string("action.") + a.key + ".";
-            add(base + "label", a.label);
-            add(base + "help", a.help);
-            if (a.help_pad != nullptr) {
-                add(base + "help_pad", a.help_pad);
-            }
-            add(base + "button", a.button);
-            if (a.confirm != nullptr) {
-                add(base + "confirm", a.confirm);
-            }
-        }
+        t.rows = port_text_rows();
         t.sorted = t.rows;
         std::sort(t.sorted.begin(), t.sorted.end());
         return t;

@@ -28,7 +28,7 @@
 //              [--fix-original-bugs on|off] [--keypad-layout L] [--edit-keypad]
 //              [--preset original|original_controller|enhanced|custom]
 //              [--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off]
-//              [--language en|ko]
+//              [--language en|ko] [--menu-language auto|en|ko|nl]
 //              [--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR]
 //              [--border color|blur|image] [--border-image FILE]
 //              [--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3]
@@ -123,9 +123,9 @@
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
 // gapless_music, audio_mono, audio_device, audio_pack, ios_audio, text_pack, right_touch,
 // hide_keypad, rumble, rumble_strength, rumble_events, perf_overlay, pacing, fullscreen, vsync,
-// pause_unfocused, language, menu_repeat, confirm_guard, focus_highlight, button_prompts,
-// button_labels, pad_pointer, border, border_image, game_speed, fast_forward, autosave,
-// ui_animations, turbo_attack, auto_potion, skip_intros, minimap, exp_percent, auto_run,
+// pause_unfocused, language, menu_language, menu_repeat, confirm_guard, focus_highlight,
+// button_prompts, button_labels, pad_pointer, border, border_image, game_speed, fast_forward,
+// autosave, ui_animations, turbo_attack, auto_potion, skip_intros, minimap, exp_percent, auto_run,
 // hold_toggle, auto_loot, save_states, pause_on_disconnect); the command line overrides it. Every
 // setting's flag is its registry row's (settings.h), checked as its file line would be. The
 // placeholder and the prototype (tests) read no settings file.
@@ -150,6 +150,8 @@
 //   --pause-unfocused on|off  the window losing focus pauses the game as a minimise does
 //                     (default off; lifecycle.h)
 //   --language en|ko  the game's language (default en; MAPLETHIEF_LANGUAGE overrides it)
+//   --menu-language auto|en|ko|nl  the port's menus (default auto: the system's language, else
+//                     English; the hint SDL_PREFERRED_LOCALES overrides the system's; #373)
 //   In an interactive run without --window, <data dir>/window.ini keeps the window's size and
 //   position from one run to the next. F12, a gamepad's Share button or R3 + Back write a
 //   screenshot to <data dir>/screenshots/; the cursor hides while the keyboard or a gamepad
@@ -377,6 +379,7 @@
 #include "pack_tools.h"
 #include "packs.h"
 #include "player_log.h"
+#include "port_text.h"
 #include "present.h"
 #include "preset_picker.h"
 #include "run_recorder.h"
@@ -1778,6 +1781,10 @@ int main(int argc, char *argv[]) {
         }
         settings = recorded;
     }
+    // The port's menus in the player's language from the first screen on (#373, port_text.h):
+    // menu_language, whose default auto follows the system's, so the start question, the import
+    // screen and the preset picker of a first start (no settings.ini yet) are in it.
+    apply_menu_language(settings.menu_language);
 
     // The last run's crash (#198): offer a safe start, before anything uses the settings. The
     // marker is set now, so a crash during the start counts too.

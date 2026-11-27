@@ -477,6 +477,10 @@ std::string SettingsMenu::row_value(std::size_t i) const {
             return tr(Txt::menu_not_available);
         }
         const std::string text = setting_text(*live_, *it.setting);
+        // The menu language (#373): its name as it calls itself.
+        if (std::string_view(it.setting->key) == "menu_language") {
+            return menu_language_name(text);
+        }
         // A texture, audio or text pack row (#370, packs.h): its list's first pack by name.
         if (pack_kind_of(it.setting->key)) {
             return pack_list_summary(text, tr(Txt::menu_pack_none));
