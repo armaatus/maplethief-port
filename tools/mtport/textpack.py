@@ -263,7 +263,9 @@ def places(s: str) -> set[int]:
 
 _C_STRING = r'"(?:[^"\\]|\\.)*"'
 _DEF = re.compile(r"MT_TEXT\(\s*(\w+)\s*,\s*((?:" + _C_STRING + r"\s*)+)\)")
-_FIELD = re.compile(r"\.(key|label|help|button|confirm)\s*=\s*((?:" + _C_STRING + r"\s*)+)")
+_FIELD = re.compile(
+    r"\.(key|label|help_pad|help|button|confirm)\s*=\s*((?:" + _C_STRING + r"\s*)+)"
+)
 
 
 def _c_literal(chunk: str) -> str:
@@ -296,12 +298,19 @@ def port_english(repo: Path = REPO) -> dict[str, str]:
     """Every key of Port.strings with its English: the table, the registry, the menu actions."""
     out: dict[str, str] = {}
     src = repo / "platform" / "src"
-    for m in _DEF.finditer((src / "port_text.def").read_text(encoding="utf-8")):
+    table = (src / "port_text.def").read_text(encoding="utf-8")
+    for m in _DEF.finditer(re.sub(r"^\s*//.*$", "", table, flags=re.M)):  # not the comments
         out[m[1]] = _c_literal(m[2])
     settings = (src / "settings.cpp").read_text(encoding="utf-8")
-    out.update(_rows(settings, "kRegistry[] = {", ("label", "help"), "setting"))
+    out.update(_rows(settings, "kRegistry[] = {", ("label", "help", "help_pad"), "setting"))
     menu = (src / "settings_menu.cpp").read_text(encoding="utf-8")
-    out.update(_rows(menu, "kActions[] = {", ("label", "help", "button", "confirm"), "action"))
+    actions = _rows(
+        menu, "kActions[] = {", ("label", "help", "help_pad", "button", "confirm"), "action"
+    )
+    for k in list(actions):
+        if k.endswith(".label"):  # MenuActionInfo's default button
+            actions.setdefault(k[: -len("label")] + "button", "Open...")
+    out.update(actions)
     return out
 
 
