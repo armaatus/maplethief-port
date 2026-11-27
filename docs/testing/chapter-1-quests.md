@@ -134,6 +134,9 @@ main quest that never reads 2: the game ends it by clearing it, not by a reward.
 not dropped: `CQuestList::ClearAll` `0x7C61D` renumbers it main 40, chapter 2's first main quest
 (`ok: main 20's record carried into chapter 2 as main 40, the only active quest`; #388,
 [re/original-bugs.md](../re/original-bugs.md#16-chapter-1s-main-quest-20-is-never-completed)).
+The trip resets the quests only (#307): `ok: the trip kept the hero: level 34 EXP 2152 max HP
+640 max MP 640 job 2/2; items … meso 9710`. The level, EXP, maximums, job, every item and
+equipment slot and the meso read the same before and after it.
 
 ### Side quests
 

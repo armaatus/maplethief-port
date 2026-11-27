@@ -1492,7 +1492,8 @@ set_tests_properties(
 # starts.<name> builds tests/starts/<name>.json into the test output directory with
 # mtport.savedata (skipped, 77, without your own copy); each play test loads it (MT_FROM_SAVE).
 # The jobs_* modes talk to the Dark Lord by play at each of the knowledge base's advancement
-# points, the skills_* modes learn and use every skill of a branch with its rule checked. The
+# points, the skills_* modes learn and use every skill of a branch with its rule checked (the
+# skills_weapon_* modes: the passives and buffs without the branch's weapon, #307). The
 # systems2_* modes (#304, docs/testing/systems-sweep-2.md) buy every cash shop tile, restore the
 # four receipt lists, use the 10 scrolls, open the Pigmy dialog and take portal620. Their starts
 # equal no chained state yet, so the tests are named synthetic (start-states.md).
@@ -1508,6 +1509,8 @@ set(_starts
     jobs_ch3_bandit_60
     skills_assassin
     skills_bandit
+    skills_weapon_assassin
+    skills_weapon_bandit
     systems2_cash
     systems2_scrolls_success
     systems2_scrolls_failure
@@ -1542,6 +1545,8 @@ set(_from_starts
     jobs_3_4_bandit:jobs_ch3_bandit_60
     skills_assassin:skills_assassin
     skills_bandit:skills_bandit
+    skills_weapon_assassin:skills_weapon_assassin
+    skills_weapon_bandit:skills_weapon_bandit
     systems2_cash_tiles:systems2_cash
     systems2_cash_restores:systems2_cash
     systems2_scrolls_success:systems2_scrolls_success

@@ -100,3 +100,28 @@ every field tick:
 
 Each run prints one `skills:` line per skill with its counts and an example hit, and fails on
 the first value off a rule.
+
+## The weapon rules of passives and buffs
+
+[#307](https://github.com/armaatus/maplethief-port/issues/307): the same two heroes without
+their branch's weapon. `play.skills_weapon_assassin_synthetic` loads the Assassin with nothing
+worn (`tests/starts/skills_weapon_assassin.json`), `play.skills_weapon_bandit_synthetic` the
+Bandit with claw `44` and stars (`tests/starts/skills_weapon_bandit.json`). Each learns its
+branch's passives to level 2, the stat rule checked as above, then puts each buff on quick slot 3
+and presses it up to three times: cast (on the buff list, its MP paid) or refused (no buff, MP
+unchanged).
+
+| Test | Passives (rule held) | Buffs |
+| --- | --- | --- |
+| `play.skills_weapon_assassin_synthetic` | 4, 6, 8, 9, 11 | 5, 12, 14 cast |
+| `play.skills_weapon_bandit_synthetic` | 4, 15, 17, 18, 20 | 5, 19, 21, 22 cast |
+
+So `CSkill::setActiveSkill` `0x7EFF1`'s weapon check holds for the attack skills only
+([re/mechanics.md](../re/mechanics.md#attacking-hit-areas-targets-and-stars)). The Assassin run also checks that a
+hero with nothing worn and no skill has exactly the level's `hero.dat` attack, defense,
+accuracy and avoidability (`ok: level 50: ATT DEF ACC AVOID 64 63 61 52, hero.dat 64 63 61
+52`).
+
+```sh
+ctest --preset mac-debug -R "play\.skills_weapon"
+```
