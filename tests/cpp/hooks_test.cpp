@@ -432,6 +432,40 @@ TEST_CASE("hooks: restored_content's shops: three merchants, both hooks on or of
     CHECK(stats.opened == 0);
 }
 
+TEST_CASE("hooks: restored_content's Monster Carnival: three towns, the wrapper on or off (#427)") {
+    Fresh fresh;
+    // Spiegelman1-3 on Kerning City, Orbis Village and Magatia Village, beside their etc
+    // merchants (docs/re/original-bugs.md, Unreachable content).
+    const mt_restored_carnival_npc *kerning = mt_restored_carnival_npc_on(0, 0);
+    const mt_restored_carnival_npc *orbis = mt_restored_carnival_npc_on(4, 0);
+    const mt_restored_carnival_npc *magatia = mt_restored_carnival_npc_on(6, 0);
+    REQUIRE(kerning != nullptr);
+    REQUIRE(orbis != nullptr);
+    REQUIRE(magatia != nullptr);
+    CHECK(std::string(kerning->script) == "Spiegelman1");
+    CHECK(std::string(orbis->script) == "Spiegelman2");
+    CHECK(std::string(magatia->script) == "Spiegelman3");
+    CHECK((kerning->ticket == 47 && orbis->ticket == 48 && magatia->ticket == 49));
+    CHECK((kerning->shop == 5 && orbis->shop == 11 && magatia->shop == 15));
+    CHECK((kerning->cell == 19 * 40 + 14 && orbis->cell == 21 * 45 + 20 &&
+           magatia->cell == 6 * 57 + 31));
+    CHECK((kerning->price > 0 && kerning->price < orbis->price && orbis->price < magatia->price));
+    // Every other map keeps its list: the rooms, the other towns.
+    CHECK(mt_restored_carnival_npc_on(0, 5) == nullptr);
+    CHECK(mt_restored_carnival_npc_on(4, 18) == nullptr);
+    CHECK(mt_restored_carnival_npc_on(6, 3) == nullptr);
+    CHECK(mt_restored_carnival_npc_on(9, 0) == nullptr);
+    CHECK(mt_restored_carnival_npc_on(0, 1) == nullptr);
+    mt_hooks_install_restored_carnival(1);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_MAP_LOAD_OBJ) == 1);
+    mt_hooks_install_restored_carnival(0);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_MAP_LOAD_OBJ) == 0);
+    const mt_restored_carnival_stats stats = mt_hooks_restored_carnival_stats();
+    CHECK(stats.npcs == 0);
+    CHECK(stats.tickets == 0);
+    CHECK(stats.rounds == 0);
+}
+
 // --- PopupMenu_QuestTabOnKey 0x5462D: the quest page fix (#167) ------------------------------
 
 namespace {
