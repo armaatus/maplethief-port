@@ -8,6 +8,7 @@ Thanks for wanting to help! Bug reports, playtesting, code and docs are all welc
 - **Request a feature**: the [feature request](https://github.com/armaatus/maplethief-port/issues/new?template=feature.yml) is for something concrete; a loose idea fits better in Discussions.
 - **Playtest**: play through a part of the game and note anything that differs from the iPhone. [docs/testing/](docs/testing/README.md) has step-by-step runs.
 - **Ask a question or suggest an idea** in [Discussions](https://github.com/armaatus/maplethief-port/discussions): Q&A for questions, Ideas for suggestions. Start with the [FAQ](https://github.com/armaatus/maplethief-port/discussions/418).
+- **Translate the port's menus** into your language, or fix a translation: [Translating the port's menus](docs/build/how-to/translation.md) is a text file to edit and a test that lists what is missing.
 - **Improve the docs**: if something in [the player guide](docs/play/README.md) confused you, it will confuse others. A pull request or an issue is welcome.
 
 ## Triage
@@ -54,6 +55,7 @@ Step-by-step guides for the changes most contributions are made of, each followe
 - [Adding an HLE function](docs/build/how-to/hle-function.md): an iOS library function the game calls (`memcpy`, `CFStringGetLength`)
 - [Adding a selector on a host class](docs/build/how-to/host-selector.md): a method of a framework class (`-[UIView setFrame:]`)
 - [Adding a setting](docs/build/how-to/setting.md): a `settings.ini` key with its flag, presets, menu row and tests
+- [Translating the port's menus](docs/build/how-to/translation.md): fix a text or add a language to `platform/lang/`
 - [Debugging a trap](docs/build/how-to/trap.md): from a crash report to the cause, with symbols, traces and the unimplemented report
 
 For reverse engineering: [the notes](docs/re/README.md) say what is known, the [Ghidra tools](tools/ghidra/README.md) build a project of the game, and their [naming contract](tools/ghidra/README.md#naming-contract) is how a name you find gets into it and survives a re-import. `scripts/re-analyze` rebuilds every names file, the Ghidra project and the generated notes after a change. `scripts/difftest` checks the recompiler's lifted functions against an emulator (local only). Every `MAPLETHIEF_*` environment variable is in [Running and options](docs/build/running.md#environment-variables).

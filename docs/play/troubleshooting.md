@@ -111,6 +111,8 @@ When you [report a problem](https://github.com/armaatus/maplethief-port/issues/n
 
 **Can I help?** Yes. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
+**Can the menus be in my language?** The port's own menus are in English, Dutch and Korean (a draft): the Menu language row in the settings menu's Other tab, or `auto` to follow your system. To add your language, or fix a text: [Translating the port's menus](../build/how-to/translation.md). The game's own text stays in English or Korean (the `language` setting).
+
 **My question isn't here.** Ask in [Discussions](https://github.com/armaatus/maplethief-port/discussions/categories/q-a). Its [FAQ](https://github.com/armaatus/maplethief-port/discussions/418) sums up this page.
 
 ## A crash or a bug to report

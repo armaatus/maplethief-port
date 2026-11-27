@@ -114,7 +114,7 @@ TEST_CASE("menu languages: every port text has a translation in each shipped lan
                                    std::end(fe::kMenuLanguageNames));
     CHECK(names == fe::menu_languages());
     CHECK(std::string(fe::kMenuLanguageNames[0]) == "auto");
-    REQUIRE(languages.size() == 2);
+    REQUIRE(languages.size() >= 2);
     for (const fe::ShippedLanguage &l : languages) {
         CAPTURE(l.tag);
         CHECK(l.error.empty());
@@ -145,11 +145,16 @@ TEST_CASE("menu languages: every port text has a translation in each shipped lan
         CHECK_MESSAGE(l.unknown.empty(), "keys the port has no text for:\n" << unknown);
         CHECK(l.texts.size() == rows.size());
     }
-    // The Korean is a draft until a speaker reviews it; the Dutch is reviewed.
+    // A language is a draft until a second speaker reviews it (#375,
+    // docs/build/how-to/translation.md): the Dutch is reviewed, the Korean and a new language
+    // are drafts. Taking a language off this list, or onto it, is a deliberate change.
+    const std::set<std::string> reviewed = {"nl"};
     for (const fe::ShippedLanguage &l : languages) {
         CAPTURE(l.tag);
-        CHECK((l.description.rfind("Draft", 0) == 0) == (l.tag == "ko"));
+        CHECK((l.description.rfind("Draft", 0) == 0) == (reviewed.count(l.tag) == 0));
     }
+    CHECK(std::any_of(languages.begin(), languages.end(),
+                      [](const fe::ShippedLanguage &l) { return l.tag == "ko"; }));
 }
 
 TEST_CASE("menu languages: auto follows the system's preferred languages; a set one stays") {
