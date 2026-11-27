@@ -91,10 +91,23 @@ The data folder is `sdmc:/switch/maplethief/data` on the SD card, with the same 
 
 An import checks every file first. If anything would break the game (a cut-off file, an item the game doesn't have, a character without its quest file) it refuses the whole set, changes nothing and says why. The saves it replaces are backed up first.
 
+## Saves from another folder
+
+Settings menu → Saves → **Saves from a folder** (from the title or the main menu) lists the folders the game can bring saves from, and imports the one you choose:
+
+- **the other data folder**: the user folder when your data is next to the game, or the game folder's `data` when it is in the user folder ([above](#the-user-folder-instead));
+- **every folder in `import`** that holds saves: an old version's `data` folder, a copy of a friend's `saves`, an old build's `Documents`. Copy the folder into `import` first.
+
+It asks *Bring the saves of …? The files they replace are backed up first.* with **No** selected; Right for **Yes**. Only the saves are brought over, checked and backed up as any import; the other folder is never changed. To bring a whole data folder over, settings and backups too, start the game once with `--migrate-from <folder>` instead.
+
+## Checking your saves
+
+Settings menu → Saves → **Check saves** runs every file in `saves` through the checks an import uses and lists them with their verdict: `ok`, or the rule a file breaks (`bad_size`, `bad_item`, `bad_map`, …). Choose a row to read the reason. It only reads: nothing is changed. A file that fails was most likely edited or copied in by hand; restore a backup of that slot (**Backups**) or import a good copy. From the command line: `MapleThief --check-saves <folder or zip>`.
+
 ## Sharing saves through Dropbox, iCloud or OneDrive
 
 Set `save_dir` in `settings.ini` to a folder in your cloud drive, for example `save_dir = C:\Users\you\Dropbox\MapleThief`. Every computer that points there plays the same saves, and the achievements (`gamecenter.json` sits with the saves). Settings and backups stay on each computer. Don't play the same slot on two computers at once.
 
 ## Bringing your iPhone or iPod save over
 
-If the original game is still installed on your device, you can bring your character along. You make a backup of the device with Finder or iTunes and run one command. Step by step: [Saves from your iPhone](iphone-saves.md).
+If the original game is still installed on your device, you can bring your character along. Make an unencrypted backup of the device with Finder, Apple Devices or iTunes, then on the title screen open the settings menu → Saves → **iPhone backup** and choose it. Step by step: [Saves from your iPhone](iphone-saves.md).
