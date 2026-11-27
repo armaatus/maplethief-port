@@ -672,7 +672,8 @@ struct Settings {
     // restored_content, --restored-content (on | off; #389, ADR 0069's #379 addendum,
     // docs/re/original-bugs.md "Unreachable content"): content the game ships but no path
     // reaches (Monster Carnival, shops 0, 1 and 16, the unreached maps) made reachable, each
-    // by its own follow-up. Never a bug fix, so off in every preset; off is the original.
+    // by its own follow-up (#426: the shops, restored_content.h). Never a bug fix, so off in
+    // every preset; off is the original.
     bool restored_content = false;
     // Texture packs (#153, ADR 0081, maplethief/texpack.h): texture_pack, --texture-pack DIR
     // (empty: none), a directory of replacements made from the player's own dump; and

@@ -453,6 +453,11 @@
 "packs_verdict_problems" = "opent, {0} bruikbaar, {1} afgewezen";
 "packs_verdict_refused" = "geweigerd";
 "packs_check_fine" = "{0}: niets te herstellen";
+"restored_shop_line" = "Waar ben je naar op zoek?";
+"restored_shop_usual" = "Mijn gewone waren";
+"restored_shop_0" = "Alle uitrusting";
+"restored_shop_1" = "Alle benodigdheden";
+"restored_shop_16" = "Ertsen en edelstenen voor de smid";
 "setting.scale_mode.label" = "Schaalmodus";
 "setting.scale_mode.help" = "Hoe het beeld het venster vult: integer is scherp, fit vult er meer van";
 "setting.border_color.label" = "Randkleur";

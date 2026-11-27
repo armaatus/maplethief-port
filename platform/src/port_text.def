@@ -569,3 +569,11 @@ MT_TEXT(packs_verdict_opens, "opens, {0} usable")
 MT_TEXT(packs_verdict_problems, "opens, {0} usable, {1} rejected")
 MT_TEXT(packs_verdict_refused, "refused")
 MT_TEXT(packs_check_fine, "{0}: nothing to fix")
+
+// The restored shops' list box (#426, restored_content): drawn by the game's chat box, the
+// merchant's line and the rows of his usual shop and of shop 0, 1 or 16.
+MT_TEXT(restored_shop_line, "What are you looking for?")
+MT_TEXT(restored_shop_usual, "My usual goods")
+MT_TEXT(restored_shop_0, "Every piece of equipment")
+MT_TEXT(restored_shop_1, "Every supply")
+MT_TEXT(restored_shop_16, "Ores and gems for the smith")

@@ -33,6 +33,7 @@ constexpr CensusSite kSites[] = {
     {"game.cpp", "mt_hooks_install_original_bug_fixes", P, nullptr, "fix_original_bugs"},
     {"game.cpp", "mt_hooks_install_quest_page_fix", P, nullptr, "always on"},
     {"game.cpp", "mt_hooks_install_text_wrap_guard", P, nullptr, "always on"},
+    {"restored_content.cpp", "mt_hooks_install_restored_shops", P, nullptr, "restored_content"},
     {"game.cpp", "mt_hooks_install_screen_shake", P, nullptr, "screen_shake"},
     {"game.cpp", "mt_hooks_install_flashes", P, nullptr, "flashes"},
     {"game.cpp", "mt_hooks_install_native_script_vm", P, nullptr,

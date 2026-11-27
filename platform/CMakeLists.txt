@@ -89,6 +89,7 @@ add_library(
     src/remap.cpp
     src/render_scale.cpp
     src/replay.cpp
+    src/restored_content.cpp
     src/rumble.cpp
     src/run_census.cpp
     src/run_file.cpp
