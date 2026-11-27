@@ -5,7 +5,8 @@
 // file is read (at most k_max_file bytes) when its upload comes, its PNG signature and header
 // size are checked against the upload before stb_image (PNG only) decodes it, and the decoded
 // size is checked again. A rejected file is logged once and never read
-// again; the game's texture is kept.
+// again; the next pack is asked (#421: the first of up to MT_PACKS_MAX packs that has a good file
+// wins), then the game's texture is kept.
 #include "maplethief/texpack.h"
 
 #include <cstdarg>
@@ -213,11 +214,10 @@ struct File {
 };
 
 struct Pack {
-    bool open = false;
     std::string dir;
     std::unordered_map<Key, File, KeyHash> files;
     std::map<std::string, File> ui; // by bundle path
-    std::vector<u8> pixels;         // the replacement handed out last
+    mt_pack_use use{};              // its counts (use.dir set when read)
 };
 
 struct Dump {
@@ -229,13 +229,14 @@ struct Dump {
     std::vector<u8> rgba;
 };
 
-Pack g_pack;
+std::vector<Pack> g_packs; // in the list's order: the first that has a good file wins
+std::vector<u8> g_pixels;  // the replacement handed out last
 Dump g_dump;
 mt_texpack_stats g_stats{};
 u32 g_max_files = MT_TEXPACK_MAX_FILES; // the files a pack indexes (lower in a test)
 
 // Reads and checks a pack file for an image of want_w x want_h (the upload's or the UIKit
-// image's size): a PNG k times that size. Decoded into g_pack.pixels (straight or as stored),
+// image's size): a PNG k times that size. Decoded into g_pixels (straight or as stored),
 // its factor into *k_out.
 bool load(File &file, u32 want_w, u32 want_h, const char *what, u32 *k_out) {
     if (file.bad) {
@@ -272,37 +273,55 @@ bool load(File &file, u32 want_w, u32 want_h, const char *what, u32 *k_out) {
              why.c_str(), what);
         return false;
     }
-    g_pack.pixels.assign(d.pixels->begin(), d.pixels->end());
+    g_pixels.assign(d.pixels->begin(), d.pixels->end());
     *k_out = k;
     return true;
 }
 
-// The pack's mt_gfx hook.
+// Pack `winner` answered an entry: each later pack that has it too counts it as hidden.
+template <typename Has> void note_hidden(std::size_t winner, Has has) {
+    for (std::size_t j = winner + 1; j < g_packs.size(); ++j) {
+        if (has(g_packs[j])) {
+            ++g_packs[j].use.hidden;
+            ++g_packs[j].use.hidden_by[winner];
+        }
+    }
+}
+
+// The packs' mt_gfx hook: the first pack with a good file for the upload replaces it.
 int pack_replace(void *, const mt_gfx_upload *up, mt_gfx_replacement *out) noexcept {
+    bool had = false;
     try {
         ++g_stats.uploads;
-        const auto it = g_pack.files.find(Key{up->hash, up->width, up->height});
-        if (it == g_pack.files.end()) {
-            ++g_stats.missing;
-            return 0;
+        const Key key{up->hash, up->width, up->height};
+        for (std::size_t i = 0; i < g_packs.size(); ++i) {
+            Pack &pack = g_packs[i];
+            const auto it = pack.files.find(key);
+            if (it == pack.files.end()) {
+                continue;
+            }
+            had = true;
+            u32 k = 0;
+            if (!load(it->second, up->width, up->height, "texture", &k)) {
+                ++pack.use.rejected;
+                continue;
+            }
+            if (!it->second.raw) {
+                premultiply(g_pixels);
+            }
+            out->pixels = g_pixels.data();
+            out->width = k * up->width;
+            out->height = k * up->height;
+            ++pack.use.replaced;
+            ++g_stats.replaced;
+            note_hidden(i, [&key](const Pack &p) { return p.files.count(key) != 0; });
+            return 1;
         }
-        u32 k = 0;
-        if (!load(it->second, up->width, up->height, "texture", &k)) {
-            ++g_stats.rejected;
-            return 0;
-        }
-        if (!it->second.raw) {
-            premultiply(g_pack.pixels);
-        }
-        out->pixels = g_pack.pixels.data();
-        out->width = k * up->width;
-        out->height = k * up->height;
-        ++g_stats.replaced;
-        return 1;
     } catch (const std::bad_alloc &) {
-        ++g_stats.rejected;
-        return 0;
+        had = true;
     }
+    ++(had ? g_stats.rejected : g_stats.missing);
+    return 0;
 }
 
 std::string json_hex(u32 v) {
@@ -367,7 +386,7 @@ int dump_observe(void *, const mt_gfx_upload *up, mt_gfx_replacement *) noexcept
     return 0;
 }
 
-// The UIKit image hook: the dump (once per file), then the pack's ui/ file.
+// The UIKit image hook: the dump (once per file), then the first pack with a good ui/ file.
 int image_hook(void *, const mt_cg_image_file *image, mt_cg_image_replacement *out) noexcept {
     try {
         const std::string rel = image->file != nullptr ? image->file : "";
@@ -386,24 +405,33 @@ int image_hook(void *, const mt_cg_image_file *image, mt_cg_image_replacement *o
                 logf("texpack: the dump cannot write ui/%s", rel.c_str());
             }
         }
-        if (!g_pack.open) {
+        if (g_packs.empty()) {
             return 0;
         }
         ++g_stats.ui_images;
-        const auto it = g_pack.ui.find(rel);
-        if (it == g_pack.ui.end()) {
-            return 0;
+        bool had = false;
+        for (std::size_t i = 0; i < g_packs.size(); ++i) {
+            Pack &pack = g_packs[i];
+            const auto it = pack.ui.find(rel);
+            if (it == pack.ui.end()) {
+                continue;
+            }
+            had = true;
+            u32 k = 0;
+            if (!load(it->second, image->width, image->height, "image", &k)) {
+                ++pack.use.rejected;
+                continue;
+            }
+            out->rgba = g_pixels.data();
+            out->width = k * image->width;
+            out->height = k * image->height;
+            ++pack.use.replaced;
+            ++g_stats.ui_replaced;
+            note_hidden(i, [&rel](const Pack &p) { return p.ui.count(rel) != 0; });
+            return 1;
         }
-        u32 k = 0;
-        if (!load(it->second, image->width, image->height, "image", &k)) {
-            ++g_stats.ui_rejected;
-            return 0;
-        }
-        out->rgba = g_pack.pixels.data();
-        out->width = k * image->width;
-        out->height = k * image->height;
-        ++g_stats.ui_replaced;
-        return 1;
+        g_stats.ui_rejected += had ? 1u : 0u;
+        return 0;
     } catch (const std::bad_alloc &) {
         return 0;
     }
@@ -433,7 +461,7 @@ bool regular_file(const fs::directory_entry &entry, Links *links) {
 }
 
 void update_image_hook() {
-    mt_cg_set_image_replace_hook(g_pack.open || g_dump.open ? image_hook : nullptr, nullptr);
+    mt_cg_set_image_replace_hook(!g_packs.empty() || g_dump.open ? image_hook : nullptr, nullptr);
 }
 
 void reset_pack_stats() {
@@ -461,6 +489,10 @@ extern "C" void mt_texpack_file_name(uint64_t hash, uint32_t width, uint32_t hei
 
 extern "C" int mt_texpack_open(const char *dir) noexcept {
     mt_texpack_close();
+    return mt_texpack_add(dir);
+}
+
+extern "C" int mt_texpack_add(const char *dir) noexcept {
     try {
         const fs::path root = host_path(dir != nullptr ? dir : "");
         std::error_code ec;
@@ -468,7 +500,11 @@ extern "C" int mt_texpack_open(const char *dir) noexcept {
             logf("texpack: the pack %s is no directory: no pack", dir != nullptr ? dir : "");
             return -1;
         }
-        reset_pack_stats();
+        if (g_packs.size() >= MT_PACKS_MAX) {
+            logf("texpack: the pack %s is not opened: at most %u texture packs at once", dir,
+                 static_cast<unsigned>(MT_PACKS_MAX));
+            return -1;
+        }
         Pack pack;
         pack.dir = dir;
         u64 ignored = 0, skipped = 0;
@@ -529,30 +565,49 @@ extern "C" int mt_texpack_open(const char *dir) noexcept {
             logf("texpack: pack %s: %llu files past the first %u skipped", dir,
                  static_cast<unsigned long long>(skipped), static_cast<unsigned>(g_max_files));
         }
-        pack.open = true;
-        g_pack = std::move(pack);
-        g_stats.files = static_cast<u32>(g_pack.files.size());
-        g_stats.ui_files = static_cast<u32>(g_pack.ui.size());
-        mt_gfx_add_replace_hook(MT_GFX_REPLACE_ORDER_PACK, pack_replace, nullptr);
+        const auto files = static_cast<u32>(pack.files.size());
+        const auto ui_files = static_cast<u32>(pack.ui.size());
+        if (g_packs.empty()) {
+            reset_pack_stats();
+            // One hook walks every pack, so the chain's slots are not spent on packs.
+            mt_gfx_add_replace_hook(MT_GFX_REPLACE_ORDER_PACK, pack_replace, nullptr);
+            g_packs.reserve(MT_PACKS_MAX); // a pack's dir stays where mt_texpack_pack_use put it
+        }
+        g_packs.push_back(std::move(pack));
+        g_stats.files += files;
+        g_stats.ui_files += ui_files;
         update_image_hook();
-        logf("texpack: pack %s: %u textures, %u UIKit images%s", dir,
-             static_cast<unsigned>(g_stats.files), static_cast<unsigned>(g_stats.ui_files),
+        logf("texpack: pack %s: %u textures, %u UIKit images%s", dir, static_cast<unsigned>(files),
+             static_cast<unsigned>(ui_files),
              ignored != 0 ? (", " + std::to_string(ignored) + " other files ignored").c_str() : "");
-        return static_cast<int>(g_stats.files + g_stats.ui_files);
+        return static_cast<int>(files + ui_files);
     } catch (const std::exception &) {
-        g_pack = Pack{};
         logf("texpack: the pack %s cannot be indexed: no pack", dir);
         return -1;
     }
 }
 
 extern "C" void mt_texpack_close(void) noexcept {
-    if (!g_pack.open) {
+    if (g_packs.empty()) {
         return;
     }
     mt_gfx_remove_replace_hook(pack_replace, nullptr);
-    g_pack = Pack{};
+    g_packs.clear();
+    g_pixels = {};
     update_image_hook();
+}
+
+extern "C" uint32_t mt_texpack_pack_count(void) noexcept {
+    return static_cast<u32>(g_packs.size());
+}
+
+extern "C" int mt_texpack_pack_use(uint32_t index, mt_pack_use *out) noexcept {
+    if (index >= g_packs.size() || out == nullptr) {
+        return -1;
+    }
+    *out = g_packs[index].use;
+    out->dir = g_packs[index].dir.c_str();
+    return 0;
 }
 
 extern "C" int mt_texpack_dump_open(const char *dir) noexcept {

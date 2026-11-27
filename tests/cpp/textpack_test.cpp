@@ -1,8 +1,8 @@
 // Text packs (#189, ADR 0108, maplethief/textpack.h) on synthetic packs written at run time: the
 // .strings rules (tools/mtport/textpack.py's tests check the same cases), the manifest, a table
 // row written into a synthetic table, a missing key falling back, invalid UTF-8 refused with its
-// reason, the Korean encodings with a pack open, and the Text_Wrap hooks' steps. The pack
-// through NSBundle and CFURL is in foundation_test.cpp.
+// reason, the Korean encodings with a pack open, the Text_Wrap hooks' steps, and two packs at
+// once (#421). The pack through NSBundle and CFURL is in foundation_test.cpp.
 #include <doctest/doctest.h>
 
 #include <chrono>
@@ -470,4 +470,70 @@ TEST_CASE("textpack: a Tables key's row is at most 5 digits (#413)") {
     CHECK(logged("\"item_etc.100000.name\": the row is not a number: ignored"));
     CHECK(logged("\"item_etc.000001.name\": the row is not a number: ignored"));
     CHECK(!logged("\"item_etc.99999.name\""));
+}
+
+TEST_CASE("textpack: two packs: the first wins per key in its table, a refused file falls to the "
+          "second, another language is refused (#421)") {
+    PackDir first;
+    PackDir second;
+    PackDir french;
+    first.write("textpack.strings", k_manifest);
+    first.write("Scripts.strings", "\"a\" = \"Erstes A\";\n");
+    first.write("ScriptExtra.strings", "\"x\" = \"kaputt \xC3\";\n"); // invalid UTF-8: refused
+    first.write("Tables.strings", "\"item_etc.1.name\" = \"Eins\";\n");
+    second.write("pack.strings", "\"format\" = \"1\";\n\"kind\" = \"text\";\n\"id\" = \"two\";\n"
+                                 "\"name\" = \"Two\";\n\"language\" = \"de\";\n");
+    second.write("Scripts.strings", "\"a\" = \"Zweites A\";\n\"b\" = \"Zweites B\";\n");
+    second.write("ScriptExtra.strings", "\"x\" = \"Zweites X\";\n");
+    second.write("Tables.strings", "\"item_etc.01.name\" = \"Uno\";\n"
+                                   "\"item_etc.2.name\" = \"Zwei\";\n");
+    french.write("textpack.strings", "\"format\" = \"1\";\n\"name\" = \"F\";\n"
+                                     "\"language\" = \"fr\";\n");
+    french.write("Scripts.strings", "\"b\" = \"B fran\xC3\xA7\x61is\";\n");
+    REQUIRE(mt_textpack_add(first.path().c_str()) == 2);
+    REQUIRE(mt_textpack_add(second.path().c_str()) == 5);
+    CHECK(mt_textpack_add(french.path().c_str()) == -1);
+    CHECK(logged("language fr differs from the first text pack's de: no text pack"));
+    CHECK(mt_textpack_pack_count() == 2);
+    CHECK(std::string(mt_textpack_manifest("name")) == "Test"); // the first's
+
+    CHECK(std::string(mt_textpack_lookup("Scripts", "a")) == "Erstes A");
+    CHECK(std::string(mt_textpack_lookup("Scripts", "b")) == "Zweites B");
+    CHECK(std::string(mt_textpack_lookup("ScriptExtra", "x")) == "Zweites X");
+    CHECK(mt_textpack_lookup("Scripts", "c") == nullptr);
+
+    // A field by its row and column: "01" is row 1, which the first pack has.
+    std::vector<std::uint8_t> table = item_etc(4);
+    CHECK(mt_textpack::patch_table("English/data/item_etc.dat", table) == 2);
+    CHECK(field(table, 1, 1, 64) == "Eins");
+    CHECK(field(table, 2, 1, 64) == "Zwei");
+    CHECK(field(table, 3, 1, 64) == "Potion 3");
+
+    const mt_textpack_stats s = mt_textpack_get_stats();
+    CHECK(s.files == 7);
+    CHECK(s.refused == 1);
+    CHECK(s.entries == 7);
+    CHECK(s.lookups == 4);
+    CHECK(s.replaced == 3);
+    CHECK(s.fields == 2);
+    mt_pack_use u{};
+    REQUIRE(mt_textpack_pack_use(0, &u) == 0);
+    CHECK(std::string(u.dir) == first.path());
+    CHECK(u.replaced == 2); // "a", item_etc.1.name
+    CHECK(u.rejected == 1); // its ScriptExtra.strings
+    CHECK(u.hidden == 0);
+    REQUIRE(mt_textpack_pack_use(1, &u) == 0);
+    CHECK(u.replaced == 3); // "b", "x", item_etc.2.name
+    CHECK(u.hidden == 2);   // "a", item_etc.01.name
+    CHECK(u.hidden_by[0] == 2);
+    CHECK(mt_textpack_pack_use(2, &u) == -1);
+
+    for (std::uint32_t i = 2; i < MT_PACKS_MAX; i++) {
+        REQUIRE(mt_textpack_add(second.path().c_str()) == 5);
+    }
+    CHECK(mt_textpack_add(second.path().c_str()) == -1);
+    CHECK(logged("at most 16 text packs at once"));
+    mt_textpack_close();
+    CHECK(mt_textpack_is_open() == 0);
+    CHECK(mt_textpack_pack_count() == 0);
 }
