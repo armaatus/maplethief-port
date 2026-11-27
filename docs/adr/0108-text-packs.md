@@ -85,3 +85,7 @@
 ## Addendum (#413)
 
 A symbolic link among a pack's five files is skipped and never followed, in one log line (`textpack: DIR: symbolic links not followed: ...`); a manifest that is a link leaves the pack unopened. Tests: `textpack: a symbolic link in a pack is not followed, logged once (#413)`; the limits that had none: `textpack: a file over 4 MiB is refused before it is read (#413)`, `textpack: the manifest's language is 1 to 35 characters (#413)`, `textpack: a Tables key's row is at most 5 digits (#413)`.
+
+## Addendum (#372)
+
+The port's menus draw a pack's `Port.strings` as it is: printable ASCII in the 5x7 font, any other character from the bundled fonts (NanumGothic, else Fira Sans), laid out in cells and cut at whole characters ([ADR 0206](0206-the-port-menus-draw-accents-and-hangul.md)). "The port's menus show translations without accents" above no longer holds; only the cash shop's price line (SDL's debug font) folds to ASCII. Covered and tested: Latin with accents and Hangul; Greek and Cyrillic draw from Fira Sans. **Not covered** (drawn as "?"): right-to-left scripts (Arabic, Hebrew), scripts that need shaping (Devanagari and the other Indic scripts, Thai, Khmer), combining marks (translations must be NFC), CJK ideographs and kana neither font has, and emoji. Test: `menu glyphs: a pseudo-translation draws every overlay without '?' or clipping`.
