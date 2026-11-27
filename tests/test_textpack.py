@@ -101,7 +101,7 @@ def _manifest(d: Path, extra: str = "") -> None:
 
 def test_check_refuses_ignores_and_cuts(tmp_path: Path) -> None:
     assert not textpack.check(tmp_path / "none").ok
-    assert "has no textpack.strings" in textpack.check(tmp_path).refused[0]
+    assert "has no pack.strings or textpack.strings" in textpack.check(tmp_path).refused[0]
     _manifest(tmp_path)
     (tmp_path / "TABLES.strings").write_text(
         '"item_etc.3.name" = "' + "ö" * 40 + '";\n'
@@ -139,6 +139,19 @@ def test_check_refuses_ignores_and_cuts(tmp_path: Path) -> None:
         'textpack.strings: it has no "name"',
         'textpack.strings: its "language" is not a language tag (en, pt-BR)',
     ]
+    # pack.strings (ADR 0149) counts when it is there: textpack.strings is then passed over.
+    (bad / "pack.strings").write_text(
+        '"format" = "1";\n"kind" = "texture";\n"id" = "-x";\n"name" = "N";\n'
+        '"language" = "de";\n"game_version" = "1.6";\n',
+        encoding="utf-8",
+    )
+    r = textpack.check(bad)
+    assert r.refused == [
+        'pack.strings: its "kind" is not "text"',
+        'pack.strings: its "id" is not 1 to 64 of a-z, 0-9, ".", "_" and "-"',
+        "pack.strings: made for the game's version 1.6",
+    ]
+    assert r.notes == ["textpack.strings: pack.strings is the manifest: ignored"]
 
 
 def test_port_english_has_the_table_the_registry_and_the_actions() -> None:
@@ -195,6 +208,8 @@ def test_export_from_a_synthetic_bundle(tmp_path: Path) -> None:
         "item_etc.0.name": "Tonic",
         "item_etc.0.description": "Heals$a bit",
     }
+    assert not (pack / "textpack.strings").exists()
+    assert "derived" in (pack / "pack.strings").read_text(encoding="utf-8")
     report = textpack.check(pack, textpack.port_english())
     assert report.ok and not report.cut and not report.ignored, report
     assert report.entries == 2 + 1 + 4 + counts["Port"]
