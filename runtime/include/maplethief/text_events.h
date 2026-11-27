@@ -28,11 +28,11 @@
  *              (0xRRGGBB).
  *   popup      Popup_Open 0x3EAA1 (mgr, id, text, kind), wrapped (#392): after it, the popup
  *              (the CMPopup at *0x11A96C): its message's wrapped lines (+0x08, count +0x0C)
- *              joined, `text`; index the id (0x108C64), value the kind (+0x10: 0 none, a tap
- *              is OK; 1, 2 and 5 Yes / No; 3 and 6 OK; 4 OK and an amount, +0x18) and
- *              `speaker` the button labels (+0x70, +0x74, the localized "Yes", "No", "OK" or
- *              ""), one per line. The death popup (0x68) has no message: its four choices are
- *              images the field draws.
+ *              joined, `text`; index the id (0x108C64), value the kind (+0x10), which says
+ *              the buttons: 0 none (a tap is OK); 1, 2 and 5 Yes / No; 3 and 6 OK; 4 OK and
+ *              Cancel with an amount (+0x18). The buttons are images: the CMPopup's labels
+ *              (+0x70, +0x74) point at freed buffers and are not read. The death popup (0x68)
+ *              has no message: its four choices are images the field draws.
  *
  * Everything is read, nothing is written and no guest function is called: every pointer is
  * checked against the image's segments and the committed heap first (an event with a bad one
@@ -59,8 +59,7 @@ typedef enum mt_text_event_kind {
     MT_TEXT_EVENT_ANSWER = 2,    /* the box asks for an answer: value its mode (1, 2, 3) */
     MT_TEXT_EVENT_SCENE_BOX = 3, /* a scene's speech box: index its first line, count its lines */
     MT_TEXT_EVENT_NOTICE = 4,    /* a notify line (#392): value the list, index its colour */
-    MT_TEXT_EVENT_POPUP = 5,     /* a popup (#392): index its id, value its kind, speaker its
-                                    button labels */
+    MT_TEXT_EVENT_POPUP = 5,     /* a popup (#392): index its id, value its kind */
 } mt_text_event_kind;
 
 typedef enum mt_text_speaker {
@@ -77,8 +76,7 @@ typedef struct mt_text_event {
     int32_t index;         /* see the kind */
     int32_t count;         /* see the kind */
     int32_t value;         /* see the kind, else 0 */
-    const char *speaker;   /* the name the game draws for the speaker (UTF-8), "" if none; a
-                              popup's button labels */
+    const char *speaker;   /* the name the game draws for the speaker (UTF-8), "" if none */
     const char *text;      /* UTF-8; an answer's rows one per line, "" for Accept / Refuse */
 } mt_text_event;
 

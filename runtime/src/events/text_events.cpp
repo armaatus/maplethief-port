@@ -67,9 +67,6 @@ constexpr u32 k_notify_most = 0x0C; // CNotifyTextList: the most entries; 0 adds
 constexpr u32 k_popup_lines = 0x08; // the message's wrapped lines (new[] of new[] strings)
 constexpr u32 k_popup_line_count = 0x0C;
 constexpr u32 k_popup_kind = 0x10;
-constexpr u32 k_popup_label_1 = 0x70; // the button labels (char *), kinds 1 to 6
-constexpr u32 k_popup_label_2 = 0x74;
-constexpr i32 k_popup_kinds = 6;
 // SkyCanvas::Instance and its current state (docs/re/program-flow.md).
 constexpr u32 k_canvas_global = 0x11A950u;
 constexpr u32 k_canvas_state = 0x0C;
@@ -464,13 +461,34 @@ i32 notify_list(const mt_cpu *cpu, u32 list) {
     return -1;
 }
 
+// A C string in the caller's frame on the guest stack (from sp up, in the stacks' area), which
+// readable() does not cover: the hero's lines are formatted into a stack buffer. The read stops
+// at the NUL, inside the frame.
+bool stack_cstr(const mt_cpu *cpu, u32 at, std::size_t max, std::string *out) {
+    const u32 sp = cpu->r[13];
+    if (at < sp || at < MT_GUEST_STACK_AREA || at >= MT_GUEST_STACK_AREA_END ||
+        sp < MT_GUEST_STACK_AREA || static_cast<std::uint64_t>(at) + max > cpu->mem_size) {
+        return false;
+    }
+    out->clear();
+    for (u32 a = at; a < MT_GUEST_STACK_AREA_END && out->size() < max; a++) {
+        const char c = static_cast<char>(cpu->mem[a]);
+        if (c == 0) {
+            return true;
+        }
+        out->push_back(c);
+    }
+    return false;
+}
+
 int notify_wrap(mt_cpu *cpu, const mt_hook_call *call) {
     const u32 list = cpu->r[0], at = cpu->r[1], colour = cpu->r[2];
     // The caller's text (its stack buffer or a localized string), read before Add runs.
     std::string text;
     i32 most = 0;
     const bool ok =
-        rd32(cpu, list + k_notify_most, &most) && rd_cstr(cpu, at, k_max_line * 2, &text);
+        rd32(cpu, list + k_notify_most, &most) &&
+        (rd_cstr(cpu, at, k_max_line * 2, &text) || stack_cstr(cpu, at, k_max_line * 2, &text));
     call->original(cpu);
     g_stats.entries++;
     if (!ok) {
@@ -502,23 +520,8 @@ void popup(mt_cpu *cpu) {
         g_stats.ignored++;
         return;
     }
-    // The labels CMPopup::SetKind set for this kind; kind 0 has none (what +0x70 holds is the last
-    // one's).
-    Speaker buttons;
-    if (kind >= 1 && kind <= k_popup_kinds) {
-        for (const u32 field : {k_popup_label_1, k_popup_label_2}) {
-            std::string label;
-            const u32 at = rdptr(cpu, box + field);
-            if (at != 0 && rd_cstr(cpu, at, k_max_name, &label)) {
-                label = joined({table_text(label)});
-                if (!label.empty()) {
-                    buttons.name += (buttons.name.empty() ? "" : "\n") + label;
-                }
-            }
-        }
-    }
     g_stats.popups++;
-    emit(MT_TEXT_EVENT_POPUP, buttons, id, 0, kind, joined(text));
+    emit(MT_TEXT_EVENT_POPUP, Speaker{}, id, 0, kind, joined(text));
 }
 
 int popup_wrap(mt_cpu *cpu, const mt_hook_call *call) {

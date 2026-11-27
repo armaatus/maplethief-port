@@ -640,13 +640,36 @@ TEST_CASE("text events: a notify line, its list and its colour (#392)") {
     CHECK(g_seen[1].e.index == 0x00FF00);
     CHECK(g_seen[2].e.value == 2); // +0x54: the map's name
     CHECK(g_seen[3].e.value == 1); // +0x50
+    // The hero's lines come from a stack buffer in the caller's frame, above sp.
+    mt_stack stack{};
+    REQUIRE(mt_stack_create(g.mem, 0, &stack) == 0);
+    const u32 buf = stack.top - 0x40;
+    std::memcpy(g.cpu.mem + buf, "Red Potion Obtained!", 21);
+    g_guest = &g;
+    for (u32 i = 0; i < 15; i++) {
+        g.cpu.r[i] = k_regs[i];
+    }
+    g.cpu.r[0] = l.notify;
+    g.cpu.r[1] = buf;
+    g.cpu.r[2] = 0xFFFFFFu;
+    g.cpu.r[13] = stack.top - 0x60;
+    notify_add(&g.cpu);
+    REQUIRE(g_seen.size() == 5);
+    CHECK(g_seen[4].text == "Red Potion Obtained!");
+    // Below sp (a frame already gone): not read.
+    g.cpu.r[0] = l.notify;
+    g.cpu.r[1] = buf;
+    g.cpu.r[13] = stack.top - 0x20;
+    notify_add(&g.cpu);
+    CHECK(g_seen.size() == 5);
+    g_seen.pop_back();
     // A list that is not the state's: -1.
     const u32 other = g.alloc(0x24);
     g.put(other + 0x0C, 1);
     call_args(g, notify_add, {other, g.str("Elsewhere"), 0});
     REQUIRE(g_seen.size() == 5);
     CHECK(g_seen[4].e.value == -1);
-    CHECK(mt_text_events_get_stats().notices == 5);
+    CHECK(mt_text_events_get_stats().notices == 6);
 }
 
 TEST_CASE("text events: a list that keeps no line, an empty line, a bad text: no event (#392)") {
@@ -680,7 +703,7 @@ TEST_CASE("text events: a popup per kind, its message joined and its buttons (#3
     CHECK(g_seen[0].e.index == MT_TEXT_POPUP_DEATH);
     CHECK(g_seen[0].e.value == 0);
     CHECK(g_seen[0].text.empty());
-    CHECK(g_seen[0].speaker.empty()); // kind 0: no button (a tap anywhere is OK)
+    CHECK(g_seen[0].speaker.empty());
     // Its Return to town: 0x69, kind 1, a message in three '$' lines.
     call_args(g, popup_open,
               {0, 0x69,
@@ -689,17 +712,15 @@ TEST_CASE("text events: a popup per kind, its message joined and its buttons (#3
     CHECK(g_seen[1].e.index == 0x69);
     CHECK(g_seen[1].e.value == 1);
     CHECK(g_seen[1].text == "Move to the nearest safe village. EXP: 5 Decrease Meso: 10% Decrease");
-    CHECK(g_seen[1].speaker == "Yes\nNo");
-    // Kind 3: OK alone (the second label is ""); kinds 2 and 5 Yes / No; kind 4 OK.
+    CHECK(g_seen[1].speaker.empty()); // the labels are not read: the buttons are images
+    // Kinds 3, 2 and 4: the kind says the buttons.
     call_args(g, popup_open, {0, 600, g.str("You can't gain EXP anymore."), 3});
     call_args(g, popup_open, {0, 0x22, g.str("Give up?"), 2});
     call_args(g, popup_open, {0, 5, g.str("How many?"), 4});
     REQUIRE(g_seen.size() == 5);
-    CHECK(g_seen[2].speaker == "OK");
-    CHECK(g_seen[3].speaker == "Yes\nNo");
-    CHECK(g_seen[4].speaker == "OK");
+    CHECK(g_seen[2].e.value == 3);
+    CHECK(g_seen[3].e.value == 2);
     CHECK(g_seen[4].e.value == 4);
-    // Kind 0 again: the labels +0x70 still hold the last popup's; none is said.
     call_args(g, popup_open, {0, 8, g.str("Quest complete."), 0});
     REQUIRE(g_seen.size() == 6);
     CHECK(g_seen[5].speaker.empty());
