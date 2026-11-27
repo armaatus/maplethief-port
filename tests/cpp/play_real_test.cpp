@@ -12049,16 +12049,16 @@ void then_shop_use(Run &r, const std::string &name, int area, int map, const std
                [s](mt_cpu *) { return s->bought && s->sold; });
 }
 
-// Part shops (#299, from part E's save in area 9): the shops of 9.0 and 4.0 by the pad, each of
-// its two shops opened, one item bought and one sold (then_shop_use), then the save.
+// Part shops (#299, from part sides_f's save in area 4): the shops of 4.0 and 9.0 by the pad, each
+// of its two shops opened, one item bought and one sold (then_shop_use), then the save.
 void chapter_2_shops(Run &r, u64) {
     using namespace quest_bot;
     from_save(r);
     then_check(r, "chapter 2", [](mt_cpu *cpu) { return hero(cpu).chapter == 2; });
-    then_shop_use(r, "Etc90 (9.0)", 9, 0, "Etc90", 5, false);
-    then_shop_use(r, "Equip90 (9.0)", 9, 0, "Equip90", 54, true);
     then_shop_use(r, "Etc40 (4.0)", 4, 0, "Etc40", 5, false);
     then_shop_use(r, "Equip40 (4.0)", 4, 0, "Equip40", 53, true);
+    then_shop_use(r, "Etc90 (9.0)", 9, 0, "Etc90", 5, false);
+    then_shop_use(r, "Equip90 (9.0)", 9, 0, "Equip90", 54, true);
     then_bag(r, "the shops' end");
     then_save(r);
     then_finish(r);
@@ -12274,7 +12274,7 @@ void chapter_2_sides_d_checks(Run &, u64) {}
 
 // Part sides_e (#299): area 9 again. Jade ends 31 (33 is done) and gives 32 (30 of item 115 from
 // mob 52 on 9.4); Skadru 29 (25 of item 67 from mob 47 on 9.6) and 30 (30 of item 68 from mob 48
-// on 9.7, which also drops Elma's item 8); Humanoid2's 7 (30 of item 65 from mob 41 on 9.2).
+// on 9.7); Humanoid2's 7 (30 of item 65 from mob 41 on 9.2); Elma's item 8, bought.
 void chapter_2_sides_e(Run &r, u64) {
     using namespace quest_bot;
     chapter_2_side_start(r, "sides_e", 4);
@@ -12289,8 +12289,11 @@ void chapter_2_sides_e(Run &r, u64) {
               fight);
     then_talk_to(r, "Skadru: side 29 done", 9, 0, "Skadru", 2, quest_is(1, 29, 2), 900);
     then_talk_to(r, "Skadru: side 30 given", 9, 0, "Skadru", 3, quest_is(1, 30, 1));
-    then_farm(r, "30 of item 68 and 10 of item 8 from mob 48 on 9.7 (sides 30, 21)", 9, 7, {48},
-              all_of({ready(1, 30), has_item(8, 10)}), 3600, fight);
+    then_farm(r, "30 of item 68 from mob 48 on 9.7 (side 30)", 9, 7, {48}, ready(1, 30), 3600,
+              fight);
+    // Elma's item 8 drops from mob 48 one time in a thousand (360 kills on 9.7 brought none);
+    // Etc90 sells it.
+    then_stock(r, "10 of item 8 for side 21 (Etc90)", 9, 8, 10, 500, 600);
     then_talk_to(r, "Skadru: side 30 done", 9, 0, "Skadru", 3, quest_is(1, 30, 2), 900);
     then_talk_to(r, "Jade: side 32 done", 9, 0, "Jade", 2, quest_is(1, 32, 2));
     then_quests_are(r, "part sides_e's quests",
