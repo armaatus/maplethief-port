@@ -5,7 +5,8 @@
 // game's would. Each event kind, its speaker, the joined text, the answer of the last page, the
 // scene box once per change, a bad pointer (no event), and no write to guest memory: a guest
 // run with the wrappers on ends byte for byte (and register for register) as one without them.
-// The real game's events are play.speech_dialogue (play_real_test.cpp).
+// The real game's events are play.speech_dialogue (play_real_test.cpp). #392 adds the notify
+// lines (CNotifyTextList::Add) and the popups (Popup_Open), below; play.speech_notices.
 #include <doctest/doctest.h>
 
 #include <cstdint>
@@ -57,6 +58,10 @@ struct Guest {
         seg.vmsize = 0x1000u;
         seg.initprot = MT_PROT_READ | MT_PROT_WRITE;
         const std::uint8_t none[1] = {0};
+        REQUIRE(mt_mem_map_segment(mem, &seg, none, 0) == 0);
+        // The popup's id 0x108C64 (#392).
+        std::strcpy(seg.name, "__bss");
+        seg.vmaddr = 0x108000u;
         REQUIRE(mt_mem_map_segment(mem, &seg, none, 0) == 0);
         state = alloc(0x500);
         box = alloc(0x60);
@@ -149,6 +154,7 @@ struct Guest {
         mt_heap_stats h{};
         mt_heap_get_stats(mem, &h);
         std::vector<std::uint8_t> b(cpu.mem + 0x11A000u, cpu.mem + 0x11B000u);
+        b.insert(b.end(), cpu.mem + 0x108000u, cpu.mem + 0x109000u);
         b.insert(b.end(), cpu.mem + MT_GUEST_HEAP_BASE, cpu.mem + h.committed);
         return b;
     }
@@ -505,4 +511,234 @@ TEST_CASE("text events: a listener added twice hears once; removed, it hears not
     mt_text_events_remove_listener(record, nullptr);
     call(g, first_page, g.box);
     CHECK(g_seen.size() == 1);
+}
+
+// --- Notify lines and popups (#392, ADR 0191) ----------------------------------------------
+
+namespace {
+
+// CNotifyTextList::Add's stand-in (list, text, colour): with the list's most entries (+0x0C) 1 or
+// more, a line more (+0x08 counts them, as the game's total lines); it clobbers r0-r3 and r12.
+void notify_add_original(mt_cpu *MT_RESTRICT cpu) {
+    Guest &g = *g_guest;
+    const u32 list = cpu->r[0];
+    // A list below 0x1000 is the test's bad pointer, which the stand-in leaves alone.
+    if (list >= 0x1000u && static_cast<i32>(g.get(list + 0x0C)) >= 1) {
+        g.put(list + 0x08, g.get(list + 0x08) + 1);
+    }
+    cpu->r[0] = 0x5u;
+    cpu->r[1] = 0x1111u;
+    cpu->r[2] = 0x2222u;
+    cpu->r[3] = 0x3333u;
+    cpu->r[12] = 0xCCCCu;
+}
+void notify_add(mt_cpu *MT_RESTRICT cpu) {
+    MT_FN_HOOK(MT_HOOK_FN_NOTIFY_TEXT_ADD, notify_add_original);
+}
+
+// Popup_Open's stand-in (mgr, id, text, kind), as the game's: the id to 0x108C64, the message
+// copied into the CMPopup at *0x11A96C (+0x04), the kind (+0x10), its labels (+0x70 / +0x74 from
+// +0x20..+0x2C, 0xE798) and the message wrapped at '$' (+0x08, count +0x0C).
+void popup_open_original(mt_cpu *MT_RESTRICT cpu) {
+    Guest &g = *g_guest;
+    const u32 box = g.get(0x11A96Cu);
+    const u32 id = cpu->r[1], at = cpu->r[2], kind = cpu->r[3];
+    g.put(0x108C64u, id);
+    if (box < 0x1000u) { // the test's bad CMPopup pointer
+        return;
+    }
+    std::string text = at != 0 ? reinterpret_cast<const char *>(g.cpu.mem + at) : "";
+    g.put(box + 0x04, g.str(text));
+    g.put(box + 0x10, kind);
+    if (kind == 1) {
+        g.put(box + 0x70, g.get(box + 0x20));
+        g.put(box + 0x74, g.get(box + 0x24));
+    } else if (kind == 3 || kind == 4 || kind == 6) {
+        g.put(box + 0x70, g.get(box + 0x28));
+        g.put(box + 0x74, g.str(""));
+    } else if (kind == 2 || kind == 5) {
+        g.put(box + 0x70, g.get(box + 0x2C));
+        g.put(box + 0x74, g.get(box + 0x24));
+    }
+    std::vector<std::string> lines;
+    for (std::size_t a = 0; !text.empty() && a <= text.size();) {
+        std::size_t b = text.find('$', a);
+        b = b == std::string::npos ? text.size() : b;
+        lines.push_back(text.substr(a, b - a));
+        a = b + 1;
+    }
+    g.put(box + 0x08, lines.empty() ? 0u : g.lines(lines));
+    g.put(box + 0x0C, static_cast<u32>(lines.size()));
+    cpu->r[0] = 0x9u;
+    cpu->r[1] = 0x1111u;
+    cpu->r[2] = 0x2222u;
+    cpu->r[3] = 0x3333u;
+    cpu->r[12] = 0xCCCCu;
+}
+void popup_open(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(MT_HOOK_FN_POPUP_OPEN, popup_open_original); }
+
+// The CStateGame's three notify lists (most entries `most`) and the CMPopup with its labels.
+struct Lists {
+    u32 notify = 0, top = 0, banner = 0;
+};
+Lists notify_lists(Guest &g, u32 most) {
+    Lists l;
+    for (u32 *at : {&l.notify, &l.top, &l.banner}) {
+        *at = g.alloc(0x24);
+        g.put(*at + 0x0C, most);
+    }
+    g.put(g.state + 0x4C, l.notify);
+    g.put(g.state + 0x50, l.top);
+    g.put(g.state + 0x54, l.banner);
+    const u32 popup = g.alloc(0x7C);
+    g.put(popup + 0x20, g.str("Yes"));
+    g.put(popup + 0x24, g.str("No"));
+    g.put(popup + 0x28, g.str("OK"));
+    g.put(popup + 0x2C, g.str("Yes"));
+    g.put(0x11A96Cu, popup);
+    g.put(0x108C64u, 0xFFFFFFFFu);
+    return l;
+}
+
+// Calls a hooked function with r0-r3 = `args`; r4-r11, sp and lr kept (as `call`).
+std::vector<u32> call_args(Guest &g, void (*fn)(mt_cpu *), std::vector<u32> args) {
+    for (u32 i = 0; i < 15; i++) {
+        g.cpu.r[i] = k_regs[i];
+    }
+    for (std::size_t i = 0; i < args.size(); i++) {
+        g.cpu.r[i] = args[i];
+    }
+    g_guest = &g;
+    fn(&g.cpu);
+    for (u32 i = 4; i < 15; i++) {
+        if (i != 12) {
+            CHECK(g.cpu.r[i] == k_regs[i]);
+        }
+    }
+    return {g.cpu.r, g.cpu.r + 4};
+}
+
+} // namespace
+
+TEST_CASE("text events: a notify line, its list and its colour (#392)") {
+    Fresh fresh;
+    mt_text_events_install(1);
+    Guest g;
+    const Lists l = notify_lists(g, 3);
+    call_args(g, notify_add, {l.notify, g.str("Meso obtained.(+70)"), 0xFFFFFFu});
+    call_args(g, notify_add, {l.notify, g.str("EXP  obtained.(+7)\r"), 0x00FF00u});
+    call_args(g, notify_add, {l.banner, g.str("Kerning City"), 0xFFFFFFu});
+    call_args(g, notify_add, {l.top, g.str("Top line"), 0xFFFFFFu});
+    REQUIRE(g_seen.size() == 4);
+    CHECK(g_seen[0].e.kind == MT_TEXT_EVENT_NOTICE);
+    CHECK(g_seen[0].text == "Meso obtained.(+70)");
+    CHECK(g_seen[0].e.value == 0); // CStateGame +0x4C
+    CHECK(g_seen[0].e.index == 0xFFFFFF);
+    CHECK(g_seen[0].e.speaker_kind == MT_TEXT_SPEAKER_NONE);
+    CHECK(g_seen[0].speaker.empty());
+    CHECK(g_seen[1].text == "EXP obtained.(+7)"); // runs of white space as one, none at the end
+    CHECK(g_seen[1].e.index == 0x00FF00);
+    CHECK(g_seen[2].e.value == 2); // +0x54: the map's name
+    CHECK(g_seen[3].e.value == 1); // +0x50
+    // A list that is not the state's: -1.
+    const u32 other = g.alloc(0x24);
+    g.put(other + 0x0C, 1);
+    call_args(g, notify_add, {other, g.str("Elsewhere"), 0});
+    REQUIRE(g_seen.size() == 5);
+    CHECK(g_seen[4].e.value == -1);
+    CHECK(mt_text_events_get_stats().notices == 5);
+}
+
+TEST_CASE("text events: a list that keeps no line, an empty line, a bad text: no event (#392)") {
+    Fresh fresh;
+    mt_text_events_install(1);
+    Guest g;
+    const Lists l = notify_lists(g, 0); // the save's information lines off: Add adds nothing
+    call_args(g, notify_add, {l.notify, g.str("Meso obtained.(+70)"), 0xFFFFFFu});
+    CHECK(g_seen.empty());
+    g.put(l.notify + 0x0C, 1);
+    call_args(g, notify_add, {l.notify, g.str("  "), 0xFFFFFFu});
+    CHECK(g_seen.empty());
+    call_args(g, notify_add, {l.notify, 0xDEAD0000u, 0xFFFFFFu});
+    call_args(g, notify_add, {0x10u, g.str("No list"), 0xFFFFFFu});
+    CHECK(g_seen.empty());
+    const mt_text_events_stats st = mt_text_events_get_stats();
+    CHECK(st.notices == 0);
+    CHECK(st.ignored == 2);
+    CHECK(st.entries == 4);
+}
+
+TEST_CASE("text events: a popup per kind, its message joined and its buttons (#392)") {
+    Fresh fresh;
+    mt_text_events_install(1);
+    Guest g;
+    notify_lists(g, 1);
+    // The death popup: id 0x68, kind 0, no message.
+    call_args(g, popup_open, {0, MT_TEXT_POPUP_DEATH, g.str(""), 0});
+    REQUIRE(g_seen.size() == 1);
+    CHECK(g_seen[0].e.kind == MT_TEXT_EVENT_POPUP);
+    CHECK(g_seen[0].e.index == MT_TEXT_POPUP_DEATH);
+    CHECK(g_seen[0].e.value == 0);
+    CHECK(g_seen[0].text.empty());
+    CHECK(g_seen[0].speaker.empty()); // kind 0: no button (a tap anywhere is OK)
+    // Its Return to town: 0x69, kind 1, a message in three '$' lines.
+    call_args(g, popup_open,
+              {0, 0x69,
+               g.str("Move to the nearest safe village.$EXP: 5 Decrease$Meso: 10% Decrease"), 1});
+    REQUIRE(g_seen.size() == 2);
+    CHECK(g_seen[1].e.index == 0x69);
+    CHECK(g_seen[1].e.value == 1);
+    CHECK(g_seen[1].text == "Move to the nearest safe village. EXP: 5 Decrease Meso: 10% Decrease");
+    CHECK(g_seen[1].speaker == "Yes\nNo");
+    // Kind 3: OK alone (the second label is ""); kinds 2 and 5 Yes / No; kind 4 OK.
+    call_args(g, popup_open, {0, 600, g.str("You can't gain EXP anymore."), 3});
+    call_args(g, popup_open, {0, 0x22, g.str("Give up?"), 2});
+    call_args(g, popup_open, {0, 5, g.str("How many?"), 4});
+    REQUIRE(g_seen.size() == 5);
+    CHECK(g_seen[2].speaker == "OK");
+    CHECK(g_seen[3].speaker == "Yes\nNo");
+    CHECK(g_seen[4].speaker == "OK");
+    CHECK(g_seen[4].e.value == 4);
+    // Kind 0 again: the labels +0x70 still hold the last popup's; none is said.
+    call_args(g, popup_open, {0, 8, g.str("Quest complete."), 0});
+    REQUIRE(g_seen.size() == 6);
+    CHECK(g_seen[5].speaker.empty());
+    CHECK(g_seen[5].text == "Quest complete.");
+    CHECK(mt_text_events_get_stats().popups == 6);
+    // A CMPopup that is not guest memory: no event.
+    g.put(0x11A96Cu, 0x10u);
+    g_guest = &g;
+    call_args(g, popup_open, {0, 3, 0, 1});
+    CHECK(g_seen.size() == 6);
+    CHECK(mt_text_events_get_stats().ignored == 1);
+}
+
+TEST_CASE("text events: notify and popup wrappers write no guest memory (#392)") {
+    Fresh fresh;
+    const auto run = [](Guest &g) {
+        const Lists l = notify_lists(g, 2);
+        std::vector<u32> regs;
+        const auto keep = [&regs](const std::vector<u32> &r) {
+            regs.insert(regs.end(), r.begin(), r.end());
+        };
+        // A burst of lines in a fight, then the death popup and its confirmation.
+        for (int i = 0; i < 6; i++) {
+            keep(call_args(
+                g, notify_add,
+                {l.notify, g.str("EXP obtained.(+" + std::to_string(i) + ")"), 0xFFFFFFu}));
+        }
+        keep(call_args(g, popup_open, {0, MT_TEXT_POPUP_DEATH, g.str(""), 0}));
+        keep(call_args(g, popup_open, {0, 0x69, g.str("Move.$EXP: 5 Decrease"), 1}));
+        return regs;
+    };
+    Guest off;
+    mt_text_events_install(0);
+    const std::vector<u32> regs_off = run(off);
+    CHECK(g_seen.empty());
+    Guest on;
+    mt_text_events_install(1);
+    const std::vector<u32> regs_on = run(on);
+    CHECK(g_seen.size() == 8);
+    CHECK(regs_on == regs_off);
+    CHECK(on.bytes() == off.bytes());
 }
