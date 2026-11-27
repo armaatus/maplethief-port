@@ -117,6 +117,8 @@ Platform targets (CLAUDE.md): macOS 13+ universal (arm64 + x86_64), Windows 10/1
 | Clang (Linux) | **Clang 17** | Ubuntu 24.04 ships 17 and 18. Shipping compiler for Linux. |
 | Python | **3.10** | See above. |
 
+GCC 13 and Clang 17 are built and tested by CI's weekly and manual runs (job `min-compilers`, [ADR 0006](0006-continuous-integration.md)'s addendum of #341). The Apple clang, MSVC and clang-cl minimums are not built in CI.
+
 ### Formatting and linting
 
 - **C, C++, Objective-C(++):** clang-format **23.1.3** (the PyPI `clang-format` wheel, run through `uvx`), configured in `.clang-format` (LLVM style, 4-space indent, 100 columns). Generated code in `work/gen/` is never formatted or linted. It isn't tracked, and the linters only look at git-tracked files.
