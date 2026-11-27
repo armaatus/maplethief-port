@@ -804,8 +804,10 @@ def fight_section(ctx: Context, e: Entity) -> str:
         parts.append(
             '<details class="spoiler"><summary>After the fight</summary>\n'
             + _p(
-                "No closing scene of its own exists: its defeat leads into the game's ending"
-                " scenes, which return to the main menu (probable, from the scene list)."
+                "No closing scene of its own exists: its defeat plays the game's two ending"
+                " scenes, the first here and the second on another map, and then the hero is"
+                " free to move again and the game goes on (confirmed in play,"
+                " <code>play.chapter_3_e_synthetic</code>)."
             )
             + "</details>\n"
         )

@@ -141,7 +141,7 @@ A portal's exit is the constant `changeMap(area, map, portal)` of its script, re
 
 **trade** (20): `chapter`, `quest` (`[1, 78]`), `title_key`, `title`, `function`, `script`, `cost_items`, `cost_meso`, `result_items`, `result_other`. The name is the first result item's.
 
-**job_advancement** (11): `chapter`, `advancement` (the count after it, 1 to 4), `job` (the `setClassUp` job, null when it keeps the job), `job_name` (probable: 0 Rogue, 1 Assassin, 2 Bandit), `keeps_job`, `script`, `conditions`.
+**job_advancement** (11): `chapter`, `advancement` (the count after it, 1 to 4), `job` (the `setClassUp` job, null when it keeps the job), `job_name` (0 Rogue, 1 Assassin, 2 Bandit; confirmed in play by `play.jobs_*_synthetic` and `play.skills_*_synthetic`), `keeps_job`, `script`, `conditions`.
 
 **warp** (173): `used`, `chapters`, `function`, `offset`, `target_map`, `target_portal` (`probable` when the target map has no portal of that number), `conditions` (box answers included), `conditional`, `chapter_end` (the path also calls `clearAll`) and `from` (`{map, role, portal, npc}` of the objects that run the script).
 

@@ -1351,8 +1351,9 @@ def chapter_end_body(ctx: Context, ev: Entity, ch: int) -> str:
     after += f" on {qs.map_phrase(ctx, target)}." if target else "."
     after += (
         " Unfinished side quests of the chapter lose their progress, and the chapter's"
-        " recipes and trades give way to the next chapter's. Level, items and meso are not among"
-        " what clearAll resets (probable, from the native's description)."
+        " recipes and trades give way to the next chapter's. The hero keeps level, EXP, job,"
+        " items, equipment and meso: they read the same before and after the trip (confirmed"
+        " in play, <code>play.chapter_1_l</code>)."
     )
     parts.append(f"<li><strong>What happens after.</strong> {after}</li>")
     out = "<ul>" + "".join(parts) + "</ul>\n"

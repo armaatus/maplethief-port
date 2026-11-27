@@ -2827,6 +2827,29 @@ void then_bag(Run &r, const std::string &what) {
             [what](mt_cpu *cpu) { std::printf("%s: %s\n", what.c_str(), bag_text(cpu).c_str()); });
 }
 
+// What a chapter's end must leave alone (#307): CQuestList::ClearAll 0x7C61D resets the quests
+// only, so the hero's level, EXP, max HP and MP, job, items, equipment and meso read the
+// same before and after the trip.
+std::string kept_text(mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    return "level " + std::to_string(h.level) + " EXP " + std::to_string(h.exp) + " max HP " +
+           std::to_string(h.max_hp) + " max MP " + std::to_string(h.max_mp) + " job " +
+           std::to_string(rdi(cpu, h.addr + 0x88)) + "/" + std::to_string(rdi(cpu, h.addr + 0x8C)) +
+           "; " + bag_text(cpu);
+}
+std::shared_ptr<std::string> then_take_kept(Run &r) {
+    auto before = std::make_shared<std::string>();
+    then_do(r, "the hero before the trip", [before](mt_cpu *cpu) { *before = kept_text(cpu); });
+    return before;
+}
+void then_kept(Run &r, const std::shared_ptr<std::string> &before) {
+    then_do(r, "the trip's clearAll kept the hero", [before](mt_cpu *cpu) {
+        const std::string now = kept_text(cpu);
+        check(now == *before, "the trip kept the hero: " + now +
+                                  (now == *before ? "" : " (before the trip: " + *before + ")"));
+    });
+}
+
 // Part J (#162): Sabitrama (Sabi, 3.0, x 632) ends Roy's Advice 2 (16) and gives Sabitrama's
 // Help (17: 30 Charms of the Undead, 45, from the Zombie Mushrooms on 3.3), then ends 17 and
 // gives Defeat Malady (18).
@@ -2958,6 +2981,7 @@ void chapter_1_l(Run &r, u64) {
                      {1, 16, 2},
                      {1, 34, 2}});
     then_bag(r, "before the trip");
+    const std::shared_ptr<std::string> kept = then_take_kept(r);
     then_do(r, "main 20's record active before the trip", [](mt_cpu *cpu) {
         const Hero h = hero(cpu);
         check(quest_active(cpu, h, 0, 20) && !quest_active(cpu, h, 0, 40),
@@ -3013,6 +3037,7 @@ void chapter_1_l(Run &r, u64) {
                   q);
     });
     then_bag(r, "after the trip");
+    then_kept(r, kept);
     then_save(r);
     then_do(r, "chapter 2 on Orbis (4.1) in the save", [&r](mt_cpu *) {
         const std::vector<std::uint8_t> theif = read_save(r, "theif0");
@@ -3419,6 +3444,7 @@ void chapter_2_f(Run &r, u64) {
                  900);
     then_quests_are(r, "chapter 2 before the trip", {{0, 8, 2}, {0, 9, 1}});
     then_bag(r, "before the trip");
+    const std::shared_ptr<std::string> kept = then_take_kept(r);
     then_talk_to(
         r, "Pirate_Orbis (4.1): the end of chapter 2 (list 2)", 4, 1, "Pirate_Orbis", 2,
         [](mt_cpu *cpu) {
@@ -3439,6 +3465,7 @@ void chapter_2_f(Run &r, u64) {
                   std::to_string(h.area) + "." + std::to_string(h.map) +
                   " (want 3, 6.0); after clearAll:" + q);
     });
+    then_kept(r, kept);
     then_save(r);
     then_do(r, "chapter 3 on 6.0 in the save", [&r](mt_cpu *) {
         const std::vector<std::uint8_t> theif = read_save(r, "theif0");
@@ -11365,6 +11392,97 @@ void skills_bandit_checks(Run &, u64) {
     check(g_skills->stats[22].guard_ok > 0, "Meso Guard: blows paid in meso");
 }
 
+// --- The weapon rules of passives and buffs (#307, docs/testing/skills-and-jobs.md) ----------
+//
+// skills_weapon_assassin: the Assassin of skills_assassin with no weapon; skills_weapon_bandit:
+// the Bandit of skills_bandit with a claw and stars. Each learns its branch's passives (the rule
+// checked as in skills_*) and presses each buff on LB: cast (on the buff list, MP paid) or
+// refused (no buff, MP unchanged). CSkill::setActiveSkill 0x7EFF1's weapon check holds for the
+// attack skills only: every buff is cast.
+
+std::map<i32, bool> g_weapon_buffs; // buff id -> cast with this weapon
+
+// Presses buff `id` up to three times; records whether it went on.
+void then_buff_try(Run &r, i32 id) {
+    then_phase(r, id, id);
+    auto mp = std::make_shared<i32>(0);
+    then_do(r, "skills: MP before " + std::to_string(id),
+            [mp](mt_cpu *cpu) { *mp = hero(cpu).mp; });
+    then(r, "skills: press " + std::to_string(id) + " up to three times", 6,
+         [&r, id](mt_cpu *cpu, double el) {
+             const bool on = buffs(cpu, hero(cpu)).count(id) != 0;
+             release_all(r);
+             hold(r, quest_bot::LB, std::fmod(el, 1.5) < 0.1 && !on);
+             return (on && el >= 0.7) || el >= 4.6;
+         });
+    then_wait_field(r);
+    then_do(r, "skills: " + std::to_string(id) + " with this weapon", [mp, id](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const bool on = buffs(cpu, h).count(id) != 0;
+        g_weapon_buffs[id] = on;
+        std::printf("weapon rule: buff %d %s, MP %d -> %d\n", id, on ? "cast" : "refused", *mp,
+                    h.mp);
+        check(on == (h.mp < *mp), "buff " + std::to_string(id) + ": MP paid only when it is on");
+    });
+}
+
+// With nothing worn and no skill learned, the hero's ATT, DEF, ACC and avoid are hero.dat's
+// columns 14-17 of the level (docs/formats/data-tables.md#herodat; CHero +0xA4/+0xA8/+0xB0/+0xAC).
+void then_bare_stats(Run &r) {
+    then_do(r, "skills: the bare hero's stats are hero.dat's", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const std::vector<std::uint8_t> dat =
+            world_map::read_bytes(fs::path(MT_BUNDLE_DIR) / "English" / "data" / "hero.dat");
+        std::array<i32, 4> want{-1, -1, -1, -1};
+        for (std::size_t o = 6; o + 18 <= dat.size(); o += 18) {
+            if (dat[o] == h.level) {
+                want = {dat[o + 14], dat[o + 15], dat[o + 16], dat[o + 17]};
+            }
+        }
+        const std::array<i32, 7> got = hero_stats(cpu, h);
+        check(got[0] == want[0] && got[1] == want[1] && got[2] == want[2] && got[3] == want[3],
+              "level " + std::to_string(h.level) + ": ATT DEF ACC AVOID " + std::to_string(got[0]) +
+                  " " + std::to_string(got[1]) + " " + std::to_string(got[2]) + " " +
+                  std::to_string(got[3]) + ", hero.dat " + std::to_string(want[0]) + " " +
+                  std::to_string(want[1]) + " " + std::to_string(want[2]) + " " +
+                  std::to_string(want[3]));
+    });
+}
+
+void skills_weapon(Run &r, bool thrower, std::initializer_list<i32> passives,
+                   std::initializer_list<i32> buff_ids) {
+    using quest_bot::then_quick_slot;
+    g_weapon_buffs.clear();
+    skills_common(r, thrower);
+    if (!thrower) {
+        then_bare_stats(r);
+    }
+    for (const i32 id : passives) {
+        then_learn(r, id, passive(id));
+    }
+    for (const i32 id : buff_ids) {
+        then_learn(r, id, nullptr);
+        then_quick_slot(r, "skill " + std::to_string(id) + " on LB", id, 3);
+        then_buff_try(r, id);
+    }
+    then_finish(r);
+}
+void skills_weapon_assassin(Run &r, u64) { skills_weapon(r, false, {4, 6, 8, 9, 11}, {5, 12, 14}); }
+void skills_weapon_bandit(Run &r, u64) {
+    skills_weapon(r, true, {4, 15, 17, 18, 20}, {5, 19, 21, 22});
+}
+
+void skills_weapon_checks(Run &, u64) {
+    std::string text;
+    for (const auto &[id, on] : g_weapon_buffs) {
+        text += " " + std::to_string(id) + (on ? " cast" : " refused");
+    }
+    // Played (#307): every buff goes on with no weapon and with the other branch's weapon.
+    check(!g_weapon_buffs.empty() && std::all_of(g_weapon_buffs.begin(), g_weapon_buffs.end(),
+                                                 [](const auto &b) { return b.second; }),
+          "weapon rule: every buff cast without the branch's weapon:" + text);
+}
+
 // --- Speech: dialogue and the scenes' speech boxes (#391, ADR 0187, speech_text.h) -------------
 //
 // speech_dialogue: chat_text's flow (a new game through the intro's speech boxes and MacArthur's
@@ -14735,6 +14853,8 @@ constexpr Mode k_modes[] = {
     {"jobs_3_4_bandit", jobs_3_4_bandit, jobs_checks, 1},
     {"skills_assassin", skills_assassin, skills_assassin_checks, 1},
     {"skills_bandit", skills_bandit, skills_bandit_checks, 1},
+    {"skills_weapon_assassin", skills_weapon_assassin, skills_weapon_checks, 1},
+    {"skills_weapon_bandit", skills_weapon_bandit, skills_weapon_checks, 1},
     {"systems2_cash_tiles", systems2_cash_tiles, systems2_cash_checks, 1},
     {"systems2_cash_restores", systems2_cash_restores, systems2_cash_checks, 1, false,
      systems2_cash_restores_setup},

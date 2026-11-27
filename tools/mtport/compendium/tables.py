@@ -369,10 +369,12 @@ def _levels(kb: KB, en: dict) -> None:
                 "level": (h.level, "code"),
                 "exp": (h.exp, "code"),
                 "exp_total": (exp_total, "code"),
-                "hp_gain": (h.hp_gain, "probable"),  # summed by code; HP vs MP order inferred
-                "mp_gain": (h.mp_gain, "probable"),
-                "max_hp": (hp, "probable"),
-                "max_mp": (mp, "probable"),
+                # HP vs MP: HP and MP Mastery add their percent of these sums in play
+                # (play.skills_*_synthetic, docs/testing/skills-and-jobs.md).
+                "hp_gain": (h.hp_gain, "code"),
+                "mp_gain": (h.mp_gain, "code"),
+                "max_hp": (hp, "code"),
+                "max_mp": (mp, "code"),
                 "unknown_9": (h.unknown_9, "unknown"),
                 "stats": (
                     {
@@ -381,12 +383,13 @@ def _levels(kb: KB, en: dict) -> None:
                         "intelligence": h.intelligence,
                         "luck": h.luck,
                     },
-                    "probable",
+                    "data",
                 ),
-                "attack": (h.attack, "probable"),
-                "defense": (h.defense, "probable"),
-                "accuracy": (h.accuracy, "probable"),
-                "avoidability": (h.avoidability, "probable"),
+                # A hero wearing nothing has exactly these (play.skills_weapon_assassin_synthetic).
+                "attack": (h.attack, "code"),
+                "defense": (h.defense, "code"),
+                "accuracy": (h.accuracy, "code"),
+                "avoidability": (h.avoidability, "code"),
             },
         )
         exp_total += h.exp

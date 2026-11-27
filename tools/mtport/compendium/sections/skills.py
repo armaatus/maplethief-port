@@ -576,10 +576,14 @@ def _weapon_text(ctx: Context, e: Entity) -> str:
     typ = _type_text(e)
     if eid in STARS or (job is not None and job.weapon == "claw" and typ == "active attack"):
         return "claw"
-    if job is not None and job.weapon and typ in ("active attack", "buff"):
+    if job is not None and job.weapon and typ == "active attack":
         return job.weapon
     if eid == "0":
         return "dagger or claw"
+    if eid == "3":
+        return "dagger"  # refused with a claw in play (play.skills_assassin_synthetic)
+    if typ in ("buff", "passive"):
+        return "any or none"
     return ""
 
 
@@ -605,7 +609,7 @@ def _infobox(ctx: Context, e: Entity, rows: Sequence[LevelRow]) -> str:
             if mp and max(mp)
             else "",
         ),
-        ("Weapon", t.esc(weapon + (" (probable)" if typ == "buff" and weapon else ""))),
+        ("Weapon", t.esc(weapon[:1].upper() + weapon[1:] if weapon == "any or none" else weapon)),
         ("ID", f"<code>{t.esc(eid)}</code>"),
     ]
     ko = name_of(e, "ko")
@@ -701,22 +705,16 @@ def _requirements(ctx: Context, e: Entity) -> str:
             f"Needs a claw and {stars} per use{extra}, taken from the first stack that"
             " holds enough."
         )
-    elif weapon in ("claw", "dagger") and _type_text(e) == "buff":
-        items.append(
-            f"Probably needs a {weapon}: the game checks the branch's weapon when a skill is"
-            " used, and the mechanics notes do not say whether buffs are exempt."
-        )
     elif weapon in ("claw", "dagger"):
         items.append(f"Needs a {weapon}: the game refuses the skill with any other weapon.")
+    elif _type_text(e) == "buff":
+        items.append(
+            "Needs no weapon: the game checks the weapon for attack skills only, and a buff"
+            " is cast with the other branch's weapon or with none."
+        )
     elif _type_text(e) == "passive":
         items.append(
-            "A passive: its bonus is applied when the points are learned, so it needs no"
-            " weapon (probable)."
-        )
-    elif eid == "3":
-        items.append(
-            "No weapon rule is known: the game ties the claw to star skills and the dagger"
-            " to the Bandit's skills, and this is neither."
+            "A passive: its bonus is applied when the points are learned, with any weapon or none."
         )
     return "<ul>" + "".join(f"<li>{x}</li>" for x in items) + "</ul>\n"
 
