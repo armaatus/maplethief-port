@@ -284,3 +284,16 @@ def test_unicorn_runs_are_independent(image, selection) -> None:
             assert (a.status, a.regs, a.cpsr, a.mem, a.fault) == (
                 b.status, b.regs, b.cpsr, b.mem, b.fault,
             ), (hex(ptr), i)  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("cc", "msvc"),
+    [("clang", False), ("clang-17", False), ("/usr/bin/gcc-13", False), ("cl", True),
+     ("C:/VS/cl.exe", True), ("C:/LLVM/bin/clang-cl.exe", True)],
+)  # fmt: skip
+def test_cc_picks_msvc_flags_only_for_cl_and_clang_cl(monkeypatch, cc, msvc) -> None:
+    # CC=clang-17 (CI's minimum-compiler job, #341) once got cl's /W4 /nologo flags.
+    monkeypatch.delenv("MAPLETHIEF_CC", raising=False)
+    monkeypatch.setenv("CC", cc)
+    assert host.find_compiler().msvc is msvc
+    assert host_cc().msvc is msvc

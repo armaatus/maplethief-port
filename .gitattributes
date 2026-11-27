@@ -1,0 +1,24 @@
+# End-of-line policy (#328): every text file is stored and checked out with LF, on every OS.
+# Windows' usual core.autocrlf=true would otherwise check the shell scripts out with CRLF, and
+# bash then fails on the first line ("$'\r': command not found"). PowerShell, CMake, MSVC and
+# Python all read LF, so nothing here needs CRLF. tests/test_line_endings.py checks it, and
+# Windows CI runs a shell script from its fresh checkout.
+* text=auto eol=lf
+
+# Shell scripts without an extension (scripts/*, tools/ghidra/*) are detected as text by
+# text=auto; the ones with one are named here so the rule never depends on detection.
+*.sh text eol=lf
+
+# Binary: never converted, never diffed as text.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.mp3 binary
+*.flac binary
+*.wav binary
+*.ogg binary
+*.caf binary
+*.zip binary
+*.ipa binary

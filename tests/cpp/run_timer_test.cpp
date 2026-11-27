@@ -559,3 +559,225 @@ TEST_CASE("run timer: the overlay's lines and the times' text") {
     t.on_event(event(MT_GAME_EVENT_MAP_CHANGE, 4, 1));
     CHECK(t.overlay_lines()[1] == "finished (3/3)");
 }
+
+// --- Practice and best segments (#409, ADR 0189) -------------------------------------------------
+
+TEST_CASE("best segments: a run's segments, the best of each and the sum of best") {
+    FakeClock clock;
+    fe::RunTimer t(clock.clock());
+    t.set_category(test_category(), std::nullopt);
+    CHECK(t.segments().best.size() == 3);
+    CHECK_FALSE(t.segments().sum_of_best().has_value());
+
+    // run_through: three segments of 10 s and 200 ticks each.
+    run_through(t, clock);
+    CHECK(t.take_segments_changed());
+    CHECK_FALSE(t.take_segments_changed()); // once
+    for (const std::optional<fe::RunTime> &b : t.segments().best) {
+        REQUIRE(b.has_value());
+        CHECK(*b == fe::RunTime{10000, 200});
+    }
+    CHECK(t.segments().sum_of_best() == fe::RunTime{30000, 600});
+
+    // A slower run with one faster segment: only that segment improves.
+    t.on_event(event(MT_GAME_EVENT_NEW_CHARACTER, 0));
+    clock.advance(12, 240);
+    t.on_event(event(MT_GAME_EVENT_CHAPTER_END, 0));
+    CHECK(t.take_reached() == std::optional<std::size_t>(1));
+    CHECK_FALSE(t.take_reached().has_value());
+    CHECK_FALSE(t.take_segments_changed());
+    clock.advance(7, 140);
+    t.on_event(event(MT_GAME_EVENT_JOB_ADVANCE, 2, 2));
+    CHECK(t.take_segments_changed());
+    clock.advance(11, 220);
+    t.on_event(event(MT_GAME_EVENT_MAP_CHANGE, 4, 1));
+    const std::vector<fe::RunRecord> runs = t.take_records();
+    REQUIRE(runs.size() == 1);
+    CHECK(runs[0].end.ms == 30000);
+    CHECK(t.segments().best[1] == fe::RunTime{7000, 140});
+    CHECK(t.segments().sum_of_best() == fe::RunTime{27000, 540});
+}
+
+TEST_CASE("practice: a load marks the run as practice and times that segment alone") {
+    FakeClock clock;
+    fe::Settings s;
+    s.save_states = true; // a practice needs it: its segments still count
+    fe::RunTimer t(clock.clock());
+    t.attach(&s);
+    t.set_category(test_category(), std::nullopt);
+
+    // A run in progress past its first split: the load ends it as reset.
+    t.on_event(event(MT_GAME_EVENT_NEW_CHARACTER, 0));
+    clock.advance(10, 200);
+    t.on_event(event(MT_GAME_EVENT_CHAPTER_END, 0));
+    clock.advance(5, 100);
+    CHECK_FALSE(t.start_practice(0)); // no state before the first split
+    CHECK_FALSE(t.start_practice(3)); // nothing follows the last split
+    CHECK_FALSE(t.practice());
+    REQUIRE(t.start_practice(1));
+    CHECK(t.practice());
+    CHECK(t.practice_from() == 1);
+    CHECK(t.state() == fe::RunTimer::State::kRunning);
+    CHECK(t.next_split() == 1);
+    std::vector<fe::RunRecord> records = t.take_records();
+    REQUIRE(records.size() == 1);
+    CHECK_FALSE(records[0].finished); // the run before the load: reset
+
+    // The segment timer restarts at the load.
+    CHECK(t.elapsed() == fe::RunTime{0, 0});
+    clock.advance(8, 160);
+    CHECK(t.elapsed() == fe::RunTime{8000, 160});
+    std::vector<std::string> lines = t.overlay_lines();
+    CHECK(lines[0] == "Test% practice  0:08.0");
+    CHECK(lines[1] == "loaded: Tutorial (1/3)");
+    CHECK(lines[2] == "next: Bandit (2/3)");
+    CHECK(lines[3] == "no best segment yet");
+    CHECK(lines[4] == "sum of best: 1 of 3 segments");
+    CHECK(lines[5] == "practice, never a run");
+
+    // An earlier split's event does nothing; the next one ends the segment, the next starts.
+    t.on_event(event(MT_GAME_EVENT_CHAPTER_END, 0));
+    CHECK(t.next_split() == 1);
+    t.on_event(event(MT_GAME_EVENT_JOB_ADVANCE, 2, 2));
+    CHECK(t.next_split() == 2);
+    CHECK(t.take_reached() == std::optional<std::size_t>(2));
+    CHECK(t.last_segment() == fe::RunTime{8000, 160});
+    CHECK(t.segments().best[1] == fe::RunTime{8000, 160});
+    CHECK(t.take_segments_changed());
+    CHECK(t.elapsed() == fe::RunTime{0, 0});
+    clock.advance(9, 180);
+    t.on_event(event(MT_GAME_EVENT_MAP_CHANGE, 4, 1));
+    CHECK(t.state() == fe::RunTimer::State::kFinished);
+    CHECK(t.practice());
+    CHECK(t.elapsed() == fe::RunTime{9000, 180});
+    CHECK(t.segments().sum_of_best() == fe::RunTime{27000, 540});
+    CHECK(t.take_segments_changed());
+    lines = t.overlay_lines();
+    CHECK(lines[2] == "finished (3/3)");
+    CHECK(lines[3] == "last segment 0:09.0 (+0:00.0)");
+    CHECK(lines[4] == "sum of best 0:27.0");
+    // A practice is never a run: no record, no personal best.
+    CHECK(t.take_records().empty());
+    t.reset();
+    CHECK_FALSE(t.practice());
+    CHECK(t.take_records().empty());
+
+    // Again from the same split, slower: the best stays; the overlay shows the difference.
+    REQUIRE(t.start_practice(1));
+    clock.advance(9.5, 190);
+    t.on_event(event(MT_GAME_EVENT_JOB_ADVANCE, 2, 2));
+    CHECK_FALSE(t.take_segments_changed());
+    CHECK(t.segments().best[1] == fe::RunTime{8000, 160});
+    lines = t.overlay_lines();
+    CHECK(lines[4] == "last segment 0:09.5 (+0:01.5)");
+
+    // A new character ends the practice and starts a run.
+    t.on_event(event(MT_GAME_EVENT_NEW_CHARACTER, 0));
+    CHECK_FALSE(t.practice());
+    CHECK(t.state() == fe::RunTimer::State::kRunning);
+    CHECK(t.next_split() == 0);
+}
+
+TEST_CASE(
+    "practice: another Assist or a variable outside the category: the segment does not count") {
+    FakeClock clock;
+    fe::Settings s;
+    s.save_states = true;
+    fe::RunTimer t(clock.clock());
+    t.attach(&s);
+    t.set_category(test_category(), std::nullopt);
+    REQUIRE(t.start_practice(1));
+    s.game_speed = fe::GameSpeed::k25;
+    t.turn();
+    s.game_speed = fe::GameSpeed::kGame;
+    clock.advance(3, 60);
+    t.on_event(event(MT_GAME_EVENT_JOB_ADVANCE, 2, 2));
+    CHECK(t.last_segment() == fe::RunTime{3000, 60});
+    CHECK_FALSE(t.segments().best[1].has_value());
+    CHECK_FALSE(t.take_segments_changed());
+    // The next segment starts clean again.
+    clock.advance(4, 80);
+    t.on_event(event(MT_GAME_EVENT_MAP_CHANGE, 4, 1));
+    CHECK(t.segments().best[2] == fe::RunTime{4000, 80});
+
+    // skip_intros on: not allowed by test_category, so outside it.
+    s.skip_intros = true;
+    REQUIRE(t.start_practice(1));
+    clock.advance(1, 20);
+    t.on_event(event(MT_GAME_EVENT_JOB_ADVANCE, 2, 2));
+    CHECK_FALSE(t.segments().best[1].has_value());
+    const std::vector<std::string> lines = t.overlay_lines();
+    CHECK(lines.back() == "practice: this segment does not count");
+}
+
+TEST_CASE("practice: the picked split on the overlay; another category drops the bests") {
+    FakeClock clock;
+    fe::RunTimer t(clock.clock());
+    t.set_category(test_category(), std::nullopt);
+    t.set_picked(2);
+    std::vector<std::string> lines = t.overlay_lines();
+    CHECK(lines[1] == "practice from: Bandit (2/3)");
+    run_through(t, clock);
+    CHECK(t.segments().known() == 3);
+
+    // Bests read back are kept for the same splits, dropped for others.
+    const fe::RunSegments kept = t.segments();
+    t.set_category(test_category(), std::nullopt, kept);
+    CHECK(t.segments() == kept);
+    CHECK_FALSE(t.picked().has_value());
+    fe::RunCategory other = test_category();
+    other.splits.pop_back();
+    t.set_category(other, std::nullopt, kept);
+    CHECK(t.segments().known() == 0);
+    CHECK(t.segments().best.size() == 2);
+}
+
+TEST_CASE("best segments: the file's round trip, and malformed files refused by line") {
+    fe::RunSegments s = fe::run_segments_for(test_category());
+    s.best[0] = fe::RunTime{10000, 200};
+    s.best[2] = fe::RunTime{4000, 80};
+    const std::string text = fe::run_segments_text(s);
+    CHECK(text.find("segment 1 = 10000 ms 200 ticks\n") != std::string::npos);
+    CHECK(text.find("segment 2") == std::string::npos);
+    std::vector<std::string> problems;
+    const std::optional<fe::RunSegments> back = fe::parse_run_segments(text, &problems);
+    REQUIRE(back.has_value());
+    CHECK(problems.empty());
+    CHECK(*back == s);
+
+    const struct {
+        const char *text;
+        const char *problem;
+    } bad[] = {
+        {"split chapter_end 0 = A\n", "no category or split line"},
+        {"category = test\n", "no category or split line"},
+        {"category = test\nsplit chapter_end 0 = A\nsegment 0 = 1 ms 1 ticks\n", "line 3: "},
+        {"category = test\nsplit chapter_end 0 = A\nsegment 1 = 1 ms\n", "line 3: "},
+        {"category = test\nsplit chapter_end 0 = A\nsegment 1 = 1 ms 1 ticks\n"
+         "segment 1 = 2 ms 2 ticks\n",
+         "line 4: "},
+        {"category = test\nsplit chapter_end 0 = A\nsegment 2 = 1 ms 1 ticks\n",
+         "segment 2 of a category with 1 splits"},
+        {"category = Te st\nsplit chapter_end 0 = A\n", "line 1: "},
+        {"category = test\nsplit nothing 0 = A\n", "line 2: a bad split line"},
+        {"category = test\nsplit chapter_end 0 = A\nbest = 3\n", "line 3: unknown or bad line"},
+    };
+    for (const auto &b : bad) {
+        problems.clear();
+        CHECK_MESSAGE(!fe::parse_run_segments(b.text, &problems).has_value(), b.text);
+        REQUIRE(problems.size() == 1);
+        CHECK_MESSAGE(problems[0].rfind(b.problem, 0) == 0, problems[0]);
+    }
+
+    // The data folder: runs/<category>.segments, written and read back; another category's name
+    // reads nothing.
+    const fs::path dir = fresh_dir("mt_run_segments_test");
+    std::string why;
+    REQUIRE(fe::write_run_segments(path_text(dir), s, &why));
+    CHECK(fs::is_regular_file(dir / "runs" / "test.segments"));
+    CHECK(fe::load_run_segments(path_text(dir), "test") == s);
+    CHECK_FALSE(fe::load_run_segments(path_text(dir), "any").has_value());
+    CHECK_FALSE(fe::load_run_segments(path_text(dir), "../test").has_value());
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}

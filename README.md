@@ -16,7 +16,7 @@ You play it with **your own copy** of the game. This repository contains none of
 
 ## Reporting a bug
 
-The game writes a log to `data/logs/` next to it (settings menu → Saves → **Open logs folder**) and a report to `data/crashes/` after a crash; a dialog names the file. Attach the newest log and the crash report to a [bug report](https://github.com/armaatus/maplethief-port/issues/new?template=bug.yml). Paths in the log have your folders replaced by `<data>`, `<game folder>` and `~`. After a crash the next start offers default settings without changing your settings file.
+The game writes a log to `data/logs/` next to it (settings menu → Saves → **Open logs folder**) and a report to `data/crashes/` after a crash; a dialog names the file. If the game freezes for 15 seconds, it writes a hang report there too and asks whether to keep waiting or quit. Attach the newest log and the crash or hang report to a [bug report](https://github.com/armaatus/maplethief-port/issues/new?template=bug.yml). Paths in the log have your folders replaced by `<data>`, `<game folder>` and `~`. After a crash the next start offers default settings without changing your settings file.
 
 ## Help build it
 
@@ -44,16 +44,16 @@ The game boots, plays and saves on Windows, macOS and Linux, with mouse, touch, 
 
 | System | |
 |---|---|
-| Windows 10/11 | x64 |
+| Windows 10/11 | x64 or ARM64 |
 | macOS 13+ | Universal (Apple silicon and Intel) |
-| Linux | x86_64, glibc 2.35+ (tarball, AppImage or Flatpak) |
+| Linux | x86_64 or aarch64, glibc 2.35+ (x86_64 also as AppImage or Flatpak) |
 | Steam Deck | As a non-Steam game ([guide](docs/play/linux-and-steam-deck.md)); not yet checked on a real Deck |
 | iPhone | iOS 16 or later, built yourself on a Mac with Xcode ([guide](docs/play/iphone.md)); reaches the first map on an iPhone 12, the only device checked so far |
 | Nintendo Switch | Homebrew, from the Homebrew Menu ([guide](docs/play/switch.md)); a preview, not checked on a console yet |
 
 ## Privacy
 
-The game runs offline. The port's only network use is an optional check for new versions, off by default: once a day it asks github.com which version is the latest, and downloads nothing. See [Settings](docs/play/settings.md#checking-for-new-versions) and [ADR 0137](docs/adr/0137-network-use-and-the-update-notice.md).
+The game runs offline. The port uses the network in two optional ways, both off by default: a check for new versions, which once a day asks github.com which version is the latest and downloads nothing ([Settings](docs/play/settings.md#checking-for-new-versions), [ADR 0137](docs/adr/0137-network-use-and-the-update-notice.md)); and, for speedrunners on a computer, a link to LiveSplit's server on your own machine or network, which sends it the run's start, splits, resets and game time and nothing else ([Speedrun timer](docs/play/speedrun.md#livesplit)).
 
 ## Legal
 

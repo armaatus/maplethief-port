@@ -192,6 +192,9 @@ linux_game() { PYTHONPATH="$REPO/tools" "$PY" -B -m mtport.linux_game "$@"; }
 linux_package() { PYTHONPATH="$REPO/tools" "$PY" -B -m mtport.linux_package "$@"; }
 
 bundle=work/ipa/Payload/MapleThief.app
+# The presets for this machine's CPU: on aarch64 the linux-arm64-* ones, which check it (#362).
+preset_arch=""
+case "$(uname -m)" in aarch64 | arm64) [ "$(uname -s)" != Linux ] || preset_arch=arm64- ;; esac
 need_inputs() {
     [ "$player" -eq 1 ] || [ -d "$bundle" ] || die "no $bundle: run scripts/bootstrap"
     [ -f work/gen/gen.cmake ] || die "no work/gen/gen.cmake: run python3 -m recomp all"
@@ -199,7 +202,7 @@ need_inputs() {
 
 # The player tarball (ADR 0125): the linux-player workflow with the glibc floor, then CPack.
 build_player_native() {
-    local preset=linux-player name
+    local preset="linux-${preset_arch}player" name
     echo "== cmake --preset $preset -DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
     cmake --preset "$preset" "-DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
     echo "== cmake --build --preset $preset (MapleThief only)"
@@ -214,8 +217,11 @@ build_player_native() {
     cp "build/$preset/$name" "$out/$name"
     echo "== $out/$name ($(wc -c <"$out/$name" | tr -d ' ') bytes)"
     # The AppImage and the Flatpak bundle of the same files (ADR 0193), where the build image's
-    # packers are: mksquashfs, the pinned runtime and flatpak.
-    if [ -f "$APPIMAGE_RUNTIME" ] && command -v mksquashfs >/dev/null && command -v flatpak >/dev/null; then
+    # packers are: mksquashfs, the pinned runtime and flatpak. x86_64 only: no aarch64 package
+    # has been run to the import screen (ADR 0194 adds the aarch64 tarball).
+    if [ "$(uname -m)" != x86_64 ]; then
+        echo "== no AppImage or Flatpak bundle on $(uname -m): x86_64 only (ADR 0193)"
+    elif [ -f "$APPIMAGE_RUNTIME" ] && command -v mksquashfs >/dev/null && command -v flatpak >/dev/null; then
         echo "== AppImage and Flatpak bundle (mtport.linux_package)"
         linux_package appimage "$out/$name" --runtime "$APPIMAGE_RUNTIME"
         linux_package flatpak "$out/$name"
@@ -232,8 +238,8 @@ build_native() {
         build_player_native
         return
     fi
-    local preset=linux-release
-    [ "$debug" -eq 0 ] || preset=linux-debug
+    local preset="linux-${preset_arch}release"
+    [ "$debug" -eq 0 ] || preset="linux-${preset_arch}debug"
     echo "== cmake --preset $preset -DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
     cmake --preset "$preset" "-DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
     echo "== cmake --build --preset $preset --target MapleThief"

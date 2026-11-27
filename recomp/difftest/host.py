@@ -72,7 +72,8 @@ def find_compiler() -> Compiler:
     for env in ("MAPLETHIEF_CC", "CC"):
         if os.environ.get(env):
             path = os.environ[env]
-            return Compiler(path, Path(path).name.lower().startswith("cl"))
+            # MSVC-style flags for cl and clang-cl only, not clang or clang-17 (#341).
+            return Compiler(path, Path(path).stem.lower() in ("cl", "clang-cl"))
     if sys.platform == "win32" and shutil.which("cl"):
         return Compiler(shutil.which("cl"), True)
     for name in ("clang", "cc", "gcc"):

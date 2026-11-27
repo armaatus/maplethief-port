@@ -130,7 +130,7 @@ Linux runs in a container, x86_64 like `ubuntu-latest` (Rosetta under [OrbStack]
 scripts/test-linux               # Debug workflow + pytest on a clean export of HEAD
 scripts/test-linux --release     # linux-release workflow; the kit lands in build/linux-release/
 scripts/test-linux --worktree    # uncommitted changes to tracked files included
-scripts/test-linux --arch arm64  # native on Apple silicon: faster, but not what CI runs
+scripts/test-linux --arch arm64  # aarch64 (linux-arm64-* presets), native on Apple silicon: CI's ubuntu-24.04-arm
 scripts/test-linux --real-assets # mount work/ read-only, so the real_assets tests run too
 ```
 
@@ -145,13 +145,13 @@ Windows has no container: run `scripts\test.ps1` (Debug and pytest) and `scripts
 | Pull request into | Runs |
 |---|---|
 | `dev` | lint and Python 3.10 and latest (Linux), clang-tidy, the Linux Debug build with the C/C++ tests, the same tests under ASan and UBSan with the fuzz smoke, the Switch NRO and the Android APK |
-| `main` | lint and Python, clang-tidy, Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux, the ASan and UBSan tests, the iOS compile, the Switch NRO and the Android APK |
+| `main` | lint and Python, clang-tidy, Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux, and on Windows and Linux ARM64, the ASan and UBSan tests, the iOS compile, the Switch NRO and the Android APK |
 | manual run | the full set, Release unless its `release` input is off |
 | weekly, on `dev` | the full set with Release, then the `weekly report` job ([below](#the-weekly-run)) |
 
 `scripts/ci-scope` skips the native jobs when a pull request touches only docs or compendium work, and the Switch or Android job when the native paths touch only another platform's own files.
 
-GitHub's hosted runners are free for this public repository, so use them. To run all three OSes on any branch:
+GitHub's hosted runners are free for this public repository, so use them. To run all three OSes, and Windows and Linux on ARM64 too, on any branch:
 
 ```sh
 gh workflow run ci.yml --ref <branch>
@@ -160,7 +160,7 @@ gh run watch
 
 A pull request is merged only when its checks are green (`gh pr checks --watch`).
 
-- **The `build` jobs** run the same `scripts/test` and `scripts/test.ps1` as above: the Debug build, CTest (including the headless `platform.smoke`) and pytest, with warnings as errors. The Release jobs run the release workflows and package the kits; the universal binary must contain both `arm64` and `x86_64`.
+- **The `build` jobs** run the same `scripts/test` and `scripts/test.ps1` as above: the Debug build, CTest (including the headless `platform.smoke`) and pytest, with warnings as errors. The Release jobs run the release workflows and package the kits; the universal binary must contain both `arm64` and `x86_64`. On the runs that build every OS, `windows-11-arm` and `ubuntu-24.04-arm` run the same jobs with the `win-arm64-*` and `linux-arm64-*` presets ([ADR 0194](../adr/0194-windows-arm64-and-linux-aarch64-builds.md)).
 - **The `asan` job** (Linux, on every pull request and manual run that builds) runs the `linux-asan` workflow: the C/C++ tests built with clang under ASan and UBSan, no recovery, the guest memory model checked ([Sanitizers](#sanitizers-asan-and-ubsan)). Then the fuzz smoke: the `linux-fuzz` workflow runs every target of `tests/fuzz/` for 30 s from its seeds ([Fuzzing](#fuzzing)); a finding fails the job, and its input is in the uploaded `build/test-output/linux-fuzz/fuzz/NAME/`.
 - **The `lint (clang-tidy)` job** (Linux, on every pull request and manual run that builds) runs `scripts/lint` in full, clang-tidy included, after installing the SDL3 build dependencies and clang for the compile database. It runs beside the build jobs and takes about 6 minutes, most of it clang-tidy.
 - **The `lint + Python min/latest` job** (Linux) runs `scripts/lint --no-tidy`, then `scripts/test --python-only` on Python 3.10 and the latest Python, and the guard that no compendium output is tracked ([ADR 0121](../adr/0121-public-compendium-site.md)).
@@ -198,5 +198,7 @@ A manual run with input `runners: self-hosted` sends the same jobs to self-hoste
 | macOS | `self-hosted`, `macOS`, `ARM64` | a Mac |
 | Windows | `self-hosted`, `Windows`, `X64` | a Windows PC with Visual Studio 2022+ and its C++ workload |
 | Linux, lint and Python | `self-hosted`, `Linux`, `X64` | a Linux x86_64 runner, for example the [actions/runner image](https://github.com/actions/runner/blob/main/images/Dockerfile) in OrbStack with `--platform linux/amd64` |
+| Windows ARM64 (`windows-11-arm`) | `self-hosted`, `Windows`, `ARM64` | an ARM64 Windows PC with Visual Studio 2022+, its C++ workload and the MSVC ARM64 build tools |
+| Linux aarch64 (`ubuntu-24.04-arm`) | `self-hosted`, `Linux`, `ARM64` | a Linux aarch64 runner, for example the actions/runner image in OrbStack with `--platform linux/arm64` |
 
 To set one up, Settings → Actions → Runners → New self-hosted runner gives the download and a registration token. Run `./config.sh --url https://github.com/armaatus/maplethief-port --token <token> --labels <labels>` and install it as a service (`./svc.sh install && ./svc.sh start` on macOS and Linux, `config.cmd --runasservice` on Windows). Keep the runner's directory away from your checkout, so its jobs never see `work/` or your IPA. Settings → Actions → General must keep "Run workflows from fork pull requests" off. The Linux runner needs `sudo` for the apt step.

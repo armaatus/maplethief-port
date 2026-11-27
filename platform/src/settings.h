@@ -153,6 +153,14 @@
 //   run_timer = off
 //   # the timer's category: any | chapter_1, or a file of your own in <data dir>/categories
 //   run_category = any
+//   # record every session, from the start to quit, as a run file in runs/ that plays back
+//   # exactly (MapleThief --play-run FILE): on | off
+//   record_runs = off
+//   # send the run timer's start, splits and resets to LiveSplit's TCP server
+//   # (livesplit.h): off | HOST:PORT (localhost:16834)
+//   livesplit = off
+//   # with livesplit, LiveSplit's game time is the game's ticks (50 ms each): on | off
+//   livesplit_game_time = on
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -687,6 +695,8 @@ struct Settings {
     bool speech = false;                            // speech, --speech (on | off)
     std::uint32_t speech_rate = kSpeechRateDefault; // --speech-rate (50 to 200, percent)
     std::uint32_t speech_volume = kSpeechVolumeMax; // --speech-volume (0 to 100, percent)
+    // The notify lines (pick-ups, meso, EXP, the map's name) said too (#392, ADR 0191).
+    bool speech_notices = true; // speech_notices, --speech-notices (on | off)
     // The picture adjustments (#187): the present stage's colour step with the filter.
     std::uint32_t brightness = kPictureDefault; // --brightness (50 to 150, percent)
     std::uint32_t contrast = kPictureDefault;   // --contrast (50 to 150, percent)
@@ -723,6 +733,13 @@ struct Settings {
     // category it times (a category file's name, without .mtcat). Outside the presets.
     bool run_timer = false;           // run_timer, --run-timer (on | off)
     std::string run_category = "any"; // run_category, --run-category (NAME)
+    // Run recording (#405, ADR 0156, run_recorder.h): every session from the start to quit into
+    // <data dir>/runs/, off by default and in no preset.
+    bool record_runs = false; // record_runs, --record-runs (on | off)
+    // The LiveSplit link (#407, ADR 0156, livesplit.h): HOST:PORT of LiveSplit's TCP server, empty
+    // for off; and whether it gets the game time. Desktop only, outside the presets.
+    std::string livesplit;           // livesplit, --livesplit (off | HOST:PORT)
+    bool livesplit_game_time = true; // livesplit_game_time, --livesplit-game-time (on | off)
 
     bool operator==(const Settings &) const = default;
 };

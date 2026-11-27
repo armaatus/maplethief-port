@@ -1,0 +1,13 @@
+{
+ "level": 10,
+ "hp": 110,
+ "mp": 110,
+ "meso": 2000,
+ "map": [2, 3],
+ "position": [-1, -1],
+ "equipped": [null, {"id": 24, "slots_left": 5, "attack": 8}, null, null, null],
+ "etc_inventory": [[3, 50]],
+ "chapter": 1,
+ "main": {"7": 2, "8": 2, "9": 2, "21": 2},
+ "side": {}
+}

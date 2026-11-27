@@ -82,6 +82,7 @@ add_library(
     src/hooks/widescreen.cpp
     src/hooks/widescreen_menus.cpp
     src/input/input.cpp
+    src/runtape/runtape.cpp
     src/mem/commit_map.cpp
     src/mem/heap.cpp
     src/mem/memory.cpp

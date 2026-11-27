@@ -57,11 +57,40 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
                         "Visual Studio developer environment (see docs/build/README.md).")
 endif()
 
+# The target's CPU, x86_64 or arm64 (#362, ADR 0194): MSVC's own architecture, so that the
+# ARM64 cross build on an x64 PC (the win-arm64-player preset) is named for ARM64; elsewhere
+# CMAKE_SYSTEM_PROCESSOR. On macOS a build can hold both (CMAKE_OSX_ARCHITECTURES).
+# cmake/Packaging.cmake names the Windows kits from it. The arm64 presets (win-arm64-*,
+# linux-arm64-*) set MAPLETHIEF_TARGET_ARCH, and a compiler for another CPU then fails here
+# instead of producing a kit named for the wrong one.
+if(MSVC)
+    string(TOLOWER "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}" MAPLETHIEF_ARCH)
+else()
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" MAPLETHIEF_ARCH)
+endif()
+if(MAPLETHIEF_ARCH MATCHES "^(x64|amd64)$")
+    set(MAPLETHIEF_ARCH x86_64)
+elseif(MAPLETHIEF_ARCH STREQUAL "aarch64")
+    set(MAPLETHIEF_ARCH arm64)
+endif()
+set(MAPLETHIEF_TARGET_ARCH
+    ""
+    CACHE STRING "The CPU the preset builds for (x86_64 or arm64); empty: any")
+if(MAPLETHIEF_TARGET_ARCH AND NOT MAPLETHIEF_TARGET_ARCH STREQUAL MAPLETHIEF_ARCH)
+    message(FATAL_ERROR "This preset builds for ${MAPLETHIEF_TARGET_ARCH}, but the compiler "
+                        "targets ${MAPLETHIEF_ARCH}. For Windows ARM64, configure from an ARM64 "
+                        "Visual Studio developer environment (docs/build/README.md).")
+endif()
+
 # Never read or write the user package registry (~/.cmake/packages, or HKCU on Windows):
 # the build must not write outside its build tree, and find_package() must not depend on
 # what else is installed on the machine.
 set(CMAKE_EXPORT_NO_PACKAGE_REGISTRY ON)
 set(CMAKE_FIND_USE_PACKAGE_REGISTRY OFF)
+
+# No C++20 modules here, so no dependency scan: with Ninja, CMake would otherwise run
+# clang-scan-deps on every C++20 file, which Ubuntu 24.04's clang-17 package lacks (#341).
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # Warnings are errors in CI (ADR 0002). CI services, GitHub Actions included, set CI in the
 # environment; locally the default is off so that a newer compiler doesn't block a build.

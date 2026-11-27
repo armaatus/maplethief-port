@@ -95,6 +95,8 @@ mt_gcd_config mt_gcd_config_default(void) MT_NOEXCEPT;
 /* Sets the configuration (NULL: the default). Only while no worker thread exists (at start,
  * or after mt_gcd_reset); returns 0, or -1 otherwise. */
 int mt_gcd_configure(const mt_gcd_config *cfg) MT_NOEXCEPT;
+/* The configuration in effect (the run tape wraps its clock, maplethief/runtape.h). */
+mt_gcd_config mt_gcd_get_config(void) MT_NOEXCEPT;
 
 /* Ends every worker thread (a blocked one is abandoned: its guest stack is freed without
  * unwinding), frees their guest stacks and forgets all queued work, timers, groups and the

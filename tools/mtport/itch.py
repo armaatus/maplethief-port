@@ -49,6 +49,8 @@ CHANNELS = {
     "mac": "macos-universal",
     "linux": "linux-x86_64",
     "windows": "windows-x64",
+    "linux-arm64": "linux-aarch64",
+    "windows-arm64": "windows-arm64",
     "switch": "switch",
 }
 KEY_VARIABLE = "BUTLER_API_KEY"
@@ -334,7 +336,7 @@ def add_parser(sub) -> None:
     p.add_argument(
         "--platforms",
         default=",".join(CHANNELS),
-        help="comma-separated, of mac,linux,windows,switch (default all four)",
+        help=f"comma-separated, of {','.join(CHANNELS)} (default all)",
     )
     p.add_argument("--target", default=TARGET, help=f"itch.io user/game (default {TARGET})")
     p.add_argument("--dry-run", action="store_true", help="print the butler commands")

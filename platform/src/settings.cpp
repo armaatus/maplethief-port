@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <iterator>
 
+#include "livesplit.h"
 #include "maplethief/gfx.h"
 #include "port_text.h"
 #include "run_timer.h"
@@ -366,6 +367,27 @@ constexpr SettingValue run_category_value() {
                                   "a category's name (a-z, 0-9 and _, at most 32)");
     v.offer = &offer_run_categories;
     return v;
+}
+
+// livesplit (#407): off, or an address parse_livesplit_address reads (written as it prints it).
+bool parse_livesplit(const SettingValue &, std::string_view text, Settings *s) {
+    std::string lower(text);
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (lower == "off") {
+        s->livesplit.clear();
+        return true;
+    }
+    const std::optional<LiveSplitAddress> a = parse_livesplit_address(text);
+    if (!a) {
+        return false;
+    }
+    s->livesplit = livesplit_address_text(*a);
+    return true;
+}
+
+std::string print_livesplit(const SettingValue &, const Settings &s) {
+    return s.livesplit.empty() ? "off" : s.livesplit;
 }
 
 constexpr SettingValue audio_device_value() {
@@ -1005,6 +1027,17 @@ constexpr SettingInfo kRegistry[] = {
      .help = "How loud the voice speaks, in percent",
      .applies = Applies::kAtOnce,
      .needs = kCapSpeech},
+    // #392 (ADR 0191, speech_text.h): the notify lines too, queued behind dialogue and popups.
+    {.key = "speech_notices",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# with speech on, also read the notify lines (pick-ups, meso, EXP): on | off",
+     .value = on_off<&Settings::speech_notices>(),
+     .flag = "--speech-notices",
+     .game_only = true,
+     .label = "Speak notices",
+     .help = "With speech on, also reads the pick-up, meso and EXP lines and the map's name",
+     .applies = Applies::kAtOnce,
+     .needs = kCapSpeech},
     // Video: the picture adjustments (#187, ADR 0093's addendum, color_filter.h), the colour
     // step with the colour-blind filter. The player's screen: no preset changes them.
     {.key = "brightness",
@@ -1215,7 +1248,7 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Direction priority",
      .help = "Two directions held: the game's own order, or the newest one wins (rolling keys)",
      .applies = Applies::kAtOnce},
-    // The opt-in update notice (#199, ADR 0137, update_check.h): the port's only network use.
+    // The opt-in update notice (#199, ADR 0137, update_check.h): network use, with livesplit.
     {.key = "update_check",
      .group = SettingGroup::kOther,
      .comment = "# once a day, ask github.com whether a newer version of the port is out (never "
@@ -1248,6 +1281,43 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Speedrun category",
      .help = "What the timer times: Any% (to the last boss) or Chapter 1 (to the trip to Orbis)",
      .applies = Applies::kAtOnce},
+    // Run recording (#405, ADR 0156, run_recorder.h): a replay of every session.
+    {.key = "record_runs",
+     .group = SettingGroup::kOther,
+     .comment = "# record every session, from the start to quit, as a run file in runs/ that "
+                "plays back\n# exactly (MapleThief --play-run FILE): on | off",
+     .value = on_off<&Settings::record_runs>(),
+     .flag = "--record-runs",
+     .game_only = true,
+     .label = "Record runs",
+     .help = "Keeps a replay of every session in runs/, from the start to quit; it plays back "
+             "exactly with --play-run"},
+    // The LiveSplit link (#407, ADR 0156, livesplit.h): read live by game.cpp's turn.
+    {.key = "livesplit",
+     .group = SettingGroup::kOther,
+     .comment = "# send the run timer's start, splits and resets to LiveSplit's TCP server\n"
+                "# (livesplit.h): off | HOST:PORT (localhost:16834)",
+     .value = custom_value(&parse_livesplit, &print_livesplit,
+                           "off, or localhost, an IPv4 address or [an IPv6 one], with :PORT"),
+     .flag = "--livesplit",
+     .game_only = true,
+     .label = "LiveSplit server",
+     .help = "Sends the timer's start, splits and resets to LiveSplit's TCP server on this "
+             "computer (localhost:16834); needs the speedrun timer on",
+     .applies = Applies::kAtOnce,
+     .needs = kCapLiveSplit | kCapTypedValues},
+    {.key = "livesplit_game_time",
+     .group = SettingGroup::kOther,
+     .comment =
+         "# with livesplit, LiveSplit's game time is the game's ticks (50 ms each): on | off",
+     .value = on_off<&Settings::livesplit_game_time>(),
+     .flag = "--livesplit-game-time",
+     .game_only = true,
+     .label = "LiveSplit game time",
+     .help = "LiveSplit's game time counts the game's own ticks (50 ms each), whatever the "
+             "computer's speed",
+     .applies = Applies::kAtOnce,
+     .needs = kCapLiveSplit},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

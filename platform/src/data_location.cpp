@@ -24,6 +24,7 @@
 #endif
 
 #include "maplethief/saves.h"
+#include "run_recorder.h"
 
 namespace maplethief::frontend {
 
@@ -62,6 +63,7 @@ std::string errno_text(int err) { return std::generic_category().message(err); }
 // The resolver's cache (data_location()) and --data-location.
 struct State {
     std::optional<DataPlace> flag;
+    std::string dir; // set_data_location_dir: in place of MAPLETHIEF_DATA_DIR
     std::optional<DataLocation> resolved;
 };
 State &state() {
@@ -246,7 +248,10 @@ bool probe_data_dir(const std::string &data_dir, std::string *why) {
 
 DataInputs current_data_inputs() {
     DataInputs in;
-    if (const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR"); env != nullptr && *env != '\0') {
+    if (!state().dir.empty()) {
+        in.env = state().dir;
+    } else if (const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR");
+               env != nullptr && *env != '\0') {
         in.env = env;
     }
     in.flag = state().flag;
@@ -382,6 +387,11 @@ DataLocation resolve_data_location(const DataInputs &in) {
 
 void set_data_location_flag(std::optional<DataPlace> flag) {
     state().flag = flag;
+    state().resolved.reset();
+}
+
+void set_data_location_dir(const std::string &dir) {
+    state().dir = dir;
     state().resolved.reset();
 }
 
@@ -521,6 +531,7 @@ std::string migrate_gamecenter(const std::string &data_dir, const std::string &s
     if (!read(from, &bytes)) {
         return "data: cannot read " + path_utf8(from);
     }
+    run_refuse("a data folder switch"); // the saves move under the game (run_census.h)
     if (mt_saves_replace_file(path_utf8(to).c_str(), bytes.data(), bytes.size()) != 0) {
         return "data: cannot copy " + path_utf8(from) + " into " + saves_dir;
     }

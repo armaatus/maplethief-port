@@ -14,6 +14,9 @@
 # The file is changed only if it holds the expected text; anything else (another commit, the fix
 # already there upstream) fails the configure step, loudly.
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 set(file "src/video/switch/SDL_switchvideo.c")
 file(READ "${file}" text)
 string(FIND "${text}" "MapleThief #238" done)

@@ -11,9 +11,9 @@ MapleThief is MapleStory Thief Edition, the 2010 iPhone game, running natively o
 
    | System | Minimum |
    |---|---|
-   | Windows | Windows 10 or 11, 64-bit |
+   | Windows | Windows 10 or 11, 64-bit (x64, or ARM64 such as Snapdragon laptops) |
    | Mac | macOS 13 Ventura or later (Apple silicon or Intel) |
-   | Linux | x86_64 with glibc 2.35 or later (Ubuntu 22.04, Debian 12, current SteamOS): a tarball, an AppImage or a Flatpak bundle |
+   | Linux | x86_64 or aarch64 (ARM64) with glibc 2.35 or later (Ubuntu 22.04, Debian 12, current SteamOS): a tarball; on x86_64 also an AppImage or a Flatpak bundle |
    | Steam Deck | Yes, as a non-Steam game ([Linux and Steam Deck](linux-and-steam-deck.md)) |
    | iPhone | iOS 16 or later, built yourself on a Mac with Xcode ([Playing on your iPhone](iphone.md)); checked on an iPhone 12 so far |
    | Nintendo Switch | One that runs homebrew from the Homebrew Menu ([Playing on the Nintendo Switch](switch.md)), not checked on a console yet |
@@ -29,9 +29,9 @@ MapleThief is MapleStory Thief Edition, the 2010 iPhone game, running natively o
 
    | System | File |
    |---|---|
-   | Windows | `MapleThief-<version>-windows-x64.zip` |
+   | Windows | `MapleThief-<version>-windows-x64.zip`; on an ARM64 PC `MapleThief-<version>-windows-arm64.zip` |
    | Mac | `MapleThief-<version>-macos-universal.zip` |
-   | Linux, Steam Deck | `MapleThief-<version>-linux-x86_64.tar.gz` (or `.AppImage`, `.flatpak`) |
+   | Linux, Steam Deck | `MapleThief-<version>-linux-x86_64.tar.gz` (or `.AppImage`, `.flatpak`); on ARM64 (aarch64) `MapleThief-<version>-linux-aarch64.tar.gz` |
    | Nintendo Switch | `MapleThief-<version>-switch.zip`: copy and start it as [Playing on the Nintendo Switch](switch.md) says |
 
    The `MapleThief-kit-…` files are for developers; you don't need them.

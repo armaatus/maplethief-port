@@ -363,6 +363,10 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # the layer on a software renderer. UI scaling (ADR 0103, ui_scaling_test.cpp): the picture, the mapping, the gear and the
 # window text over 2304 window sizes, densities, modes, widescreen, render scales and safe
 # areas; the window text's scale and boxes; the notice and the price line drawn; the veil.
+# Run recording (#405, ADR 0156): the .mtrun file's round trip, malformed files refused with
+# their byte, mutations refused or read, the census's table (run_file_test.cpp); the run tape's
+# clocks recorded and played back, boundary calls recorded at their turn and dropped in play,
+# the music's state, guest writes (runtape_test.cpp).
 # The regression run's replay and checkpoints (#91, ADR 0104, replay_test.cpp): the file's round
 # trip and every malformed line refused, SDL's pad names, the cursor, the frame hash, checkpoint
 # lines, digests and the first difference, the plan, the expects. The controls card (#193, ADR
@@ -385,7 +389,14 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # The speedrun timer (#406, ADR 0156, run_timer_test.cpp): synthetic run events and a fake clock
 # (start, splits, end, reset, the personal best), an Assist set and reset mid-run, every Assists
 # row of the registry, the run variables, the category parser's refusals by line, the shipped
-# categories, the run log's round trip.
+# categories, the run log's round trip; practice (#409, ADR 0189): a load marks the run as
+# practice, segment times, best segments and the sum of best, the .segments file.
+# Practice states (#409, practice_state_test.cpp): practice_pick F7 and practice_load F8, the
+# state per category, slot and split, armed by a split and taken at the first safe turn, the pick,
+# and a load with the quick-load's refusals.
+# The LiveSplit link (#407, livesplit_test.cpp): a test TCP server on 127.0.0.1 receives the
+# exact lines of a synthetic run (start, splits, reset, game time); a refused or unanswered
+# connection never holds a turn and logs once.
 # The first-launch IPA import (#182, ipa_import_test.cpp): synthetic IPAs refused with each
 # reason, unsafe entries writing nothing, an interrupted import leaving no game/, a re-import,
 # the bundle lookup's order, and the import screen's input and loop on a dummy-driver window.
@@ -407,6 +418,7 @@ maplethief_add_cpp_test(
             cpp/settings_menu_test.cpp cpp/game_speed_test.cpp cpp/autosave_test.cpp
             cpp/color_filter_test.cpp
             cpp/speech_test.cpp
+            cpp/speech_menus_test.cpp
             cpp/speech_text_test.cpp
             cpp/frame_interp_test.cpp
             cpp/assists_test.cpp
@@ -420,6 +432,8 @@ maplethief_add_cpp_test(
             cpp/controls_card_test.cpp
             cpp/ui_scaling_test.cpp
             cpp/replay_test.cpp
+            cpp/run_file_test.cpp
+            cpp/runtape_test.cpp
             cpp/pad_pointer_test.cpp
             cpp/file_dialog_test.cpp
             cpp/keypad_haptics_test.cpp
@@ -440,10 +454,15 @@ maplethief_add_cpp_test(
             cpp/switch_input_test.cpp
             cpp/gfx_dksh_test.cpp
             cpp/run_timer_test.cpp
+            cpp/livesplit_test.cpp
+            cpp/practice_state_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
 target_include_directories(platform_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+if(WIN32)
+    target_link_libraries(platform_test PRIVATE ws2_32) # livesplit_test.cpp's server
+endif()
 target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}"
                                                  MT_TEST_OUTPUT_DIR="${MAPLETHIEF_TEST_OUTPUT_DIR}")
 # The minimap's golden image of a synthetic grid (#176, minimap_test.cpp) and the key pad's
@@ -908,6 +927,19 @@ foreach(flow main terms early characters game pointer)
                                                        SKIP_REGULAR_EXPRESSION "skipped:"
                                                        TIMEOUT 600 RUN_SERIAL TRUE)
 endforeach()
+# The skill tab read aloud (#393, speech_menus.h) on the built Rogue's save: each row's skill
+# said once per move, its description when the game's sub-list opens (MT_SPEECH_MENUS on, the
+# log backend; hashes, not text, in the output).
+add_test(
+    NAME input.speech_menus_skills
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=speech_skills"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/speech_menus_skills"
+            "-DSEED=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_jobs_ch1_rogue_30/data" -P
+            "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+set_tests_properties(
+    input.speech_menus_skills
+    PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:" TIMEOUT 600 RUN_SERIAL
+               TRUE FIXTURES_REQUIRED start_jobs_ch1_rogue_30 ENVIRONMENT "MT_SPEECH_MENUS=1")
 add_test(
     NAME input.menu_shops_save
     COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=shops_save"
@@ -1383,6 +1415,32 @@ set_tests_properties(
         "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_SPEECH=on;MT_SPEECH_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_speech_off"
 )
 
+# Speech of the notify lines and popups (#392, ADR 0191): from a built start on 2.3 (synthetic),
+# a hunt until a kill's EXP line and a pick-up's, then a fall and Return to town; off (the base)
+# and on the log backend. Each line the notify list shows is one notice event and is said in a
+# notice; the death popup and its Return to town are said as dialogue; the state equals the off
+# run's.
+add_test(NAME play.speech_notices_off_synthetic
+         COMMAND play_real_test speech_notices "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_notices_off" 1)
+add_test(NAME play.speech_notices_synthetic
+         COMMAND play_real_test speech_notices "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_notices_on" 1)
+set_tests_properties(
+    play.speech_notices_off_synthetic
+    PROPERTIES
+        LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE
+        FIXTURES_REQUIRED start_speech_notices FIXTURES_SETUP play_notices
+        ENVIRONMENT
+        "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_speech_notices"
+)
+set_tests_properties(
+    play.speech_notices_synthetic
+    PROPERTIES
+        LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE
+        FIXTURES_REQUIRED "start_speech_notices;play_notices"
+        ENVIRONMENT
+        "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_speech_notices;MT_SPEECH=on;MT_SPEECH_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_notices_off"
+)
+
 # The HUD extras (#191, ADR 0109, docs/re/hud-extras.md): first_map's route to 2.3 with
 # exp_percent = on and a hunt until a Red Potion and a level: the figure equal to the hero's
 # fields and hero.dat in every field turn; the game's own mob HP bar after each hit and its own
@@ -1428,7 +1486,8 @@ set(_starts
     systems2_scrolls_success
     systems2_scrolls_failure
     systems2_pigmy
-    systems2_portal620)
+    systems2_portal620
+    speech_notices)
 foreach(start IN LISTS _starts)
     add_test(NAME starts.${start}
              COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
@@ -1462,6 +1521,53 @@ set(_from_starts
     systems2_scrolls_failure:systems2_scrolls_failure
     systems2_pigmy:systems2_pigmy
     systems2_portal620:systems2_portal620)
+# The five map pages checked in the running port (#221): from a start on each map, the hero takes
+# one portal (MT_MAP_PAGE_PORTAL, its kind) and play_real_test map_page writes where it landed;
+# tests/test_compendium_world_port.py compares that with the page's Connections row. The 2.0
+# and 2.4 starts come twice: chapter 1 with the gate's quest done (open) and not (shut).
+set(_map_page_runs
+    0_0:0
+    0_0:1
+    2_0_open:0
+    2_0_open:1
+    2_0_shut:1
+    2_4_open:0
+    2_4_open:1
+    2_4_open:2
+    2_4_open:3
+    2_4_shut:2
+    3_8:3
+    9_3:0
+    9_3:1
+    9_3_top:3)
+set(_map_page_starts)
+foreach(pair IN LISTS _map_page_runs)
+    string(REPLACE ":" ";" pair "${pair}")
+    list(GET pair 0 start)
+    list(GET pair 1 kind)
+    if(NOT start IN_LIST _map_page_starts)
+        list(APPEND _map_page_starts ${start})
+        add_test(NAME starts.map_page_${start}
+                 COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                         "${PROJECT_SOURCE_DIR}/tests/starts/map_page_${start}.json"
+                         "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_map_page_${start}/data/saves" --app
+                         "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+        set_tests_properties(
+            starts.map_page_${start}
+            PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_SETUP
+                       start_map_page_${start} ENVIRONMENT
+                       "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+    endif()
+    add_test(NAME play.map_page_${start}_${kind}_synthetic
+             COMMAND play_real_test map_page
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_map_page_${start}_${kind}")
+    set_tests_properties(
+        play.map_page_${start}_${kind}_synthetic
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE
+                   FIXTURES_REQUIRED start_map_page_${start}
+                   ENVIRONMENT
+                   "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_map_page_${start};MT_MAP_PAGE_PORTAL=${kind}")
+endforeach()
 foreach(pair IN LISTS _from_starts)
     string(REPLACE ":" ";" pair "${pair}")
     list(GET pair 0 mode)
@@ -1475,6 +1581,27 @@ foreach(pair IN LISTS _from_starts)
                    ENVIRONMENT
                    "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_${start}")
 endforeach()
+
+# The compendium's NPCs, shops and recipes in the running port (#220,
+# docs/testing/compendium-port-check.md): from chapter_2.json (equal to part L's save, so not
+# synthetic) five NPCs, two shops and two recipes against the knowledge base's records.
+add_test(NAME starts.chapter_2
+         COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                 "${PROJECT_SOURCE_DIR}/tests/starts/chapter_2.json"
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2/data/saves" --app
+                 "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+set_tests_properties(
+    starts.chapter_2
+    PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_SETUP start_chapter_2
+               ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+add_test(NAME play.compendium_npcs COMMAND play_real_test compendium_npcs
+                                           "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_compendium_npcs")
+set_tests_properties(
+    play.compendium_npcs
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED start_chapter_2
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2")
 
 # The systems sweep (#303, docs/testing/systems-sweep-1.md). Korean (MAPLETHIEF_LANGUAGE=ko):
 # the terms, the tutorial and chapter 1's first part from a new game, and a quest offer in
@@ -1651,6 +1778,19 @@ foreach(part IN LISTS _chapter_1_parts)
                    FIXTURES_SETUP play_chapter_1_${part} ENVIRONMENT "${_env}")
     set(_previous ${part})
 endforeach()
+# Practice states per split (#409, practice_state.h, ADR 0189): from part c's save, a synthetic
+# category of map changes (1.2, back to 1.0): two splits take two states in the run's data
+# directory; F7 picks the first, F8 loads it: the guest digest (a save right after the load) is
+# the state file's as taken, the timer is practice with its segment timer back at zero, and the
+# way back to 1.0 ends the practised segment.
+add_test(NAME play.practice_state
+         COMMAND play_real_test practice_state "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_practice_state")
+set_tests_properties(
+    play.practice_state
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_chapter_1_c
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_1_c")
 # The popup menu's skill, quest and option tabs by the d-pad (#164, prompts.h): from part c's
 # save, each list shows and the port's frame sits on its cursor, in each tab's window shot; A
 # opens each quest's page and B closes it (#167, the quest page fix).

@@ -14,6 +14,9 @@
 #     presented more frames than ticks; original logs no frame_rate = smooth line.
 # Prints "skipped:" (the test's SKIP_REGULAR_EXPRESSION) when play.save_quit left no save.
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 # skip_intros is pinned off (#174, ADR 0096): it runs the guest clock x8 through scenes, and this
 # test times or counts the guest's ticks; a suite run with MAPLETHIEF_SETTINGS="skip_intros = on"
 # must still pass. The flag comes after the environment's settings, so it wins.

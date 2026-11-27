@@ -182,6 +182,7 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `speech` | off | - | Read the game's text aloud with the system voice: off, on (not on the Switch; `MAPLETHIEF_SPEECH=log` logs each utterance instead) |
 | `speech_rate` | 100 | - | How fast the voice speaks, 50 to 200 (percent of its normal rate) |
 | `speech_volume` | 100 | - | How loud the voice speaks, 0 to 100 (percent) |
+| `speech_notices` | on | - | With `speech` on, also read the notify lines (pick-ups, meso, EXP, the map's name), queued behind dialogue and popups: on, off |
 | `brightness` | 100 | - | The picture's brightness, 50 to 150 (percent; 100: as the game drew it) |
 | `contrast` | 100 | - | The picture's contrast about mid-grey, 50 to 150 (percent; 100: the game's) |
 | `saturation` | 100 | - | How colourful the picture is, 50 to 150 (percent; 100: the game's colours) |

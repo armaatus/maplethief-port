@@ -44,7 +44,9 @@
 //                                             mechanics: CTest play.mechanics, #214,
 //                                             docs/re/mechanics.md;
 //                                             systems2_*: CTests play.systems2_*_synthetic,
-//                                             #304, docs/testing/systems-sweep-2.md)
+//                                             #304, docs/testing/systems-sweep-2.md;
+//                                             map_page: CTests play.map_page_*_synthetic,
+//                                             #221)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -84,6 +86,7 @@
 
 #if defined(MT_HAVE_GENERATED_CODE)
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <fstream>
@@ -119,6 +122,8 @@
 #include "maplethief/textpack.h"
 #include "maplethief/widescreen.h"
 #include "minimap.h"
+#include "port_text.h"
+#include "practice_state.h"
 #include "present.h"
 #include "price_line.h"
 #include "quest_bot.h"
@@ -7562,6 +7567,207 @@ void quick_state_checks(Run &r, u64) {
     }
 }
 
+// --- practice states per split (#409, practice_state.h, ADR 0189) ------------------------------
+//
+// practice_state: from part c's save (MT_FROM_SAVE), the hero in Perion (1.0), the speedrun timer
+// times a synthetic category of three splits: the map change to 1.2, the one back to 1.0, and
+// one never reached. The run starts at once (a run from a save, as chapter_1_l's). Each split
+// arms a practice state, taken at the first safe turn after it (PracticeStates on the frontend's
+// game_quick_ops, as game.cpp's turn hook runs it) to OUT_DIR/data/states/practice_test/: two
+// splits, two states. Then F7 picks the first split's state and F8 loads it: the guest digest
+// (the FNV-1a of mt_snapshot_save of the game right after the load) equals the state file's as
+// taken, the hero's state line is the one at the take, and the timer is practice with its segment
+// timer back at zero. The way back to 1.0 then ends the practised segment (and, a split of the
+// practice, takes split 2's state again).
+namespace practice_test {
+fe::PracticeStates g_states;
+fe::RunTimer *g_timer = nullptr;
+struct Taken {
+    std::string path, digest, state;
+};
+std::map<std::size_t, Taken> g_taken;
+std::string g_loaded_digest, g_loaded_state, g_load_log;
+fe::RunTime g_before_load, g_after_load;
+std::size_t g_picked = 0;
+std::uint64_t g_saves_at_load = 0; // the practice states taken before the load
+bool g_practice = false;
+std::size_t g_next = 0;
+std::optional<fe::RunTime> g_segment;
+std::vector<fe::RunRecord> g_records;
+constexpr const char *k_category = "practice_test";
+
+// The hero's state, without the harness's own counters (a load does not rewind them).
+std::string hero_state(mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    char buf[200];
+    std::snprintf(buf, sizeof buf, "map=%d.%d x=%d y=%d hp=%d mp=%d level=%d exp=%d meso=%d",
+                  h.area, h.map, h.x, h.y, h.hp, h.mp, h.level, h.exp, h.meso);
+    return buf;
+}
+
+std::string bytes_digest(const std::vector<std::uint8_t> &b) {
+    return fe::hex64(fe::fnv1a64(b.data(), b.size()));
+}
+
+// The guest digest now: the game's state file at this moment, as a practice state takes it.
+std::string guest_digest(mt_cpu *cpu, std::uint32_t slot) {
+    mt_snapshot_meta meta = mt_snapshot_meta_default();
+    mt_process_image_sha256(mt_process_current(), meta.binary_sha256);
+    meta.slot = slot;
+    std::uint8_t *bytes = nullptr;
+    std::size_t size = 0;
+    char why[256] = {};
+    if (mt_snapshot_save(cpu, &meta, &bytes, &size, why, sizeof why) != 0) {
+        return std::string("no save: ") + why;
+    }
+    const std::string d = fe::hex64(fe::fnv1a64(bytes, size));
+    std::free(bytes);
+    return d;
+}
+
+fe::RunCategory category() {
+    std::vector<std::string> problems;
+    std::optional<fe::RunCategory> c = fe::parse_run_category(k_category,
+                                                              "title = Practice test\n"
+                                                              "split map_change 1.2 = Dark Stumps\n"
+                                                              "split map_change 1.0 = Perion\n"
+                                                              "split chapter_end 9 = Never\n",
+                                                              &problems);
+    check(c.has_value() && problems.empty(), "the test category parses");
+    return c.value_or(fe::RunCategory{});
+}
+} // namespace practice_test
+
+void practice_state(Run &r, u64) {
+    using namespace quest_bot;
+    namespace pt = practice_test;
+    from_save(r);
+    static fe::RunTimer timer(fe::RunClock{[] {
+                                               return fe::RunInstant{
+                                                   static_cast<double>(SDL_GetTicksNS()) / 1e9,
+                                                   mt_input_get_stats().ticks};
+                                           },
+                                           [] { return std::string("2026-11-27 00:00:00"); }});
+    pt::g_timer = &timer;
+    // Every turn: a split the timer reached arms its state; an armed state is taken at the first
+    // safe turn.
+    r.on_turn = [&r, monitor_turn = r.on_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        if (const std::optional<std::size_t> s = pt::g_timer->take_reached()) {
+            pt::g_states.reached(*s, pt::g_timer->category().splits.size());
+            std::printf("practice: split %zu reached at step %llu\n", *s,
+                        static_cast<unsigned long long>(r.step()));
+        }
+        if (!pt::g_states.armed()) {
+            return;
+        }
+        const std::size_t split = *pt::g_states.armed();
+        const fe::QuickResult res =
+            pt::g_states.take_armed(run_quick_ops(r, cpu), r.data.string(), pt::k_category);
+        if (res.done) {
+            const fe::AutosaveCheck c = fe::check_autosave(cpu);
+            pt::Taken t;
+            t.path = fe::practice_state_path(r.data.string(), pt::k_category, c.slot, split);
+            t.digest = pt::bytes_digest(
+                fe::read_quick_state(t.path).value_or(std::vector<std::uint8_t>{}));
+            t.state = pt::hero_state(cpu);
+            std::printf("practice: %s; digest %s, %s\n", res.log.c_str(), t.digest.c_str(),
+                        t.state.c_str());
+            pt::g_taken[split] = t;
+        }
+    };
+    then_do(r, "the speedrun timer: the test category, a run from here", [](mt_cpu *) {
+        g_run_timer = pt::g_timer;
+        pt::g_timer->set_category(pt::category(), std::nullopt);
+        pt::g_timer->start();
+        check(pt::g_timer->state() == fe::RunTimer::State::kRunning, "the timer runs");
+    });
+    const wm::Object *back = wm::get(1, 2).portal(1); // 1.2's portal to Perion
+    const Goal on_1_2 = back != nullptr ? Goal{1, 2, back->x, back->y, 40} : Goal{1, 2, 0, 0, 40};
+    then_go(r, "the Dark Stumps' map (1.2), by its portal back", on_1_2, 300);
+    then_wait_for(r, "the practice state after split 1 (1.2)", 60,
+                  [](mt_cpu *) { return pt::g_taken.count(1) == 1; });
+    then_go(r, "back to Perion (1.0)", {1, 0, 376, 399, 30}, 300);
+    then_wait_for(r, "the practice state after split 2 (1.0)", 60,
+                  [](mt_cpu *) { return pt::g_taken.count(2) == 1; });
+    then_wait(r, 1);
+    // F7 picks the first split with a state, F8 loads it, as game.cpp's run_practice_state.
+    then_do(r, "F7: pick; F8: load the first split's state", [&r](mt_cpu *cpu) {
+        const fe::QuickOps ops = run_quick_ops(r, cpu);
+        const fe::RunCategory &c = pt::g_timer->category();
+        tap_key(r, SDLK_F7);
+        check(pt::g_states.take(r.actions, true) == fe::PracticeRequest::kPick, "F7 picks");
+        const std::optional<std::size_t> picked =
+            pt::g_states.pick(pt::g_timer->picked(), c.splits.size(), ops, r.data.string(),
+                              pt::k_category, fe::practice_state_exists);
+        pt::g_picked = picked.value_or(0);
+        pt::g_timer->set_picked(picked);
+        tap_key(r, SDLK_F8);
+        check(pt::g_states.take(r.actions, true) == fe::PracticeRequest::kLoad, "F8 loads");
+        pt::g_before_load = pt::g_timer->elapsed();
+        pt::g_saves_at_load = pt::g_states.stats().saves;
+        const fe::QuickResult res =
+            pt::g_states.load(ops, r.data.string(), pt::k_category, pt::g_picked);
+        pt::g_load_log = res.log;
+        if (!res.done) {
+            return;
+        }
+        const fe::AutosaveCheck slot = fe::check_autosave(cpu);
+        pt::g_loaded_digest = pt::guest_digest(cpu, static_cast<std::uint32_t>(slot.slot));
+        pt::g_loaded_state = pt::hero_state(cpu);
+        pt::g_timer->start_practice(pt::g_picked);
+        pt::g_practice = pt::g_timer->practice();
+        pt::g_next = pt::g_timer->next_split();
+        pt::g_after_load = pt::g_timer->elapsed();
+        pt::g_records = pt::g_timer->take_records();
+        std::printf("practice: %s; digest %s, %s; overlay:\n", res.log.c_str(),
+                    pt::g_loaded_digest.c_str(), pt::g_loaded_state.c_str());
+        for (const std::string &line : pt::g_timer->overlay_lines()) {
+            std::printf("  %s\n", line.c_str());
+        }
+    });
+    then_go(r, "back to Perion (1.0) again: the practised segment", {1, 0, 376, 399, 30}, 300);
+    then_do(r, "the practised segment's time", [](mt_cpu *) {
+        pt::g_segment = pt::g_timer->last_segment();
+        for (const std::string &line : pt::g_timer->overlay_lines()) {
+            std::printf("  %s\n", line.c_str());
+        }
+        g_run_timer = nullptr;
+    });
+    then_finish(r);
+}
+
+void practice_state_checks(Run &, u64) {
+    namespace pt = practice_test;
+    check(pt::g_taken.size() == 2 && pt::g_saves_at_load == 2,
+          "two splits took two practice states before the load (" +
+              std::to_string(pt::g_saves_at_load) + ")");
+    std::error_code ec;
+    for (const auto &[split, t] : pt::g_taken) {
+        check(fs::is_regular_file(t.path, ec),
+              "split " + std::to_string(split) + "'s state is a file: " + t.path);
+    }
+    check(pt::g_picked == 1, "F7 picked the first split (" + std::to_string(pt::g_picked) + ")");
+    check(pt::g_states.stats().loads == 1, "F8 loaded it: " + pt::g_load_log);
+    const pt::Taken &first = pt::g_taken[1];
+    check(!first.digest.empty() && pt::g_loaded_digest == first.digest,
+          "the guest digest after the load is the one taken (" + pt::g_loaded_digest + ", taken " +
+              first.digest + ")");
+    check(pt::g_loaded_state == first.state,
+          "the hero is where the state was taken (" + pt::g_loaded_state + ")");
+    check(pt::g_practice && pt::g_next == 1,
+          "the load marked the run as practice, timing split 2 (next " +
+              std::to_string(pt::g_next) + ")");
+    check(pt::g_records.size() == 1 && !pt::g_records[0].finished,
+          "the run before the load ended as reset");
+    check(pt::g_after_load.ms < pt::g_before_load.ms && pt::g_after_load.ms < 1000,
+          "the segment timer restarted (" + fe::format_run_time(pt::g_before_load.ms) + " -> " +
+              fe::format_run_time(pt::g_after_load.ms) + ")");
+    check(pt::g_segment.has_value() && pt::g_segment->ms > 0 && pt::g_segment->ticks > 0,
+          "the way back to 1.0 ended the practised segment (" +
+              (pt::g_segment ? fe::format_run_time(pt::g_segment->ms) : std::string("none")) + ")");
+}
+
 // --- the save-state census (#202, ADR 0105, docs/re/save-states.md) -----------------------------
 //
 // --- crash recovery points across two processes (#335, ADR 0151, recovery.h) -------------------
@@ -9960,6 +10166,232 @@ std::string seen_text(const std::set<i32> &seen) {
     return s;
 }
 
+// --- Speech: notify lines and popups (#392, ADR 0191, speech_text.h) ---------------------------
+//
+// speech_notices: from a built start (tests/starts/speech_notices.json, MT_FROM_SAVE: a level-10
+// Beginner with a knife on the hunting field 2.3), the hunt until the hero has gained EXP and
+// the notify list has shown a line besides the kill's (a pick-up or meso); then a fall, the
+// death popup (0x68) and its Return to town, answered with OK and Yes (0x69), back in town.
+// With the speech on the log backend (MT_SPEECH=on) or off (unset: the base run). Each turn the
+// run reads the notify list (+0x4C) from guest memory and keeps every new line; the text events
+// and the utterances are recorded. In town the state goes to OUT_DIR/speech_state.txt as
+// speech_dialogue's. Checks, with the speech on:
+//   - each notice event is a line the list showed, in the same order; at least one EXP line
+//     (the kill) and one other on the list +0x4C (the pick-up or meso);
+//   - the popups 0x68 (no message, kind 0) then 0x69 (a message, kind 1: Yes / No);
+//   - the notices said as kNotice utterances (a turn's lines in one), the popups as kDialogue:
+//     the death popup in the port's words, 0x69 its message then "Yes or No.";
+//   - MT_SPEECH_BASE=<the off run's OUT_DIR>: every state line equals the off run's.
+// With it off: no event and no utterance. Only counts and hashes are printed, never the text.
+struct NoticesRun {
+    bool on = false;
+    std::unique_ptr<fe::Speech> speech;
+    std::unique_ptr<fe::SpeechText> text;
+    struct Event {
+        std::uint32_t kind = 0;
+        i32 index = 0, value = 0;
+        std::string speaker, text;
+    };
+    std::vector<Event> events;
+    fe::LogSpeechBackend *log = nullptr;
+    std::set<std::pair<u32, std::uint64_t>> seen; // the list's entries seen: address, time
+    std::vector<std::string> lines;               // their text, in order
+    std::size_t lines_at_hunt = 0;
+    i32 exp_at_hunt = -1;
+    std::shared_ptr<std::set<i32>> popups = std::make_shared<std::set<i32>>();
+    std::vector<std::pair<std::string, std::string>> state;
+} g_sn;
+
+void record_notice_event(void *, const mt_text_event *e) {
+    g_sn.events.push_back(NoticesRun::Event{e->kind, e->index, e->value, e->speaker, e->text});
+}
+
+void speech_notices(Run &r, u64) {
+    r.settings_from_env = false;
+    g_sn.on = std::getenv("MT_SPEECH") != nullptr && std::string(std::getenv("MT_SPEECH")) == "on";
+    auto backend = std::make_unique<fe::LogSpeechBackend>([](const std::string &) {});
+    g_sn.log = backend.get();
+    g_sn.speech = std::make_unique<fe::Speech>(std::move(backend));
+    g_sn.speech->set_enabled(g_sn.on);
+    g_sn.text = std::make_unique<fe::SpeechText>();
+    mt_text_events_add_listener(record_notice_event, nullptr);
+    from_save(r);
+    const std::function<void(mt_cpu *)> monitor_turn = r.on_turn;
+    r.on_turn = [&r, monitor_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        g_sn.text->turn(*g_sn.speech, r.settings, r.t);
+        g_sn.speech->turn(r.t);
+        for (const NotifyLine &l : notify_lines(cpu)) {
+            if (g_sn.seen.insert({l.addr, l.time}).second) {
+                g_sn.lines.push_back(l.text);
+            }
+        }
+    };
+    then_wait_field(r);
+    then_do(r, "the hunt begins", [](mt_cpu *cpu) {
+        g_play.hunting = true;
+        g_sn.lines_at_hunt = g_sn.lines.size();
+        g_sn.exp_at_hunt = hero(cpu).exp;
+        std::printf("speech_notices: the hunt from %s\n", hero_text(cpu, hero(cpu)).c_str());
+    });
+    then_hunt(r, "map 2.3 until a kill's EXP and a pick-up's line",
+              [](mt_cpu *cpu) {
+                  return hero(cpu).exp > g_sn.exp_at_hunt &&
+                         g_sn.lines.size() >= g_sn.lines_at_hunt + 2;
+              },
+              600, {2, 0, 42, 2, 3});
+    then_do(r, "the hero falls", [&r](mt_cpu *cpu) {
+        g_play.hunting = false;
+        release_all(r);
+        fall(cpu);
+    });
+    then_wait_for(
+        r, "the death popup (0x68)", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+    then_answer(
+        r, "Return to town (0x68 OK, 0x69 Yes)",
+        [](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            return h.hp > 0 && h.on(2, 0);
+        },
+        g_sn.popups);
+    then_do(r, "the state in town", [&r](mt_cpu *cpu) {
+        g_sn.state = scene_state(cpu);
+        g_sn.state.emplace_back("ticks", std::to_string(r.ticks));
+        std::ofstream f(r.out / "speech_state.txt", std::ios::trunc);
+        for (const auto &[k, v] : g_sn.state) {
+            f << k << " = " << v << "\n";
+        }
+    });
+    then_finish(r);
+}
+
+void speech_notices_checks(Run &, u64) {
+    NoticesRun &s = g_sn;
+    mt_text_events_remove_listener(record_notice_event, nullptr);
+    // The notices still queued behind the last popup, said as the voice frees up.
+    for (int i = 1; i <= 60; i++) {
+        s.speech->turn(1e6 + 30.0 * i);
+    }
+    std::vector<std::pair<fe::SpeechKind, std::string>> said;
+    for (const fe::Utterance &u : s.log->said()) {
+        said.emplace_back(u.kind, u.text);
+    }
+    std::vector<const NoticesRun::Event *> notices, popups;
+    for (const NoticesRun::Event &e : s.events) {
+        (e.kind == MT_TEXT_EVENT_NOTICE ? notices : popups).push_back(&e);
+    }
+    std::string all;
+    for (const auto &[k, t] : said) {
+        all += (k == fe::SpeechKind::kNotice ? "n " : "d ") + t + "\n";
+    }
+    const fe::SpeechText::Stats ts = s.text->stats();
+    s.text.reset();
+    s.speech.reset();
+    std::printf("speech_notices (speech %s): %zu list lines seen, popups %s; events: %zu "
+                "notices, %zu popups; %zu utterances (hash %s), %llu notice utterances\n",
+                s.on ? "on" : "off", s.lines.size(), seen_text(*s.popups).c_str(), notices.size(),
+                popups.size(), said.size(), fe::hex64(fe::fnv1a64(all.data(), all.size())).c_str(),
+                static_cast<unsigned long long>(ts.notice_utterances));
+    check(!s.state.empty(), "the run reached the town after the death popup");
+    check(s.popups->count(0x68) == 1 && s.popups->count(0x69) == 1,
+          "the game showed the death popup and its Return to town (" + seen_text(*s.popups) + ")");
+    if (!s.on) {
+        check(s.events.empty() && said.empty(), "speech off: no text event and nothing said (" +
+                                                    std::to_string(s.events.size()) + " events, " +
+                                                    std::to_string(said.size()) + " utterances)");
+    } else {
+        // The list +0x4C's lines, against the notice events of that list.
+        std::vector<std::string> heard;
+        u64 exp = 0, other = 0;
+        for (const NoticesRun::Event *e : notices) {
+            if (e->value == 0) {
+                heard.push_back(e->text);
+                (e->text.rfind("EXP ", 0) == 0 ? exp : other)++;
+            }
+        }
+        // The run reads the list once a turn, so a line the list drops within the turn it came
+        // (its most entries reached) is an event the run never saw listed: the lines are the
+        // events in order, some events between them.
+        std::size_t at = 0;
+        for (std::size_t i = 0; at < s.lines.size() && i < heard.size(); i++) {
+            at += bare(heard[i]) == bare(s.lines[at]) ? 1 : 0;
+        }
+        check(at == s.lines.size() && !s.lines.empty(),
+              "each line the notify list showed is a notice event, in order, with its text (" +
+                  std::to_string(heard.size()) + " events, " + std::to_string(s.lines.size()) +
+                  " lines)");
+        check(exp >= 1 && other >= 1, "a kill's EXP line and a pick-up or meso line (" +
+                                          std::to_string(exp) + " EXP, " + std::to_string(other) +
+                                          " other)");
+        bool whole = true;
+        for (const NoticesRun::Event &e : s.events) {
+            whole = whole && valid_utf8(e.text) && valid_utf8(e.speaker);
+        }
+        check(whole, "every event's text is whole UTF-8");
+        // The popups: 0x68 then 0x69 (the death popup is reopened after a sub-popup it cancels;
+        // here none is cancelled).
+        std::vector<i32> ids;
+        for (const NoticesRun::Event *e : popups) {
+            ids.push_back(e->index);
+        }
+        const auto death = std::find(ids.begin(), ids.end(), 0x68);
+        const auto town = std::find(ids.begin(), ids.end(), 0x69);
+        check(death != ids.end() && town != ids.end() && death < town,
+              "the popup events: the death popup, then its Return to town");
+        const NoticesRun::Event *ask = town != ids.end() ? popups[town - ids.begin()] : nullptr;
+        check(ask != nullptr && ask->value == 1 && !ask->text.empty(),
+              "Return to town: kind 1 (Yes / No) with a message");
+        // The utterances: the notices as kNotice, the popups as kDialogue in their words.
+        std::string notice_text;
+        u64 dialogue = 0;
+        bool death_said = false, town_said = false;
+        for (const auto &[k, t] : said) {
+            if (k == fe::SpeechKind::kNotice) {
+                notice_text += t + "\n";
+            } else {
+                dialogue++;
+                death_said = death_said || t == fe::tr(fe::Txt::speech_death_popup);
+                const std::string yes_no = fe::tr(fe::Txt::speech_popup_yes_no);
+                town_said = town_said || (ask != nullptr && t == ask->text + " " + yes_no);
+            }
+        }
+        bool every = true;
+        for (const std::string &h : heard) {
+            every = every && notice_text.find(h) != std::string::npos;
+        }
+        check(every && ts.notice_utterances >= 1 && ts.notice_utterances <= notices.size(),
+              "each notify line is said in a kNotice utterance (" +
+                  std::to_string(ts.notice_utterances) + " utterances for " +
+                  std::to_string(notices.size()) + " lines)");
+        check(death_said && town_said && dialogue == popups.size(),
+              "the death popup said in the port's words, Return to town as its message and "
+              "\"Yes or No.\", each popup one dialogue utterance");
+    }
+    const char *base_dir = std::getenv("MT_SPEECH_BASE");
+    if (base_dir == nullptr || *base_dir == 0) {
+        return;
+    }
+    std::ifstream in(fs::path(base_dir) / "speech_state.txt", std::ios::binary);
+    std::vector<std::pair<std::string, std::string>> base;
+    for (std::string line; std::getline(in, line);) {
+        const std::size_t eq = line.find(" = ");
+        if (eq != std::string::npos) {
+            base.emplace_back(line.substr(0, eq), line.substr(eq + 3));
+        }
+    }
+    std::size_t differ = 0;
+    for (std::size_t i = 0; i < s.state.size() && i < base.size(); i++) {
+        if (s.state[i] != base[i]) {
+            differ++;
+            std::printf("speech_notices: %s differs from the off run's\n",
+                        s.state[i].first.c_str());
+        }
+    }
+    check(!base.empty() && base.size() == s.state.size() && differ == 0,
+          "the rand() state, the tick, the hero, the quests and the mobs equal the off run's (" +
+              std::to_string(s.state.size()) + " lines, " + std::to_string(differ) + " differ)");
+}
+
 // --- the cash shop's tiles, the Comeback Pack and the Reverse item ------------------------------
 //
 // systems2_cash_tiles: cash_shop = meso, a level-30 Rogue on 0.0 with 3,000,000 meso, 50 Red
@@ -10831,6 +11263,311 @@ void systems2_portal620(Run &r, u64) {
     then_finish(r);
 }
 void systems2_portal620_checks(Run &, u64) {}
+
+// --- the compendium's NPCs, shops and recipes in the port (#220) ---------------------------------
+//
+// compendium_npcs: from the start of chapter 2 (tests/starts/chapter_2.json, equal to part L's
+// save), five NPCs, two shops and two recipes of the compendium checked by play against the
+// knowledge base's own records (bot_world.txt's npc, shop and recipe lines, which the compendium
+// pages are built from; docs/testing/compendium-port-check.md):
+//   - an NPC: the hero goes to the map the compendium names; its object shows there at the tile
+//     the compendium gives (the live object, live_object), and up at it opens its chat or shop;
+//   - a shop: opened from its NPC, the Buy tab's rows (item, price) are the compendium's stock
+//     of that shop, row for row as a set, and of its kind (equipment or other items);
+//   - a recipe: crafted at the smith through his lists; the materials, the meso fee and the
+//     result the compendium gives are what leaves and enters the bag.
+
+// The compendium's record of the NPC object `object` on (area, map), nullptr if none.
+const world_map::Npc *kb_npc(int area, int map, const std::string &object) {
+    for (const world_map::Npc &n : world_map::npcs()) {
+        if (n.area == area && n.map == map && n.object == object) {
+            return &n;
+        }
+    }
+    return nullptr;
+}
+
+// Goes to the NPC, checks its live object against the compendium's tile, and presses up until
+// its chat or its shop opens (left open for the next step).
+void then_meet(Run &r, const std::string &name, int area, int map, const std::string &object) {
+    const world_map::Npc *n = kb_npc(area, map, object);
+    check(n != nullptr, name + ": the compendium places " + object + " on " + std::to_string(area) +
+                            "." + std::to_string(map));
+    if (n == nullptr) {
+        return;
+    }
+    const int want_x = n->column * 16 + 8, want_y = (n->row + 1) * 16 - 1;
+    quest_bot::then_go(r, name + " (" + object + ")", quest_bot::at_object(area, map, object, 6),
+                       600);
+    then_do(r, name + ": where the compendium puts it",
+            [name, object, want_x, want_y, area, map](mt_cpu *cpu) {
+                int x = -1, y = -1;
+                const bool seen = quest_bot::live_object(cpu, object, x, y);
+                check(hero(cpu).on(area, map) && seen && x == want_x && y == want_y,
+                      name + " (" + object + ") stands on " + std::to_string(area) + "." +
+                          std::to_string(map) + " at (" + std::to_string(x) + ", " +
+                          std::to_string(y) + "), the compendium's tile gives (" +
+                          std::to_string(want_x) + ", " + std::to_string(want_y) + ")");
+            });
+    then(r, name + ": up opens the chat or the shop", 20, [&r](mt_cpu *cpu, double el) {
+        if (quest_bot::chatting(cpu) || game_mode(cpu) == 2) {
+            hold(r, UP, false);
+            return true;
+        }
+        hold(r, UP, std::fmod(el, 1.0) < 0.2);
+        return false;
+    });
+    then_check(r, name + ": its chat or shop is open",
+               [](mt_cpu *cpu) { return quest_bot::chatting(cpu) || game_mode(cpu) == 2; });
+}
+
+// The chat opened by then_meet, A through to the field (any row of a list).
+void then_chat_closed(Run &r, const std::string &name, int area, int map,
+                      const std::string &object) {
+    quest_bot::then_talk_to(r, name + ": the chat closed", area, map, object, -1,
+                            [](mt_cpu *) { return true; });
+}
+
+// The shop opened by then_meet: its Buy rows against the compendium's stock, then B to the field.
+void then_shop_matches(Run &r, const std::string &name, int area, int map,
+                       const std::string &object) {
+    then_wait_for(r, name + ": the shop settled", 5, quest_bot::in_shop, 0.5);
+    then_do(r, name + ": the Buy tab is the compendium's stock", [=](mt_cpu *cpu) {
+        std::set<std::pair<i32, i32>> want;
+        std::set<int> numbers, tables;
+        for (const world_map::Shop &s : world_map::shops()) {
+            if (s.chapter == hero(cpu).chapter && s.area == area && s.map == map &&
+                s.npc == object) {
+                want.insert({s.item, s.price});
+                numbers.insert(s.shop);
+                tables.insert(s.table);
+            }
+        }
+        const Shop sh = shop(cpu);
+        std::set<std::pair<i32, i32>> got;
+        std::string rows;
+        for (i32 i = 0; i < sh.rows; i++) {
+            const ShopRow w = shop_row(cpu, sh, i);
+            got.insert({w.id, w.price});
+            rows += " " + std::to_string(w.id) + ":" + std::to_string(w.price);
+        }
+        const int table = tables.size() == 1 ? *tables.begin() : -1;
+        std::printf("%s: shop %d, kind %d, %d rows:%s\n", name.c_str(),
+                    numbers.size() == 1 ? *numbers.begin() : -1, sh.kind, sh.rows, rows.c_str());
+        check(numbers.size() == 1 && !want.empty() && got == want &&
+                  static_cast<std::size_t>(sh.rows) == want.size() &&
+                  (sh.kind == 1) == (table == 1),
+              name + ": " + std::to_string(sh.rows) +
+                  " rows, each item and price as the "
+                  "compendium's shop " +
+                  std::to_string(numbers.empty() ? -1 : *numbers.begin()) + " (" +
+                  std::to_string(want.size()) + " items) lists them");
+    });
+    then(r, name + ": B closes the shop", 10, [&r](mt_cpu *cpu, double el) {
+        if (field(cpu) && game_mode(cpu) != 2) {
+            hold(r, B, false);
+            return true;
+        }
+        hold(r, B, std::fmod(el, 0.6) < 0.1);
+        return false;
+    });
+}
+
+// Crafts the compendium's recipe for equipment `item` at the smith (0.0) through his lists
+// `choices`, and checks what left and entered the bag against the recipe.
+void then_craft(Run &r, const std::string &name, i32 item, std::vector<int> choices) {
+    const world_map::Recipe *rc = nullptr;
+    for (const world_map::Recipe &c : world_map::recipes()) {
+        if (c.chapter == 2 && c.table == 0 && c.item == item) {
+            rc = &c;
+        }
+    }
+    check(rc != nullptr && rc->area == 0 && rc->map == 0 && rc->npc == "smith",
+          name + ": the compendium has its chapter-2 recipe at the smith on 0.0");
+    if (rc == nullptr) {
+        return;
+    }
+    std::vector<i32> items;
+    for (const world_map::Material &m : rc->materials) {
+        items.push_back(m.item);
+    }
+    auto before = std::make_shared<Counts>();
+    then_do(r, name + ": before", [before, items, item](mt_cpu *cpu) {
+        *before = counts(cpu, items, {item});
+        std::printf("before %s\n", counts_text(*before).c_str());
+    });
+    quest_bot::then_talk_to(r, name + ": crafted at the smith", rc->area, rc->map, rc->npc,
+                            std::move(choices), [before, item](mt_cpu *cpu) {
+                                return quest_bot::equip_owned(cpu, hero(cpu), item) >
+                                       before->equip[item];
+                            });
+    const world_map::Recipe want = *rc;
+    then_do(r, name + ": after", [before, items, want, name](mt_cpu *cpu) {
+        Counts now = counts(cpu, items, {want.item});
+        bool ok = now.equip[want.item] == before->equip[want.item] + want.count &&
+                  now.meso == before->meso - want.meso;
+        std::string recipe = std::to_string(want.count) + " of equipment " +
+                             std::to_string(want.item) + " for " + std::to_string(want.meso) +
+                             " meso";
+        for (const world_map::Material &m : want.materials) {
+            ok = ok && m.table == 1 && now.items[m.item] == before->items[m.item] - m.count;
+            recipe += ", " + std::to_string(m.count) + " of item " + std::to_string(m.item);
+        }
+        check(ok, name + ": the compendium's recipe (" + recipe + "): before" +
+                      counts_text(*before) + "; after" + counts_text(now));
+    });
+}
+
+void compendium_npcs(Run &r, u64) {
+    from_save(r);
+    then_wait_field(r);
+    then_check(r, "chapter 2 on Orbis (4.1)",
+               [](mt_cpu *cpu) { return hero(cpu).chapter == 2 && hero(cpu).on(4, 1); });
+    // NPC 1: the Pirate on Orbis, whose list 1 takes the hero back to Henesys.
+    then_meet(r, "the Pirate", 4, 1, "Pirate_Orbis");
+    quest_bot::then_talk_to(r, "the Pirate: back to Henesys (list 1)", 4, 1, "Pirate_Orbis", 1,
+                            [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    // NPC 2: Chief Stan (2.0).
+    then_meet(r, "Chief Stan", 2, 0, "Stan");
+    then_chat_closed(r, "Chief Stan", 2, 0, "Stan");
+    // NPC 3 and shop 1: Mr. Wang's shop in Henesys (Etc20).
+    then_meet(r, "Mr. Wang", 2, 0, "Etc20");
+    then_shop_matches(r, "Mr. Wang's shop in Henesys", 2, 0, "Etc20");
+    // Shop 2: Mr. Lee's equipment shop in Henesys (Equip20).
+    then_meet(r, "Mr. Lee", 2, 0, "Equip20");
+    then_shop_matches(r, "Mr. Lee's shop in Henesys", 2, 0, "Equip20");
+    // NPC 4: Blackbull (the pig, Perion 1.0).
+    then_meet(r, "Blackbull", 1, 0, "pig");
+    then_chat_closed(r, "Blackbull", 1, 0, "pig");
+    // NPC 5: Mr. Smith (0.0), then two of his recipes: the shoes' list (5), its first pair, and
+    // the earrings' list (6), its first pair. His chat stays open for the first: any row of his
+    // first list crafts something.
+    then_meet(r, "Mr. Smith", 0, 0, "smith");
+    then_craft(r, "Lappy Boots", 51, {5, 1});
+    then_craft(r, "Lightning Earrings", 63, {6, 1});
+    then_bag(r, "the end");
+    then_finish(r);
+}
+void compendium_npcs_checks(Run &, u64) {}
+
+// --- map pages in the running port (#221, docs/compendium/kb.md) --------------------------------
+//
+// map_page: the compendium's map pages say where each portal leads, and when (the Connections
+// table). From a built start state (MT_FROM_SAVE, tests/starts/map_page_*.json) the hero walks
+// to the portal object of kind MT_MAP_PAGE_PORTAL (0-3: 3 is a hidden portal, docs/formats/
+// obj.md) on the save's map and holds Up there for 8 s. OUT_DIR/map_page.txt gets one line:
+//   from <area>.<map> chapter <c> portal <kind> <name> landed <area>.<map> at <x> <y>
+// or "... landed none" when no map change came. tests/test_compendium_world_port.py compares
+// it with the page's row for that portal: an "always" row names the map the port went to; a
+// conditional row either names it or the run stayed put (its condition unmet in the start).
+struct MapPageRun {
+    int area = -1, map = -1, chapter = -1, kind = -1;
+    std::string name;
+    int x = 0, y = 0;
+    bool placed = false; // the start puts the hero beside the portal: no route there
+    bool left = false;
+    int to_area = -1, to_map = -1, to_x = 0, to_y = 0;
+};
+std::shared_ptr<MapPageRun> g_map_page;
+
+int map_page_setup(Run &r) {
+    g_map_page = std::make_shared<MapPageRun>();
+    MapPageRun &k = *g_map_page;
+    const char *env = std::getenv("MT_MAP_PAGE_PORTAL");
+    if (env == nullptr || std::sscanf(env, "%d", &k.kind) != 1 || k.kind < 0 || k.kind > 3) {
+        std::printf("FAIL: MT_MAP_PAGE_PORTAL must name a portal kind, 0 to 3\n");
+        return 1;
+    }
+    const std::vector<std::uint8_t> theif = read_save(r, "theif0");
+    const std::vector<std::uint8_t> quest = read_save(r, "quest0");
+    if (theif.size() != 1124 || quest.empty()) {
+        std::printf("FAIL: MT_FROM_SAVE gave no theif0 and quest0\n");
+        return 1;
+    }
+    k.area = theif[0x41C]; // docs/formats/save.md
+    k.map = theif[0x41D];
+    k.chapter = quest[0];
+    k.placed = theif[0x41E] != 0xFF || theif[0x41F] != 0xFF; // x -1: the map's default spawn
+    // The last object of that kind, as the map change 0x868D5 picks an arrival point.
+    for (const world_map::Object &o : world_map::get(k.area, k.map).objects) {
+        if (o.kind == k.kind) {
+            k.name = o.name.empty() ? "-" : o.name;
+            k.x = o.x;
+            k.y = o.y;
+        }
+    }
+    if (k.name.empty()) {
+        std::printf("FAIL: map %d.%d has no portal of kind %d\n", k.area, k.map, k.kind);
+        return 1;
+    }
+    std::printf("map_page: %d.%d chapter %d, portal %d (%s) at (%d, %d)\n", k.area, k.map,
+                k.chapter, k.kind, k.name.c_str(), k.x, k.y);
+    return 0;
+}
+
+void map_page(Run &r, u64) {
+    const MapPageRun &k = *g_map_page;
+    from_save(r);
+    then_wait_field(r);
+    if (!k.placed) {
+        quest_bot::then_go(r, "portal " + std::to_string(k.kind) + " (" + k.name + ")",
+                           {k.area, k.map, k.x, k.y, 4}, 180);
+    }
+    then(r, "Up at the portal (8 s)", 30, [&r](mt_cpu *cpu, double el) {
+        MapPageRun &m = *g_map_page;
+        const Hero h = hero(cpu);
+        if (!m.left && h.addr != 0 && !h.on(m.area, m.map) && h.area >= 0) {
+            m.left = true; // the first turn on the new map: where the warp put the hero
+            m.to_area = h.area;
+            m.to_map = h.map;
+            m.to_x = h.x;
+            m.to_y = h.y;
+        }
+        if (m.left) {
+            release_all(r);
+            return true;
+        }
+        if (!field(cpu)) { // a notice or a chat the portal's script opened: A through it
+            hold(r, UP, false);
+            hold(r, A, std::fmod(el, 0.8) < 0.1);
+        } else {
+            // A placed start steps the last pixels on its own platform (the portal's tile is
+            // within 8 px: obj.md); Up once there.
+            const int d = m.x - h.x;
+            hold(r, A, false);
+            hold(r, RIGHT, m.placed && d > 4);
+            hold(r, LEFT, m.placed && d < -4);
+            hold(r, UP, std::abs(d) <= 6 && std::fmod(el, 1.5) < 0.4);
+        }
+        if (el >= 8) {
+            release_all(r);
+            return true;
+        }
+        return false;
+    });
+    // A shut portal's script can leave a notice open (popup 17): A closes it.
+    then(r, "the field (A through any notice)", 20,
+         [&r](mt_cpu *cpu, double el) { return !quest_bot::interrupted(r, cpu, el); });
+    then_do(r, "the portal's outcome", [&r](mt_cpu *cpu) {
+        const MapPageRun &m = *g_map_page;
+        char line[256];
+        if (m.left) {
+            std::snprintf(line, sizeof line,
+                          "from %d.%d chapter %d portal %d %s landed %d.%d at %d %d\n", m.area,
+                          m.map, m.chapter, m.kind, m.name.c_str(), m.to_area, m.to_map, m.to_x,
+                          m.to_y);
+        } else {
+            std::snprintf(line, sizeof line, "from %d.%d chapter %d portal %d %s landed none\n",
+                          m.area, m.map, m.chapter, m.kind, m.name.c_str());
+        }
+        std::printf("map_page: %s", line);
+        std::ofstream(r.out / "map_page.txt", std::ios::trunc) << line;
+        check(field(cpu) && hero(cpu).hp > 0, "the hero is alive in the field afterwards");
+    });
+    then_finish(r);
+}
+void map_page_checks(Run &, u64) {}
+
 // --- Korean (#303, docs/testing/systems-sweep-1.md) ----------------------------------------------
 //
 // korean_*: MAPLETHIEF_LANGUAGE=ko. The terms are agreed by the pad (the data directory has no
@@ -11714,6 +12451,7 @@ constexpr Mode k_modes[] = {
     {"save_state_census", save_state_census, save_state_census_checks, 1, false,
      save_state_census_setup},
     {"quick_state", quick_state, quick_state_checks, 1, false, quick_state_setup},
+    {"practice_state", practice_state, practice_state_checks, 1},
     {"recovery_crash", recovery_crash, recovery_crash_checks, 1, false, recovery_crash_setup},
     {"recovery_resume", recovery_resume, recovery_resume_checks, 1, true, recovery_resume_setup},
     {"recovery_off", recovery_off, recovery_off_checks, 1, false, recovery_off_setup},
@@ -11768,6 +12506,7 @@ constexpr Mode k_modes[] = {
     {"ui_animations_instant", ui_animations_instant, ui_animations_checks, 1},
     {"chat_text", chat_text, chat_text_checks, 1},
     {"speech_dialogue", speech_dialogue, speech_dialogue_checks, 1},
+    {"speech_notices", speech_notices, speech_notices_checks, 1},
     {"text_pack", text_pack_play, text_pack_checks, 1, false, text_pack_setup},
     {"skip_intros_watched", skip_intros_watched, skip_intros_checks, 1},
     {"skip_intros_skipped", skip_intros_skipped, skip_intros_checks, 1},
@@ -11803,6 +12542,8 @@ constexpr Mode k_modes[] = {
     {"systems2_scrolls_failure", systems2_scrolls_failure, systems2_scrolls_checks, 1},
     {"systems2_pigmy", systems2_pigmy, systems2_pigmy_checks, 1},
     {"systems2_portal620", systems2_portal620, systems2_portal620_checks, 1},
+    {"compendium_npcs", compendium_npcs, compendium_npcs_checks, 1},
+    {"map_page", map_page, map_page_checks, 1, false, map_page_setup},
     {"korean_chapter_1_a", korean_chapter_1_a, korean_checks, 1, false, korean_setup},
     {"korean_offer_2", korean_offer_2, korean_checks, 1, false, korean_setup},
     {"korean_offer_3", korean_offer_3, korean_checks, 1, false, korean_setup},

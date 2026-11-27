@@ -153,6 +153,9 @@ DataLocation resolve_data_location(const DataInputs &in);
 
 // --data-location for this run (main.cpp sets it before the first data_location()).
 void set_data_location_flag(std::optional<DataPlace> flag);
+// A data folder for this run that wins over everything, as MAPLETHIEF_DATA_DIR does ("": none);
+// --play-run's scratch folder (#405).
+void set_data_location_dir(const std::string &dir);
 // This process's data folder: resolved once (current_data_inputs()), then the same answer.
 // The first call logs "data: <dir> (<reason>)", a fallback's line and portable.txt's line.
 const DataLocation &data_location();

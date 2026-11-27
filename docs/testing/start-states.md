@@ -43,6 +43,8 @@ its test's name.**
 | --- | --- | --- |
 | `tests/starts/chapter_2.json`: the start of chapter 2, a level-34 Bandit on 4.1 with main 40 active | part L's save (`play.chapter_1_l`) | `tests/test_savedata_build_real.py` (local; skipped without the bundle or the chain's output, which `MT_CHAIN_OUTPUT` can name) |
 
+CTest builds it as `starts.chapter_2` for `play.compendium_npcs` ([compendium-port-check.md](compendium-port-check.md)), which is not synthetic for that reason.
+
 The synthetic starts of [skills-and-jobs.md](skills-and-jobs.md) (`tests/starts/jobs_*.json`,
 `tests/starts/skills_*.json`) and [systems-sweep-2.md](systems-sweep-2.md)
 (`tests/starts/systems2_*.json`) are built by CTest itself: `starts.<name>` writes the save into
@@ -50,7 +52,13 @@ the test output directory (skipped without the bundle) and `play.<mode>_syntheti
 So are systems sweep 1's ([systems-sweep-1.md](systems-sweep-1.md)): `korean_ch3.json` and
 `korean_ch3_key.json` (built with `--language ko`), `chapter_2.json` again as
 `starts.korean_chapter_2`, and `systems_slot0.json`, `systems_inventory_full.json`,
-`systems_level_99.json` and `systems_carry.json`.
+`systems_level_99.json` and `systems_carry.json`. `speech_notices.json` (a level-10 Beginner with
+a knife on 2.3) starts `play.speech_notices_synthetic` and its base run (#392). The
+`map_page_*.json` starts put a hero on each of the five compendium map pages checked in the
+running port (#221): `play.map_page_<start>_<kind>_synthetic` takes one portal and
+`tests/test_compendium_world_port.py` compares where the game put the hero with that page's
+Connections row. The 2.0 and 2.4 starts come twice, with the chapter-1 gate's quest done
+(`_open`) and not (`_shut`); `map_page_9_3_top.json` stands the hero beside 9.3's hidden portal.
 
 ## The bot's world
 

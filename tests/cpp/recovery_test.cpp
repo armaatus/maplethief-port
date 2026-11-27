@@ -322,7 +322,8 @@ TEST_CASE("recovery: the start offers the newest point that reads; a damaged, ot
     o = fe::find_recovery_point(dir.string(), (dir / "saves").string(), true, crash.string(),
                                 ok_check);
     CHECK(o.offered);
-    CHECK(o.path == one.string());
+    CHECK(fs::path(o.path).lexically_normal() ==
+          one.lexically_normal()); // "/" joins on Windows too
     CHECK(o.slot == 2);
     CHECK(o.minutes_before == doctest::Approx(4.0).epsilon(0.01));
     CHECK(fe::recovery_offer_text(o) ==
@@ -340,7 +341,7 @@ TEST_CASE("recovery: the start offers the newest point that reads; a damaged, ot
     put(two, state_file(1, MT_VERSION));
     o = fe::find_recovery_point(dir.string(), (dir / "saves").string(), true, "");
     CHECK(o.offered);
-    CHECK(o.path == two.string());
+    CHECK(fs::path(o.path).lexically_normal() == two.lexically_normal());
     CHECK(o.slot == 1);
     CHECK(o.minutes_before < 0);
     CHECK(fe::recovery_offer_text(o) == "A recovery point of character 2, is kept.");

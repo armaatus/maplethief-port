@@ -3,6 +3,9 @@
 #
 #   cmake -DPROGRAM=<MapleThief> -DEXPECTED="MapleThief <version>" -P version_test.cmake
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 execute_process(
     COMMAND "${PROGRAM}" --version
     RESULT_VARIABLE result

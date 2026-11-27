@@ -14,6 +14,9 @@
 #           overlay binds quick slot 1 to Q and saves the file
 #   again   a restart on the same directory: the saved game, the file's bindings still hold
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 file(REMOVE_RECURSE "${OUT}")
 file(MAKE_DIRECTORY "${OUT}")
 

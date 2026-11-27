@@ -1,11 +1,14 @@
 // The player's log and crash report (#198, player_log.h, crash_report.h), with synthetic data
 // only: the header, the rotation, the redaction, the tail, the crash marker's life cycle, the
 // safe start's settings file byte for byte, a synthetic guest that traps through run_game, and
-// (not on Windows) a child process that dies of a host signal.
+// (not on Windows) a child process that dies of a host signal. The hang watchdog (#337,
+// hang_watchdog.h): its limit and pauses, a synthetic guest loop through run_game, and (not on
+// Windows) a child process that hangs and quits.
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -19,11 +22,16 @@
 #include "crash_report.h"
 #include "data_location.h"
 #include "game.h"
+#include "hang_watchdog.h"
 #include "maplethief/boot.h"
 #include "maplethief/diag.h"
 #include "maplethief/hle/imports.h"
 #include "maplethief/recomp/calls.h"
 #include "player_log.h"
+
+#if !defined(_WIN32)
+#include <sys/wait.h>
+#endif
 
 extern std::uint32_t g_platform_test_guest_addr;
 extern mt_guest_fn g_platform_test_guest_fn;
@@ -154,6 +162,28 @@ void guest_trap(mt_cpu *MT_RESTRICT cpu) {
     cpu->r[MT_SP] = sp;
     mt_trap(cpu, MT_TRAP_UDF, 0x1944u, 0x1234u);
 }
+
+// The same two frames, then a guest loop that does not end by itself (#337): the hang
+// watchdog's question releases it, and it traps to end the run.
+volatile int g_loop_released = 0;
+void guest_loop(mt_cpu *MT_RESTRICT cpu) {
+    const u32 sp = cpu->r[MT_SP] - 16u;
+    const u32 outer = sp + 8u;
+    const u32 words[4] = {outer, k_lr_a, 0u, k_lr_b};
+    std::memcpy(cpu->mem + sp, words, sizeof words);
+    cpu->r[7] = sp;
+    cpu->r[MT_SP] = sp;
+    std::atomic_signal_fence(std::memory_order_seq_cst); // the frames are stored before it spins
+    while (g_loop_released == 0) {
+    }
+    mt_trap(cpu, MT_TRAP_UDF, 0x1944u, 0x1234u);
+}
+
+// Names for the frames' functions: the backtrace is symbolized.
+constexpr char k_loop_symbols[] = "# maplethief symbols 1\n"
+                                  "00001941 00000020 GuestLoop::Spin\n"
+                                  "00001A01 00000040 CFoo::Outer\n"
+                                  "00001B01 00000040 CGame::Update\n";
 
 } // namespace
 
@@ -450,6 +480,163 @@ TEST_CASE("crash report: a host signal writes the report and starts the dialog h
         written = slurp(dialog_log);
     }
     CHECK(written == "dialog: " + u8(files[0]) + "\n");
+}
+
+#endif
+
+// --- the hang watchdog (#337)
+// ---------------------------------------------------------------------
+
+TEST_CASE("hang watchdog: the limit by run, pauses and beats are not hangs, one report per "
+          "stall") {
+    if (!fe::hang_watchdog_supported()) {
+        CHECK(fe::hang_watch_seconds(-1, false, false) == 0);
+        return;
+    }
+    CHECK(fe::hang_watch_seconds(-1, false, false) == fe::kHangSeconds);
+    CHECK(fe::hang_watch_seconds(-1, true, false) == 0);               // --fixed-step: off
+    CHECK(fe::hang_watch_seconds(-1, true, true) == fe::kHangSeconds); // unless --force-hang
+    CHECK(fe::hang_watch_seconds(2, true, false) == 2);                // or --hang-seconds
+    CHECK(fe::hang_watch_seconds(0, false, false) == 0);               // --hang-seconds 0
+
+    const fs::path crashes = fresh_dir("hang_unit");
+    fe::crash_report_start(u8(crashes), false);
+    fe::crash_report_set_header("version: synthetic\n");
+    std::atomic<int> asked{0};
+    fe::set_hang_dialog_for_test([&](const std::string &) {
+        asked.fetch_add(1);
+        return fe::HangChoice::kKeepWaiting;
+    });
+    std::vector<std::uint8_t> memory(0x10000);
+    mt_cpu cpu{};
+    cpu.mem = memory.data();
+    cpu.mem_size = memory.size();
+    fe::hang_watchdog_start(&cpu, 0.3);
+    REQUIRE(fe::hang_watchdog_running());
+    {
+        const fe::HangPause background;
+        SDL_Delay(700); // hidden for longer than the limit
+    }
+    for (int i = 0; i < 10; i++) {
+        fe::hang_watchdog_beat();
+        SDL_Delay(50);
+    }
+    CHECK(asked.load() == 0);
+    SDL_Delay(1000); // three limits: still one stall
+    CHECK(asked.load() == 1);
+    fe::hang_watchdog_beat(); // it recovered; the next stall is a new one
+    SDL_Delay(600);
+    fe::hang_watchdog_stop();
+    CHECK_FALSE(fe::hang_watchdog_running());
+    CHECK(asked.load() == 2);
+    const fe::HangStats stats = fe::hang_watchdog_stats();
+    CHECK(stats.hangs == 2u);
+    CHECK(stats.seconds == 0.3);
+    CHECK(stats.longest_gap >= 0.9); // the first stall's gap, measured at the beat that ended it
+    const auto files = files_with(crashes, ".txt");
+    REQUIRE(files.size() == 2);
+    const std::string report = slurp(files[0]);
+    CHECK(report.rfind("MapleThief hang report\nversion: synthetic\n", 0) == 0);
+    CHECK(report.find("=== guest crash: hang (the run loop stopped turning) ===") !=
+          std::string::npos);
+    CHECK_FALSE(fe::crash_reported()); // a hang is not a crash
+    CHECK(fe::last_crash_file().empty());
+    fe::set_hang_dialog_for_test(nullptr);
+    mt_crash_set_sink(nullptr, nullptr);
+}
+
+TEST_CASE("hang watchdog: a synthetic guest loop writes a hang report with the symbolized guest "
+          "backtrace and asks once") {
+    if (!fe::hang_watchdog_supported()) {
+        return;
+    }
+    const fs::path data = fresh_dir("guest_loop");
+    const fs::path crashes = data / "crashes";
+    fe::set_data_location_for_test(fe::data_location_at(u8(data)));
+    fe::crash_report_start(u8(crashes), false);
+    fe::crash_report_set_header("version: synthetic\n");
+    REQUIRE(mt_symbols_load_text(k_loop_symbols, sizeof k_loop_symbols - 1u, nullptr) == 3);
+    std::vector<std::string> asked;
+    g_loop_released = 0;
+    fe::set_hang_dialog_for_test([&](const std::string &path) {
+        asked.push_back(path);
+        g_loop_released = 1; // Keep waiting, and the loop ends
+        return fe::HangChoice::kKeepWaiting;
+    });
+    fe::set_crash_dialog_for_test([](const std::string &) {});
+
+    const fs::path slice = data / "slice";
+    const std::vector<std::uint8_t> image = trapping_image();
+    std::ofstream(slice, std::ios::binary)
+        .write(reinterpret_cast<const char *>(image.data()),
+               static_cast<std::streamsize>(image.size()));
+    const mt_program program{k_descs, 1, g_table, nullptr, 0};
+    g_platform_test_guest_addr = k_entry;
+    g_platform_test_guest_fn = guest_loop;
+
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    REQUIRE_MESSAGE(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
+    SDL_Window *window = nullptr;
+    SDL_Renderer *renderer = nullptr;
+    REQUIRE_MESSAGE(SDL_CreateWindowAndRenderer("hang", 480, 320, 0, &window, &renderer),
+                    SDL_GetError());
+
+    fe::GameOptions options;
+    options.bundle_dir = u8(data);
+    options.slice_path = u8(slice);
+    options.audio = false;
+    options.quit_at = 0;
+    options.hang_seconds = 0.5;
+    fe::GameProgram game;
+    game.program = &program;
+    game.reservation = 0;
+    const int status = fe::run_game(game, window, renderer, false, options);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+    g_platform_test_guest_fn = nullptr;
+    fe::set_hang_dialog_for_test(nullptr);
+    fe::set_crash_dialog_for_test(nullptr);
+    fe::set_data_location_for_test(std::nullopt);
+    mt_crash_set_sink(nullptr, nullptr);
+    mt_symbols_clear();
+
+    CHECK(status == fe::kExitGuestEnded); // the trap after the loop
+    CHECK_FALSE(fe::hang_watchdog_running());
+    REQUIRE(asked.size() == 1);
+    const std::string report = slurp(fs::path(std::u8string(asked[0].begin(), asked[0].end())));
+    CHECK(report.rfind("MapleThief hang report\nversion: synthetic\n", 0) == 0);
+    CHECK(report.find("=== guest crash: hang (the run loop stopped turning) ===") !=
+          std::string::npos);
+    CHECK(report.find("no run-loop turn for ") != std::string::npos);
+    CHECK(report.find("host pc 0x0\n") == std::string::npos); // the thread was sampled
+    CHECK(report.find("registers (as last stored to mt_cpu):") != std::string::npos);
+    CHECK(report.find("#0 0x00001A11 CFoo::Outer+0x10") != std::string::npos);
+    CHECK(report.find("#1 0x00001B21 CGame::Update+0x20") != std::string::npos);
+    CHECK(report.find("--- the last log lines ---") != std::string::npos);
+    // The trap's crash report is the crash; the hang report stays a file of its own.
+    CHECK(fe::crash_reported());
+    CHECK(fe::last_crash_file() != asked[0]);
+    CHECK(files_with(crashes, ".txt").size() == 2);
+}
+
+#if defined(MT_CRASH_REPORT_CHILD)
+
+TEST_CASE("hang watchdog: Quit ends a hung process with kExitHang and keeps the crash marker") {
+    const fs::path dir = fresh_dir("hang_quit");
+    const std::string cmd =
+        "'" + std::string(MT_CRASH_REPORT_CHILD) + "' hang '" + u8(dir) + "' 2>/dev/null";
+    const int status = std::system(cmd.c_str());
+    REQUIRE(WIFEXITED(status));
+    CHECK(WEXITSTATUS(status) == fe::kExitHang);
+    const auto files = files_with(dir, ".txt");
+    REQUIRE(files.size() == 1);
+    const std::string report = slurp(files[0]);
+    CHECK(report.rfind("MapleThief hang report\nversion: child\n", 0) == 0);
+    CHECK(report.find("=== guest crash: hang (the run loop stopped turning) ===") !=
+          std::string::npos);
+    CHECK(report.find("the child's own log line") != std::string::npos);
+    CHECK(fs::exists(dir / fe::kCrashMarkerName)); // the next start offers the safe start
 }
 
 #endif

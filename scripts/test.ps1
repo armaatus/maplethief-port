@@ -18,12 +18,13 @@
     written below build/ (test output: build/test-output/).
 
 .PARAMETER Release
-    Run the release workflow (win-release, mac-release-universal or linux-release): configure,
+    Run the release workflow (win-release, or win-arm64-release in an ARM64 developer
+    environment; mac-release-universal or linux-release): configure,
     build, test and package the kit into build/<preset>/. Implies -CppOnly.
 
 .PARAMETER Preset
-    Workflow preset for the C/C++ part. Default: win-debug, mac-debug or linux-debug for this
-    OS, or $env:MAPLETHIEF_PRESET.
+    Workflow preset for the C/C++ part. Default: win-debug (win-arm64-debug in an ARM64
+    developer environment), mac-debug or linux-debug for this OS, or $env:MAPLETHIEF_PRESET.
 
 .PARAMETER CppOnly
     Skip the Python tests.
@@ -58,6 +59,8 @@ Set-Location -LiteralPath $Repo
 # $IsMacOS/$IsLinux only exist in PowerShell 6+; Windows PowerShell 5.1 is always Windows.
 if ((Test-Path variable:IsMacOS) -and $IsMacOS) { $osPresets = 'mac-debug', 'mac-release-universal' }
 elseif ((Test-Path variable:IsLinux) -and $IsLinux) { $osPresets = 'linux-debug', 'linux-release' }
+# Windows: the ARM64 presets in an ARM64 developer environment (vcvarsall arm64 or x64_arm64).
+elseif ($env:VSCMD_ARG_TGT_ARCH -eq 'arm64') { $osPresets = 'win-arm64-debug', 'win-arm64-release' }
 else { $osPresets = 'win-debug', 'win-release' }
 if ($Release) {
     $CppOnly = [switch]$true

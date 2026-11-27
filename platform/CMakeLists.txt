@@ -58,6 +58,7 @@ add_library(
     src/gamepad.cpp
     src/gfx_backend.cpp
     src/gpu_screen.cpp
+    src/hang_watchdog.cpp
     src/glyphs.cpp
     src/hud_labels.cpp
     src/import_screen.cpp
@@ -87,10 +88,15 @@ add_library(
     src/render_scale.cpp
     src/replay.cpp
     src/rumble.cpp
+    src/run_census.cpp
+    src/run_file.cpp
+    src/run_recorder.cpp
     src/run_timer.cpp
+    src/livesplit.cpp
     src/file_dialog.cpp
     src/save_menu.cpp
     src/save_state_input.cpp
+    src/practice_state.cpp
     src/quick_state.cpp
     src/recovery.cpp
     src/save_tools.cpp
@@ -101,6 +107,7 @@ add_library(
     src/settings.cpp
     src/settings_menu.cpp
     src/speech.cpp
+    src/speech_menus.cpp
     src/speech_text.cpp
     src/start_question.cpp
     src/switch_pads.cpp
@@ -187,6 +194,10 @@ if(APPLE)
     target_link_libraries(maplethief_frontend PRIVATE "-framework Foundation")
 elseif(WIN32)
     target_link_libraries(maplethief_frontend PRIVATE winhttp)
+endif()
+# The LiveSplit link's TCP socket (#407, livesplit.h): Winsock on Windows.
+if(WIN32)
+    target_link_libraries(maplethief_frontend PRIVATE ws2_32)
 endif()
 # Text-to-speech's system voice (#390, ADR 0174, speech.h): AVSpeechSynthesizer on macOS and iOS
 # (Objective-C++ with ARC), SAPI 5 on Windows; Linux loads libspeechd at run time

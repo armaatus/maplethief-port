@@ -4,6 +4,9 @@
 //
 //   crash_report_child host DIR   sets up the crash report in DIR and writes through a null
 //                                 pointer: exits by SIGSEGV
+//   crash_report_child hang DIR   sets up the crash report and the hang watchdog (#337) in DIR,
+//                                 answers its question with Quit and stops turning: exits
+//                                 with kExitHang
 //   crash_report_child --crash-dialog FILE   the helper's half (MAPLETHIEF_CRASH_DIALOG_LOG)
 #include <SDL3/SDL.h>
 
@@ -13,6 +16,7 @@
 #include <string>
 
 #include "crash_report.h"
+#include "hang_watchdog.h"
 #include "maplethief/recomp/calls.h"
 #include "player_log.h"
 
@@ -28,7 +32,7 @@ int main(int argc, char **argv) {
     if (mode == "--crash-dialog" && argc > 2) {
         return fe::run_crash_dialog_tool(argv[2]);
     }
-    if (mode != "host" || argc < 3) {
+    if ((mode != "host" && mode != "hang") || argc < 3) {
         return 2;
     }
     fe::player_log_open(std::string(argv[2]) + "/logs");
@@ -36,6 +40,14 @@ int main(int argc, char **argv) {
     fe::crash_report_start(argv[2]);
     fe::crash_report_set_header("version: child\n");
     SDL_Log("the child's own log line");
+    if (mode == "hang") {
+        fe::set_hang_dialog_for_test([](const std::string &) { return fe::HangChoice::kQuit; });
+        static mt_cpu cpu{};
+        fe::hang_watchdog_start(&cpu, 0.3);
+        for (;;) {
+            SDL_Delay(50); // no beat: the watchdog ends the process
+        }
+    }
     volatile int *volatile null_page = nullptr;
     *null_page = 1;
     return 0;

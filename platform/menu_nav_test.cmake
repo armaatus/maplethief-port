@@ -21,6 +21,8 @@
 #   carry_pad   carry_pad                       (on a copy of SEED: pick up and drop by the pad,
 #                                                #140, ADR 0129)
 #   carry_keys  carry_keys                      (the same by the keys, and the trash)
+#   speech_skills speech_skills                 (on a copy of SEED, a built Rogue's save: the skill
+#                                                tab read aloud, #393)
 #   chords      chords_touch, chords_pad,       (fresh data each: the chords as two fingers, by the
 #               chords_keys, chords_keys_last    pad, by the keys and by the keys with
 #                                                direction_priority last; the per-tick hero files
@@ -32,6 +34,9 @@
 #
 #   cmake -DPROGRAM=<menu_nav_real_test> -DFLOW=<flow> -DOUT=<dir> [-DSEED=<dir>]
 #         -P menu_nav_test.cmake
+
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
 
 file(REMOVE_RECURSE "${OUT}")
 file(MAKE_DIRECTORY "${OUT}/data")
@@ -62,6 +67,8 @@ elseif(FLOW STREQUAL "shop_scroll")
     set(modes shop_scroll)
 elseif(FLOW STREQUAL "popup_grids")
     set(modes equip_save popup_grids)
+elseif(FLOW STREQUAL "speech_skills")
+    set(modes speech_skills)
 elseif(FLOW STREQUAL "pointer")
     set(modes pointer)
     set(language ko)

@@ -458,9 +458,28 @@ struct Shop {
     std::string npc;
     int shop, table, item, price;
 };
+// An NPC object on (area, map): its name and tile (column, row), as the map's .obj places it.
+struct Npc {
+    int id, area, map;
+    std::string object;
+    int column, row;
+};
+// A crafting recipe of `chapter` at the crafter object `npc` on (area, map): `count` of item
+// `item` of `table` for `meso` and the materials (table, item, count).
+struct Material {
+    int table, item, count;
+};
+struct Recipe {
+    int chapter, area, map;
+    std::string npc;
+    int table, item, count, meso;
+    std::vector<Material> materials;
+};
 struct Tables {
     std::vector<Link> links;
     std::vector<Shop> shops;
+    std::vector<Npc> npcs;
+    std::vector<Recipe> recipes;
 };
 
 inline Term parse_term(const std::string &t) {
@@ -516,6 +535,23 @@ inline const Tables &tables() {
                 f >> s.chapter >> s.area >> s.map >> s.npc >> s.shop >> s.table >> s.item >>
                     s.price;
                 t.shops.push_back(std::move(s));
+            } else if (kind == "npc") {
+                Npc n{};
+                f >> n.id >> n.area >> n.map >> n.object >> n.column >> n.row;
+                t.npcs.push_back(std::move(n));
+            } else if (kind == "recipe") {
+                Recipe rc{};
+                f >> rc.chapter >> rc.area >> rc.map >> rc.npc >> rc.table >> rc.item >> rc.count >>
+                    rc.meso;
+                std::string m;
+                while (f >> m) {
+                    Material mat{};
+                    if (std::sscanf(m.c_str(), "%d:%d:%d", &mat.table, &mat.item, &mat.count) ==
+                        3) {
+                        rc.materials.push_back(mat);
+                    }
+                }
+                t.recipes.push_back(std::move(rc));
             }
         }
         if (t.links.empty()) {
@@ -530,6 +566,9 @@ inline const Tables &tables() {
     return k;
 }
 inline const std::vector<Link> &links() { return tables().links; }
+inline const std::vector<Shop> &shops() { return tables().shops; }
+inline const std::vector<Npc> &npcs() { return tables().npcs; }
+inline const std::vector<Recipe> &recipes() { return tables().recipes; }
 
 // Whether `l` is open with these quest states: `state(kind, number)` reads one.
 template <class State> bool open(const Link &l, State &&state) {

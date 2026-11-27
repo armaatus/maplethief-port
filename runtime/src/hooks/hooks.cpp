@@ -29,6 +29,7 @@ constexpr u32 k_hookable[] = {
     MT_HOOK_FN_CHAT_BOX_NEXT_PAGE,          // 0x34A05
     MT_HOOK_FN_CHAT_BOX_FIRST_PAGE,         // 0x34CD1
     MT_HOOK_FN_SAVE_QUEST_DATA,             // 0x38F55
+    MT_HOOK_FN_POPUP_OPEN,                  // 0x3EAA1
     MT_HOOK_FN_SHOP_ON_KEY,                 // 0x46DB9
     MT_HOOK_FN_QUICK_SLOTS_PAINT,           // 0x4CAED
     MT_HOOK_FN_POPUP_MENU_EQUIP_TAB_ON_KEY, // 0x519F9
@@ -43,6 +44,7 @@ constexpr u32 k_hookable[] = {
     MT_HOOK_FN_MAP_PAINT_0,                 // 0x59BB1
     MT_HOOK_FN_HUD_PAINT,                   // 0x5A465
     MT_HOOK_FN_OBJECT_TOUCHES,              // 0x6CF01
+    MT_HOOK_FN_NOTIFY_TEXT_ADD,             // 0x78339
     MT_HOOK_FN_SCENE_RUNNER,                // 0x83C71
     MT_HOOK_FN_STATE_GAME_PAINT,            // 0x87501
     MT_HOOK_FN_STATE_GAME_ON_KEY,           // 0x8D4C9

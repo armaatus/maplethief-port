@@ -7,6 +7,7 @@ The speedrun timer ([#406](https://github.com/armaatus/maplethief-port/issues/40
 | `NAME.mtcat` | shipped: [`platform/categories/`](../../platform/categories/), embedded in the binary at build time; a player's own: `<data dir>/categories/` | the project, a player | `parse_run_category` |
 | `NAME-YYYYMMDD-hhmmss.log` | `<data dir>/runs/` (`-2`, `-3`, ... when the name is taken) | the timer, one per finished or reset run | `parse_run_log` |
 | `NAME.best` | `<data dir>/runs/` | the timer: the category's personal best, a run log's text | `load_run_best` |
+| `NAME.segments` | `<data dir>/runs/` | the timer: the category's best segments ([#409](https://github.com/armaatus/maplethief-port/issues/409), [ADR 0189](../adr/0189-practice-states-per-split-and-segment-times.md)) | `parse_run_segments`, `load_run_segments` |
 
 `NAME` is the category's name, the file name without `.mtcat`: 1 to 32 of `a-z`, `0-9` and `_`. It is the value of the `run_category` setting. A player's file of the same name as a shipped one replaces it.
 
@@ -67,6 +68,20 @@ Times are since the run's start: `MS` real time on the host's monotonic clock in
 
 Refused (`parse_run_log`): a line it does not know, a bad value, a `time` out of order, no `category`, `result` or `end`, more times than splits, a finished run without a time for every split.
 
+## Best segments
+
+`NAME.segments` holds the best segment of each split of category `NAME`: the shortest real time from the split before it (the run's start, for the first) to it, from runs and from practice after a practice state's load ([ADR 0189](../adr/0189-practice-states-per-split-and-segment-times.md)). The timer writes it whole (through a temporary file beside it) whenever a best improves.
+
+| Line | Meaning |
+|---|---|
+| `category = NAME` | the category's name (once) |
+| `split EVENT = TITLE` | the category's splits when the bests were timed, as in its file (1 to 64) |
+| `segment N = MS ms TICKS ticks` | split N's best segment (N from 1, once each, in any order); a split with no best has no line |
+
+`MS` and `TICKS` are as in a run log. The timer keeps the file's bests only while its `split` lines equal the category's splits; for other splits it starts with none (and the next best written replaces the file). The **sum of best** is every split's best segment added up, once each split has one.
+
+Refused (`parse_run_segments`): a line it does not know, a bad value, a second `category`, a `segment` numbered 0, twice, or past the last split, no `category` or no `split`.
+
 ## Parser and tests
 
-[`platform/src/run_timer.cpp`](../../platform/src/run_timer.cpp): `parse_run_category`, `run_category_text`, `load_run_categories`, `parse_run_log`, `run_log_text`, `write_run`, `load_run_best`. [`tests/cpp/run_timer_test.cpp`](../../tests/cpp/run_timer_test.cpp) (CI, synthetic files): every refusal by its line, a byte order mark and CR LF, the round trips, a data folder's files beside the shipped ones, both shipped categories parse and match the repository's files. `play.chapter_1_l` (local, real assets) writes the log of a run timed to Chapter 1's last split and reads it back.
+[`platform/src/run_timer.cpp`](../../platform/src/run_timer.cpp): `parse_run_category`, `run_category_text`, `load_run_categories`, `parse_run_log`, `run_log_text`, `write_run`, `load_run_best`, `parse_run_segments`, `run_segments_text`, `write_run_segments`, `load_run_segments`. [`tests/cpp/run_timer_test.cpp`](../../tests/cpp/run_timer_test.cpp) (CI, synthetic files): every refusal by its line, a byte order mark and CR LF, the round trips, a data folder's files beside the shipped ones, both shipped categories parse and match the repository's files, the `.segments` round trip and its refusals. `play.chapter_1_l` (local, real assets) writes the log of a run timed to Chapter 1's last split and reads it back.

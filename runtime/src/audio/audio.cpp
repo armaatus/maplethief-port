@@ -626,7 +626,10 @@ bool load_audio(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *app
         return false;
     }
     auto voices = std::make_shared<mix::Voices>();
-    if (!r.u32(&n) || !r.count_fits(n, 30)) {
+    // An effect voice is at least 26 bytes (key, buffer, inline flag, pos, step, playing), a music
+    // voice 39 (no samples): a larger minimum refuses a state with a few voices and little after
+    // them (#409: two music voices with empty buffers).
+    if (!r.u32(&n) || !r.count_fits(n, 26)) {
         return false;
     }
     for (u32 i = 0; i < n; i++) {
@@ -647,7 +650,7 @@ bool load_audio(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *app
         }
         voices->effects.push_back(std::move(e));
     }
-    if (!r.u32(&n) || !r.count_fits(n, 43)) {
+    if (!r.u32(&n) || !r.count_fits(n, 39)) {
         return false;
     }
     for (u32 i = 0; i < n; i++) {

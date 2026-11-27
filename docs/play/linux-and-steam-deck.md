@@ -1,13 +1,13 @@
 # Linux and Steam Deck
 
-How to build the game for Linux x86_64 from your own IPA and play it on a Linux PC or a Steam Deck as a non-Steam game. The decisions behind it are in [ADR 0065](../adr/0065-linux-and-steam-deck-build.md) (#84) and [ADR 0193](../adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md) (#349: glibc 2.35, the AppImage and the Flatpak). If you only want to play, the release's player download is easier: [Download and play](README.md#linux-and-steam-deck).
+How to build the game for Linux x86_64 (or aarch64) from your own IPA and play it on a Linux PC or a Steam Deck as a non-Steam game. The decisions behind it are in [ADR 0065](../adr/0065-linux-and-steam-deck-build.md) (#84), [ADR 0193](../adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md) (#349: glibc 2.35, the AppImage and the Flatpak) and [ADR 0194](../adr/0194-windows-arm64-and-linux-aarch64-builds.md) (#362: aarch64). If you only want to play, the release's player download is easier: [Download and play](README.md#linux-and-steam-deck).
 
 Three different things are called "the Linux build":
 
 | | What | Where it comes from | Shared? |
 |---|---|---|---|
-| **Player download** | `MapleThief-<version>-linux-x86_64.tar.gz`, `.AppImage` or `.flatpak`: the game's program without any of its files; it imports your IPA on first launch ([ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md), [ADR 0193](../adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md)) | `scripts/linux-game player`, released by `scripts/release` | Yes, they are release assets |
-| **Port kit** | `MapleThief-kit-<version>-linux-x86_64.tar.gz`: the platform shell (no game code), the runtime, the tools ([ADR 0024](../adr/0024-release-contents-and-flow.md)) | `cmake --workflow --preset linux-release`, released by `scripts/release` | Yes, it is a release asset |
+| **Player download** | `MapleThief-<version>-linux-x86_64.tar.gz`, `.AppImage` or `.flatpak` (on ARM64: `-linux-aarch64.tar.gz`, no AppImage or Flatpak): the game's program without any of its files; it imports your IPA on first launch ([ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md), [ADR 0193](../adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md)) | `scripts/linux-game player`, released by `scripts/release` | Yes, they are release assets |
+| **Port kit** | `MapleThief-kit-<version>-linux-x86_64.tar.gz` (on ARM64: `-linux-aarch64`): the platform shell (no game code), the runtime, the tools ([ADR 0024](../adr/0024-release-contents-and-flow.md)) | `cmake --workflow --preset linux-release`, released by `scripts/release` | Yes, it is a release asset |
 | **Game folder** | `MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz`: the game, built from your IPA | `scripts/linux-game build`, into `build/linux-game/` | **No.** It contains the game. Keep it to your own machines |
 
 The player download and the game folder both have `MapleThief.sh`, `--install-desktop` and `--uninstall-desktop`; the launcher uses the folder's `game/` copy when there is one. The [Steam Deck](#steam-deck) steps below use the player download. The build sections are about the game folder.
@@ -140,4 +140,4 @@ The back grips (L4, L5, R4, R5) have no binding by default. In the controller se
 ## Not done yet
 
 - **The Deck itself** hasn't been checked yet (#84, `needs-human`). That covers Game Mode's window, the default controller layout, the touchscreen, the glibc of current SteamOS, and the AppImage and Flatpak there (#349).
-- Only x86_64 is built and checked. `--arch arm64` builds an aarch64 folder in the same way, untested on hardware.
+- aarch64 (ARM64): the release has a player tarball and a kit (`-linux-aarch64`, [ADR 0194](../adr/0194-windows-arm64-and-linux-aarch64-builds.md)), built in the same glibc 2.35 image, and `--arch arm64` builds an aarch64 game folder in the same way. There is no aarch64 AppImage or Flatpak ([ADR 0193](../adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md)). The test suite runs in the arm64 container and on GitHub's ARM64 runner; the build hasn't been played on ARM64 hardware yet (an ARM64 Linux laptop or board). The Steam Deck is x86_64.
