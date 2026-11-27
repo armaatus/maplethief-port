@@ -69,13 +69,15 @@ Every key, by its SDL name (`SDL_GetKeyName`) and its actions by their names in 
 | `Tab` | fast_forward | fast_forward |
 | `F5` | quick_save | quick_save |
 | `F9` | quick_load | quick_load |
+| `F7` | practice_pick | practice_pick |
+| `F8` | practice_load | practice_load |
 <!-- END keyboard-defaults -->
 
 Keys are matched by **keycode** (`SDL_Keycode`): the key with that label in the player's layout. On AZERTY, Z is the key where QWERTY has W, and A is where QWERTY has Q. The letters are the ones this page names, and a bindings file (#70) can move them. Keys pressed while Cmd (macOS) or the Windows key is held are left to the system (Cmd+Q, Cmd+M, Cmd+H), so Cmd+M does not open the map.
 
 ### The port's own keys
 
-These are the port's, not the game's: they never reach the bindings and can't be bound. The port's fast-forward key (Tab), auto-run key (R), page keys (Shift, above) and save-state keys (F5, F9) are the exception: they are the bindable actions `fast_forward`, `auto_run`, `page`, `quick_save` and `quick_load`. The window's size keys are bindable too, in `bindings.ini`'s `[window]` section.
+These are the port's, not the game's: they never reach the bindings and can't be bound. The port's fast-forward key (Tab), auto-run key (R), page keys (Shift, above), save-state keys (F5, F9) and practice keys (F7, F8) are the exception: they are the bindable actions `fast_forward`, `auto_run`, `page`, `quick_save`, `quick_load`, `practice_pick` and `practice_load`. The window's size keys are bindable too, in `bindings.ini`'s `[window]` section.
 
 | Key | What it does |
 |---|---|
@@ -95,6 +97,7 @@ The mouse cursor hides while the keyboard or a gamepad is used and comes back wh
 - **It is not the game's save.** A state never writes the game's save files (`theif<N>`, `quest<N>`) and they never hold a state. The game still saves as it always did. After F9, the game's next save (yours, or the autosave) writes whatever is loaded, as if you had loaded an older save: what happened after the state is gone from that character.
 - **When.** Only in the field with nothing open: not in a menu, a shop, a chat or a popup, not during a scene, not while the screen moves. F5 also needs every other key let go (a walking hero is refused: "let go of the keys first"). Otherwise a short notice says why nothing happened ("Not saved: not in a menu"). F9 also refuses a state of another copy of the game, of another version of the port, or of another character, and a damaged file; nothing changes then.
 - The port's menus pause the game and take every key, so F5 and F9 do nothing while one is open.
+- With the speedrun timer on too, F7 and F8 pick and load a state kept after a split of your category ([speedrun.md](../play/speedrun.md#practice-from-a-split)).
 
 ### Why not W A S D
 
