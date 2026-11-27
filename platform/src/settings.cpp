@@ -739,6 +739,19 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Fix original bugs",
      .help = "Fixes the original game's crashes and dead ends; never changes its balance"},
+    // Gameplay (#389, ADR 0069's #379 addendum): content the game ships but never reaches,
+    // made reachable. Not a fix, so off in every preset, Enhanced included.
+    {.key = "restored_content",
+     .group = SettingGroup::kGameplay,
+     .comment = "# make content the game ships but never reaches reachable "
+                "(docs/re/original-bugs.md,\n# Unreachable content): on | off",
+     .value = on_off<&Settings::restored_content>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--restored-content",
+     .game_only = true,
+     .label = "Restored content",
+     .help = "Opens content the game ships but never reaches, as each restore lands; off is the "
+             "original"},
     // Video: texture packs (#153, ADR 0081).
     {.key = "texture_pack",
      .group = SettingGroup::kVideo,

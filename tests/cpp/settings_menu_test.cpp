@@ -1740,6 +1740,7 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"language", true, ""},
     {"text_pack", true, "offers <base>/text-packs/"},
     {"fix_original_bugs", true, ""},
+    {"restored_content", true, ""},
     {"texture_pack", true, "offers <base>/texture-packs/"},
     {"texture_filter", true, ""},
     {"hide_online_ui", true, ""},

@@ -72,6 +72,7 @@ const Expected kExpected[] = {
     {"language", {nullptr, nullptr, nullptr}},
     {"text_pack", {nullptr, nullptr, nullptr}},
     {"fix_original_bugs", {"off", "off", "on"}},
+    {"restored_content", {"off", "off", "off"}}, // #389: never a fix, off in Enhanced too
     {"texture_pack", {nullptr, nullptr, nullptr}},
     {"texture_filter", {"game", "game", "nearest"}},
     {"hide_online_ui", {"off", "on", "on"}},
@@ -265,6 +266,25 @@ TEST_CASE("presets: the registry matches #89's table; each preset sets exactly i
     CHECK(fe::matching_preset(o) == Preset::kOriginal);
     CHECK(fe::matching_preset(oc) == Preset::kOriginalController);
     CHECK(fe::matching_preset(en) == Preset::kEnhanced);
+}
+
+TEST_CASE("presets: restored_content is off in every column; Enhanced never turns it on (#389)") {
+    // ADR 0069's #379 addendum: restoring unreachable content is never a bug fix, so unlike
+    // fix_original_bugs no preset opens it, and a preset turns off a player's on.
+    const SettingInfo *info = fe::find_setting("restored_content");
+    REQUIRE(info != nullptr);
+    CHECK(info->group == SettingGroup::kGameplay);
+    CHECK(std::string(info->flag) == "--restored-content");
+    CHECK_FALSE(Settings{}.restored_content);
+    for (const Preset p : kColumns) {
+        CAPTURE(fe::preset_name(p));
+        REQUIRE(info->presets[p] != nullptr);
+        CHECK(std::string(info->presets[p]) == "off");
+        Settings s;
+        s.restored_content = true;
+        fe::apply_preset(&s, p);
+        CHECK_FALSE(s.restored_content);
+    }
 }
 
 TEST_CASE("presets: changing one key it controls makes it custom; other keys do not") {
