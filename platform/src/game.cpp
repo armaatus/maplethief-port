@@ -87,6 +87,7 @@
 #include "scene_skip.h"
 #include "settings_menu.h"
 #include "speech.h"
+#include "speech_text.h"
 #include "update_check.h"
 
 namespace maplethief::frontend {
@@ -519,7 +520,8 @@ struct Game {
     ControlsCard card{&actions, &gamepads};          // the controls card (controls_card.h, #193)
     bool card_pending = false; // the preset picker's "Show controls": opens at a turn (#193)
     PadPointer pointer{&input, &actions}; // pad_pointer: the right stick's, touchpads (#185)
-    Speech speech; // text-to-speech (speech.h, #390): what #391-#393 feed; off by default
+    Speech speech;          // text-to-speech (speech.h, #390): what #391-#393 feed; off by default
+    SpeechText speech_text; // the dialogue and the scenes' speech boxes for it (#391)
     // The settings in effect (options->settings at the start), which the settings menu and the
     // fullscreen hotkeys change (#89, ADR 0076; #145): every setting is read from here.
     Settings settings;
@@ -2718,6 +2720,7 @@ void release_layers(Game &g, double t) {
     layers.assists = &g.assists;
     layers.scene_skip = &g.scene_skip;
     release_for_restore(layers, t);
+    g.speech_text.restart(); // a box the restore shows is said again (#391)
 }
 
 // save_states (#204, quick_state.h): a quick_save or quick_load pressed since the last turn, here
@@ -2983,6 +2986,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     g.hints.turn(cpu, g.focus, mt_input_panel(), g.settings.button_prompts,
                  g.settings.focus_highlight); // prompts and markers (#146), as in effect now
     g.rumble.turn(); // what the game's vibration and events asked for since the last turn
+    g.speech_text.turn(g.speech, g.settings, speech_clock()); // dialogue said (#391)
     g.speech.turn(speech_clock()); // the next queued utterance, once the last is done (#390)
     g.game_options.turn(now);      // the settings menu's "Game options" (#89): one step a turn
     g.file_dialogs.poll();         // a file dialog answered after the menu closed (#192)
