@@ -30,7 +30,7 @@ using u64 = std::uint64_t;
 
 constexpr u32 k_chunk = 0x1000u;
 constexpr u32 k_synthetic_dead = 0x10000u; // a synthetic guest's dead stack below the entry sp
-constexpr std::size_t k_report_ops = 48u; // the rewrite's last opcode lines in a report
+constexpr std::size_t k_report_ops = 48u;  // the rewrite's last opcode lines in a report
 
 struct Range {
     u32 lo, hi;
@@ -49,9 +49,8 @@ struct Book {
     std::vector<u32> small[mt::mem::k_small_classes];
 
     bool operator==(const Book &o) const {
-        if (has != o.has || top != o.top || live != o.live ||
-            live_bytes != o.live_bytes || free_by_addr != o.free_by_addr ||
-            free_by_size != o.free_by_size) {
+        if (has != o.has || top != o.top || live != o.live || live_bytes != o.live_bytes ||
+            free_by_addr != o.free_by_addr || free_by_size != o.free_by_size) {
             return false;
         }
         for (u32 c = 0; c < mt::mem::k_small_classes; c++) {
@@ -416,8 +415,7 @@ int shadow_execute(mt_cpu *cpu, const mt_hook_call *call) {
     if (s.mode == Mode::original || (s.mode == Mode::rewrite && s.in_native > 0)) {
         return MT_HOOK_PASS; // nested in run 1, or in a native that runs: the original's
     }
-    const mt_scriptvm_execute_fn rewrite =
-        s.rewrite != nullptr ? s.rewrite : mt_scriptvm_execute;
+    const mt_scriptvm_execute_fn rewrite = s.rewrite != nullptr ? s.rewrite : mt_scriptvm_execute;
     if (s.mode == Mode::rewrite) {
         cpu->r[0] = rewrite(cpu, cpu->r[0], cpu->r[1], cpu->r[2]); // nested in run 2
         return MT_HOOK_HANDLED;

@@ -67,7 +67,8 @@ void mt_scriptvm_reset_stats(void) MT_NOEXCEPT;
  *      native does outside guest memory (a sound, a popup, Game Center, an ObjC object) happens
  *      once.
  *   3. compares r0, r4-r8, r10, r11 and sp (r9 is a scratch register on iOS), memory and the
- *      heap's bookkeeping with run 1's end, and the number of native calls. Then the game goes on from run 1's end: the original's.
+ *      heap's bookkeeping with run 1's end, and the number of native calls. Then the game goes on
+ * from run 1's end: the original's.
  *
  * The first difference of a run (where, the address and both words, the native calls so far and
  * the rewrite's last opcodes from the scriptvm recorder) is written to stderr and counted; the

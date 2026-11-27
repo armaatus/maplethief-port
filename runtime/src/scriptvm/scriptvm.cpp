@@ -97,7 +97,7 @@ static_assert(sizeof k_names / sizeof k_names[0] == 0x43, "67 opcodes");
 
 std::atomic<u64> g_calls{0}, g_steps{0}, g_natives{0}, g_checks{0};
 std::vector<std::string> *g_recorder = nullptr; // mt::scriptvm::set_recorder
-constexpr std::size_t k_recorder_max = 4096u;    // lines kept; older ones are dropped
+constexpr std::size_t k_recorder_max = 4096u;   // lines kept; older ones are dropped
 
 // A trace line: to the scriptvm channel when it is on, to the recorder when one is set.
 #if defined(__GNUC__) || defined(__clang__)
@@ -282,11 +282,11 @@ void Vm::trace_step(u32 op) {
     const u32 reader = rd(tfunc_ + k_tfunc_reader);
     const u32 at = rd(reader + k_reader_buf) + rd(reader + k_reader_pos);
     note("tfunc 0x%08X pc %u: %s [%02X %02X %02X %02X] base %u depth %u",
-              static_cast<unsigned>(tfunc_), static_cast<unsigned>(op_pc_),
-              op < 0x43u ? k_names[op] : "(none: skipped)", static_cast<unsigned>(peek8(at)),
-              static_cast<unsigned>(peek8(at + 1)), static_cast<unsigned>(peek8(at + 2)),
-              static_cast<unsigned>(peek8(at + 3)), static_cast<unsigned>(base_),
-              static_cast<unsigned>(depth()));
+         static_cast<unsigned>(tfunc_), static_cast<unsigned>(op_pc_),
+         op < 0x43u ? k_names[op] : "(none: skipped)", static_cast<unsigned>(peek8(at)),
+         static_cast<unsigned>(peek8(at + 1)), static_cast<unsigned>(peek8(at + 2)),
+         static_cast<unsigned>(peek8(at + 3)), static_cast<unsigned>(base_),
+         static_cast<unsigned>(depth()));
 }
 
 // ADDOP..DIVOP: both operands made numbers (the right one first; the left is not tried when

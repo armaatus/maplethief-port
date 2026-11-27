@@ -1380,8 +1380,8 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
                       "difference%s%s",
                       static_cast<unsigned long long>(sh.runs),
                       static_cast<unsigned long long>(sh.natives),
-                      static_cast<unsigned long long>(sh.differences), differs ? "; the first: " : "",
-                      differs ? d.what : "");
+                      static_cast<unsigned long long>(sh.differences),
+                      differs ? "; the first: " : "", differs ? d.what : "");
         check(sh.differences == 0u, line);
         mt_scriptvm_shadow_install(0, nullptr);
     } else if (script_vm == "on") {

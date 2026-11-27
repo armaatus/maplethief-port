@@ -209,8 +209,8 @@ void s_new_array(mt_cpu *cpu) {
 int g_original_runs = 0;
 void execute_original(mt_cpu *MT_RESTRICT cpu) {
     g_original_runs++;
-    cpu->r[0] = g->original_is_host ? mt_scriptvm_execute(cpu, cpu->r[0], cpu->r[1], cpu->r[2])
-                                    : 0x1234u;
+    cpu->r[0] =
+        g->original_is_host ? mt_scriptvm_execute(cpu, cpu->r[0], cpu->r[1], cpu->r[2]) : 0x1234u;
 }
 void hooked_execute(mt_cpu *MT_RESTRICT cpu) {
     MT_FN_HOOK(MT_HOOK_FN_LUA_EXECUTE, execute_original);
@@ -762,8 +762,8 @@ u32 rewrite_result(mt_cpu *cpu, u32 lua, u32 tfunc, u32 base) {
 
 TEST_CASE("scriptvm shadow: the host loop against an equal original: no difference, the native "
           "run once") {
-    for (const mt_scriptvm_execute_fn rewrite : {static_cast<mt_scriptvm_execute_fn>(nullptr),
-                                                 rewrite_scratch_below_sp}) {
+    for (const mt_scriptvm_execute_fn rewrite :
+         {static_cast<mt_scriptvm_execute_fn>(nullptr), rewrite_scratch_below_sp}) {
         ShadowGuest vm(rewrite);
         vm.call();
         const mt_scriptvm_shadow_stats st = mt_scriptvm_shadow_get_stats();
