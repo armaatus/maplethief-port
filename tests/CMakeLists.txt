@@ -1518,6 +1518,8 @@ set(_starts
     systems2_pigmy
     systems2_portal620
     systems2_boss_knockback
+    restored_shops_0_0
+    restored_shops_9_0
     speech_notices)
 foreach(start IN LISTS _starts)
     add_test(NAME starts.${start}
@@ -1556,7 +1558,11 @@ set(_from_starts
     systems2_portal620:systems2_portal620
     systems2_portal620_fixed:systems2_portal620
     systems2_boss_knockback:systems2_boss_knockback
-    systems2_boss_knockback_fixed:systems2_boss_knockback)
+    systems2_boss_knockback_fixed:systems2_boss_knockback
+    systems2_restored_shops_0:restored_shops_0_0
+    systems2_restored_shops_0_off:restored_shops_0_0
+    systems2_restored_shops_9:restored_shops_9_0
+    systems2_restored_shops_9_off:restored_shops_9_0)
 # The five map pages checked in the running port (#221): from a start on each map, the hero takes
 # one portal (MT_MAP_PAGE_PORTAL, its kind) and play_real_test map_page writes where it landed;
 # tests/test_compendium_world_port.py compares that with the page's Connections row. The 2.0

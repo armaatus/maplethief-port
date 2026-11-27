@@ -70,6 +70,7 @@
 #include "present.h"
 #include "prompts.h"
 #include "replay.h"
+#include "restored_content.h"
 #include "save_tools.h"
 #include "scene_skip.h"
 #include "speech.h"
@@ -1297,6 +1298,7 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     mt_hooks_install_quest_page_fix(1);  // in every mode, as the game (#167)
     mt_hooks_install_text_wrap_guard(1); // in every mode, as the game (#419)
     mt_hooks_install_original_bug_fixes(r.settings.fix_original_bugs ? 1 : 0); // as game.cpp
+    fe::install_restored_shops(r.settings.restored_content);                   // as game.cpp
     if (!r.clock.install()) {
         check(false, "the virtual clock is installed");
         return 1;

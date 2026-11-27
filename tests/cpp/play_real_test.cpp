@@ -12958,6 +12958,187 @@ void systems2_boss_knockback(Run &r, u64) { boss_knockback_run(r, false); }
 void systems2_boss_knockback_fixed(Run &r, u64) { boss_knockback_run(r, true); }
 void systems2_boss_knockback_checks(Run &, u64) {}
 
+// --- shops 0, 1 and 16 from an existing merchant (restored_content, #426) ------------------------
+//
+// docs/re/original-bugs.md "Unreachable content": with restored_content on, Etc00 (0.0, shop 5),
+// Equip90 and Etc90 (9.0, shops 8 and 13) answer the talk with a list box of two rows, their usual
+// shop and shop 16, 0 or 1 (mt_restored_shop_for). The bot picks each row in turn: the shop that
+// opens has exactly market.dat's listings for that shop, in the file's order, at its prices.
+// With it off the talk opens the usual shop at once: no chat box at any turn, no list box built.
+// systems2_restored_shops_0 / _9 run on 0.0 / 9.0 (the starts restored_shops_0_0 / _9_0);
+// systems2_restored_shops_0_off / _9_off the same with the setting off.
+
+// market.dat's listings of `shop` in the file's order: (table, item, price); the all-zero rows
+// (unused) are not listings. The file: a 6-byte header, then 7-byte rows
+// (docs/formats/data-tables.md).
+struct MarketListing {
+    i32 table, item, price;
+};
+std::vector<MarketListing> market_listings(i32 shop) {
+    const std::vector<std::uint8_t> raw =
+        read_file((fs::path(MT_BUNDLE_DIR) / "English/data/market.dat").string());
+    std::vector<MarketListing> out;
+    for (std::size_t at = 6; at + 7 <= raw.size(); at += 7) {
+        i32 price = 0;
+        std::memcpy(&price, raw.data() + at + 3, 4);
+        const bool unused = raw[at] == 0 && raw[at + 1] == 0 && raw[at + 2] == 0 && price == 0;
+        if (!unused && raw[at] == shop) {
+            out.push_back({raw[at + 1], raw[at + 2], price});
+        }
+    }
+    return out;
+}
+
+struct ShopVisit {
+    quest_bot::Nav nav;
+    double pressed = -10;
+    bool chatted = false;      // a chat box was seen during the talk
+    std::vector<i32> values;   // the list box's row values, as seen on its last page
+    Shop seen;                 // the shop as it opened
+    std::vector<ShopRow> rows; // its Buy rows
+};
+
+// Talks to merchant `npc` on (area, map); on a list box picks the row of value `choose`; done in
+// the shop, which it records, then B back to the field.
+void then_shop_from(Run &r, const std::string &what, int area, int map, const std::string &npc,
+                    i32 choose, std::shared_ptr<ShopVisit> v) {
+    using namespace quest_bot;
+    const Goal g = at_object(area, map, npc, 6);
+    then(r, "shop: " + what, 240, [&r, g, choose, v](mt_cpu *cpu, double el) {
+        const auto press = [&](SDL_GamepadButton b) {
+            if (el - v->pressed >= 0.6) {
+                v->pressed = el;
+                hold(r, b, true);
+            }
+        };
+        if (el - v->pressed >= 0.1) {
+            release_all(r);
+        }
+        if (in_shop(cpu)) {
+            v->seen = shop(cpu);
+            v->rows.clear();
+            for (i32 i = 0; i < v->seen.rows; i++) {
+                v->rows.push_back(shop_row(cpu, v->seen, i));
+            }
+            release_all(r);
+            return true;
+        }
+        if (chatting(cpu)) {
+            v->chatted = true;
+            const Chat c = chat(cpu);
+            if (c.mode == 2 && c.last_page() && !c.values.empty()) {
+                v->values = c.values;
+                i32 want = 0;
+                for (std::size_t i = 0; i < c.values.size(); i++) {
+                    want = c.values[i] == choose ? static_cast<i32>(i) : want;
+                }
+                press(c.sel < want ? DOWN : (c.sel > want ? UP : A));
+            } else {
+                press(A);
+            }
+            return false;
+        }
+        if (game_mode(cpu) == 2 || !field(cpu)) {
+            press(A); // a popup over the shop or the field
+            return false;
+        }
+        if (drive(r, cpu, el, v->nav, g)) {
+            press(UP);
+        }
+        return false;
+    });
+    then(r, "B closes the shop: " + what, 20, [&r](mt_cpu *cpu, double el) {
+        hold(r, B, std::fmod(el, 0.6) < 0.1);
+        if (field(cpu)) {
+            release_all(r);
+            return true;
+        }
+        return false;
+    });
+}
+
+// The visit's shop against market.dat's listings of `shop`.
+void check_visit(const ShopVisit &v, i32 shop, const std::string &what) {
+    const std::vector<MarketListing> want = market_listings(shop);
+    bool same = v.rows.size() == want.size();
+    for (std::size_t i = 0; same && i < want.size(); i++) {
+        same = v.rows[i].id == want[i].item && v.rows[i].price == want[i].price;
+    }
+    std::printf("%s: shop of %d Buy rows (market.dat lists %zu for shop %d), kind %d, rows %s\n",
+                what.c_str(), v.seen.rows, want.size(), shop, v.seen.kind,
+                same ? "as listed" : "differ");
+    check(v.seen.rows == static_cast<i32>(want.size()) && !want.empty(),
+          what + ": the shop has market.dat's " + std::to_string(want.size()) +
+              " listings of shop " + std::to_string(shop));
+    check(same, what + ": its rows are the listings, in order, at their prices");
+    check(v.seen.kind == (want.empty() || want[0].table == 0 ? 0 : 1),
+          what + ": the Buy tab sells from the listings' table");
+}
+
+void restored_shops_run(Run &r, int area, bool on) {
+    using namespace quest_bot;
+    r.settings.restored_content = on;
+    from_save(r);
+    then_wait_field(r);
+    struct Merchant {
+        const char *npc;
+        i32 usual, restored;
+    };
+    const std::vector<Merchant> merchants =
+        area == 0 ? std::vector<Merchant>{{"Etc00", 5, 16}}
+                  : std::vector<Merchant>{{"Equip90", 8, 0}, {"Etc90", 13, 1}};
+    for (const Merchant &m : merchants) {
+        const std::string npc = m.npc;
+        then_check(
+            r,
+            npc + " offers shop " + std::to_string(m.restored) + " beside shop " +
+                std::to_string(m.usual) + " on " + std::to_string(area) + ".0",
+            [area, m](mt_cpu *) { return mt_restored_shop_for(area, 0, m.usual) == m.restored; });
+        auto before = std::make_shared<mt_restored_shop_stats>();
+        then_do(r, npc + ": the list boxes so far",
+                [before](mt_cpu *) { *before = mt_hooks_restored_shop_stats(); });
+        if (on) {
+            auto restored = std::make_shared<ShopVisit>();
+            then_shop_from(r, npc + ": the restored row", area, 0, npc, m.restored, restored);
+            then_do(r, npc + ": shop " + std::to_string(m.restored), [=](mt_cpu *) {
+                const std::vector<i32> rows = {m.usual, m.restored};
+                check(restored->chatted && restored->values == rows,
+                      npc + ": a list box of two rows, shop " + std::to_string(m.usual) +
+                          " and shop " + std::to_string(m.restored));
+                check_visit(*restored, m.restored, npc + ", the restored row");
+            });
+            auto usual = std::make_shared<ShopVisit>();
+            then_shop_from(r, npc + ": the usual row", area, 0, npc, m.usual, usual);
+            then_do(r, npc + ": shop " + std::to_string(m.usual), [=](mt_cpu *) {
+                check(usual->chatted, npc + ": the list box again");
+                check_visit(*usual, m.usual, npc + ", the usual row");
+                const mt_restored_shop_stats after = mt_hooks_restored_shop_stats();
+                check(after.boxes - before->boxes == 2 && after.opened - before->opened == 2,
+                      npc + ": two list boxes, a shop opened from each");
+            });
+        } else {
+            auto visit = std::make_shared<ShopVisit>();
+            then_shop_from(r, npc, area, 0, npc, m.usual, visit);
+            then_do(r, npc + ": shop " + std::to_string(m.usual) + " at once", [=](mt_cpu *) {
+                check(!visit->chatted,
+                      npc + " (restored_content off): the shop opens with no chat box");
+                check_visit(*visit, m.usual, npc + " (off)");
+                const mt_restored_shop_stats after = mt_hooks_restored_shop_stats();
+                check(after.boxes == before->boxes && after.boxes == 0,
+                      npc + " (off): no list box built");
+            });
+        }
+    }
+    then_check(r, "the hero is alive in the field",
+               [](mt_cpu *cpu) { return hero(cpu).hp > 0 && field(cpu); });
+    then_finish(r);
+}
+void systems2_restored_shops_0(Run &r, u64) { restored_shops_run(r, 0, true); }
+void systems2_restored_shops_0_off(Run &r, u64) { restored_shops_run(r, 0, false); }
+void systems2_restored_shops_9(Run &r, u64) { restored_shops_run(r, 9, true); }
+void systems2_restored_shops_9_off(Run &r, u64) { restored_shops_run(r, 9, false); }
+void systems2_restored_shops_checks(Run &, u64) {}
+
 // --- the compendium's NPCs, shops and recipes in the port (#220) ---------------------------------
 //
 // compendium_npcs: from the start of chapter 2 (tests/starts/chapter_2.json, equal to part L's
@@ -14865,6 +15046,12 @@ constexpr Mode k_modes[] = {
     {"systems2_portal620_fixed", systems2_portal620_fixed, systems2_portal620_checks, 1},
     {"systems2_boss_knockback", systems2_boss_knockback, systems2_boss_knockback_checks, 1},
     {"systems2_boss_knockback_fixed", systems2_boss_knockback_fixed, systems2_boss_knockback_checks,
+     1},
+    {"systems2_restored_shops_0", systems2_restored_shops_0, systems2_restored_shops_checks, 1},
+    {"systems2_restored_shops_0_off", systems2_restored_shops_0_off, systems2_restored_shops_checks,
+     1},
+    {"systems2_restored_shops_9", systems2_restored_shops_9, systems2_restored_shops_checks, 1},
+    {"systems2_restored_shops_9_off", systems2_restored_shops_9_off, systems2_restored_shops_checks,
      1},
     {"compendium_npcs", compendium_npcs, compendium_npcs_checks, 1},
     {"map_page", map_page, map_page_checks, 1, false, map_page_setup},

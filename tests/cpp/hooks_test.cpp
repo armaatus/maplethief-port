@@ -409,6 +409,29 @@ TEST_CASE("hooks: fix_original_bugs installs every fix, on or off together (#155
     CHECK(mt_hook_set_enabled(MT_HOOK_FN_MAIN_MENU_CLICK_PLAY, 1) == 1);
 }
 
+TEST_CASE("hooks: restored_content's shops: three merchants, both hooks on or off (#426)") {
+    Fresh fresh;
+    // Etc00 on 0.0, Equip90 and Etc90 on 9.0 (docs/re/original-bugs.md, Unreachable content).
+    CHECK(mt_restored_shop_for(0, 0, 5) == 16);
+    CHECK(mt_restored_shop_for(9, 0, 8) == 0);
+    CHECK(mt_restored_shop_for(9, 0, 13) == 1);
+    // Every other merchant keeps his shop: Equip60 on 6.0 opens shop 8 too, Equip00 shop 2.
+    CHECK(mt_restored_shop_for(6, 0, 8) == -1);
+    CHECK(mt_restored_shop_for(0, 0, 2) == -1);
+    CHECK(mt_restored_shop_for(9, 1, 13) == -1);
+    CHECK(mt_restored_shop_for(0, 0, 16) == -1);
+    mt_hooks_install_restored_shops(1, nullptr);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_LUA_SHOW_MARKET) == 1);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_LUA_RUN_CALLBACK) == 1);
+    const mt_restored_shop_texts texts = {"line", "", nullptr, "every supply", "ores"};
+    mt_hooks_install_restored_shops(0, &texts);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_LUA_SHOW_MARKET) == 0);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_LUA_RUN_CALLBACK) == 0);
+    const mt_restored_shop_stats stats = mt_hooks_restored_shop_stats();
+    CHECK(stats.boxes == 0);
+    CHECK(stats.opened == 0);
+}
+
 // --- PopupMenu_QuestTabOnKey 0x5462D: the quest page fix (#167) ------------------------------
 
 namespace {
