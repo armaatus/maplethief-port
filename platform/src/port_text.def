@@ -69,6 +69,17 @@ MT_TEXT(speech_unavailable,
 MT_TEXT(speech_accept_refuse, "Accept or refuse.")
 MT_TEXT(speech_rows, "Choose: {0}.")
 MT_TEXT(speech_speaker, "{0}: {1}")
+// The menus (#393, speech_menus.h): a settings row ("label, value"), a shop's row ("name, price
+// meso"), a screen's title before its focused control ("title. control").
+MT_TEXT(speech_row, "{0}, {1}")
+MT_TEXT(speech_price, "{0}, {1} meso")
+MT_TEXT(speech_then, "{0}. {1}")
+// The names of the shell's image buttons, which have no title (speech_menus.cpp's
+// kShellButtons, keyed by their image).
+MT_TEXT(button_ok, "OK")
+MT_TEXT(button_yes, "Yes")
+MT_TEXT(button_no, "No")
+MT_TEXT(button_back, "Back")
 MT_TEXT(menu_preset_help,
         "Left / Right picks a preset: it sets every setting it controls. Custom keeps your own "
         "values.")

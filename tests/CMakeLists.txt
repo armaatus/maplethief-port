@@ -407,6 +407,7 @@ maplethief_add_cpp_test(
             cpp/settings_menu_test.cpp cpp/game_speed_test.cpp cpp/autosave_test.cpp
             cpp/color_filter_test.cpp
             cpp/speech_test.cpp
+            cpp/speech_menus_test.cpp
             cpp/speech_text_test.cpp
             cpp/frame_interp_test.cpp
             cpp/assists_test.cpp

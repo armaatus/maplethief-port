@@ -87,6 +87,7 @@
 #include "scene_skip.h"
 #include "settings_menu.h"
 #include "speech.h"
+#include "speech_menus.h"
 #include "speech_text.h"
 #include "update_check.h"
 
@@ -522,6 +523,7 @@ struct Game {
     PadPointer pointer{&input, &actions}; // pad_pointer: the right stick's, touchpads (#185)
     Speech speech;          // text-to-speech (speech.h, #390): what #391-#393 feed; off by default
     SpeechText speech_text; // the dialogue and the scenes' speech boxes for it (#391)
+    SpeechMenus speech_menus; // the menus for it (#393)
     // The settings in effect (options->settings at the start), which the settings menu and the
     // fullscreen hotkeys change (#89, ADR 0076; #145): every setting is read from here.
     Settings settings;
@@ -993,6 +995,7 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     if (!was_open && g.menu.is_open()) {
         g.menu.set_frame_cost(g.stats.recent()); // the game's last second, before the pause
     }
+    g.speech_menus.settings_turn(g.menu, g.speech, speech_clock()); // its row said (#393)
     if (is_screen_finger_down(e)) {
         g.touch_screen = true;
     }
@@ -1559,6 +1562,21 @@ void stop_speech(Game &g) {
                 static_cast<unsigned long long>(st.failed));
     }
     g.speech.set_backend(nullptr);
+}
+
+// The menus read aloud (#393, speech_menus.h): once per run-loop turn, after the focus; reads
+// the labels and the popup menu or the shop only while speech is on.
+void speak_menus(Game &g, mt_cpu *cpu) {
+    const double now = speech_clock();
+    if (!SpeechMenus::listening(g.speech)) {
+        g.speech_menus.shell_turn(g.focus, {}, g.speech, now);
+        g.speech_menus.spot_turn(MenuSpot{}, SpotText{}, g.speech, now);
+        return;
+    }
+    g.speech_menus.shell_turn(g.focus, g.focus.active() ? runtime_labels(cpu) : std::vector<ScreenLabel>{},
+                              g.speech, now);
+    const MenuSpot spot = read_menu_spot(cpu);
+    g.speech_menus.spot_turn(spot, spot_text(cpu, spot), g.speech, now);
 }
 
 // Text packs (#189, ADR 0108, maplethief/textpack.h): text_pack = DIR replaces the game's text
@@ -2987,6 +3005,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
                  g.settings.focus_highlight); // prompts and markers (#146), as in effect now
     g.rumble.turn(); // what the game's vibration and events asked for since the last turn
     g.speech_text.turn(g.speech, g.settings, speech_clock()); // dialogue said (#391)
+    speak_menus(g, cpu); // the focused control, the popup menu's and the shop's row (#393)
     g.speech.turn(speech_clock()); // the next queued utterance, once the last is done (#390)
     g.game_options.turn(now);      // the settings menu's "Game options" (#89): one step a turn
     g.file_dialogs.poll();         // a file dialog answered after the menu closed (#192)
