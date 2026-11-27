@@ -223,6 +223,12 @@ HOOKED: dict[int, Hooked] = {
         "checks its guards when Yes on 0x6D is confirmed, and finds the hero dead "
         "(docs/re/autosave.md)",
     ),
+    0x9BC11: Hooked(
+        "Lua::execute",
+        "(L, tfunc, base): the script VM's opcode loop, which returns the first result's stack "
+        "index; --native-script-vm on (#386, ADR 0226) runs it as host code over the same guest "
+        "memory (runtime/src/scriptvm/)",
+    ),
     0xAAAB9: Hooked(
         "MainMenuView_clickPlay",
         "-[MainMenuView clickPlay:] (self, _cmd, sender): Play before the engine's main menu "
