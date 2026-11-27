@@ -254,8 +254,11 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 
 # mt_gfx's GPU backend (#120, ADR 0060) against the software rasterizer: gfx_test's golden scenes
 # on the GPU within ADR 0060's tolerance, internal scale 4, the sync points, batching and a busy
-# frame's GPU time, the present filters (#88) and GPU presentation (#130). Local only: without a GPU device (CI, the Linux container) and on GitHub
-# Actions every case prints "gfx_gpu: skipped", which CTest reports as skipped. One label only:
+# frame's GPU time, the present filters (#88) and GPU presentation (#130). Without a GPU device,
+# and on GitHub Actions unless MAPLETHIEF_GPU_TESTS=1, every case prints "gfx_gpu: skipped", which
+# CTest reports as skipped. CI's Linux debug job and the Linux container run them on Mesa's
+# software Vulkan driver, lavapipe (#364, ADR 0202), without the GPU-time limits; the slowest
+# picture cases take about a minute there, hence the timeout. One label only:
 # maplethief_doctest_discover flattens a list value into the property arguments. The cases share
 # one RESOURCE_LOCK (#344): the time checks' fence waits also wait for other work on the GPU, so
 # no other case draws while one of them measures (the GPU's real-asset tests are RUN_SERIAL).
@@ -271,7 +274,7 @@ maplethief_target_defaults(gfx_gpu_test)
 maplethief_doctest_discover(
     gfx_gpu_test
     PREFIX "gfx_gpu."
-    PROPERTIES LABELS gpu TIMEOUT 120 SKIP_REGULAR_EXPRESSION "gfx_gpu: skipped" RESOURCE_LOCK
+    PROPERTIES LABELS gpu TIMEOUT 300 SKIP_REGULAR_EXPRESSION "gfx_gpu: skipped" RESOURCE_LOCK
                gpu)
 
 # The GPU shaders' committed header is up to date with its HLSL sources (#120, ADR 0060):
