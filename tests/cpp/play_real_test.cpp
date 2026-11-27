@@ -2836,7 +2836,7 @@ Pred job_at(i32 branch, i32 tier); // below, with the job advancements
 // Part A (#298): from the start of chapter 2 (tests/starts/chapter_2.json, part L's save) on
 // 4.1. Heracle (4.0) rewards main 40 (chapter 1's last, carried over) and gives main 0 (20 of mob
 // 40 on 4.2), ends it and gives main 1; the Fairy (4.0) ends 1 and gives main 2 (40 of item 58,
-// from mob 38). The level-34 hero of chapter 1 kills about four of the level-56 mob 40 a minute
+// from mob 38). The level-35 hero of chapter 1 kills about four of the level-56 mob 40 a minute
 // and falls every few minutes (its HP potion, item 3, heals 50 HP, and area 4 sells none); part B
 // goes on at level 60 (chapter-2-quests.md).
 void chapter_2_a(Run &r, u64) {
@@ -2950,6 +2950,8 @@ void chapter_2_c(Run &r, u64) {
     then_farm(r, "mob 66 on 4.17 (side 37)", 4, 17, {66}, ready(1, 37), 3600, boss);
     then_run_event(r, "portal4111 to the boss's map 4.17", MT_GAME_EVENT_MAP_CHANGE, 4, {17});
     then_run_event(r, "mob 66 killed", MT_GAME_EVENT_BOSS_KILLED, 66);
+    // Chapter 1's drops and 4.11's fill the bag's other-item slots: no room for item 105.
+    then_sell(r, "materials (Etc40)", 4, 4, {105, 120});
     then_talk_to(r, "Wilson: side 37 done, item 105", 4, 2, "Wilson", 7, quest_is(1, 37, 2));
     then_check(r, "item 105 (side 37's reward) in the bag", has_item(105, 1));
     then_talk_to(r, "Fairy: main 3 done (item 105), main 4 given", 4, 0, "Fairy", -1,
