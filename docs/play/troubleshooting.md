@@ -43,6 +43,8 @@ The game keeps your saves and settings in a `data` folder next to itself ([Saves
 
 **It runs slowly.** Lower the render scale or set it to `auto`, or try the GPU renderer (`gfx_backend = gpu`). F3 shows how long each frame takes.
 
+**Movement stutters a little on a 75, 144 or 165 Hz screen.** The game shows a new picture every 50 ms (20 a second). A 60, 100, 120 or 240 Hz screen fits a whole number of its refreshes into that, so every picture stays up just as long. A 144 Hz screen fits 7.2: four pictures in five stay up for 7 refreshes and one for 8 (75 Hz: 3 or 4; 165 Hz: 8 or 9). The game still runs at exactly the right speed, but the uneven steps can show as a faint stutter, and no clock can remove it. Two things do: set the screen to a rate it also offers that is a multiple of 20 Hz, usually 120 Hz on a 144 or 165 Hz screen and 60 Hz on a 75 Hz one (in your system's display settings; the log names the rates your screen offers that would, on a line starting `pacing:`), or turn on `frame_rate = smooth` with `gfx_backend = gpu`, which draws a picture for every refresh. The slower and faster game speeds (65 and 40 ms) have their own multiples (the log line says which).
+
 **No sound.** Check the volumes in the settings menu (Audio), and that `mute_unfocused` isn't muting it because the window lost focus. On Linux, try starting it with `SDL_AUDIO_DRIVER=pulseaudio`.
 
 **The controller does nothing.** Press a button on it once: the first controller you press is the one that plays. Steam can take over controllers; on the Deck use Steam's Gamepad layout.
