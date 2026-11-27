@@ -3,9 +3,10 @@
 // refusal's reason (not a zip, no Payload, another app, an encrypted entry, an encrypted
 // executable, another version, other bytes); hostile entries that write nothing; an
 // interrupted import that leaves no game/ and whose temporary folder goes; leftovers removed;
-// a re-import replacing game/; the import screen's state, input and loop on a dummy-driver
-// window; the Nintendo Switch's SD-card route over a fake SD folder (#243). The real IPA:
-// ipa_import_real_test.cpp (local only).
+// a repack accepted by its armv7 slice and per-file hash list, a changed file refused by name
+// (#350); a re-import replacing game/; the import screen's state, input and loop on a
+// dummy-driver window; the Nintendo Switch's SD-card route over a fake SD folder (#243). The
+// real IPA: ipa_import_real_test.cpp (local only).
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
@@ -208,6 +209,48 @@ std::vector<std::string> names_in(const fs::path &dir) {
     return names;
 }
 
+// The entries of a zip, in order.
+std::vector<fe::ZipEntry> entries_of(const Bytes &zip) {
+    std::vector<fe::ZipEntry> entries;
+    std::string why;
+    REQUIRE_MESSAGE(fe::zip_read(zip, fe::kMaxIpaEntryBytes, &entries, &why), why);
+    return entries;
+}
+
+// `ipa`'s expected values with the per-file hash list and armv7 slice a build made from it would
+// hold (#350, mtport.ipa_files): every file below the app but the executable.
+fe::IpaExpected with_file_list(const Ipa &ipa) {
+    fe::IpaExpected e = ipa.expected;
+    const std::string app = "Payload/MapleThief.app/";
+    for (const fe::ZipEntry &entry : entries_of(ipa.zip)) {
+        if (entry.name.rfind(app, 0) != 0) {
+            continue;
+        }
+        const std::string rel = entry.name.substr(app.size());
+        if (rel == "MapleThief") {
+            std::size_t off = 0, len = 0;
+            REQUIRE(
+                fe::find_armv7_slice(entry.bytes.data(), entry.bytes.size(), &off, &len, nullptr));
+            e.armv7_sha256 =
+                fe::sha256_of(std::span<const std::uint8_t>(entry.bytes).subspan(off, len));
+        } else {
+            e.files.push_back({rel, fe::sha256_of(entry.bytes)});
+        }
+    }
+    return e;
+}
+
+// `entries` with the entry named `name` given `bytes`.
+std::vector<fe::ZipEntry> with_entry(std::vector<fe::ZipEntry> entries, const std::string &name,
+                                     const Bytes &bytes) {
+    for (fe::ZipEntry &e : entries) {
+        if (e.name == name) {
+            e.bytes = bytes;
+        }
+    }
+    return entries;
+}
+
 fe::IpaResult import_bytes(const Ipa &ipa, const fs::path &data,
                            const fe::IpaProgress &progress = {}) {
     return fe::import_ipa_bytes(ipa.zip, data.string(), ipa.expected, progress);
@@ -393,6 +436,77 @@ TEST_CASE("ipa import: a synthetic IPA is extracted into game/ with its executab
     CHECK(names_in(data) == std::vector<std::string>{"MapleThief-1.5.ipa", "game"});
     REQUIRE(calls.size() == 4);
     CHECK(calls.back().first == calls.back().second);
+}
+
+TEST_CASE("ipa import: a repack of the fixture is imported; a changed file is refused by name") {
+    // #350, ADR 0135's addendum: the same files in another zip pass by the executable's armv7
+    // slice and the per-file hash list; files the list does not name are ignored.
+    const Ipa fixture = make_ipa();
+    const fe::IpaExpected listed = with_file_list(fixture);
+    REQUIRE(listed.files.size() == 3); // Info.plist, b.bin, data/a.txt
+    const std::vector<fe::ZipEntry> entries = entries_of(fixture.zip);
+    std::vector<fe::ZipEntry> moved(entries.rbegin(), entries.rend());
+    moved.push_back({"Payload/MapleThief.app/extra.txt", bytes_of("a repacker's note")});
+    moved.push_back({"META-INF/manifest.txt", bytes_of("not in the app")});
+    const Bytes repacked = zip_fixtures::zip_deflate(moved);
+    REQUIRE(repacked != fixture.zip);
+    fe::IpaResult r = fe::check_ipa_bytes(repacked, listed);
+    REQUIRE_MESSAGE(r.ok(), r.why);
+    CHECK(r.version == "1.5");
+    const fs::path data = fresh_dir("repack");
+    r = fe::import_ipa_bytes(repacked, data.string(), listed);
+    REQUIRE_MESSAGE(r.ok(), r.why);
+    CHECK(read_file(data / "game" / "MapleThief") == executable());
+    CHECK(read_file(data / "game" / "data" / "a.txt") == bytes_of("first file"));
+    CHECK(read_file(data / "game" / "b.bin") == Bytes(300, 0));
+    CHECK(r.repack);
+    CHECK(fs::exists(data / "game" / "Info.plist"));
+    // Files the list does not name are neither checked nor extracted.
+    CHECK_FALSE(fs::exists(data / "game" / "extra.txt"));
+    CHECK_FALSE(fs::exists(data / "game" / "META-INF"));
+    // Stored, in another order: a repack too. The exact file still passes at once.
+    CHECK(fe::check_ipa_bytes(fe::zip_store(moved), listed).ok());
+    CHECK_FALSE(fe::check_ipa_bytes(fixture.zip, listed).repack);
+    // Without a list (a build without ipa_files.inc) only the exact file passes, as before.
+    CHECK(fe::check_ipa_bytes(repacked, fixture.expected).problem == IpaProblem::kModified);
+
+    const auto refused = [&listed](const std::vector<fe::ZipEntry> &files) {
+        const fe::IpaResult res = fe::check_ipa_bytes(zip_fixtures::zip_deflate(files), listed);
+        INFO(res.why);
+        CHECK(res.problem == IpaProblem::kModified);
+        CHECK(res.version == "1.5");
+        return res.why;
+    };
+    // A changed file is named, and the import writes nothing.
+    const auto changed =
+        with_entry(moved, "Payload/MapleThief.app/data/a.txt", bytes_of("other bytes"));
+    CHECK(refused(changed) == "This is MapleThief 1.5, but its file data/a.txt is not 1.5's: it "
+                              "is damaged or changed.");
+    const fs::path refused_dir = fresh_dir("repack_changed");
+    CHECK(fe::import_ipa_bytes(zip_fixtures::zip_deflate(changed), refused_dir.string(), listed)
+              .problem == IpaProblem::kModified);
+    CHECK(names_in(refused_dir).empty());
+    // A missing file is named.
+    std::vector<fe::ZipEntry> missing;
+    std::copy_if(moved.begin(), moved.end(), std::back_inserter(missing),
+                 [](const fe::ZipEntry &e) { return e.name != "Payload/MapleThief.app/b.bin"; });
+    CHECK(refused(missing).find("it has no b.bin, which the game reads") != std::string::npos);
+    // A changed binary (its armv7 slice) is still refused, with the reason.
+    const std::string exe = "Payload/MapleThief.app/MapleThief";
+    CHECK(refused(with_entry(moved, exe, executable(0, 7)))
+              .find("its game executable is not 1.5's (armv7 slice SHA-256 ") != std::string::npos);
+    // ... and one whose armv7 slice is 1.5's passes, though its armv6 slice differs.
+    Bytes other_armv6 = executable();
+    other_armv6[0x10FF] = 9;
+    const Bytes thin_repack = zip_fixtures::zip_deflate(with_entry(moved, exe, other_armv6));
+    const fs::path slice_dir = fresh_dir("repack_armv6");
+    r = fe::import_ipa_bytes(thin_repack, slice_dir.string(), listed);
+    CHECK_MESSAGE(r.ok(), r.why);
+    CHECK(read_file(slice_dir / "game" / "MapleThief") == other_armv6);
+    // An encrypted executable is refused as such before the list is looked at.
+    CHECK(fe::check_ipa_bytes(zip_fixtures::zip_deflate(with_entry(moved, exe, executable(1))),
+                              listed)
+              .problem == IpaProblem::kEncryptedApp);
 }
 
 TEST_CASE("ipa import: unsafe entries are refused and nothing is written") {

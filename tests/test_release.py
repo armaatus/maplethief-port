@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from mtport import appicon, jpeg, nro
+from mtport import appicon, ipa_files, jpeg, nro
 from mtport import release as rel
 from repo_paths import REPO
 
@@ -111,7 +111,9 @@ def test_planted_generated_file_fails(tmp_path, kit_format):
     assert ("lib/fn_000.c", "generated") in rules(report)
 
 
-@pytest.mark.parametrize("name", ["mt_gen.h", "dispatch.c", "imports.c", "gen.cmake", "fn_063.c"])
+@pytest.mark.parametrize(
+    "name", ["mt_gen.h", "dispatch.c", "imports.c", "gen.cmake", "fn_063.c", "ipa_files.inc"]
+)
 def test_generated_file_names_fail(tmp_path, name):
     report = run_guard(make_zip(tmp_path / "k.zip", {**CLEAN, f"src/{name}": b"x"}))
     assert (f"src/{name}", "generated") in rules(report)
@@ -395,6 +397,25 @@ def test_player_mode_rejects_the_bundle_executable(tmp_path, kit_format):
     assert {("Payload/MapleThief.app/MapleThief", "path"), ("bin/game", "derived")} <= (
         player_rules(report)
     )
+
+
+def test_player_mode_passes_with_the_ipa_hash_list_compiled_in(tmp_path, kit_format):
+    # #350: the player executable holds the per-file hash list (paths and SHA-256 hashes, from
+    # mtport.ipa_files); the guard, with work/ipa and work/gen (holding ipa_files.inc) as its
+    # references, still passes it. The list as a file of its own is caught by its name and hash.
+    app = tmp_path / "work/ipa/Payload/MapleThief.app"
+    write_dir(app, {"MapleThief": ARM_FAT, "map/m1.map": GAME_FILE, "Info.plist": b"<plist/>"})
+    listing = ipa_files.render(ipa_files.file_hashes(app))
+    gen = write_dir(tmp_path / "work/gen", {"ipa_files.inc": listing.encode()})
+    refs = rel.reference_hashes([tmp_path / "work/ipa", gen])
+    files = {**PLAYER, "MapleThief.exe": PLAYER_EXE + listing.encode() + b"\0"}
+    report = rel.guard(build_player(tmp_path / "p", kit_format, files), refs, TABLE, "player")
+    assert report.ok, report.findings
+    assert report.game_code == 1
+    files = {**PLAYER, "share/ipa_files.inc": listing.encode()}
+    report = rel.guard(build_player(tmp_path / "q", kit_format, files), refs, TABLE, "player")
+    assert player_rules(report) == {("share/ipa_files.inc", "generated"),
+                                    ("share/ipa_files.inc", "derived")}  # fmt: skip
 
 
 # --- The Nintendo Switch player zip (#243, ADR 0138): switch/maplethief/MapleThief.nro --------

@@ -137,7 +137,7 @@ It is safe to re-run and writes byte-identical outputs every time. The scripts o
 
 1. checks the IPA against `original/SHA256SUMS` (the exact file, or a [repacked copy](#build-from-your-own-copy-wherever-it-is) with the right main binary), then extracts it to `work/ipa/`. The IPA is treated as untrusted data: every entry name is checked before anything is written (no absolute paths, `..` or symbolic links), and nothing extracted is executed. `scripts/verify-original.sh` runs just this step (`--no-extract`: only the checks);
 2. splits the fat main binary into `work/slices/MapleThief.armv6` and `work/slices/MapleThief.armv7` with a portable splitter ([`tools/mtport/fat.py`](../../tools/mtport/fat.py), no `lipo` needed) and checks both slices. On macOS it also cross-checks them against `lipo -thin`;
-3. writes `work/slices/SHA256SUMS` and `work/bootstrap.json` (paths, sizes, hashes, fat offsets and the tool version). Other tools read `work/bootstrap.json` instead of hard-coding paths.
+3. writes `work/slices/SHA256SUMS` and `work/bootstrap.json` (paths, sizes, hashes, fat offsets and the tool version). Other tools read `work/bootstrap.json` instead of hard-coding paths. It also writes `work/gen/ipa_files.inc`, the SHA-256 of each bundle file the game reads ([`tools/mtport/ipa_files.py`](../../tools/mtport/ipa_files.py)), which a build compiles into the IPA import so that it accepts a repacked copy ([ADR 0135](../adr/0135-accept-an-ipa-by-its-main-binary.md)'s addendum); the player build needs it.
 
 Any failure (missing file, the wrong game or version, an encrypted copy, a tool that's too old) stops with an `error:` line and a non-zero exit.
 
@@ -160,7 +160,7 @@ python3 -m recomp all       # Windows: py -m recomp all
 
 This loads, discovers and lifts the armv7 slice in a few seconds. It writes the generated C into the ignored `work/gen/` (`mt_gen.h`, the translation units `fn_NNN.c`, `imports.c`, `dispatch.c` and `gen.cmake`) and its reports into `work/recomp/`. A file is rewritten only when its content changes, so the next build recompiles only what changed. `python3 -m recomp lift --units N` picks another number of translation units.
 
-When `work/gen/gen.cmake` exists, the build compiles it as the static library `maplethief_gen`, and the program runs the game. Without it, the build skips that target and the program shows a placeholder. `-DMAPLETHIEF_GEN_DIR=<dir>` builds another output directory, and `-DMAPLETHIEF_GEN_DIR=` leaves the generated code out ([ADR 0014](../adr/0014-recompiler-design.md), [ADR 0021](../adr/0021-generated-code-partition-and-build.md)).
+When `work/gen/gen.cmake` exists, the build compiles it as the static library `maplethief_gen`, and the program runs the game. Without it, the build skips that target and the program shows a placeholder. `-DMAPLETHIEF_GEN_DIR=<dir>` builds another output directory, and `-DMAPLETHIEF_GEN_DIR=` leaves the generated code out ([ADR 0014](../adr/0014-recompiler-design.md), [ADR 0021](../adr/0021-generated-code-partition-and-build.md)). The IPA import's per-file hash list is read from `<gen dir>/ipa_files.inc` the same way; `-DMAPLETHIEF_IPA_FILES=<file>` names another one ([ADR 0135](../adr/0135-accept-an-ipa-by-its-main-binary.md)'s addendum).
 
 ### 4. Configure, build and test
 

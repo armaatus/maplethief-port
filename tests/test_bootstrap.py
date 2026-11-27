@@ -163,6 +163,11 @@ class BootstrapModuleTest(unittest.TestCase):
         self.assertEqual(doc["slices"]["armv6"]["fat_offset"], 4096)
         self.assertEqual(doc["slices"]["armv7"]["size"], len(ARMV7_THIN))
         self.assertEqual(doc["slices"]["armv7"]["cpusubtype"], 9)
+        # The per-file hash list (#350): Info.plist, not the executable.
+        self.assertEqual(
+            (self.root / bs.IPA_FILES).read_text(encoding="utf-8").splitlines()[2:],
+            [f'{{"Info.plist", "{sha(b"<plist/>")}"}},'],
+        )
 
     def test_extracts_every_entry_with_its_time(self):
         self.assertIsNone(self.run_bootstrap(until=bs.EXTRACT))
