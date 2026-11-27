@@ -442,6 +442,7 @@ maplethief_add_cpp_test(
             cpp/keypad_haptics_test.cpp
             cpp/audio_session_test.cpp
             cpp/port_text_test.cpp
+            cpp/menu_glyphs_test.cpp
             cpp/thread_priority_test.cpp
             cpp/update_check_test.cpp
             cpp/ipa_import_test.cpp
