@@ -63,6 +63,10 @@ endif()
 set(CMAKE_EXPORT_NO_PACKAGE_REGISTRY ON)
 set(CMAKE_FIND_USE_PACKAGE_REGISTRY OFF)
 
+# No C++20 modules here, so no dependency scan: with Ninja, CMake would otherwise run
+# clang-scan-deps on every C++20 file, which Ubuntu 24.04's clang-17 package lacks (#341).
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 # Warnings are errors in CI (ADR 0002). CI services, GitHub Actions included, set CI in the
 # environment; locally the default is off so that a newer compiler doesn't block a build.
 if(DEFINED ENV{CI})
