@@ -610,6 +610,27 @@ inline void then_go(Run &r, std::string what, Goal g, double timeout = 300,
     });
 }
 
+// Drinks the potion of quick slot 1 (Y) every 1.5 s, standing, until HP is at least `pct` % of
+// the maximum (before a boss map: the way there costs HP).
+inline void then_heal(Run &r, std::string what, i32 pct, double timeout = 120) {
+    auto last = std::make_shared<double>(-10);
+    then(r, "heal: " + what, timeout, [&r, last, pct](mt_cpu *cpu, double el) {
+        const Hero h = hero(cpu);
+        if (interrupted(r, cpu, el)) {
+            return false;
+        }
+        release_all(r);
+        if (h.hp * 100 >= h.max_hp * pct) {
+            return true;
+        }
+        if (el - *last >= 1.5 && standing(h)) {
+            *last = el;
+        }
+        hold(r, Y, el - *last >= 0.1 && el - *last < 0.2);
+        return false;
+    });
+}
+
 // The position of the object named `name` on (area, map), as a goal (an NPC: stand on it).
 inline Goal at_object(int area, int map, const std::string &name, int tol = 6) {
     const wm::Map &m = wm::get(area, map);
@@ -1249,6 +1270,10 @@ struct Restock {
 // among them without attacking (a Dark Sight check).
 struct FarmStyle {
     SDL_GamepadButton skill = SDL_GAMEPAD_BUTTON_INVALID;
+    // A buff skill on a quick slot's button, cast again every buff_every seconds with buff_mp MP.
+    SDL_GamepadButton buff = SDL_GAMEPAD_BUTTON_INVALID;
+    double buff_every = 20;
+    i32 buff_mp = 0;
     i32 min_mp = 0, hp_pct = 33, mp_pct = 25, reach_up = 6, keep = 0;
     bool no_attack = false;
     std::vector<Restock> restock{Restock{}};
@@ -1268,7 +1293,7 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
     struct S {
         Nav nav;
         int facing = 1, falls = 0;
-        double attack = -10, drink = -10, turn = -10, report = 0;
+        double attack = -10, drink = -10, turn = -10, report = 0, cast = -1e9;
         SDL_GamepadButton potion = Y;
         bool away = false;
         u32 chase = 0;
@@ -1353,6 +1378,18 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
                  const double d = el - s->drink;
                  release_all(r);
                  hold(r, s->potion, d >= 0.1 && d < 0.2);
+                 return false;
+             }
+             // A buff.
+             if (style.buff != SDL_GAMEPAD_BUTTON_INVALID && el - s->cast >= style.buff_every &&
+                 h.mp >= style.buff_mp && standing(h)) {
+                 s->cast = el;
+                 s->nav.acting = false;
+             }
+             if (el - s->cast < 0.3) {
+                 const double d = el - s->cast;
+                 release_all(r);
+                 hold(r, style.buff, d >= 0.1 && d < 0.2);
                  return false;
              }
              hold(r, Y, false);
