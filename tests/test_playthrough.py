@@ -67,7 +67,8 @@ for name, mode in chain:
                      '<failure message="Failed"/></testcase>')
     else:
         cases.append(f'<testcase name="{name}" time="2.0" status="run"/>')
-open(junit, "w", encoding="utf-8").write('<?xml version="1.0"?><testsuite>' + "".join(cases) + "</testsuite>")
+xml = '<?xml version="1.0"?><testsuite>' + "".join(cases) + "</testsuite>"
+open(junit, "w", encoding="utf-8").write(xml)
 sys.exit(0)
 """
 
