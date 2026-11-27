@@ -2116,33 +2116,44 @@ set_tests_properties(play.texture_pack PROPERTIES FIXTURES_REQUIRED play_texture
 # writes the game mode, the hero's and every mob's state at each game tick; play.widescreen_on
 # plays it again with the 568-point GL layer (the field wide on Henesys 2.0 and 2.3, 3:2 on the
 # tutorial's 30-tile maps 2.8 and 2.9) and fails unless every line equals the off run's.
+# play.widescreen_fill_on (#425, ADR 0214) does it with fill's 768-point layer (2.0 and 2.3 768
+# wide) and checks the tiled backdrop's seam at x = 480 in their window shots.
 add_test(NAME play.widescreen_off COMMAND play_real_test widescreen_off
                                           "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_off")
 add_test(NAME play.widescreen_on COMMAND play_real_test widescreen_on
                                          "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_on")
+add_test(NAME play.widescreen_fill_on
+         COMMAND play_real_test widescreen_fill_on
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_fill_on")
 set_tests_properties(
-    play.widescreen_off play.widescreen_on
+    play.widescreen_off play.widescreen_on play.widescreen_fill_on
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
                ENVIRONMENT
                "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_WIDESCREEN_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_off")
 set_tests_properties(play.widescreen_off PROPERTIES FIXTURES_SETUP play_widescreen)
-set_tests_properties(play.widescreen_on PROPERTIES FIXTURES_REQUIRED play_widescreen)
+set_tests_properties(play.widescreen_on play.widescreen_fill_on PROPERTIES FIXTURES_REQUIRED
+                                                                      play_widescreen)
 # Widescreen with the touch key pad (#168): play.widescreen_pad_off holds the key pad's left,
 # attack and right keys by touch on the field 2.3 and writes the hero at each tick;
 # play.widescreen_pad_on does it with the field 568 points wide and the key pad's groups at the
 # view's edges, touching where they are drawn now (partly in the wings), and fails unless every
 # tick equals the off run's. It also writes the wide window pictures with the pad (pad_*.png).
+# play.widescreen_pad_fill_on (#425) holds them at fill's 768 points, the groups 144 points out.
 add_test(NAME play.widescreen_pad_off COMMAND play_real_test widescreen_pad_off
                                               "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_pad_off")
 add_test(NAME play.widescreen_pad_on COMMAND play_real_test widescreen_pad_on
                                              "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_pad_on")
+add_test(NAME play.widescreen_pad_fill_on
+         COMMAND play_real_test widescreen_pad_fill_on
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_pad_fill_on")
 set_tests_properties(
-    play.widescreen_pad_off play.widescreen_pad_on
+    play.widescreen_pad_off play.widescreen_pad_on play.widescreen_pad_fill_on
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
                ENVIRONMENT
                "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_WIDESCREEN_PAD_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_pad_off")
 set_tests_properties(play.widescreen_pad_off PROPERTIES FIXTURES_SETUP play_widescreen_pad)
-set_tests_properties(play.widescreen_pad_on PROPERTIES FIXTURES_REQUIRED play_widescreen_pad)
+set_tests_properties(play.widescreen_pad_on play.widescreen_pad_fill_on
+                     PROPERTIES FIXTURES_REQUIRED play_widescreen_pad)
 # Widescreen's wings through the present pass (#170): play.widescreen_filters walks into 2.3 with
 # the field 568 points wide and the key pad at the edges, and draws the real frame through the
 # Presenter on an offscreen SDL GPU renderer with each filter, the colour-blind filter off and on:

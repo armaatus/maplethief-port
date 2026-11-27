@@ -18,11 +18,15 @@
 //                                             #336);
 //                                             widescreen_off, then widescreen_on with
 //                                             MT_WIDESCREEN_BASE: CTests play.widescreen_off,
-//                                             play.widescreen_on, #86; widescreen_pad_off,
-//                                             then widescreen_pad_on with
+//                                             play.widescreen_on, #86 (and
+//                                             widescreen_fill_on: play.widescreen_fill_on,
+//                                             #425); widescreen_pad_off, then
+//                                             widescreen_pad_on with
 //                                             MT_WIDESCREEN_PAD_BASE: CTests
 //                                             play.widescreen_pad_off, play.widescreen_pad_on,
-//                                             #168; widescreen_filters: CTest
+//                                             #168 (and widescreen_pad_fill_on:
+//                                             play.widescreen_pad_fill_on, #425);
+//                                             widescreen_filters: CTest
 //                                             play.widescreen_filters, #170;
 //                                             widescreen_scene_off, then widescreen_scene_on
 //                                             with MT_SCENE and MT_WIDESCREEN_SCENE_BASE:
@@ -4637,6 +4641,17 @@ void texture_pack_checks(Run &, u64) {
 // screen (menu_<screen>_screen.png) and a hash of part of it in OUT_DIR/menus.txt. widescreen_on
 // compares the popup menu's (its window's opaque top bar, (78, 32, 320, 20)) with the off run's:
 // the screen is drawn at 480 points in the wide view's centre, where the touches land.
+//
+// widescreen_fill_on (#425, ADR 0214) is widescreen_on with fill's 768-point GL layer (no window
+// to cap it): Henesys 2.0 and 2.3 drawn 768 wide, every tick equal to the off run's. On both
+// maps its wide shot is checked for the tiled backdrop's seam at GL x = 480: where the picture
+// shows only the backdrop left of it (each of the 10 columns before 480 equal to the column 160
+// to its left: the backdrop's period), the 10 columns after 480 continue it the same way.
+
+struct Seam {
+    u64 rows = 0;     // rows that show only the backdrop just left of x = 480
+    u64 seamless = 0; // of them, those that continue it past x = 480
+};
 
 struct WideRun {
     std::ofstream state;
@@ -4644,16 +4659,20 @@ struct WideRun {
     u64 lines = 0;
     std::map<std::string, std::set<u32>> views; // "area.map" -> the view widths seen
     std::map<std::string, u64> ticks_on;        // "area.map" -> ticks seen there
+    std::map<std::string, Seam> seams;          // "area.map" -> the seam check (fill)
 };
 WideRun g_wide;
 
-// The window's picture: the GL layer's first `view` points centred in a 568-point picture, the
-// 480-point composited screen over its middle (Presenter::draw's wings), to OUT_DIR/name.png.
-// `pad` (#168): the key pad's groups as the frontend places them, and the strips of its keys
-// moved into the wings (keypad_wings_composite) over the wings.
-// The window's wide picture now (568 x 320 at 1x: the GL frame, the screen image over its middle
-// and, with `pad`, the key pad's strips in the wings) into `out`; its view's width in `view_out`.
-// False when it cannot be composed (or the render scale is not 1).
+// The wide picture's width: the run's GL layer (568, or 768 for widescreen = fill, #425).
+u32 wide_width(const Run &r) { return r.widescreen > 480u ? r.widescreen : MT_WIDESCREEN_WIDE; }
+
+// The window's picture: the GL layer's first `view` points centred in a wide_width-point
+// picture, the 480-point composited screen over its middle (Presenter::draw's wings), to
+// OUT_DIR/name.png. `pad` (#168): the key pad's groups as the frontend places them, and the
+// strips of its keys moved into the wings (keypad_wings_composite) over the wings.
+// The window's wide picture now (wide_width x 320 at 1x: the GL frame, the screen image over its
+// middle and, with `pad`, the key pad's strips in the wings) into `out`; its view's width in
+// `view_out`. False when it cannot be composed (or the render scale is not 1).
 bool wide_pixels(Run &r, mt_cpu *cpu, bool pad, std::vector<std::uint8_t> *out, u32 *view_out) {
     if (pad) {
         fe::apply_keypad_layout();
@@ -4664,7 +4683,8 @@ bool wide_pixels(Run &r, mt_cpu *cpu, bool pad, std::vector<std::uint8_t> *out, 
     }
     const u32 gw = r.screen.gl_width(), gh = r.screen.gl_height();
     const u32 view = std::min(r.screen.gl_view(), gw);
-    constexpr u32 w = MT_WIDESCREEN_WIDE, h = MT_WIDESCREEN_HEIGHT;
+    const u32 w = wide_width(r);
+    constexpr u32 h = MT_WIDESCREEN_HEIGHT;
     if (gh != h) {
         return false; // render scale 1 only
     }
@@ -4683,9 +4703,10 @@ bool wide_pixels(Run &r, mt_cpu *cpu, bool pad, std::vector<std::uint8_t> *out, 
                     static_cast<std::size_t>(480) * 4);
     }
     std::vector<std::uint8_t> strips;
-    constexpr u32 wing = (w - 480) / 2;
+    const u32 wing = (w - 480) / 2;
     if (pad && fe::keypad_wings_composite(cpu, now, wing, 1, &strips)) {
-        // Premultiplied over: the left strip on columns 0 ... 43, the right one on 524 ... 567.
+        // Premultiplied over: the left strip on columns 0 ... wing - 1, the right one on
+        // 480 + wing ... w - 1.
         for (u32 y = 0; y < h; y++) {
             for (u32 x = 0; x < 2 * wing; x++) {
                 const std::uint8_t *s = &strips[(static_cast<std::size_t>(y) * 2 * wing + x) * 4];
@@ -4701,11 +4722,12 @@ bool wide_pixels(Run &r, mt_cpu *cpu, bool pad, std::vector<std::uint8_t> *out, 
     return true;
 }
 
-// wide_pixels to OUT_DIR/name.png. `over`, if set, draws on the 568 x 320 picture (RGBA8) before
-// it is written (the minimap's corner).
+// wide_pixels to OUT_DIR/name.png. `over`, if set, draws on the wide_width x 320 picture (RGBA8)
+// before it is written (the minimap's corner).
 void wide_shot(Run &r, mt_cpu *cpu, const std::string &name, bool pad = false,
                const std::function<void(std::vector<std::uint8_t> &)> &over = {}) {
-    constexpr u32 w = MT_WIDESCREEN_WIDE, h = MT_WIDESCREEN_HEIGHT;
+    const u32 w = wide_width(r);
+    constexpr u32 h = MT_WIDESCREEN_HEIGHT;
     std::vector<std::uint8_t> px;
     u32 view = 0;
     if (!wide_pixels(r, cpu, pad, &px, &view)) {
@@ -4722,6 +4744,33 @@ void wide_shot(Run &r, mt_cpu *cpu, const std::string &name, bool pad = false,
         SDL_DestroySurface(surf);
     }
     std::printf("wide shot %s at %.2f s (view %u)\n", name.c_str(), r.t, view);
+}
+
+// The tiled backdrop's seam at GL x = 480 in the window's picture now (fill, #425): see above.
+void wide_seam(Run &r, mt_cpu *cpu, const std::string &map) {
+    std::vector<std::uint8_t> px;
+    u32 view = 0;
+    if (!wide_pixels(r, cpu, false, &px, &view) || view < 480 + 10) {
+        return;
+    }
+    const u32 w = wide_width(r), left = (w - view) / 2; // the GL frame's column 0
+    const auto same = [&px, w, left](u32 y, u32 x) {    // GL column x equals x - 160
+        const std::uint8_t *a = &px[(static_cast<std::size_t>(y) * w + left + x) * 4];
+        return std::memcmp(a, a - 160 * 4, 3) == 0;
+    };
+    Seam &s = g_wide.seams[map];
+    for (u32 y = 0; y < MT_WIDESCREEN_HEIGHT; y++) {
+        bool before = true, after = true;
+        for (u32 d = 1; d <= 10; d++) {
+            before = before && same(y, 480 - d);
+            after = after && same(y, 480 + d - 1);
+        }
+        s.rows += before ? 1 : 0;
+        s.seamless += before && after ? 1 : 0;
+    }
+    std::printf("seam %s: %llu rows show only the backdrop left of x 480, %llu continue it\n",
+                map.c_str(), static_cast<unsigned long long>(s.rows),
+                static_cast<unsigned long long>(s.seamless));
 }
 
 // Once a game tick: the line of state.txt, the view width on the hero's map, a wide shot after
@@ -4755,6 +4804,9 @@ void wide_tick(Run &r, mt_cpu *cpu) {
     }
     if (++g_wide.ticks_on[map] == 100 && r.widescreen != 0) {
         wide_shot(r, cpu, "wide_" + std::to_string(h.area) + "_" + std::to_string(h.map));
+        if (r.widescreen == MT_WIDESCREEN_FILL) {
+            wide_seam(r, cpu, map);
+        }
     }
 }
 
@@ -4903,6 +4955,12 @@ int widescreen_on_setup(Run &r) {
     return widescreen_off_setup(r);
 }
 
+int widescreen_fill_on_setup(Run &r) {
+    const int code = widescreen_on_setup(r);
+    r.widescreen = MT_WIDESCREEN_FILL;
+    return code;
+}
+
 std::string views_text() {
     std::string text;
     for (const auto &[map, set] : g_wide.views) {
@@ -4942,8 +5000,10 @@ void widescreen_on_checks(Run &r, u64) {
                 "stretched\n",
                 static_cast<unsigned long long>(ms.screens),
                 static_cast<unsigned long long>(ms.dims));
+    const u32 wide = r.widescreen; // 568, or fill's 768 (#425)
+    const std::string points = std::to_string(wide) + " points";
     for (const std::string &l : g_menus.lines) {
-        check(l.find(" view " + std::to_string(MT_WIDESCREEN_WIDE)) != std::string::npos,
+        check(l.find(" view " + std::to_string(wide)) != std::string::npos,
               "menus: the field stays wide behind the screen: " + l);
     }
     check(ms.screens > 0 && ms.dims > 0,
@@ -4972,12 +5032,14 @@ void widescreen_on_checks(Run &r, u64) {
     }
     const mt_widescreen_stats st = mt_widescreen_get_stats();
     std::printf(
-        "widescreen_on: %llu state lines; %llu turns, %llu wide, %llu changes, %llu camera "
-        "hook calls, %llu backdrops stretched; views%s\n",
-        static_cast<unsigned long long>(g_wide.lines), static_cast<unsigned long long>(st.turns),
-        static_cast<unsigned long long>(st.wide_turns), static_cast<unsigned long long>(st.changes),
+        "%s: %llu state lines; %llu turns, %llu wide, %llu changes, %llu camera hook calls, %llu "
+        "backdrops stretched, %llu tiled; views%s\n",
+        r.mode.c_str(), static_cast<unsigned long long>(g_wide.lines),
+        static_cast<unsigned long long>(st.turns), static_cast<unsigned long long>(st.wide_turns),
+        static_cast<unsigned long long>(st.changes),
         static_cast<unsigned long long>(st.camera_calls),
-        static_cast<unsigned long long>(st.backdrops), views_text().c_str());
+        static_cast<unsigned long long>(st.backdrops), static_cast<unsigned long long>(st.tiles),
+        views_text().c_str());
     const auto only = [](const char *map, u32 width) {
         const auto it = g_wide.views.find(map);
         return it != g_wide.views.end() && it->second == std::set<u32>{width};
@@ -4988,9 +5050,21 @@ void widescreen_on_checks(Run &r, u64) {
     };
     check(only("2.8", 480) && only("2.9", 480),
           "the tutorial's maps (30 tiles, 480 points) stay 3:2 in the field");
-    check(has("2.0", MT_WIDESCREEN_WIDE) && has("2.3", MT_WIDESCREEN_WIDE),
-          "Henesys (2.0) and the field 2.3 are drawn 568 points wide");
-    check(st.backdrops > 0 && st.camera_calls > 0, "the backdrop is stretched, the camera hooked");
+    check(has("2.0", wide) && has("2.3", wide),
+          "Henesys (2.0) and the field 2.3 are drawn " + points + " wide");
+    check(st.backdrops + st.tiles > 0 && st.camera_calls > 0,
+          "the backdrop is widened (tiled or stretched), the camera hooked");
+    if (wide == MT_WIDESCREEN_FILL) {
+        // The tiled backdrop's seam (#425): Henesys's backdrop repeats every 160 points.
+        check(st.tiles > 0, "Henesys's backdrop is tiled, not stretched");
+        for (const char *map : {"2.0", "2.3"}) {
+            const Seam s = g_wide.seams[map];
+            check(s.rows >= 20 && s.seamless * 100 >= s.rows * 95,
+                  std::string("no seam at x = 480 on ") + map + ": " + std::to_string(s.seamless) +
+                      " of " + std::to_string(s.rows) +
+                      " rows showing the backdrop left of it continue it past it");
+        }
+    }
     // The gameplay: the same state at every tick as the off run's.
     std::ifstream on(r.out / "state.txt", std::ios::binary);
     std::ifstream off(fs::path(std::getenv("MT_WIDESCREEN_BASE")) / "state.txt", std::ios::binary);
@@ -5628,8 +5702,9 @@ void widescreen_pad(Run &r, u64) {
     then_wait(r, 2);
     then_do(r, "Henesys with the key pad", [&r](mt_cpu *cpu) {
         if (r.widescreen != 0) {
-            check(mt_widescreen_view() == MT_WIDESCREEN_WIDE,
-                  "Henesys (2.0) is drawn 568 points wide with the key pad shown");
+            check(mt_widescreen_view() == r.widescreen, "Henesys (2.0) is drawn " +
+                                                            std::to_string(r.widescreen) +
+                                                            " points wide with the key pad shown");
             wide_shot(r, cpu, "pad_2_0", true);
         }
     });
@@ -5640,9 +5715,12 @@ void widescreen_pad(Run &r, u64) {
     then_do(r, "2.3 with the key pad", [&r](mt_cpu *cpu) {
         check(hero(cpu).on(2, 3), "the hero is on the field 2.3");
         if (r.widescreen != 0) {
-            check(mt_widescreen_view() == MT_WIDESCREEN_WIDE &&
-                      fe::installed_keypad_wide().off == 44.0f && r.input.side_margin() == 44.0f,
-                  "2.3 is drawn 568 points wide with the key pad shown, its groups 44 points out");
+            const float off = static_cast<float>(r.widescreen - MT_WIDESCREEN_NARROW) / 2;
+            check(mt_widescreen_view() == r.widescreen && fe::installed_keypad_wide().off == off &&
+                      r.input.side_margin() == off,
+                  "2.3 is drawn " + std::to_string(r.widescreen) +
+                      " points wide with the key pad shown, its groups (E - 480) / 2 = " +
+                      std::to_string(static_cast<int>(off)) + " points out");
             wide_shot(r, cpu, "pad_2_3", true);
         }
     });
@@ -5666,6 +5744,12 @@ int widescreen_pad_on_setup(Run &r) {
     return widescreen_pad_off_setup(r);
 }
 
+int widescreen_pad_fill_on_setup(Run &r) {
+    const int code = widescreen_pad_on_setup(r);
+    r.widescreen = MT_WIDESCREEN_FILL;
+    return code;
+}
+
 void widescreen_pad_checks(Run &r, u64) {
     g_wpad.hold.close();
     const fe::KeypadLayoutStats st = fe::keypad_layout_stats();
@@ -5682,8 +5766,9 @@ void widescreen_pad_checks(Run &r, u64) {
               "widescreen off: 480 points, the mask hook never ran");
         return;
     }
-    check(g_wpad.hold_view == MT_WIDESCREEN_WIDE && st.hits > 0 && st.remapped > 0,
-          "widescreen on: the hold at 568 points, the mask read through the hook");
+    check(g_wpad.hold_view == r.widescreen && st.hits > 0 && st.remapped > 0,
+          "widescreen on: the hold at " + std::to_string(r.widescreen) +
+              " points, the mask read through the hook");
     std::ifstream on(r.out / "hold.txt", std::ios::binary);
     std::ifstream off(fs::path(std::getenv("MT_WIDESCREEN_PAD_BASE")) / "hold.txt",
                       std::ios::binary);
@@ -14686,6 +14771,8 @@ constexpr Mode k_modes[] = {
     {"popup_menu_shoulders", popup_menu_shoulders, popup_menu_shoulders_checks, 1},
     {"widescreen_off", widescreen_flow, widescreen_off_checks, 2400, false, widescreen_off_setup},
     {"widescreen_on", widescreen_flow, widescreen_on_checks, 2400, false, widescreen_on_setup},
+    {"widescreen_fill_on", widescreen_flow, widescreen_on_checks, 2400, false,
+     widescreen_fill_on_setup},
     {"widescreen_scene_off", widescreen_scene, widescreen_scene_off_checks, 1, false,
      widescreen_scene_off_setup},
     {"widescreen_scene_on", widescreen_scene, widescreen_scene_on_checks, 1, false,
@@ -14697,6 +14784,8 @@ constexpr Mode k_modes[] = {
     {"widescreen_pad_off", widescreen_pad, widescreen_pad_checks, 1, false,
      widescreen_pad_off_setup},
     {"widescreen_pad_on", widescreen_pad, widescreen_pad_checks, 1, false, widescreen_pad_on_setup},
+    {"widescreen_pad_fill_on", widescreen_pad, widescreen_pad_checks, 1, false,
+     widescreen_pad_fill_on_setup},
     {"widescreen_filters", widescreen_filters, widescreen_filters_checks, 1, false,
      widescreen_filters_setup},
     {"auto_potion", auto_potion, auto_potion_checks, 1},
