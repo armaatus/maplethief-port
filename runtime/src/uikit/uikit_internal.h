@@ -272,6 +272,20 @@ bool touch_point(mt_cpu *cpu, u32 touch, Point *now, Point *previous);
 // Forgets every touch (a new runtime).
 void touch_reset();
 
+// --- the controls a tap reaches (focus.cpp) -----------------------------------------------------
+
+// A landscape screen rectangle (x0, y0, x1, y1), as mt_uikit_controls clips views to.
+struct ScreenBox {
+    double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    // Under half a point wide or high: nothing a touch can hit.
+    bool empty() const;
+};
+ScreenBox intersect(const ScreenBox &a, const ScreenBox &b);
+// `v`'s bounds on the landscape screen.
+ScreenBox screen_box(mt_cpu *cpu, const View &v);
+// The target-action a tap on control `v` sends (touch-up-inside first), or nullptr.
+const TargetAction *tap_action(const View &v);
+
 // --- the module (app.cpp) ------------------------------------------------------------------------
 
 // Per-runtime state; reset when the current ObjC runtime changes.

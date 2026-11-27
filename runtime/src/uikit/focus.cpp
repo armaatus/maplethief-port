@@ -18,24 +18,17 @@
 
 namespace mt_ui {
 
-namespace {
+bool ScreenBox::empty() const { return !(x1 - x0 >= 0.5 && y1 - y0 >= 0.5); }
 
-// Landscape screen rectangles (x0, y0, x1, y1).
-struct Box {
-    double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-    bool empty() const { return !(x1 - x0 >= 0.5 && y1 - y0 >= 0.5); }
-};
-
-Box intersect(const Box &a, const Box &b) {
+ScreenBox intersect(const ScreenBox &a, const ScreenBox &b) {
     return {std::max(a.x0, b.x0), std::max(a.y0, b.y0), std::min(a.x1, b.x1), std::min(a.y1, b.y1)};
 }
 
-// A view's bounds on the landscape screen (the bounding box: the game turns views only by
-// right angles).
-Box screen_box(mt_cpu *cpu, const View &v) {
+// The bounding box: the game turns views only by right angles.
+ScreenBox screen_box(mt_cpu *cpu, const View &v) {
     const Affine m = local_to_screen(cpu, v).then(screen_from_window());
     const Rect &b = v.model.bounds;
-    Box out{1e300, 1e300, -1e300, -1e300};
+    ScreenBox out{1e300, 1e300, -1e300, -1e300};
     for (const Point p : {Point{b.x, b.y}, Point{b.x + b.w, b.y}, Point{b.x, b.y + b.h},
                           Point{b.x + b.w, b.y + b.h}}) {
         const Point q = m.apply(p);
@@ -46,6 +39,22 @@ Box screen_box(mt_cpu *cpu, const View &v) {
     }
     return out;
 }
+
+const TargetAction *tap_action(const View &v) {
+    const TargetAction *action = nullptr;
+    for (const TargetAction &ta : v.actions) {
+        if (ta.target == 0 || ta.action == 0) {
+            continue;
+        }
+        if (action == nullptr || ((ta.events & k_event_touch_up_inside) != 0 &&
+                                  (action->events & k_event_touch_up_inside) == 0)) {
+            action = &ta;
+        }
+    }
+    return action;
+}
+
+namespace {
 
 // Whether the hit test at landscape point (x, y) finds `view` or a subview of it.
 bool reaches(mt_cpu *cpu, u32 view, double x, double y) {
@@ -73,7 +82,7 @@ struct Walk {
     u32 order = 0;
 };
 
-void consider(Walk &w, const View &v, const Box &visible) {
+void consider(Walk &w, const View &v, const ScreenBox &visible) {
     const bool control =
         v.kind == Kind::button || v.kind == Kind::control || v.kind == Kind::page_control;
     const bool scroll = v.kind == Kind::scroll_view || v.kind == Kind::text_view;
@@ -83,15 +92,7 @@ void consider(Walk &w, const View &v, const Box &visible) {
     double mx = 0, my = 0;
     const TargetAction *action = nullptr;
     if (control) {
-        for (const TargetAction &ta : v.actions) {
-            if (ta.target == 0 || ta.action == 0) {
-                continue;
-            }
-            if (action == nullptr || ((ta.events & k_event_touch_up_inside) != 0 &&
-                                      (action->events & k_event_touch_up_inside) == 0)) {
-                action = &ta;
-            }
-        }
+        action = tap_action(v);
         if (action == nullptr) {
             return; // nothing a tap would do
         }
@@ -156,12 +157,12 @@ void consider(Walk &w, const View &v, const Box &visible) {
     w.count++;
 }
 
-void walk(Walk &w, u32 obj, const Box &clip, int depth) {
+void walk(Walk &w, u32 obj, const ScreenBox &clip, int depth) {
     const View *v = view_of(w.cpu, obj);
     if (v == nullptr || depth > 64 || v->hidden || !v->interaction || v->model.alpha < 0.01) {
         return;
     }
-    const Box visible = intersect(clip, screen_box(w.cpu, *v));
+    const ScreenBox visible = intersect(clip, screen_box(w.cpu, *v));
     w.order++;
     if (!visible.empty()) {
         consider(w, *v, visible);
@@ -204,8 +205,8 @@ void walk_labels(LabelWalk &w, u32 obj, int depth) {
     }
     w.order++;
     if (v->kind == Kind::label && !v->text.empty()) {
-        const Box screen{0, 0, MT_UIKIT_SCREEN_WIDTH, MT_UIKIT_SCREEN_HEIGHT};
-        const Box visible = intersect(screen, screen_box(w.cpu, *v));
+        const ScreenBox screen{0, 0, MT_UIKIT_SCREEN_WIDTH, MT_UIKIT_SCREEN_HEIGHT};
+        const ScreenBox visible = intersect(screen, screen_box(w.cpu, *v));
         if (!visible.empty()) {
             if (w.count < w.max && w.out != nullptr) {
                 mt_uikit_label &l = w.out[w.count];
@@ -250,7 +251,7 @@ uint32_t mt_uikit_controls(mt_cpu *cpu, mt_uikit_control *out, uint32_t max) noe
         return 0;
     }
     Walk w{cpu, out, out != nullptr ? max : 0};
-    const Box screen{0, 0, MT_UIKIT_SCREEN_WIDTH, MT_UIKIT_SCREEN_HEIGHT};
+    const ScreenBox screen{0, 0, MT_UIKIT_SCREEN_WIDTH, MT_UIKIT_SCREEN_HEIGHT};
     const std::vector<u32> windows = state(cpu).windows;
     for (const u32 window : windows) {
         walk(w, window, screen, 0);
