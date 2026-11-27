@@ -14,6 +14,7 @@ The pages marked *generated* are written by a tool from your own copy of the gam
 | [The Objective-C shell](objc-shell.md) | What each of the 18 app classes does, and what it calls (*partly generated*) |
 | [C++ classes, RTTI and vtables](cpp-classes.md) | The C++ class hierarchy and its vtables (*generated*) |
 | [Statically linked libraries](libraries.md) | A tag for every function: the app's Objective-C, the C++ engine, Chartboost and the other linked libraries (*generated*) |
+| [Coverage gaps](coverage-gaps.md) | Every game function no automated run enters, with a reason or a test: dead, difftested, unreachable by play or missed (*generated*) |
 | [Function names](function-names.md) | How many functions still have a generated name, and which the play runs enter most |
 | [Program flow](program-flow.md) | From `start` to a frame: the boot, the frame driver and the state machine |
 | [Timing and threading](timing-threading.md) | The clock, one tick, the timers, every thread and lock |
