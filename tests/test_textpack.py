@@ -166,7 +166,9 @@ def test_port_english_has_the_table_the_registry_and_the_actions() -> None:
     assert sum(k.startswith("setting.") and k.endswith(".label") for k in port) > 50
 
 
-@pytest.mark.parametrize("tag", ["ko", "nl"])
+@pytest.mark.parametrize(
+    "tag", sorted(p.name for p in (textpack.REPO / "platform" / "lang").iterdir() if p.is_dir())
+)
 def test_shipped_menu_languages_pass_the_python_rules(tag: str) -> None:
     # platform/lang/<tag>/ (#373, ADR 0222): a text pack of the port's own text only, which
     # the frontend embeds; the C++ completeness test checks every key, this the same files by
