@@ -132,3 +132,13 @@ Each has its flag (`--fullscreen`, `--vsync`, `--pause-unfocused`, `--language`,
 - `remap_test.cpp`: `remap: Save keeps bindings.ini's [window] size keys; Reset restores them (#196)`.
 - `presets_test.cpp`: the new row is outside the presets.
 - **By hand (Joris, `needs-human`):** on a two-display Mac or PC, fullscreen on the second display and Ctrl+3 (or Cmd+3).
+
+## Addendum: Ctrl and Alt wait for the chord (#381, 2026-11-27)
+
+Accepted (delegated by Joris, 2026-11-13).
+
+- **Problem.** On Windows and Linux Ctrl is both the field's attack and the size keys' modifier, so Ctrl+1 … Ctrl+5 attacked once before sizing the window (Alt+Enter jumped once the same way). The desktop takes the number key, but Ctrl's own press had already gone to the game.
+- **Decision.** `Keyboard` holds back the press of Ctrl, Alt and Shift (keyboard.h). Let go first, the key is pressed and released at once, so a tap still attacks. Another key going down presses it first, so Ctrl held with X still attacks and jumps. Held `Keyboard::kChordSeconds` (0.25 s, measured on the run-loop turns' clock as the gamepad's holds are, `Keyboard::turn`), it is pressed. When `Desktop::handle` consumes a key down while it is held back, game.cpp calls `Keyboard::chord_taken` with the event's modifiers: the matching held-back keys never press, and their releases are dropped. Anything that lifts the keyboard (`Actions::release_source`, counted by `Actions::lifts`: an overlay opening, focus lost) drops a held-back key too, so no press reaches the game under an overlay.
+- **Rejected.** Ctrl attacking only on release: a held Ctrl would never attack continuously. Undoing the attack after the chord: the game has had it for a tick by then.
+- **Cost.** Ctrl held to attack starts 0.25 s late; a tap attacks when it is let go. Z, the first attack key, has no wait. A Ctrl held longer than 0.25 s before the number still attacks once.
+- **Tests.** `keyboard_test.cpp`: `keyboard: a modifier waits for a desktop chord (#381)` (tap, hold, the chord swallowed, another modifier's chord, a lift, focus lost) and the per-key and modifier cases of the existing tests.
