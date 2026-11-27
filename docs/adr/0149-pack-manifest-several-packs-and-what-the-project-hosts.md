@@ -112,6 +112,6 @@ Made by the agent under Joris's delegation of 2026-11-13; Joris can veto any of 
 - #371's checks share the manifest rules with the runtime; the texture and audio checks gain one more file to read.
 - #373's shipped translations are packs like any other (`content = own`, `license = MIT`) and are the only packs the repository holds.
 - A player can stack a menu translation on a dialogue translation of the same language, or an effects pack under a music pack.
-- The runtime changes (the list in each setting, one hook walking several texture packs, the hidden counts) are #370's work; until it lands, the first folder of a list is the only one opened.
+- The runtime changes (one hook walking several texture packs, audio and text per entry, the hidden counts, repeated flags) were split from #370 into #421, and the zip and folder drop into #422. #370 shipped the manifest reader (`maplethief/pack_manifest.h`), the list in each setting and the packs screen; until #421 lands, the start opens the first accepted folder of a list only.
 - The `content` field is the author's statement, not a check. Moderation of the Discussions category relies on it plus a look at the files.
 - How we'd know this is wrong: players stacking packs and reporting surprises about which one shows (the order), packs refused for a `port_min` that a later port could have run (the compatibility rule too strict), or a Nexon concern about a pack in a "Yes" row (the line drawn in the wrong place).

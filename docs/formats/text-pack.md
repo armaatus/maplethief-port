@@ -10,7 +10,8 @@ A text pack replaces the game's text and the port's own with a translation in UT
 
 | File (any case) | Required | Keys | Replaces |
 |---|---|---|---|
-| `textpack.strings` | yes | `format`, `name`, `language`; `version`, `game_version`, `author` optional | nothing: the manifest |
+| `textpack.strings` | yes, unless `pack.strings` | `format`, `name`, `language`; `version`, `game_version`, `author` optional | nothing: the manifest |
+| `pack.strings` | no | ADR 0149's manifest for every pack kind (`kind = "text"`, `id`, `name`, `language`, ...; `runtime/include/maplethief/pack_manifest.h`); when present it is the manifest and `textpack.strings` is ignored | nothing: the manifest |
 | `Scripts.strings` | no | the game's `Scripts` keys, `<Prefix>.<function>.<n>` | dialogue and quest text |
 | `ScriptExtra.strings` | no | the game's `ScriptExtra` keys, `<Class>.<member>.<n>` | the C++ code's sentences |
 | `Tables.strings` | no | `<table>.<row>.<column>` | names and descriptions in the data tables |
