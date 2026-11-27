@@ -958,6 +958,9 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
             g.screenshot_wanted = true;
         }
         if (r.consumed) {
+            if (e.type == SDL_EVENT_KEY_DOWN) {
+                g.keyboard.chord_taken(e.key.mod); // Ctrl+1 never attacks (#381)
+            }
             return;
         }
     }
@@ -3202,6 +3205,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     g.gamepads.set_stick_mode(g.settings.stick_mode);
     g.actions.set_direction_priority(g.settings.direction_priority);
     g.gamepads.turn(now);   // a button held back for its hold (R3's pointer tap, ADR 0107)
+    g.keyboard.turn(now);   // a modifier held back for the desktop's chords (#381)
     g.actions.turn();       // the synthetic touches of actions without a key code
     g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
     g.at_title = g.update.has_notice() && focus_engine_at_title(cpu); // the update notice (#199)

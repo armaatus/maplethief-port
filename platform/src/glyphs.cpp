@@ -172,6 +172,17 @@ GlyphSet glyph_set_for(SDL_GamepadType type) {
     }
 }
 
+bool pad_type_has_touchpad(SDL_GamepadType type) {
+    switch (type) {
+    case SDL_GAMEPAD_TYPE_XBOX360:
+    case SDL_GAMEPAD_TYPE_XBOXONE:
+    case SDL_GAMEPAD_TYPE_PS3:
+        return false;
+    default:
+        return glyph_set_for(type) != GlyphSet::kNintendo;
+    }
+}
+
 std::string pad_glyph_label(const Control &c, SDL_GamepadType type, FaceButtons face) {
     if (c.kind == ControlKind::kDirection) {
         return std::string("D-pad ") + direction_name(static_cast<Direction>(c.code));
