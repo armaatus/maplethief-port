@@ -47,6 +47,26 @@ The synthetic starts of [skills-and-jobs.md](skills-and-jobs.md) (`tests/starts/
 `tests/starts/skills_*.json`) are built by CTest itself: `starts.<name>` writes the save into
 the test output directory (skipped without the bundle) and `play.<mode>_synthetic` loads it.
 
+## Raised starts: a chained save with a few fields changed
+
+A chain can skip what play would take game-hours for, such as levels, without leaving the chain:
+`build --base DIR` lays the description over the `describe` of the pair in `DIR` (a play test's
+output directory, its `data/saves` or `data/Documents`), so everything the description leaves
+out is the save of the part before. A raised `level` levels the hero up by the game's rules
+(`CHero::LevelUp`): the skill points of each level gained (none to level 9, 1 to 29, 2 from 30),
+EXP 0, and HP and MP the sums of `hero.dat`'s gains (needs `--app`).
+
+```sh
+PYTHONPATH=tools python3 -m mtport.savedata build tests/starts/raise/chapter_2_b.json \
+    OUT_DIR/data/saves --base build/test-output/mac-debug/play_chapter_2_a \
+    --app work/ipa/Payload/MapleThief.app
+```
+
+The overlays live in `tests/starts/raise/` (they hold only the changed keys, so they are not
+whole descriptions). A raised start equals no chained state, so the part that loads it is
+synthetic: CTest names it `play.chapter_2_<part>_synthetic` and builds its start in
+`starts.chapter_2_<part>` ([chapter-2-quests.md](chapter-2-quests.md)).
+
 ## The bot's world
 
 The bot finds its way with tables generated from the knowledge base, not written by hand

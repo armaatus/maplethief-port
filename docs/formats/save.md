@@ -279,6 +279,12 @@ Every key is optional except `hp` and `mp`. A key left out keeps the value of [a
 | `main`, `side` | `{"<quest number>": state}`, state 0 to 2 ([quest states](#quest-states)) | `quest` 0x001, 0x065 |
 | `records` | up to 10 active quests in order: `{"kind", "number", "npc", "title", "description", "requirements", "rewards"}`; `title` and `description` are `Scripts.strings` keys; a requirement is `{"item": [table, id], "count"}`, `{"mob", "needed", "progress"}` or `{"meso"}`, a reward `{"item": [table, id], "count"}`, `{"meso"}` or `{"exp"}` (up to 5 each) | the [quest records](#quest-record-0x1c9-bytes) |
 
+`--base DIR` lays the description over the `describe` of the pair already in `DIR` (or its
+`data/saves` or `data/Documents`): only the keys it names change. A higher `level` levels the
+hero up as the game does (the skill points of each level gained: none to 9, 1 to 29, 2 from 30;
+EXP 0; HP and MP the sums of `hero.dat`'s gains, with `--app`), before the other keys apply
+([testing/start-states.md](../testing/start-states.md#raised-starts-a-chained-save-with-a-few-fields-changed)).
+
 The bytes the game never writes are zero in a built save. `savedata.written_diff` compares two files in every byte the game does write, and names the field or quest that differs.
 
 ## Pulling a save from a device
