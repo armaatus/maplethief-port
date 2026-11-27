@@ -80,7 +80,21 @@ Every finished or reset run is written to the `runs` folder of your data folder,
 
 Your **personal best** of a category is your fastest finished run that is clean and inside the category. It is kept as `runs/any.best` (the same text as a log). To start over, delete that file.
 
+## LiveSplit
+
+On a computer (macOS, Windows, Linux) the timer can drive [LiveSplit](https://livesplit.org/), so you keep your own layout and splits there. The port sends LiveSplit its start, each split and each reset; LiveSplit does the timing and the comparisons.
+
+1. In LiveSplit, right-click, **Control**, **Start TCP Server** (each time you start LiveSplit, unless its server settings start it by themselves). The default port is 16834.
+2. In the port, turn on **Speedrun timer** and set `livesplit = localhost` in `settings.ini` (or `localhost:PORT` for another port), or start it with `--run-timer on --livesplit localhost`. The **LiveSplit server** row in the **Other** tab shows the value.
+3. Give LiveSplit as many splits as your category has, in the same order (Any% has six, Chapter 1 three).
+
+The link is off by default. It connects to LiveSplit's own server only: `localhost`, or an IP address (another computer on your network, as `192.168.1.20:16834` or `[fe80::1]:16834`), never a name to look up. If LiveSplit isn't there, the game plays on as usual, the log says so once and the port tries again every few seconds without a word. A run that starts before LiveSplit connects is not in LiveSplit.
+
+**Game time.** With **LiveSplit game time** on (`livesplit_game_time = on`, the default), LiveSplit's game time is the game's own ticks, 50 ms each: compare against *Game Time* in LiveSplit to rank by it. The port pauses LiveSplit's own game time and sets it on every tick. Turn it off to keep LiveSplit's game time as LiveSplit runs it.
+
+No LiveSplit auto-splitter script is needed or offered: such scripts read the game's memory, which moves with every build of the port.
+
 ## Not yet
 
-- A link to LiveSplit ([#407](https://github.com/armaatus/maplethief-port/issues/407)), replays that can be checked ([#405](https://github.com/armaatus/maplethief-port/issues/405), [#408](https://github.com/armaatus/maplethief-port/issues/408)) and practice from a split ([#409](https://github.com/armaatus/maplethief-port/issues/409)) are planned.
+- Replays that can be checked ([#405](https://github.com/armaatus/maplethief-port/issues/405), [#408](https://github.com/armaatus/maplethief-port/issues/408)) and practice from a split ([#409](https://github.com/armaatus/maplethief-port/issues/409)) are planned.
 - No full Any% run has been timed in the port yet: the last boss has not been reached in the port's own tests.

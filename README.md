@@ -53,7 +53,7 @@ The game boots, plays and saves on Windows, macOS and Linux, with mouse, touch, 
 
 ## Privacy
 
-The game runs offline. The port's only network use is an optional check for new versions, off by default: once a day it asks github.com which version is the latest, and downloads nothing. See [Settings](docs/play/settings.md#checking-for-new-versions) and [ADR 0137](docs/adr/0137-network-use-and-the-update-notice.md).
+The game runs offline. The port uses the network in two optional ways, both off by default: a check for new versions, which once a day asks github.com which version is the latest and downloads nothing ([Settings](docs/play/settings.md#checking-for-new-versions), [ADR 0137](docs/adr/0137-network-use-and-the-update-notice.md)); and, for speedrunners on a computer, a link to LiveSplit's server on your own machine or network, which sends it the run's start, splits, resets and game time and nothing else ([Speedrun timer](docs/play/speedrun.md#livesplit)).
 
 ## Legal
 

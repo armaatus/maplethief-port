@@ -44,6 +44,7 @@ For the folders the issue named `sdmc:/switch/maplethief/exports/` and `.../text
 | `kCapIpaOnSdCard` | the import screen's SD-card route: the IPA beside the game, no dialog or drop (#243, ADR 0138's addendum) | no | no | yes |
 | `kCapMessageBox` | #198's start-up question after a crash in an SDL message box; without it (or in a Steam Deck's Game Mode) the window asks (`start_question.h`, #416, ADR 0151's addendum) | yes | yes | no |
 | `kCapSpeech` | `speech`, `speech_rate`, `speech_volume`: a system voice (#390, [ADR 0174](0174-text-to-speech-layer-system-voices-and-queue.md)) | yes | yes | no |
+| `kCapLiveSplit` | `livesplit`, `livesplit_game_time`: a TCP link to LiveSplit's server on the same computer (#407, [ADR 0156](0156-speedrun-kit-splits-clean-runs-and-verifiable-replays.md)) | yes | no | no |
 
 **The rows.** `SettingInfo::needs` and `MenuActionInfo::needs` hold the bits a row needs (0 means every platform). `setting_shown(row, platform)` adds the needs to the `ios_only` test, and `action_shown(a, platform)` is the actions' version. The menu builds its tabs and rows for its platform: `SettingsMenu::set_platform` lets a test build another platform's menu, and the build's own is the default. The iOS `#if`s around the action rows are gone; their `needs` give the same result. The file and the command line still take every key on every platform.
 
