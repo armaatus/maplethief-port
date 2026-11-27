@@ -115,7 +115,8 @@ def _normalise(root: Path, mtime: int) -> None:
     only."""
     for p in sorted(root.rglob("*"), reverse=True):
         if p.is_symlink():
-            os.utime(p, (mtime, mtime), follow_symlinks=False)
+            if os.utime in os.supports_follow_symlinks:  # not on Windows
+                os.utime(p, (mtime, mtime), follow_symlinks=False)
             continue
         p.chmod(0o755 if p.is_dir() or p.stat().st_mode & 0o100 else 0o644)
         os.utime(p, (mtime, mtime))
