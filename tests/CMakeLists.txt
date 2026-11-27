@@ -1804,15 +1804,7 @@ set_tests_properties(
 # played level-62 hero 46 times (part f, raised to 70), so that part's test says synthetic.
 set(_chapter_2_parts a b c d e f)
 set(_chapter_2_raised b f)
-add_test(NAME starts.chapter_2
-         COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
-                 "${PROJECT_SOURCE_DIR}/tests/starts/chapter_2.json"
-                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2/data/saves" --app
-                 "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
-set_tests_properties(
-    starts.chapter_2
-    PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_SETUP start_chapter_2
-               ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+# starts.chapter_2 (above, with the compendium's NPC check) builds the chain's first save.
 set(_previous_fixture start_chapter_2)
 set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2")
 foreach(part IN LISTS _chapter_2_parts)
