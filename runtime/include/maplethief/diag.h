@@ -277,6 +277,7 @@ typedef struct mt_crash_info {
 
 #define MT_CRASH_HARDWARE 0x100u /* a hardware fault, not an mt_trap */
 #define MT_CRASH_HOST 0x101u     /* a fault outside the guest (a host bug, an abort) */
+#define MT_CRASH_HANG 0x102u     /* the guest's thread stopped turning its run loop (#337) */
 
 enum mt_access {
     MT_ACCESS_UNKNOWN = 0,
@@ -354,6 +355,28 @@ void mt_crash_set_host_functions(const mt_fn_entry *table, uint32_t count) MT_NO
  * guest fault from a host one. */
 void mt_crash_set_cpu(mt_cpu *cpu) MT_NOEXCEPT;
 mt_cpu *mt_crash_get_cpu(void) MT_NOEXCEPT;
+
+/* --- the hang sampler (#337, ADR 0195) ------------------------------------------------ */
+
+/* Makes the calling thread, which runs `cpu`, the one mt_hang_report samples (NULL: none).
+ * POSIX installs a handler for SIGURG once (ignored by default, so a late one does no harm);
+ * Windows keeps a handle of the thread. Returns 0, or -1 where a thread cannot be sampled (the
+ * Nintendo Switch: the report then has the registers as last stored and no host PC). */
+int mt_hang_watch_thread(mt_cpu *cpu) MT_NOEXCEPT;
+
+/* From another thread: stops the watched thread for a moment (POSIX: SIGURG, whose handler
+ * copies its host PC and its mt_cpu; Windows: SuspendThread and GetThreadContext),
+ * then formats the report with mt_crash_format as MT_CRASH_HANG, `what` naming the stall:
+ *
+ *     === guest crash: hang (the run loop stopped turning) ===
+ *     no run-loop turn for 15 s at host pc 0x... f_0001A2B5+0x40
+ *     in guest function 0x0001A2B5 CFoo::Wait+0x0 (the guest pc is not known ...)
+ *     registers (as last stored to mt_cpu): ...
+ *     backtrace (r7 frame chain): ...
+ *
+ * A thread that does not answer the signal within half a second is reported without a host
+ * PC. Returns the full length (like snprintf); 0 if no thread is watched. */
+size_t mt_hang_report(const char *what, char *buf, size_t size) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

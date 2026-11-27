@@ -78,6 +78,7 @@ enum ExitStatus : int {
     kExitNoGame = 4,        // no generated code, no bundle, no slice, or the load failed
     kExitGuestEnded = 5,    // the guest trapped, stopped by itself or exited non-zero
     kExitRunDiffers = 6,    // --play-run: a checkpoint differed, or the replay ended early
+    kExitHang = 7,          // the game hung and the player chose Quit (hang_watchdog.h, #337)
 };
 
 // The generated program and the reservation its memory model needs (MT_MEM_RESERVE_FOR_BUILD in
@@ -212,6 +213,13 @@ struct GameOptions {
     // run-loop turn. Empty: never.
     std::string force_crash;
     double force_crash_at = 2.0;
+    // --force-hang (#337, a test aid: the hang watchdog's report and question): at
+    // force_crash_at seconds after the first run-loop turn the turn never ends, as a host call
+    // that never returns. It turns the watchdog on in a --fixed-step run too.
+    bool force_hang = false;
+    // --hang-seconds S (#337, hang_watchdog.h): the watchdog's limit; 0: no watchdog. Negative
+    // (not given): kHangSeconds, and none in a --fixed-step run.
+    double hang_seconds = -1;
     // --restore-backup T,N (#192, a test aid): at T seconds after the first run-loop turn, the
     // settings menu's Backups list's row N (1 = the newest) is chosen and confirmed, as a player
     // does (save_menu.h's backups_list: refused with a character loaded). Each is (T, N).

@@ -47,6 +47,7 @@
 #include "focus.h"
 #include "gamepad.h"
 #include "guest_state.h"
+#include "hang_watchdog.h"
 #include "input.h"
 #include "keyboard.h"
 #include "keypad_layout.h"
@@ -376,6 +377,7 @@ inline void pump(Run &r) {
 
 inline int turn(void *, mt_cpu *cpu, double now, double) {
     Run &r = *g_run;
+    fe::hang_watchdog_beat(); // as game.cpp's on_turn (#337)
     if (r.turns++ == 0) {
         r.first = now;
     }
@@ -1321,7 +1323,19 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     if (r.before_run) {
         r.before_run(mt_process_cpu(p));
     }
+    // The hang watchdog (#337, ADR 0195) at the player's limit, though the virtual clock would
+    // leave it off: real time per turn, so every real-asset run records its longest turn and
+    // shows that no load or scene comes near the limit.
+    fe::hang_watchdog_start(mt_process_cpu(p), fe::kHangSeconds);
     const std::uint32_t outcome = mt_process_run(p);
+    fe::hang_watchdog_stop();
+    if (const fe::HangStats hang = fe::hang_watchdog_stats(); hang.seconds > 0) {
+        char line[160];
+        std::snprintf(line, sizeof line,
+                      "no hang report: the longest run-loop turn took %.2f s (the limit %g s)",
+                      hang.longest_gap, hang.seconds);
+        check(hang.hangs == 0u, line);
+    }
     const mt_process_result *res = mt_process_result_of(p);
     r.outcome = outcome;
     r.result = *res;

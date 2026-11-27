@@ -72,6 +72,24 @@ void set_crash_dialog_for_test(CrashDialogFn fn); // null: the default
 // `MapleThief --crash-dialog FILE`: shows it and returns the process's exit status.
 int run_crash_dialog_tool(const std::string &path);
 
+// The hang report (#337, ADR 0195; hang_watchdog.h): crashes/<time>.txt as "MapleThief hang
+// report", the header, the hang's report and the log's tail. Not a crash: crash_reported() and
+// last_crash_file() stay as they were. Returns the path ("" if no file was written).
+std::string hang_report_write(const char *report, std::size_t len);
+// The question after a hang report, from the watchdog's thread (the main thread is the one that
+// hangs, so the box is the `--hang-dialog FILE` helper's, as the crash dialog's): Keep waiting
+// (the default) or Quit. The test seam first, then MAPLETHIEF_CRASH_DIALOG_LOG ("hang dialog:
+// <path>", keep waiting), then the helper in an interactive run (set_crash_ui), else keep waiting
+// (logged). No helper (iOS, Android, the Switch): keep waiting.
+enum class HangChoice { kKeepWaiting, kQuit };
+HangChoice ask_hang_choice(const std::string &path);
+using HangDialogFn = std::function<HangChoice(const std::string &path)>;
+void set_hang_dialog_for_test(HangDialogFn fn); // null: the default
+std::string hang_question_text(const std::string &path);
+// `MapleThief --hang-dialog FILE`: the box; exits with kHangHelperQuit for Quit, else 0.
+inline constexpr int kHangHelperQuit = 3;
+int run_hang_dialog_tool(const std::string &path);
+
 // The marker. `begin` returns whether the last run left it (and its report's path: the newest
 // .txt in `crashes_dir`, "" if none) and then sets it; `end` clears it. "" as the folder: a
 // no-op that reports no crash.
