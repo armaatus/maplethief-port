@@ -28,9 +28,8 @@ typedef struct mt_dt_fn {
 extern const mt_dt_fn mt_dt_fns[];
 extern const uint32_t mt_dt_fn_count;
 
-/* Leaves call no imports; the table exists because calls.h declares it. */
-mt_import_fn mt_import_table[1];
-const char *const mt_import_names[1] = {""};
+/* The import table (mt_import_table, mt_import_names) is models.c's: the pure imports a
+ * leaf may call (#305). */
 
 enum { MAGIC_IN = 0x3144544Du, MAGIC_OUT = 0x3244544Du, PAGE = 4096u };
 enum { ST_RETURN = 0, ST_FAULT = 1, ST_TRAP = 2, ST_DISPATCH = 3, ST_SJLJ = 4 };
