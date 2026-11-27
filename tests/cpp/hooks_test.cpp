@@ -6,7 +6,7 @@
 // OpenPortalURLAndExit hook on a guest with a URL in an image segment, and the early Play guard
 // on a guest with SkyCanvas's global and a state; and the quest page fix (#167) on a guest
 // with a data manager and stand-ins for the game's quest lookups; portal620's warp target
-// (#388). The real game's hooked calls are
+// (#388); the hero's knock-back cleared at a scene's start (#420). The real game's hooked calls are
 // runtime.hooks_portal_on/off (hooks_real_test.cpp) and platform.early_tap(_fixed)
 // (platform/input_test.cmake), and play.popup_menu_tabs for the quest pages.
 #include <doctest/doctest.h>
@@ -399,10 +399,12 @@ TEST_CASE("hooks: fix_original_bugs installs every fix, on or off together (#155
     CHECK(mt_hook_enabled(MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT) == 1);
     CHECK(mt_hook_enabled(MT_HOOK_FN_MAIN_MENU_CLICK_PLAY) == 1);
     CHECK(mt_hook_enabled(MT_HOOK_FN_CHANGE_MAP) == 1);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_START_SCENE) == 1);
     mt_hooks_install_original_bug_fixes(0);
     CHECK(mt_hook_enabled(MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT) == 0);
     CHECK(mt_hook_enabled(MT_HOOK_FN_MAIN_MENU_CLICK_PLAY) == 0);
     CHECK(mt_hook_enabled(MT_HOOK_FN_CHANGE_MAP) == 0);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_START_SCENE) == 0);
     // Registered either way, so mt_hook_set_enabled can switch them at run time.
     CHECK(mt_hook_set_enabled(MT_HOOK_FN_MAIN_MENU_CLICK_PLAY, 1) == 1);
 }
@@ -672,6 +674,103 @@ TEST_CASE("hooks: with the portal620 fix off, the warp keeps 6.1's missing porta
     CHECK(warped_to(6, 1, 2)); // the device: no kind 2 on 6.1, the hero keeps its 6.2 place
     CHECK(g_original_calls == 1);
     CHECK(mt_hook_get_stats(k_change_map).passed == 1u);
+}
+
+// --- CStateGame::StartScene 0x853E5: the hero's knock-back at a scene's start (#420, bug 19) --
+
+namespace {
+
+constexpr u32 k_start_scene = MT_HOOK_FN_START_SCENE;
+constexpr u32 k_scene_game = 0x6000u; // the CStateGame
+constexpr u32 k_scene_hero = 0x7000u; // its CHero (+0x30)
+// The hero's knock-back bytes the original saw: +0x119, +0x108.
+std::uint8_t g_scene_knocked = 0xFF;
+std::uint8_t g_scene_hit = 0xFF;
+void start_scene_original(mt_cpu *MT_RESTRICT cpu) {
+    g_original_calls++;
+    u32 hero = 0;
+    std::memcpy(&hero, cpu->mem + cpu->r[0] + 0x30u, 4);
+    const bool in_mem = hero != 0u && hero + 0x11Au <= cpu->mem_size;
+    g_scene_knocked = in_mem ? cpu->mem[hero + 0x119u] : 0xFF;
+    g_scene_hit = in_mem ? cpu->mem[hero + 0x108u] : 0xFF;
+    cpu->r[0] = 0x1u; // void in the game; whatever it leaves
+    cpu->r[1] = 0x5555u;
+}
+void hooked_start_scene(mt_cpu *MT_RESTRICT cpu) {
+    MT_FN_HOOK(k_start_scene, start_scene_original);
+}
+
+// A boss's end scene: StartScene(game, scene) as CStateGame::Paint calls it, with the hero's
+// knock-back bytes as given; checks r4-lr kept and the bytes the game reads afterwards.
+void start_scene(QuestGuest &g, u32 scene, std::uint8_t knocked, std::uint8_t hit) {
+    for (u32 i = 0; i < 15; i++) {
+        g.cpu.r[i] = k_regs[i];
+    }
+    g.put(k_scene_game + 0x30u, k_scene_hero);
+    g.mem[k_scene_hero + 0x119u] = knocked;
+    g.mem[k_scene_hero + 0x108u] = hit;
+    g.cpu.r[0] = k_scene_game;
+    g.cpu.r[1] = scene;
+    hooked_start_scene(&g.cpu);
+    for (u32 i = 4; i < 15; i++) {
+        CHECK(g.cpu.r[i] == k_regs[i]);
+    }
+    CHECK(g.mem[k_scene_hero + 0x119u] == g_scene_knocked);
+    CHECK(g.mem[k_scene_hero + 0x108u] == g_scene_hit);
+}
+
+} // namespace
+
+TEST_CASE(
+    "hooks: a scene started with the hero knocked back clears the knock-back when on (#420)") {
+    Fresh fresh;
+    QuestGuest g;
+    mt_hooks_install_scene_knockback_fix(1);
+    CHECK(mt_hook_enabled(k_start_scene) == 1);
+    start_scene(g, 8, 1, 1); // mob 68's end scene, the last blow landed mid knock-back
+    CHECK(g_scene_knocked == 0);
+    CHECK(g_scene_hit == 0);
+    start_scene(g, 4, 1, 0);
+    CHECK(g_scene_knocked == 0);
+    CHECK(g_scene_hit == 0);
+    // The hero standing: nothing to clear, the original alone.
+    start_scene(g, 6, 0, 0);
+    CHECK(g_scene_knocked == 0);
+    CHECK(g_scene_hit == 0);
+    CHECK(g_original_calls == 3);
+    const mt_hook_stats st = mt_hook_get_stats(k_start_scene);
+    CHECK(st.entries == 3u);
+    CHECK(st.handled == 2u);
+    CHECK(st.passed == 1u);
+}
+
+TEST_CASE("hooks: with the scene knock-back fix off, the scene starts with the hero knocked back") {
+    Fresh fresh;
+    QuestGuest g;
+    mt_hooks_install_scene_knockback_fix(0);
+    start_scene(g, 8, 1, 1);
+    CHECK(g_scene_knocked == 1); // the device: OnKeyPressed drops every key of the scene
+    CHECK(g_scene_hit == 1);
+    CHECK(g_original_calls == 1);
+    CHECK(mt_hook_get_stats(k_start_scene).passed == 1u);
+}
+
+TEST_CASE("hooks: the scene knock-back fix reads nothing outside guest memory") {
+    Fresh fresh;
+    QuestGuest g;
+    mt_hooks_install_scene_knockback_fix(1);
+    // No hero yet, and a hero pointer past the end of guest memory: the original alone.
+    const std::vector<std::uint8_t> before = g.mem;
+    for (const u32 hero : {0u, 0xFFF0u, 0xFFFFFF00u}) {
+        g.put(k_scene_game + 0x30u, hero);
+        g.cpu.r[0] = k_scene_game;
+        g.cpu.r[1] = 8;
+        hooked_start_scene(&g.cpu);
+        g.put(k_scene_game + 0x30u, 0u);
+    }
+    CHECK(g.mem == before);
+    CHECK(g_original_calls == 3);
+    CHECK(mt_hook_get_stats(k_start_scene).passed == 3u);
 }
 
 namespace {

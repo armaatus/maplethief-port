@@ -1285,7 +1285,7 @@ struct FarmStyle {
     i32 min_mp = 0, hp_pct = 33, mp_pct = 25, reach_up = 6, keep = 0;
     bool no_attack = false;
     // No attack starts while the hero is knocked back (CHero +0x119): a boss killed then leaves
-    // its end scene's box deaf to every key (docs/re/original-bugs.md, 17).
+    // its end scene's box deaf to every key (docs/re/original-bugs.md, 19).
     bool land_first = false;
     std::vector<Restock> restock{Restock{}};
 };
