@@ -777,7 +777,8 @@ set_tests_properties(input.keypad_layout PROPERTIES LABELS "cpp;real_assets" SKI
                                                     "skipped:" TIMEOUT 900 RUN_SERIAL TRUE)
 # Rumble in the real game (#72, ADR 0053): the same boot to the first map with a virtual pad
 # whose motors record SDL's calls; a hit through CHero::TakeDamage and a level-up through
-# CHero::setExp, with rumble off (no call) and on (one call each, at the strength).
+# CHero::setExp, with rumble off (no call), on (one call each, at the strength) and on with
+# rumble_events = game (#399: the hit's game vibration only, no call for the level-up).
 add_test(NAME input.rumble COMMAND gamepad_real_test rumble
                                    "${MAPLETHIEF_TEST_OUTPUT_DIR}/rumble")
 set_tests_properties(input.rumble PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77

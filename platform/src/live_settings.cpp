@@ -116,11 +116,11 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
         t.keypad->set_mode(s.hide_keypad, t.now);
         return true;
     }
-    if (is(row, "rumble") || is(row, "rumble_strength")) {
+    if (is(row, "rumble") || is(row, "rumble_strength") || is(row, "rumble_events")) {
         if (t.rumble == nullptr) {
             return false;
         }
-        t.rumble->configure(s.rumble, s.rumble_strength);
+        t.rumble->configure(s.rumble, s.rumble_strength, s.rumble_events);
         return true;
     }
     if (is(row, "perf_overlay")) {

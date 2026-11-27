@@ -3980,7 +3980,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.recovery.set_data_dir(data_dir());
     g.recovery.arm(options.recovery); // a resume chosen at the start (#335)
     g.script = lifecycle_script(options);
-    g.rumble.configure(set.rumble, set.rumble_strength);
+    g.rumble.configure(set.rumble, set.rumble_strength, set.rumble_events);
     // Frame telemetry (#137, ADR 0071): the overlay.
     g.perf = PerfOverlay(set.perf_overlay, perf_overlay_allowed(options));
     g.bundle = bundle;
@@ -4003,8 +4003,9 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 setting_text(set, *find_setting("fast_forward")).c_str(),
                 options.display_mode ? options.display_mode().c_str() : "desktop");
     }
-    SDL_Log("input: rumble %s, strength %u%%", set.rumble ? "on" : "off",
-            static_cast<unsigned>(set.rumble_strength));
+    SDL_Log("input: rumble %s, strength %u%%, on %s", set.rumble ? "on" : "off",
+            static_cast<unsigned>(set.rumble_strength),
+            kRumbleEventsNames[static_cast<int>(set.rumble_events)]);
     if (set.right_touch.on) {
         SDL_Log("input: the right mouse button touches (%u, %u)",
                 static_cast<unsigned>(set.right_touch.x), static_cast<unsigned>(set.right_touch.y));

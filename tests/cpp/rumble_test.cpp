@@ -4,8 +4,9 @@
 // writes guest memory. The frontend's half: Rumble on SDL3 virtual joysticks whose motors
 // record every call SDL makes to them: the game's vibration, a hit and a level-up rumble the
 // active pad with the strength scaled, the requests of one turn merge into one rumble, off and
-// strength 0 never rumble, no pad, a pad gone and a pad without motors are no crash. And the
-// settings keys rumble and rumble_strength.
+// strength 0 never rumble, no pad, a pad gone and a pad without motors are no crash;
+// rumble_events = game passes only the game's vibration (#399). And the settings keys rumble,
+// rumble_strength and rumble_events.
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
@@ -537,6 +538,83 @@ TEST_CASE("rumble: through the runtime's hooks: AudioServicesPlaySystemSound and
     CHECK(pad.rumbles.empty());
 }
 
+TEST_CASE("rumble: rumble_events game passes the game's vibration only; all, every source (#399)") {
+    Rig r;
+    virtual_pad::Pad pad(Kind::kXbox360, false, true);
+    r.activate(pad);
+    const mt_game_event hit{MT_GAME_EVENT_HERO_DAMAGE, 0x1000000u, 9, 40, 60, {}};
+    const mt_game_event level_up{MT_GAME_EVENT_LEVEL_UP, 0x1000000u, 5, 60, 60, {}};
+    // game: a hit with the game's vibration off is the damage event alone, and a level-up
+    // never vibrated the phone: neither reaches the motors.
+    r.rumble.configure(true, 100, fe::RumbleEvents::kGame);
+    CHECK(r.rumble.events() == fe::RumbleEvents::kGame);
+    r.rumble.on_event(hit);
+    r.rumble.turn();
+    r.rumble.on_event(level_up);
+    r.rumble.turn();
+    CHECK(pad.rumbles.empty());
+    CHECK(r.rumble.stats().filtered == 2);
+    CHECK(r.rumble.stats().requests == 0);
+    // The vibrate hook does: alone, or with the hit it came with (the game's option on), the
+    // vibration's effect only.
+    r.rumble.on_vibrate();
+    r.rumble.turn();
+    REQUIRE(pad.rumbles.size() == 1);
+    CHECK(is(pad.rumbles[0], fe::kRumbleVibrate, 100));
+    r.rumble.stop();
+    pad.rumbles.clear();
+    r.rumble.on_event(hit);
+    r.rumble.on_vibrate();
+    r.rumble.on_event(level_up);
+    r.rumble.turn();
+    REQUIRE(pad.rumbles.size() == 1);
+    CHECK(is(pad.rumbles[0], fe::kRumbleVibrate, 100));
+    r.rumble.stop();
+    pad.rumbles.clear();
+    // Through the runtime's hooks too: the observer's hit and level-up stop at Rumble.
+    r.rumble.install();
+    Hero h; // installs its own event hook: put Rumble's back
+    r.rumble.install();
+    h.enter(MT_EVENTS_FN_TAKE_DAMAGE, h.addr, 30);
+    h.enter(MT_EVENTS_FN_LEVEL_UP, h.addr);
+    r.rumble.turn();
+    CHECK(pad.rumbles.empty());
+    h.cpu.r[0] = 0xFFF; // kSystemSoundID_Vibrate, as CMSoundPlayer::Vibrate plays it
+    mt_hle_AudioServicesPlaySystemSound(&h.cpu, 0);
+    r.rumble.turn();
+    REQUIRE(pad.rumbles.size() == 1);
+    CHECK(is(pad.rumbles[0], fe::kRumbleVibrate, 100));
+    r.rumble.stop();
+    pad.rumbles.clear();
+    // all (the default): as before #399, each source rumbles.
+    r.rumble.configure(true, 100);
+    CHECK(r.rumble.events() == fe::RumbleEvents::kAll);
+    r.rumble.configure(true, 100, fe::RumbleEvents::kAll);
+    const std::uint64_t filtered = r.rumble.stats().filtered;
+    for (const mt_game_event &e : {hit, level_up}) {
+        r.rumble.on_event(e);
+        r.rumble.turn();
+    }
+    REQUIRE(pad.rumbles.size() == 2);
+    CHECK(is(pad.rumbles[0], fe::kRumbleDamage, 100));
+    CHECK(is(pad.rumbles[1], fe::kRumbleLevelUp, 100));
+    CHECK(r.rumble.stats().filtered == filtered);
+    r.rumble.stop();
+    pad.rumbles.clear();
+    // Off and strength 0 never rumble, whichever the events.
+    for (const fe::RumbleEvents events : {fe::RumbleEvents::kGame, fe::RumbleEvents::kAll}) {
+        for (const bool on : {false, true}) {
+            r.rumble.configure(on, on ? 0u : 100u, events);
+            r.rumble.on_vibrate();
+            r.rumble.on_event(hit);
+            r.rumble.on_event(level_up);
+            r.rumble.turn();
+        }
+    }
+    CHECK(pad.rumbles.empty());
+    r.rumble.uninstall();
+}
+
 TEST_CASE("rumble: no pad, a pad not yet active, a pad gone and a pad without motors") {
     Rig r;
     // No pad at all.
@@ -575,10 +653,12 @@ TEST_CASE("rumble: no pad, a pad not yet active, a pad gone and a pad without mo
     CHECK(r.rumble.stats().sent == 1);
 }
 
-TEST_CASE("settings: rumble is on or off, rumble_strength 0 to 100 (#72)") {
+TEST_CASE("settings: rumble is on or off, rumble_strength 0 to 100 (#72), rumble_events game "
+          "or all (#399)") {
     const fe::Settings defaults;
     CHECK(defaults.rumble);
     CHECK(defaults.rumble_strength == 100);
+    CHECK(defaults.rumble_events == fe::RumbleEvents::kAll);
     fe::Settings s;
     CHECK(fe::parse_settings("rumble = Off\nRUMBLE_STRENGTH=35\n", &s).empty());
     CHECK_FALSE(s.rumble);
@@ -599,6 +679,11 @@ TEST_CASE("settings: rumble is on or off, rumble_strength 0 to 100 (#72)") {
     CHECK_FALSE(fe::apply_setting(&s, "rumble", "maybe", &why));
     CHECK(why == "rumble: 'maybe' is not on or off");
     CHECK(s.rumble);
+    CHECK(fe::parse_settings("rumble_events = GAME\n", &s).empty());
+    CHECK(s.rumble_events == fe::RumbleEvents::kGame);
+    CHECK_FALSE(fe::apply_setting(&s, "rumble_events", "hits", &why));
+    CHECK(why.find("rumble_events: 'hits'") == 0);
+    CHECK(s.rumble_events == fe::RumbleEvents::kGame);
     // Written with their comments, and read back.
     s.rumble = false;
     s.rumble_strength = 42;
@@ -606,6 +691,8 @@ TEST_CASE("settings: rumble is on or off, rumble_strength 0 to 100 (#72)") {
     CHECK(text.find("\nrumble = off\n") != std::string::npos);
     CHECK(text.find("# how strongly, 0 to 100 (percent)\nrumble_strength = 42\n") !=
           std::string::npos);
+    CHECK(text.find("rumble_strength = 42\n# what rumbles: game (") != std::string::npos);
+    CHECK(text.find("\nrumble_events = game\n") != std::string::npos);
     fe::Settings back;
     CHECK(fe::parse_settings(text, &back).empty());
     CHECK(back == s);

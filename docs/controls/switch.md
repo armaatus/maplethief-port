@@ -48,7 +48,7 @@ The Switch's `bindings.ini` starts with `nintendo_buttons = label`: in the file,
 
 ## Rumble
 
-The controller you play with rumbles on the game's vibration, a hit and a level-up, at `rumble_strength` (Controls → Rumble strength), on both sides of a pair or a Pro Controller and in handheld mode ([ADR 0053](../adr/0053-observed-functions-game-events-and-rumble.md)). The Switch's HD rumble plays each effect at its two default frequencies.
+The controller you play with rumbles on the game's vibration and, with `rumble_events = all` (Controls → What rumbles; the Enhanced preset), a hit and a level-up, at `rumble_strength` (Controls → Rumble strength), on both sides of a pair or a Pro Controller and in handheld mode ([ADR 0053](../adr/0053-observed-functions-game-events-and-rumble.md)). The Switch's HD rumble plays each effect at its two default frequencies.
 
 ## Several controllers
 

@@ -571,14 +571,15 @@ constexpr SettingInfo kRegistry[] = {
      .applies = Applies::kAtOnce},
     {.key = "rumble",
      .group = SettingGroup::kControls,
-     .comment = "# the gamepad rumbles on a vibration, a hit and a level-up: on | off",
+     .comment = "# the gamepad rumbles on the game's vibration and, with rumble_events = all, "
+                "a hit and a\n# level-up: on | off",
      .value = on_off<&Settings::rumble>(),
-     // Original and Original + controller: the game's vibration only, once #72's follow-up
-     // splits it from the hit and the level-up.
+     // On in every preset; Original and Original + controller narrow it to the game's
+     // vibration with rumble_events (#399).
      .presets = {"on", "on", "on"},
      .flag = "--rumble",
      .label = "Rumble",
-     .help = "The gamepad rumbles on the game's vibration, a hit and a level-up",
+     .help = "The gamepad rumbles: on the game's vibration, or also a hit and a level-up",
      .applies = Applies::kAtOnce},
     {.key = "rumble_strength",
      .group = SettingGroup::kControls,
@@ -587,6 +588,18 @@ constexpr SettingInfo kRegistry[] = {
      .flag = "--rumble-strength",
      .label = "Rumble strength",
      .help = "How strongly the gamepad rumbles, in percent",
+     .applies = Applies::kAtOnce},
+    // #399 (rumble.h): Original rumbles where the phone vibrated, nowhere else.
+    {.key = "rumble_events",
+     .group = SettingGroup::kControls,
+     .comment = "# what rumbles: game (the game's own vibration only, as the phone) | all (also "
+                "every hit\n# and a level-up)",
+     .value = choice<&Settings::rumble_events>(kRumbleEventsNames),
+     .presets = {"game", "game", "all"},
+     .flag = "--rumble-events",
+     .label = "What rumbles",
+     .help = "game: only where the phone vibrated (the game's vibration option). all: also every "
+             "hit and a level-up",
      .applies = Applies::kAtOnce},
     // #194 (keypad_haptics.h): read live by game.cpp; iOS only, outside the presets.
     {.key = "keypad_haptics",

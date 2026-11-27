@@ -141,8 +141,9 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `audio_pack` | (empty) | - | A directory of your own music and sound files that replace the game's, by name (the game's `sound/` folder lists them; `--check-pack` checks a pack); several, in order, with `|` between them (the packs screen sets it, #370); empty: none. The packs screen lists the folders in `<data folder>/audio-packs/` |
 | `right_touch` | off | - | The right mouse button: a touch at screen point X,Y, or off. Not in the Switch's menu |
 | `hide_keypad` | auto | never / auto / auto | Hide the on-screen key pad: auto (while a gamepad or the keyboard is used), always, never |
-| `rumble` | on | on / on / on | The gamepad rumbles on a vibration, a hit and a level-up: on, off |
+| `rumble` | on | on / on / on | The gamepad rumbles on the game's vibration and, with `rumble_events = all`, a hit and a level-up: on, off |
 | `rumble_strength` | 100 | - | How strongly, 0 to 100 (percent) |
+| `rumble_events` | all | game / game / all | What rumbles: game (the game's own vibration only, as the phone), all (also every hit and a level-up) |
 | `keypad_haptics` | off (light on iOS) | - | IOS: a light tap of the phone at each press of a touch key pad key: off, light, medium |
 | `perf_overlay` | off | off / off / off | The frame-time overlay (F3 shows or hides it while the game runs): on, off |
 | `cash_shop` | off | off / off / off | Assist: the cash shop and the paid revives: off (as the original offline), meso (sold for the hero's meso, dearer with the level, the falls and the purchases) |

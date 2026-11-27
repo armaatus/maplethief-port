@@ -15,7 +15,7 @@
 //                              a device stream, --no-audio or a capture, the next start)
 //   right_touch                Input
 //   hide_keypad                KeypadHider::set_mode (it fades)
-//   rumble, rumble_strength    Rumble::configure
+//   rumble, rumble_strength, rumble_events   Rumble::configure
 //   perf_overlay               PerfOverlay (never in a run that writes images)
 //   fullscreen, vsync          Desktop::apply, then follow_vsync (#145, ADR 0077): Game::vsync
 //                              and the frame telemetry follow, so the paced clock re-plans

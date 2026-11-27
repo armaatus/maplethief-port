@@ -32,9 +32,10 @@ Rumble::~Rumble() {
     stop();
 }
 
-void Rumble::configure(bool on, std::uint32_t strength) {
+void Rumble::configure(bool on, std::uint32_t strength, RumbleEvents events) {
     on_ = on;
     strength_ = std::min<std::uint32_t>(strength, 100);
+    events_ = events;
     if (!on_ || strength_ == 0) {
         pending_ = false;
         merged_ = {};
@@ -68,6 +69,11 @@ void Rumble::request(const RumbleEffect &e) {
 }
 
 void Rumble::on_event(const mt_game_event &e) {
+    const bool observed = e.kind == MT_GAME_EVENT_HERO_DAMAGE || e.kind == MT_GAME_EVENT_LEVEL_UP;
+    if (observed && events_ == RumbleEvents::kGame) {
+        stats_.filtered++; // the phone did not vibrate for these (rumble_events = game)
+        return;
+    }
     switch (e.kind) {
     case MT_GAME_EVENT_HERO_DAMAGE:
         request(kRumbleDamage);

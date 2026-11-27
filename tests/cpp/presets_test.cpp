@@ -58,6 +58,7 @@ const Expected kExpected[] = {
     {"hide_keypad", {"never", "auto", "auto"}},
     {"rumble", {"on", "on", "on"}},
     {"rumble_strength", {nullptr, nullptr, nullptr}},
+    {"rumble_events", {"game", "game", "all"}},      // #399: Original rumbles where the phone did
     {"keypad_haptics", {nullptr, nullptr, nullptr}}, // #194: iOS only
     {"perf_overlay", {"off", "off", "off"}},
     {"cash_shop", {"off", "off", "off"}},
@@ -421,9 +422,41 @@ TEST_CASE("presets: Assists are off in every column; check_registry catches a ba
                     "file writes it");
 }
 
-TEST_CASE("presets: no settings file is today's defaults: Original but for hide_keypad") {
+TEST_CASE("presets: rumble_events is the game's vibration in both Originals, all in Enhanced "
+          "and without a file (#399)") {
+    // ADR 0070's planned row: the phone vibrated only through CMSoundPlayer::Vibrate; the hit
+    // and level-up rumbles the port observes (ADR 0053) are Enhanced's. Without a settings
+    // file it stays all, the behaviour since #72.
+    const SettingInfo *info = fe::find_setting("rumble_events");
+    REQUIRE(info != nullptr);
+    CHECK(info->group == SettingGroup::kControls);
+    CHECK(std::string(info->flag) == "--rumble-events");
+    CHECK(info->applies == fe::Applies::kAtOnce);
+    CHECK(Settings{}.rumble_events == fe::RumbleEvents::kAll);
+    const fe::RumbleEvents want[] = {fe::RumbleEvents::kGame, fe::RumbleEvents::kGame,
+                                     fe::RumbleEvents::kAll};
+    for (std::size_t i = 0; i < 3; i++) {
+        CAPTURE(fe::preset_name(kColumns[i]));
+        Settings s;
+        s.rumble_events =
+            want[i] == fe::RumbleEvents::kAll ? fe::RumbleEvents::kGame : fe::RumbleEvents::kAll;
+        fe::apply_preset(&s, kColumns[i]);
+        CHECK(s.rumble_events == want[i]);
+    }
+    // The row sits after rumble_strength, in Controls.
+    const auto &rows = fe::settings_registry();
+    for (std::size_t i = 0; i + 1 < rows.size(); i++) {
+        if (std::string_view(rows[i + 1].key) == "rumble_events") {
+            CHECK(std::string_view(rows[i].key) == "rumble_strength");
+        }
+    }
+}
+
+TEST_CASE("presets: no settings file is today's defaults: Original but for hide_keypad and "
+          "rumble_events") {
     // ADR 0070: a run without a settings file keeps the defaults it always had. They are the
-    // Original column except hide_keypad (auto since #71; Original keeps the key pad shown).
+    // Original column except hide_keypad (auto since #71; Original keeps the key pad shown) and
+    // rumble_events (all since #72; Original rumbles only where the phone vibrated, #399).
     // Since #145 they are no longer the Original + controller column: the keys below are on
     // there and off without a file, as the game always was (pause_unfocused, ADR 0077: a run
     // without a file has never paused when the window lost focus; hide_online_ui, ADR 0084;
@@ -433,16 +466,17 @@ TEST_CASE("presets: no settings file is today's defaults: Original but for hide_
     CHECK_FALSE(defaults.preset.has_value());
     const std::vector<const SettingInfo *> diff =
         fe::preset_differences(defaults, Preset::kOriginal);
-    REQUIRE(diff.size() == 1);
+    REQUIRE(diff.size() == 2);
     CHECK(std::string(diff[0]->key) == "hide_keypad");
+    CHECK(std::string(diff[1]->key) == "rumble_events");
     std::vector<std::string> controller_keys;
     for (const SettingInfo *info : fe::preset_differences(defaults, Preset::kOriginalController)) {
         controller_keys.emplace_back(info->key);
     }
-    CHECK(controller_keys == std::vector<std::string>{"pause_unfocused", "hide_online_ui",
-                                                      "menu_repeat", "confirm_guard",
-                                                      "button_prompts", "pad_pointer",
-                                                      "pause_on_disconnect"});
+    CHECK(controller_keys == std::vector<std::string>{"rumble_events", "pause_unfocused",
+                                                      "hide_online_ui", "menu_repeat",
+                                                      "confirm_guard", "button_prompts",
+                                                      "pad_pointer", "pause_on_disconnect"});
     CHECK_FALSE(fe::matching_preset(defaults).has_value());
     // #145's keys without a file: windowed, vsync on, no pause when unfocused, English.
     CHECK_FALSE(defaults.fullscreen);

@@ -79,10 +79,12 @@
 //     installed (the vibrate and game-event hooks): the hero is hit through the game's own
 //     damage path, CHero::TakeDamage 0x65B55 (7 HP, as a monster's touch calls it), and gains
 //     a level through the real exp path, CHero::setExp 0x6654D with the EXP the level needs
-//     (CHero::ExpToLevelUp 0x65919), once each with rumble off and once each with it on at 60 %.
-//     Off: HP and level change and the motors get no call. On: one rumble per event, the hit's
-//     the game's own vibration (its option is on by default) merged with the damage event, the
-//     level-up's the level-up effect, each at 60 %.
+//     (CHero::ExpToLevelUp 0x65919), once each with rumble off, on at 60 % and on at 60 % with
+//     rumble_events = game (#399). Off: HP and level change and the motors get no call. On: one
+//     rumble per event, the hit's the game's own vibration (its option is on by default) merged
+//     with the damage event, the level-up's the level-up effect, each at 60 %. Game: the hit
+//     rumbles once with the vibration's effect alone (through the game's vibration), the
+//     level-up sends no motor call.
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -993,9 +995,12 @@ std::string calls_text(const std::vector<virtual_pad::RumbleCall> &v) {
 
 constexpr u32 k_strength = 60;
 
-// A hit and a level-up through the game's own code with rumble off (from t0) and on (t0 + 4).
-void rumble_events(Run &r, double t0, bool on) {
-    const std::string mode = on ? "rumble on (60 %)" : "rumble off";
+// A hit and a level-up through the game's own code with rumble off, on, or on with
+// rumble_events = game (#399), from t0.
+void rumble_events(Run &r, double t0, bool on, fe::RumbleEvents events = fe::RumbleEvents::kAll) {
+    const bool game = events == fe::RumbleEvents::kGame;
+    const std::string mode =
+        !on ? "rumble off" : (game ? "rumble on (60 %), rumble_events game" : "rumble on (60 %)");
     struct Before {
         Hero hero;
         std::size_t calls = 0;
@@ -1003,8 +1008,8 @@ void rumble_events(Run &r, double t0, bool on) {
         u32 system_sounds = 0;
     };
     const auto before = std::make_shared<Before>();
-    at(r, t0, [&r, on, before](mt_cpu *cpu) {
-        r.rumble.configure(on, k_strength);
+    at(r, t0, [&r, on, events, before](mt_cpu *cpu) {
+        r.rumble.configure(on, k_strength, events);
         before->hero = hero(cpu);
         before->calls = rumbles(r).size();
         before->events = mt_game_events_get_stats();
@@ -1012,7 +1017,7 @@ void rumble_events(Run &r, double t0, bool on) {
         // A monster's touch: CHero::CheckMobContact 0x65F05 calls this with the mob's attack.
         call(cpu, k_take_damage, {before->hero.addr, 7, 0});
     });
-    at(r, t0 + 0.5, [&r, on, mode, before](mt_cpu *cpu) {
+    at(r, t0 + 0.5, [&r, on, game, mode, before](mt_cpu *cpu) {
         const Hero h = hero(cpu);
         const mt_game_events_stats ev = mt_game_events_get_stats();
         const std::vector<virtual_pad::RumbleCall> v = rumbles(r);
@@ -1022,7 +1027,14 @@ void rumble_events(Run &r, double t0, bool on) {
                   vibrated,
               mode + ": CHero::TakeDamage(7): HP " + std::to_string(before->hero.hp) + " -> " +
                   std::to_string(h.hp) + ", one damage event, the game's own vibration played");
-        if (on) {
+        if (on && game) {
+            const Uint16 low = amplitude(fe::kRumbleVibrate.low, k_strength);
+            const Uint16 high = amplitude(fe::kRumbleVibrate.high, k_strength);
+            check(fresh.size() == 1 && fresh[0].low == low && fresh[0].high == high,
+                  mode + ": the hit rumbles the pad once, the game's vibration alone (" +
+                      std::to_string(low) + ", " + std::to_string(high) +
+                      "): " + calls_text(fresh));
+        } else if (on) {
             const Uint16 low =
                 amplitude(std::max(fe::kRumbleVibrate.low, fe::kRumbleDamage.low), k_strength);
             const Uint16 high =
@@ -1041,7 +1053,7 @@ void rumble_events(Run &r, double t0, bool on) {
         before->events = ev;
         call(cpu, k_set_exp, {h.addr, static_cast<u32>(need - h.exp)});
     });
-    at(r, t0 + 1.5, [&r, on, mode, before](mt_cpu *cpu) {
+    at(r, t0 + 1.5, [&r, on, game, mode, before](mt_cpu *cpu) {
         const Hero h = hero(cpu);
         const mt_game_events_stats ev = mt_game_events_get_stats();
         const std::vector<virtual_pad::RumbleCall> v = rumbles(r);
@@ -1051,7 +1063,7 @@ void rumble_events(Run &r, double t0, bool on) {
               mode + ": CHero::setExp with the level's EXP: level " +
                   std::to_string(before->hero.level) + " -> " + std::to_string(h.level) +
                   ", one level-up event, HP " + std::to_string(h.hp));
-        if (on) {
+        if (on && !game) {
             const Uint16 low = amplitude(fe::kRumbleLevelUp.low, k_strength);
             const Uint16 high = amplitude(fe::kRumbleLevelUp.high, k_strength);
             check(fresh.size() == 1 && fresh[0].low == low && fresh[0].high == high,
@@ -1078,11 +1090,13 @@ void rumble(Run &r) {
     });
     rumble_events(r, 58.0, false);
     rumble_events(r, 61.0, true);
-    at(r, 64.0, [&r](mt_cpu *) {
+    rumble_events(r, 64.0, true, fe::RumbleEvents::kGame);
+    at(r, 67.0, [&r](mt_cpu *) {
         const fe::RumbleStats &st = r.rumble.stats();
-        check(st.sent == 2 && st.failed == 0 && st.no_pad == 0,
+        check(st.sent == 3 && st.failed == 0 && st.no_pad == 0 && st.filtered == 2,
               "Rumble: " + std::to_string(st.requests) + " requests, " + std::to_string(st.sent) +
-                  " sent, " + std::to_string(st.ignored) + " ignored while off");
+                  " sent, " + std::to_string(st.ignored) + " ignored while off, " +
+                  std::to_string(st.filtered) + " events dropped by rumble_events game");
         r.rumble.uninstall();
         r.rumble.stop();
         r.done = true;
