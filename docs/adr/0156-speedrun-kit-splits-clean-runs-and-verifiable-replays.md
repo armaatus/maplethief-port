@@ -83,7 +83,7 @@ Built in [`platform/src/run_timer.h`](../../platform/src/run_timer.h) (no SDL) w
 - **Run variables a category does not name** may only take their Original value. A run outside its category's values is timed, logged and shown, never a personal best.
 - **The personal best** is the fastest finished run that is clean and inside its category, by real time; it is stored as a run log (`runs/<category>.best`), and the overlay compares the last split reached with the best's.
 - **The category file and the run log** are `key = value` text ([docs/formats/run-category.md](../formats/run-category.md)). The shipped categories live in `platform/categories/` and are embedded in the binary by CMake; a player's own go in `<data dir>/categories/` and replace a shipped one of the same name.
-- **Any%'s splits** are the three chapter ends and the bosses the main quests need (64, 67, 69). Mob 66 is a side quest's boss and mob 68 has no fight in version 1.5, so splitting on them would leave a run waiting.
+- **Any%'s splits** are the three chapter ends and the bosses the main quests need (64, 67, 69). Mob 66 is a side quest's boss and mob 68 has no fight in version 1.5, so splitting on them would leave a run waiting. (Wrong about 68: see the [#434 addendum](#addendum-434-any-splits-on-mob-68).)
 - **The overlay** is the frame-time overlay's box (ADR 0071) in the safe area's top right corner, drawn after every read-back, so never in a shot or a golden.
 
 The times are the host's monotonic clock (`SDL_GetTicksNS`) and the input layer's tick count (`mt_input_get_stats`). With #405's clock tape a replay can recompute both from the tape (#408); the timer takes its clock as a parameter for that.
@@ -185,3 +185,13 @@ Built in [`platform/src/input_display.h`](../../platform/src/input_display.h) wi
 - **How it draws.** The port's Canvas (its 5x7 font and shapes, no game art) into a small texture, drawn after every read-back like the minimap and the EXP figure. It is never in a shot, a golden of the game, a `--capture` or the regression replay's digests, so it is not a run variable.
 
 **Evidence.** `tests/cpp/input_display_test.cpp` (CI): the action layer driven by keys and a pad lights exactly the delivered cells; the pad keys light theirs; the placement in a side bar, a bar below and over the picture; goldens `tests/golden/data/input_display_idle.png` and `input_display_held.png` of the panel alone on a synthetic frame. Locally with real assets, `scripts/regress --settings input_display=on` gives the same digests as with it off.
+
+## Addendum (#434): Any% splits on mob 68
+
+Accepted (delegated by Joris, 2026-11-27). The #406 addendum left mob 68 out of Any% because it "has no fight in version 1.5". The port's own chapter 2 run disproves that: mob 68 (32,000 HP) is main quest 8's boss on 9.5, the map's own spawn with no map script and no boss scene ([docs/re/boss-fights.md](../re/boss-fights.md)), and `play.chapter_2_f_synthetic` kills it with the run event `boss_killed 68` ([docs/testing/chapter-2-quests.md](../testing/chapter-2-quests.md), main 8). Main 8 leads to main 9 and the trip to chapter 3, so every run fights it.
+
+- **Any%'s splits** are now seven: the tutorial's end, mob 64, chapter 1's end, **mob 68 (`Chapter 2 boss`)**, chapter 2's end, mob 67 and mob 69. The new split sits between chapter 1's and chapter 2's ends, where the game fires it.
+- **Mob 66 stays out.** It is side quest 37's boss on 4.17, which a run can skip, so a split on it could leave a run waiting; the #406 reason holds for 66 only.
+- A personal best or a `.segments` file saved with the six-split Any% no longer lines up with the category; no release shipped one (#406 and #434 are in the same unreleased line).
+
+**Evidence.** `tests/cpp/run_timer_test.cpp`, `run categories: both shipped categories parse` (CI): Any%'s split list, in order, with 68 fourth. Locally with real assets, `play.chapter_2_f_synthetic` times Any%'s splits from `Chapter 2 boss` to `Chapter 2`: the 68 split fires on `run event mob 68 killed` and the run finishes at chapter 2's end.

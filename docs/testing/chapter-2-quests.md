@@ -119,7 +119,7 @@ the bot chooses in the NPC's quest list.
 | 7 | Alchester, list 2 | 25 of mob 41 (9.2) | done | E: `farm: 25 of mob 41 on 9.2 (main 7)`, `talk: Alchester: main 7 done, main 71 given` |
 | 71 | Alchester, list 3 | sides 35 and 36 done | done | E: `talk: Alchester: main 71 done, main 72 given` |
 | 72 | Alchester, list 4 | 30 of item 66 (mob 45, 9.3) | done | E: `talk: Alchester: main 72 done, main 8 given`; `ok: part E's quests: …` |
-| 8 | Alchester, list 5 | mob 68 on 9.5 (32,000 HP) | done | F (synthetic): `farm: mob 68 on 9.5 (main 8)`, `run event mob 68 killed`, `talk: Alchester: main 8 done, main 9 given` |
+| 8 | Alchester, list 5 | mob 68 on 9.5 (32,000 HP) | done | F (synthetic): `farm: mob 68 on 9.5 (main 8)`, `run event mob 68 killed`, Any%'s `Chapter 2 boss` split (#434), `talk: Alchester: main 8 done, main 9 given` |
 | 9 | Alchester → Pirate_Orbis (4.1), list 2 | — (no reward call: the trip clears it) | ends at the trip | F (synthetic): `ok: chapter 2 before the trip: main 8:2 main 9:1`, then the trip below |
 
 ### Side quests on the way

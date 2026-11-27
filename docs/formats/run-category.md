@@ -42,7 +42,7 @@ Refused, each with its line number (`line 4: ...`), and the file as a whole then
 
 ### The shipped categories
 
-- **`any`**, *Any%*: a new character to the death of mob 69, whose closing scene is the first ending scene. Splits: the tutorial's end, mob 64's death, chapter 1's end, chapter 2's end, mob 67's death, mob 69's death. Mob 66 is a side quest's boss and mob 68 has no fight in version 1.5 ([docs/re/mechanics.md](../re/mechanics.md)), so neither is a split.
+- **`any`**, *Any%*: a new character to the death of mob 69, whose closing scene is the first ending scene. Splits: the tutorial's end, mob 64's death, chapter 1's end, mob 68's death (main 8's boss on 9.5), chapter 2's end, mob 67's death, mob 69's death. Mob 66 is side quest 37's boss on 4.17 ([docs/testing/chapter-2-quests.md](../testing/chapter-2-quests.md)), which a run need not play, so it is not a split.
 - **`chapter_1`**, *Chapter 1*: a new character to the trip to Orbis (chapter 1's `clearAll`). Splits: the tutorial's end, mob 64's death, chapter 1's end.
 
 Both allow every run variable (`fix_original_bugs`, `skip_intros`, `widescreen`, `texture_pack`) off only, the original game's rules: they name only the first two, and a run variable a category does not name may only take its Original value.

@@ -532,15 +532,18 @@ TEST_CASE("run categories: both shipped categories parse") {
     REQUIRE(ch1.has_value());
     CHECK(any->id == "any");
     CHECK(any->title == "Any%");
-    // Any%: a new character to mob 69's death, on every chapter end and main-quest boss.
-    CHECK(any->splits.back() == fe::RunSplit{MT_GAME_EVENT_BOSS_KILLED, 69, 0, "Last boss"});
-    std::size_t chapter_ends = 0, bosses = 0;
-    for (const fe::RunSplit &s : any->splits) {
-        chapter_ends += s.kind == MT_GAME_EVENT_CHAPTER_END ? 1 : 0;
-        bosses += s.kind == MT_GAME_EVENT_BOSS_KILLED ? 1 : 0;
-    }
-    CHECK(chapter_ends == 3);
-    CHECK(bosses == 3);
+    // Any%: a new character to mob 69's death, on every chapter end and main-quest boss, in the
+    // order the game fires them: 68 is main 8's boss in chapter 2 (#434); 66, side 37's, is not.
+    const std::vector<fe::RunSplit> any_splits = {
+        {MT_GAME_EVENT_CHAPTER_END, 0, 0, "Tutorial"},
+        {MT_GAME_EVENT_BOSS_KILLED, 64, 0, "Chapter 1 boss"},
+        {MT_GAME_EVENT_CHAPTER_END, 1, 0, "Chapter 1"},
+        {MT_GAME_EVENT_BOSS_KILLED, 68, 0, "Chapter 2 boss"},
+        {MT_GAME_EVENT_CHAPTER_END, 2, 0, "Chapter 2"},
+        {MT_GAME_EVENT_BOSS_KILLED, 67, 0, "Chapter 3 boss"},
+        {MT_GAME_EVENT_BOSS_KILLED, 69, 0, "Last boss"},
+    };
+    CHECK(any->splits == any_splits);
     // Chapter 1: to the trip to Orbis (chapter 1's clearAll).
     CHECK(ch1->id == "chapter_1");
     CHECK(ch1->splits.back() == fe::RunSplit{MT_GAME_EVENT_CHAPTER_END, 1, 0, "Orbis"});

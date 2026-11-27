@@ -45,7 +45,7 @@ The timer shows **real time**: the time on your computer's clock from the start 
 
 | Category | From | To | Splits |
 |---|---|---|---|
-| **Any%** (`any`) | a new character | the last boss's death (the first ending scene) | the tutorial's end, the chapter 1 boss, chapter 1's end, chapter 2's end, the chapter 3 boss, the last boss |
+| **Any%** (`any`) | a new character | the last boss's death (the first ending scene) | the tutorial's end, the chapter 1 boss, chapter 1's end, the chapter 2 boss, chapter 2's end, the chapter 3 boss, the last boss |
 | **Chapter 1** (`chapter_1`) | a new character | the trip to Orbis | the tutorial's end, the chapter 1 boss, the trip to Orbis |
 
 ### Your own categories
@@ -150,7 +150,7 @@ On a computer (macOS, Windows, Linux) the timer can drive [LiveSplit](https://li
 
 1. In LiveSplit, right-click, **Control**, **Start TCP Server** (each time you start LiveSplit, unless its server settings start it by themselves). The default port is 16834.
 2. In the port, turn on **Speedrun timer** and set `livesplit = localhost` in `settings.ini` (or `localhost:PORT` for another port), or start it with `--run-timer on --livesplit localhost`. The **LiveSplit server** row in the **Other** tab shows the value.
-3. Give LiveSplit as many splits as your category has, in the same order (Any% has six, Chapter 1 three).
+3. Give LiveSplit as many splits as your category has, in the same order (Any% has seven, Chapter 1 three).
 
 The link is off by default. It connects to LiveSplit's own server only: `localhost`, or an IP address (another computer on your network, as `192.168.1.20:16834` or `[fe80::1]:16834`), never a name to look up. If LiveSplit isn't there, the game plays on as usual, the log says so once and the port tries again every few seconds without a word. A run that starts before LiveSplit connects is not in LiveSplit. A practice ([Practice from a split](#practice-from-a-split)) is never a run, so LiveSplit hears nothing of it; loading a practice state during a run resets LiveSplit's.
 
