@@ -153,6 +153,9 @@
 //   run_timer = off
 //   # the timer's category: any | chapter_1, or a file of your own in <data dir>/categories
 //   run_category = any
+//   # record every session, from the start to quit, as a run file in runs/ that plays back
+//   # exactly (MapleThief --play-run FILE): on | off
+//   record_runs = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -725,6 +728,9 @@ struct Settings {
     // category it times (a category file's name, without .mtcat). Outside the presets.
     bool run_timer = false;           // run_timer, --run-timer (on | off)
     std::string run_category = "any"; // run_category, --run-category (NAME)
+    // Run recording (#405, ADR 0156, run_recorder.h): every session from the start to quit into
+    // <data dir>/runs/, off by default and in no preset.
+    bool record_runs = false; // record_runs, --record-runs (on | off)
 
     bool operator==(const Settings &) const = default;
 };

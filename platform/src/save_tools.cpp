@@ -19,6 +19,7 @@
 #include "maplethief/hooks.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
+#include "run_recorder.h"
 #include "save_zip.h"
 
 namespace maplethief::frontend {
@@ -448,6 +449,7 @@ namespace {
 // import_saves, which may throw std::bad_alloc.
 bool import_set(const SaveLocation &loc, const std::string &source, const std::string &stamp,
                 ImportResult *result, std::string *why) {
+    run_refuse("a save import or backup restore"); // the game's files change (run_census.h)
     ImportResult local;
     ImportResult &r = result != nullptr ? *result : local;
     r = ImportResult{};

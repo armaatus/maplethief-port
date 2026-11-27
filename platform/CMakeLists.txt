@@ -87,6 +87,9 @@ add_library(
     src/render_scale.cpp
     src/replay.cpp
     src/rumble.cpp
+    src/run_census.cpp
+    src/run_file.cpp
+    src/run_recorder.cpp
     src/run_timer.cpp
     src/file_dialog.cpp
     src/save_menu.cpp

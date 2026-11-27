@@ -26,6 +26,7 @@
 #include "maplethief/diag.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/input.h"
+#include "maplethief/runtape.h"
 #include "objc/objc_internal.h"
 #include "snapshot/snapshot_internal.h"
 #include "uikit/nib.h"
@@ -947,6 +948,12 @@ extern "C" int mt_uikit_lifecycle_event(mt_cpu *cpu, std::uint32_t event) noexce
     if (event >= sizeof k_selectors / sizeof k_selectors[0]) {
         return 0;
     }
+    mt_runtape_event e{};
+    e.kind = MT_RUNTAPE_LIFECYCLE;
+    e.a = event;
+    if (mt_runtape_admit(&e) == 0) {
+        return 0; // a tape plays: only its messages reach the guest
+    }
     const State &st = state(cpu);
     if (st.delegate == 0 || !responds(cpu, st.delegate, k_selectors[event])) {
         return 0;
@@ -1004,9 +1011,11 @@ extern "C" std::int32_t mt_uikit_app_main(mt_process *, mt_cpu *cpu, const mt_ap
         mt_process_stop(cpu, "UIApplicationMain: launched; no turn hook installed");
     }
     for (;;) {
+        mt_runtape_turn();
         const double t = now(cpu);
         mt_uikit_turn(cpu, t);
         const double next = mt_runloop_run_once(cpu, t);
+        mt_runtape_deliver(cpu); // a tape that plays: this turn's input, as the hook gave it
         const mt_uikit_config &c = state(cpu).config;
         if (c.turn(c.user, cpu, t, next) != 0) {
             mt_process_stop(cpu, "UIApplicationMain: the host ended the run loop");

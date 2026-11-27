@@ -20,6 +20,7 @@
 #include "maplethief/saves.h"
 #include "maplethief/snapshot.h"
 #include "port_text.h"
+#include "run_recorder.h"
 
 #ifndef MT_VERSION
 #define MT_VERSION "unknown"
@@ -344,6 +345,7 @@ QuickOps game_quick_ops(mt_cpu *cpu, std::function<void()> release,
         ex.rebase_clock = rebase;
         ex.user = user;
         char buf[256] = {};
+        run_refuse("a save state's load"); // the run's recording ends here (run_census.h)
         if (mt_snapshot_restore(cpu, bytes.data(), bytes.size(), &ex, nullptr, buf, sizeof buf) !=
             0) {
             *why = buf;

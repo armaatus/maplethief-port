@@ -1259,6 +1259,17 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Speedrun category",
      .help = "What the timer times: Any% (to the last boss) or Chapter 1 (to the trip to Orbis)",
      .applies = Applies::kAtOnce},
+    // Run recording (#405, ADR 0156, run_recorder.h): a replay of every session.
+    {.key = "record_runs",
+     .group = SettingGroup::kOther,
+     .comment = "# record every session, from the start to quit, as a run file in runs/ that "
+                "plays back\n# exactly (MapleThief --play-run FILE): on | off",
+     .value = on_off<&Settings::record_runs>(),
+     .flag = "--record-runs",
+     .game_only = true,
+     .label = "Record runs",
+     .help = "Keeps a replay of every session in runs/, from the start to quit; it plays back "
+             "exactly with --play-run"},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

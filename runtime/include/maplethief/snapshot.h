@@ -93,6 +93,12 @@ int mt_snapshot_save(mt_cpu *cpu, const mt_snapshot_meta *meta, uint8_t **out, s
 int mt_snapshot_deflate(const uint8_t *bytes, size_t size, uint8_t **out, size_t *out_size,
                         char *why, size_t why_size) MT_NOEXCEPT;
 
+/* A digest of guest memory as a save state reads it (#405, ADR 0156): the writable image
+ * segments and the heap up to its committed end, FNV-1a 64 over each range's address, length and
+ * bytes. Equal in two runs that reached the same guest state, whatever the presentation. Guest
+ * thread, between two run-loop turns. */
+uint64_t mt_snapshot_memory_digest(mt_cpu *cpu) MT_NOEXCEPT;
+
 /* --- reading -------------------------------------------------------------------------------- */
 
 typedef struct mt_snapshot_header {
@@ -145,6 +151,13 @@ int mt_snapshot_has_serializer(const char *name) MT_NOEXCEPT;
 void mt_sha256(const uint8_t *data, size_t n, uint8_t out[32]) MT_NOEXCEPT;
 /* CRC-32 (IEEE 802.3) of `n` bytes, continuing from `crc` (0 to start). */
 uint32_t mt_crc32(uint32_t crc, const uint8_t *data, size_t n) MT_NOEXCEPT;
+/* `size` bytes deflated as a zlib stream (RFC 1950) into *out (malloc'd, freed with free) and
+ * *out_size, as the state files' sections are (the run files of #405 too). Returns 0, or -1
+ * (too large, out of memory). */
+int mt_zlib_deflate(const uint8_t *data, size_t size, uint8_t **out, size_t *out_size) MT_NOEXCEPT;
+/* A zlib stream inflated into *out (malloc'd, freed with free), which must come to exactly
+ * `expected` bytes. Returns 0, or -1 for a malformed stream or another length (untrusted input). */
+int mt_zlib_inflate(const uint8_t *data, size_t size, size_t expected, uint8_t **out) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

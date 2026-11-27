@@ -702,6 +702,8 @@ extern "C" int mt_gcd_configure(const mt_gcd_config *cfg) noexcept {
     return 0;
 }
 
+extern "C" mt_gcd_config mt_gcd_get_config(void) noexcept { return G.cfg; }
+
 extern "C" void mt_gcd_reset(void) noexcept {
     if (t_worker != nullptr) {
         log_line("mt_gcd_reset on a worker thread: ignored");

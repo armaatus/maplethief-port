@@ -956,6 +956,37 @@ extern "C" void mt_snapshot_configure(const mt_snapshot_config *config) noexcept
     g_config = config != nullptr ? *config : mt_snapshot_config_default();
 }
 
+extern "C" uint64_t mt_snapshot_memory_digest(mt_cpu *cpu) noexcept {
+    std::uint64_t h = 0xcbf29ce484222325ull;
+    const auto mix = [&h](const std::uint8_t *p, std::size_t n) {
+        for (std::size_t i = 0; i < n; i++) {
+            h = (h ^ p[i]) * 0x100000001b3ull;
+        }
+    };
+    const auto range = [&](u32 lo, u32 hi) {
+        const std::uint8_t head[8] = {static_cast<std::uint8_t>(lo),
+                                      static_cast<std::uint8_t>(lo >> 8),
+                                      static_cast<std::uint8_t>(lo >> 16),
+                                      static_cast<std::uint8_t>(lo >> 24),
+                                      static_cast<std::uint8_t>(hi - lo),
+                                      static_cast<std::uint8_t>((hi - lo) >> 8),
+                                      static_cast<std::uint8_t>((hi - lo) >> 16),
+                                      static_cast<std::uint8_t>((hi - lo) >> 24)};
+        mix(head, sizeof head);
+        mix(cpu->mem + lo, hi - lo);
+    };
+    mt_mem *mem = mt_mem_from_cpu(cpu);
+    if (mem == nullptr) {
+        return h;
+    }
+    for (const mt_segment *s : writable_segments(mem)) {
+        range(s->vmaddr, s->vmaddr + s->vmsize);
+    }
+    const std::lock_guard<std::mutex> lock(mem->heap.mu);
+    range(MT_GUEST_HEAP_BASE, mem->heap.committed);
+    return h;
+}
+
 namespace {
 
 // The safe-point check. A restore (`restoring`) skips the input conditions: the state it puts

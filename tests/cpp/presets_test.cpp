@@ -119,6 +119,7 @@ const Expected kExpected[] = {
     {"update_check", {nullptr, nullptr, nullptr}}, // #199: opt-in, in no preset
     {"run_timer", {nullptr, nullptr, nullptr}},    // #406: the speedrun timer, in no preset
     {"run_category", {nullptr, nullptr, nullptr}},
+    {"record_runs", {nullptr, nullptr, nullptr}}, // #405: opt-in, in no preset
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 

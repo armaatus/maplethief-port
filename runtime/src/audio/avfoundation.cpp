@@ -46,6 +46,7 @@
 #include "cf/cf_objects.h"
 #include "foundation/foundation.h"
 #include "maplethief/diag.h"
+#include "maplethief/runtape.h"
 #include "snapshot/snapshot_internal.h"
 
 namespace mt_audio {
@@ -169,7 +170,9 @@ PlayerState *player(mt_cpu *cpu) {
     const u32 self = mt_objc_self(cpu);
     auto *s =
         static_cast<PlayerState *>(mt_objc_find_state(mt_objc_current(), self, &k_player_state));
-    if (s != nullptr && s->playing && !mix::music_playing(self)) {
+    // The mixer plays out on the audio device's thread, in real time: what the guest sees of it
+    // is taped (maplethief/runtape.h).
+    if (s != nullptr && s->playing && mt_runtape_music_playing(mix::music_playing(self)) == 0) {
         s->playing = false;
         s->finished = true;
         stats().players_playing--;

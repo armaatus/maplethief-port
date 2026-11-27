@@ -13,6 +13,7 @@
 //              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB] [--safe-area T,L,B,R]
 //              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N] [--seconds S]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
+//              [--pad T,BUTTON,down|up]... [--play-run FILE]
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
 //              [--effects-volume N] [--mute-unfocused on|off] [--gapless-music on|off]
@@ -193,6 +194,14 @@
 //                     turn: a left click at the window point that shows it, through the same
 //                     path as the mouse's (a test aid)
 //   --hold T,X,Y,S    the same touch held down for S seconds (a key pad button: walking, #87)
+//   --pad T,BUTTON,down|up  a virtual Xbox 360 pad's button (SDL's names: a, b, dpup, start,
+//                     ...) set T seconds after the first run-loop turn, through SDL's events as
+//                     a real pad's (a test aid, #405)
+//   --play-run FILE   play a run file (record_runs = on writes them in <data dir>/runs/, #405,
+//                     ADR 0156): its game files in a scratch data folder, its settings, its
+//                     tape as the clock and the only input, as fast as the host goes; checks a
+//                     checkpoint every 1,000 game ticks; exit status 6 if one differs or the
+//                     replay ends early. With SDL_VIDEO_DRIVER=dummy it runs headless
 //   --fixed-step MS   run on a virtual clock (ADR 0044): every run-loop turn advances it by MS
 //                     milliseconds (0.001 to 1000) and nothing waits, so a scripted run
 //                     reaches the same frames bit for bit every time
@@ -333,6 +342,7 @@
 #include "player_log.h"
 #include "present.h"
 #include "preset_picker.h"
+#include "run_recorder.h"
 #include "save_tools.h"
 #include "scaling.h"
 #include "settings.h"
@@ -411,6 +421,7 @@ struct Options {
     bool force = false;                            // --force (with --migrate-from)
     bool safe_start = false;                       // --safe-start (#198)
     std::string crash_dialog;                      // --crash-dialog FILE: show it and exit
+    std::string play_run;                          // --play-run FILE (#405): replay a run file
     GameOptions game;
 };
 
@@ -569,6 +580,7 @@ void print_usage() {
             "[--safe-area T,L,B,R] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
             "[--capture-at N[,N...]] [--tap T,X,Y]... [--swipe T,X1,Y1,X2,Y2]... "
+            "[--pad T,BUTTON,down|up]... [--play-run FILE] "
             "[--fixed-step MS] [--shot T,NAME]... "
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
@@ -851,6 +863,21 @@ bool parse_options(int argc, char **argv, Options &options) {
             tap.y2 = tap.y;
             options.game.taps.push_back(tap);
             options.game_option = true;
+        } else if (arg == "--pad" && has_value) {
+            const std::vector<std::string_view> parts = split(argv[++i]);
+            double t = 0;
+            const SDL_GamepadButton b =
+                parts.size() == 3 ? SDL_GetGamepadButtonFromString(std::string(parts[1]).c_str())
+                                  : SDL_GAMEPAD_BUTTON_INVALID;
+            if (parts.size() != 3 || !parse_double(parts[0], &t) || t < 0 ||
+                b == SDL_GAMEPAD_BUTTON_INVALID || (parts[2] != "down" && parts[2] != "up")) {
+                SDL_Log("--pad needs T,BUTTON,down|up (seconds, an SDL gamepad button name: a, "
+                        "b, dpup, start, ...), got '%s'",
+                        argv[i]);
+                return false;
+            }
+            options.game.pad_steps.push_back({t, static_cast<int>(b), parts[2] == "down"});
+            options.game_option = true;
         } else if (arg == "--hold" && has_value) {
             const std::vector<std::string_view> parts = split(argv[++i]);
             double v[4] = {};
@@ -929,6 +956,9 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.game.quit_at = t;
+            options.game_option = true;
+        } else if (arg == "--play-run" && has_value) {
+            options.play_run = argv[++i];
             options.game_option = true;
         } else if (arg == "--fixed-step" && has_value) {
             double ms = 0;
@@ -1318,6 +1348,22 @@ int main(int argc, char *argv[]) {
     // The data folder (data_location.h, ADR 0127): --data-location first, then resolved on the
     // first use. Without SDL's video: SDL_GetBasePath and SDL_GetPrefPath need none.
     set_data_location_flag(options.data_location);
+    // --play-run FILE (#405): the run file read, its game files in a scratch data folder of
+    // their own (the player's saves are never touched), before anything resolves the folder.
+    if (!options.play_run.empty()) {
+        std::string why;
+        auto run = std::make_shared<RunFile>();
+        const std::string dir = prepare_run_folder(options.play_run, run.get(), &why);
+        if (dir.empty()) {
+            SDL_Log("--play-run %s: %s", options.play_run.c_str(), why.c_str());
+            return kExitUsage;
+        }
+        set_data_location_dir(dir);
+        SDL_Log("--play-run %s: recorded by MapleThief %s, %llu turns; its %zu game files in %s",
+                options.play_run.c_str(), run->port_version.c_str(),
+                static_cast<unsigned long long>(run->turns), run->files.size(), dir.c_str());
+        options.game.run_file = std::move(run);
+    }
     if (options.print_data_dir) {
         std::fputs(describe_data_location(data_location()).c_str(), stdout);
         return std::fflush(stdout) == 0 ? kExitOk : kExitUsage;
@@ -1432,6 +1478,23 @@ int main(int argc, char *argv[]) {
     }
     for (const auto &[key, value] : options.setting_flags) {
         apply_setting(&settings, key, value, nullptr); // checked by parse_options
+    }
+    if (options.game.run_file != nullptr) {
+        // The recording's settings, whatever settings.ini and the command line say; only the
+        // window's own (fullscreen, vsync) from the command line.
+        Settings recorded;
+        for (const std::string &w : parse_settings(options.game.run_file->settings, &recorded)) {
+            SDL_Log("--play-run: the recording's settings: %s", w.c_str());
+        }
+        recorded.record_runs = false; // a replay is never recorded again
+        recorded.update_check = false;
+        recorded.crash_recovery = false;
+        for (const auto &[key, value] : options.setting_flags) {
+            if (key == "fullscreen" || key == "vsync") {
+                apply_setting(&recorded, key, value, nullptr);
+            }
+        }
+        settings = recorded;
     }
 
     // The last run's crash (#198): offer a safe start, before anything uses the settings. The

@@ -1787,6 +1787,7 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"update_check", false, "no HTTP fetcher on the console (update_fetch.cpp)"},
     {"run_timer", true, ""},
     {"run_category", true, ""},
+    {"record_runs", true, "run files go in the data folder (#405)"},
 };
 constexpr SwitchDecision kSwitchActions[] = {
     {"bindings", true, "the remap screen takes the pad"},
