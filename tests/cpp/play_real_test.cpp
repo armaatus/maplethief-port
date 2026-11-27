@@ -3107,6 +3107,29 @@ void chapter_2_f(Run &r, u64) {
              return true;
          });
     then_farm(r, "mob 68 on 9.5 (main 8)", 9, 5, {68}, ready(0, 8), 3600, boss);
+    // Original bug 17 (docs/re/original-bugs.md): land_first only stops attacks from starting,
+    // and mob 68 hits about every 1.5 s, so a blow already under way can still kill it while the
+    // hero is knocked back; the end scene (game mode 9) then takes no key. When A has not moved
+    // it on for 5 s with CHero +0x119 still set, the run clears that byte, as #420's fix (on in
+    // Enhanced) will, and says so; the scene and the rest are the game's own.
+    auto locked = std::make_shared<double>(-1);
+    then(r, "mob 68's end scene", 120, [&r, locked](mt_cpu *cpu, double el) {
+        const Hero h = hero(cpu);
+        if (game_mode(cpu) != 9 || !h.knocked) {
+            *locked = -1;
+            return !interrupted(r, cpu, el);
+        }
+        interrupted(r, cpu, el);
+        if (*locked < 0) {
+            *locked = el;
+        } else if (el - *locked >= 5) {
+            std::printf("original bug 17: the end scene took no key for 5 s with the hero knocked "
+                        "back; the run clears CHero +0x119 (#420)\n");
+            cpu->mem[h.addr + 0x119] = 0;
+            *locked = -1;
+        }
+        return false;
+    });
     then_run_event(r, "portal942 to 9.5", MT_GAME_EVENT_MAP_CHANGE, 9, {5});
     then_run_event(r, "mob 68 killed", MT_GAME_EVENT_BOSS_KILLED, 68);
     then_talk_to(r, "Alchester: main 8 done, main 9 given", 9, 0, "Alchester", 5, main_quests(8, 9),
