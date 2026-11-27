@@ -207,6 +207,58 @@ TEST_CASE("a jump onto a narrow step leaves from far enough back to land on it")
     CHECK(wm::jump_travel(0) == 49);
 }
 
+// Two steps 40 px of air apart at one height, like 9.9's: a running jump from the very end
+// crosses (a long hop), but only where nothing else leads from one to the other. 64 px above the
+// floor they have no other way; 32 px above it the floor joins them, and the hop is left out.
+TEST_CASE("a long hop joins steps 40 px apart only where nothing else does") {
+    namespace wm = world_map;
+    for (const int row : {10, 14}) {
+        wm::Map m;
+        m.w = 30;
+        m.h = 20;
+        m.att.assign(static_cast<std::size_t>(m.w * m.h), wm::k_air);
+        auto set = [&m](int c, int r, wm::u8 v) {
+            m.att[static_cast<std::size_t>(r * m.w + c)] = v;
+        };
+        for (int c = 0; c < m.w; c++) {
+            set(c, 18, wm::k_foothold); // the floor: y 143
+        }
+        for (int c = 4; c <= 8; c++) {
+            set(c, row, wm::k_foothold); // the left step: x 32..71
+        }
+        for (int c = 14; c <= 18; c++) {
+            set(c, row, wm::k_foothold); // the right step: x 112..151, 40 px of air between
+        }
+        wm::build(m);
+        REQUIRE(m.platforms.size() == 3);
+        int left = -1, right = -1;
+        for (std::size_t i = 0; i < m.platforms.size(); i++) {
+            if (m.platforms[i].row == row) {
+                (m.platforms[i].c0 == 4 ? left : right) = static_cast<int>(i);
+            }
+        }
+        REQUIRE(left >= 0);
+        REQUIRE(right >= 0);
+        const wm::Edge *hop = nullptr;
+        for (const wm::Edge &e : m.edges[static_cast<std::size_t>(left)]) {
+            if (e.to == right && e.long_hop) {
+                hop = &e;
+            }
+        }
+        if (row == 10) {
+            REQUIRE(hop != nullptr);
+            CHECK(hop->move == wm::Move::jump);
+            CHECK(hop->dir == 1);
+            CHECK(hop->x == 70); // from the very end
+            CHECK(hop->x + wm::jump_travel(0) > 112);
+            CHECK(wm::route(m, left, 40, right).size() == 1);
+        } else {
+            CHECK(hop == nullptr);
+            CHECK(!wm::route(m, left, 40, right).empty());
+        }
+    }
+}
+
 // A rope hanging from a high platform, 64 px above the floor (too high to grab from it) and
 // 11 px beside a ledge 48 px below the top (too high to jump), like 5.1's rope to portal510: the
 // ledge reaches the top by a rope grab (a jump toward the rope, up in the air), and the top comes
