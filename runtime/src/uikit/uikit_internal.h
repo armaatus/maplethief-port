@@ -285,6 +285,13 @@ ScreenBox intersect(const ScreenBox &a, const ScreenBox &b);
 ScreenBox screen_box(mt_cpu *cpu, const View &v);
 // The target-action a tap on control `v` sends (touch-up-inside first), or nullptr.
 const TargetAction *tap_action(const View &v);
+// How far the last mt_uikit_controls got: windows walked, views entered, views with a
+// visible box, controls among them, with an action, reached by the hit test, and listed.
+struct ControlsWalkTrace {
+    u32 windows = 0, views = 0, visible = 0, controls = 0, with_action = 0, reached = 0,
+        listed = 0;
+};
+ControlsWalkTrace last_controls_walk();
 
 // --- the module (app.cpp) ------------------------------------------------------------------------
 
