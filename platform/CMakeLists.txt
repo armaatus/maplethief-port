@@ -91,6 +91,7 @@ add_library(
     src/run_file.cpp
     src/run_recorder.cpp
     src/run_timer.cpp
+    src/run_verify.cpp
     src/livesplit.cpp
     src/file_dialog.cpp
     src/save_menu.cpp

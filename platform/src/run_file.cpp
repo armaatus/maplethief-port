@@ -408,7 +408,23 @@ bool read_body(const u8 *p, std::size_t n, RunFile *out, std::string *why) {
             }
         } else if (t == "SPLT") {
             u64 count = 0;
-            if (r.count(&count, 4, "splits")) {
+            if (r.count(&count, 2, "categories") && count > kRunMaxCategories) {
+                r.fail(std::to_string(count) + " categories, over the limit of " +
+                       std::to_string(kRunMaxCategories));
+            }
+            if (r.ok()) {
+                out->categories.resize(count);
+                for (RunFileCategory &c : out->categories) {
+                    if (!r.text(&c.id, 64) || !r.text(&c.text, kRunMaxCategoryText)) {
+                        break;
+                    }
+                    if (c.id.empty() || c.id.find_first_of("/\\:.") != std::string::npos) {
+                        r.fail("a category named '" + c.id + "' (a plain name expected)");
+                        break;
+                    }
+                }
+            }
+            if (r.ok() && r.count(&count, 4, "splits")) {
                 out->splits.resize(count);
                 for (RunFileSplit &s : out->splits) {
                     if (!r.text(&s.name, 256) || !r.var(&s.turn) || !r.var(&s.rta_us) ||
@@ -496,8 +512,9 @@ bool RunFile::operator==(const RunFile &o) const {
     }
     return binary_sha256 == o.binary_sha256 && port_version == o.port_version &&
            settings == o.settings && changes == o.changes && files == o.files &&
-           same_events(events, o.events) && splits == o.splits && checkpoints == o.checkpoints &&
-           end == o.end && end_detail == o.end_detail && turns == o.turns;
+           same_events(events, o.events) && categories == o.categories && splits == o.splits &&
+           checkpoints == o.checkpoints && end == o.end && end_detail == o.end_detail &&
+           turns == o.turns;
 }
 
 std::vector<std::uint8_t> write_run_file(const RunFile &run) {
@@ -561,6 +578,11 @@ std::vector<std::uint8_t> write_run_file(const RunFile &run) {
     }
     {
         Writer w;
+        w.var(run.categories.size());
+        for (const RunFileCategory &c : run.categories) {
+            w.text(c.id);
+            w.text(c.text);
+        }
         w.var(run.splits.size());
         for (const RunFileSplit &s : run.splits) {
             w.text(s.name);

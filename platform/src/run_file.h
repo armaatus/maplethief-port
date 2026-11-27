@@ -33,6 +33,8 @@ inline constexpr std::uint64_t kRunMaxBody = 512ull << 20; // inflated body
 inline constexpr std::uint32_t kRunMaxFiles = 16;
 inline constexpr std::uint32_t kRunMaxFileBytes = 4u << 20;
 inline constexpr std::uint32_t kRunMaxText = 1u << 20; // a string (the settings text)
+inline constexpr std::uint32_t kRunMaxCategories = 16;
+inline constexpr std::uint32_t kRunMaxCategoryText = 16u << 10; // a category file (run_timer.h)
 
 // A setting changed during the run, at the turn the recorder saw it.
 struct RunSettingChange {
@@ -58,13 +60,21 @@ struct RunCheckpoint {
     bool operator==(const RunCheckpoint &) const = default;
 };
 
-// A split (#406 fills them): its name and both times.
+// A split the live timer reached (#408): its name and both times, at the end of its turn.
 struct RunFileSplit {
     std::string name;
     std::uint64_t turn = 0;
     std::uint64_t rta_us = 0; // real time from the run's start
     std::uint64_t ticks = 0;  // game ticks from the run's start
     bool operator==(const RunFileSplit &) const = default;
+};
+
+// A run category the session timed (#408): its id (run_category's value) and its file's text,
+// so that a player's own category plays back with the file.
+struct RunFileCategory {
+    std::string id;
+    std::string text;
+    bool operator==(const RunFileCategory &) const = default;
 };
 
 // Why a recording ended.
@@ -83,6 +93,7 @@ struct RunFile {
     std::vector<RunBootFile> files;
     std::array<std::vector<mt_runtape_run>, MT_RUNTAPE_STREAMS> streams;
     std::vector<mt_runtape_event> events;
+    std::vector<RunFileCategory> categories;
     std::vector<RunFileSplit> splits;
     std::vector<RunCheckpoint> checkpoints;
     RunEnd end = RunEnd::kQuit;

@@ -44,6 +44,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -77,7 +78,8 @@ enum ExitStatus : int {
     kExitCheckMismatch = 3, // a read-back did not show what was presented
     kExitNoGame = 4,        // no generated code, no bundle, no slice, or the load failed
     kExitGuestEnded = 5,    // the guest trapped, stopped by itself or exited non-zero
-    kExitRunDiffers = 6,    // --play-run: a checkpoint differed, or the replay ended early
+    kExitRunDiffers = 6,    // --play-run: a checkpoint differed, or the replay ended early;
+                            // --verify-run: the file does not verify (or was refused)
 };
 
 // The generated program and the reservation its memory model needs (MT_MEM_RESERVE_FOR_BUILD in
@@ -220,6 +222,13 @@ struct GameOptions {
     // scratch data folder, its settings in `settings`), played with its tape as the clock.
     // nullptr: a normal run.
     std::shared_ptr<const RunFile> run_file;
+    // --verify-run FILE (#408, run_verify.h): the run file plays as with --play-run, headless and
+    // silent, and the run prints its report on stdout. `run_path` is the file as given.
+    bool verify_run = false;
+    std::string run_path;
+    // Where the report goes: the process's stdout as it was before main.cpp sent stdout to stderr
+    // for the run, so that the guest's own printing stays out of it (nullptr: stdout).
+    std::FILE *report = nullptr;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must

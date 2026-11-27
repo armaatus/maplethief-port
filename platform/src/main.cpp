@@ -13,7 +13,7 @@
 //              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB] [--safe-area T,L,B,R]
 //              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N] [--seconds S]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
-//              [--pad T,BUTTON,down|up]... [--play-run FILE]
+//              [--pad T,BUTTON,down|up]... [--play-run FILE] [--verify-run FILE]
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
 //              [--effects-volume N] [--mute-unfocused on|off] [--gapless-music on|off]
@@ -202,6 +202,11 @@
 //                     tape as the clock and the only input, as fast as the host goes; checks a
 //                     checkpoint every 1,000 game ticks; exit status 6 if one differs or the
 //                     replay ends early. With SDL_VIDEO_DRIVER=dummy it runs headless
+//   --verify-run FILE verify a shared run file (#408, run_verify.h): --play-run with no window
+//                     and no audio device, refused for another binary or port version or a
+//                     missing checkpoint; prints a report on stdout (the splits' times
+//                     recomputed from the tape, clean or assisted from the recorded settings);
+//                     exit status 0 if it verifies, 6 if not
 //   --fixed-step MS   run on a virtual clock (ADR 0044): every run-loop turn advances it by MS
 //                     milliseconds (0.001 to 1000) and nothing waits, so a scripted run
 //                     reaches the same frames bit for bit every time
@@ -321,6 +326,12 @@
 #include <utility>
 #include <vector>
 
+#if defined(_WIN32)
+#include <io.h>
+#elif !defined(__SWITCH__)
+#include <unistd.h>
+#endif
+
 #include "audio_out.h"
 #include "bindings.h"
 #include "build_info.h"
@@ -343,6 +354,7 @@
 #include "present.h"
 #include "preset_picker.h"
 #include "run_recorder.h"
+#include "run_verify.h"
 #include "save_tools.h"
 #include "scaling.h"
 #include "settings.h"
@@ -426,6 +438,29 @@ struct Options {
 };
 
 namespace proto = maplethief::gfx_prototype;
+
+// --verify-run's report stream (#408): stdout as it is now, while stdout itself goes to stderr
+// from here on, so that what the guest prints never mixes into the report. nullptr (the report
+// then goes to stdout) where that cannot be done.
+std::FILE *report_stream() {
+#if defined(_WIN32)
+    std::fflush(stdout);
+    const int out = _dup(_fileno(stdout));
+    if (out < 0 || _dup2(_fileno(stderr), _fileno(stdout)) != 0) {
+        return nullptr;
+    }
+    return _fdopen(out, "w");
+#elif defined(__SWITCH__)
+    return nullptr;
+#else
+    std::fflush(stdout);
+    const int out = dup(fileno(stdout));
+    if (out < 0 || dup2(fileno(stderr), fileno(stdout)) < 0) {
+        return nullptr;
+    }
+    return fdopen(out, "w");
+#endif
+}
 
 // The generated program, if this build links it (main.cpp is the only unit that sees
 // maplethief_gen and its MT_MEM_CHECKED).
@@ -580,7 +615,7 @@ void print_usage() {
             "[--safe-area T,L,B,R] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
             "[--capture-at N[,N...]] [--tap T,X,Y]... [--swipe T,X1,Y1,X2,Y2]... "
-            "[--pad T,BUTTON,down|up]... [--play-run FILE] "
+            "[--pad T,BUTTON,down|up]... [--play-run FILE] [--verify-run FILE] "
             "[--fixed-step MS] [--shot T,NAME]... "
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
@@ -959,6 +994,11 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.game_option = true;
         } else if (arg == "--play-run" && has_value) {
             options.play_run = argv[++i];
+            options.game_option = true;
+        } else if (arg == "--verify-run" && has_value) {
+            options.play_run = argv[++i];
+            options.game.verify_run = true;
+            options.game.audio = false;
             options.game_option = true;
         } else if (arg == "--fixed-step" && has_value) {
             double ms = 0;
@@ -1354,6 +1394,24 @@ int main(int argc, char *argv[]) {
         std::string why;
         auto run = std::make_shared<RunFile>();
         const std::string dir = prepare_run_folder(options.play_run, run.get(), &why);
+        if (options.game.verify_run) {
+            // --verify-run (#408): no window, a missing checkpoint refused before it plays, and
+            // every refusal reported on stdout.
+            SDL_setenv_unsafe("SDL_VIDEO_DRIVER", "dummy", 1);
+            if (!dir.empty()) {
+                why = run_file_problem(*run);
+            }
+            if (!why.empty()) {
+                RunVerification v;
+                v.path = options.play_run;
+                v.refused = why;
+                std::fputs(run_verify_report(v).c_str(), stdout);
+                std::fflush(stdout);
+                return kExitRunDiffers;
+            }
+            options.game.run_path = options.play_run;
+            options.game.report = report_stream();
+        }
         if (dir.empty()) {
             SDL_Log("--play-run %s: %s", options.play_run.c_str(), why.c_str());
             return kExitUsage;

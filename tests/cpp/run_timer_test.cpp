@@ -190,6 +190,54 @@ TEST_CASE("run timer: reset, and a new character restarts a run") {
     CHECK(none.state() == fe::RunTimer::State::kWaiting);
 }
 
+TEST_CASE("run timer: a category's start line starts a run from a save (#408)") {
+    FakeClock clock;
+    fe::RunTimer t(clock.clock());
+    std::vector<std::string> problems;
+    std::optional<fe::RunCategory> c = fe::parse_run_category(
+        "orbis", "title = Orbis\nstart = map_change 2.0\nsplit chapter_end 1 = Orbis\n", &problems);
+    REQUIRE(c.has_value());
+    REQUIRE(c->start.has_value());
+    CHECK(fe::run_split_event_text(*c->start) == "map_change 2.0");
+    // The canonical text keeps it, and reads back as the same category.
+    CHECK(fe::run_category_text(*c).find("\nstart = map_change 2.0\n") != std::string::npos);
+    CHECK(fe::parse_run_category("orbis", fe::run_category_text(*c), &problems) == c);
+    t.set_category(*c, std::nullopt);
+    // A new character does not start it; the start event does.
+    t.on_event(event(MT_GAME_EVENT_NEW_CHARACTER, 0));
+    CHECK(t.state() == fe::RunTimer::State::kWaiting);
+    t.on_event(event(MT_GAME_EVENT_MAP_CHANGE, 2, 1));
+    CHECK(t.state() == fe::RunTimer::State::kWaiting);
+    t.on_event(event(MT_GAME_EVENT_MAP_CHANGE, 2, 0));
+    CHECK(t.state() == fe::RunTimer::State::kRunning);
+    clock.advance(30, 600);
+    // The start event again during the run does not restart it.
+    t.on_event(event(MT_GAME_EVENT_MAP_CHANGE, 2, 0));
+    clock.advance(31.5, 620);
+    t.on_event(event(MT_GAME_EVENT_CHAPTER_END, 1));
+    CHECK(t.state() == fe::RunTimer::State::kFinished);
+    std::vector<fe::RunRecord> records = t.take_records();
+    REQUIRE(records.size() == 1);
+    CHECK(records[0].finished);
+    CHECK(records[0].end == fe::RunTime{61500, 1220});
+    // After a finished run, the start event starts the next.
+    t.on_event(event(MT_GAME_EVENT_MAP_CHANGE, 2, 0));
+    CHECK(t.state() == fe::RunTimer::State::kRunning);
+
+    // load_character SLOT: a saved character chosen in that slot; a start line's only.
+    c = fe::parse_run_category(
+        "from_save", "title = From a save\nstart = load_character 0\nsplit chapter_end 1 = Orbis\n",
+        &problems);
+    REQUIRE(c.has_value());
+    CHECK(fe::run_split_event_text(*c->start) == "load_character 0");
+    fe::RunTimer l(clock.clock());
+    l.set_category(*c, std::nullopt);
+    l.on_event(event(MT_GAME_EVENT_LOAD_CHARACTER, 1));
+    CHECK(l.state() == fe::RunTimer::State::kWaiting);
+    l.on_event(event(MT_GAME_EVENT_LOAD_CHARACTER, 0));
+    CHECK(l.state() == fe::RunTimer::State::kRunning);
+}
+
 TEST_CASE("run timer: the personal best and the difference to it") {
     FakeClock clock;
     fe::RunTimer t(clock.clock());
@@ -331,8 +379,11 @@ TEST_CASE("run timer: run variables are recorded, and outside the category's val
     t.attach(&s);
     t.set_category(test_category(), std::nullopt); // names no variable: off only
     t.on_event(event(MT_GAME_EVENT_NEW_CHARACTER, 0));
-    CHECK(t.variables() == std::vector<std::pair<std::string, std::string>>{
-                               {"fix_original_bugs", "off"}, {"skip_intros", "on"}});
+    CHECK(t.variables() ==
+          std::vector<std::pair<std::string, std::string>>{{"fix_original_bugs", "off"},
+                                                           {"skip_intros", "on"},
+                                                           {"widescreen", "off"},
+                                                           {"texture_pack", "off"}});
     CHECK_FALSE(t.in_category());
     CHECK(t.assists().empty()); // a run variable is no Assist
     s.fix_original_bugs = true;
@@ -341,7 +392,9 @@ TEST_CASE("run timer: run variables are recorded, and outside the category's val
     t.turn();
     CHECK(t.variables()[0].second == "off,on,off");
     std::vector<std::string> lines = t.overlay_lines();
-    CHECK(lines.back() == "fix_original_bugs off  skip_intros on");
+    REQUIRE(lines.size() >= 2);
+    CHECK(lines[lines.size() - 2] == "fix_original_bugs off  skip_intros on");
+    CHECK(lines.back() == "widescreen off  texture_pack off");
     CHECK(std::find(lines.begin(), lines.end(), "outside the category's run variables") !=
           lines.end());
     t.reset();
@@ -350,6 +403,21 @@ TEST_CASE("run timer: run variables are recorded, and outside the category's val
     CHECK(records[0].variables[1] == std::pair<std::string, std::string>{"skip_intros", "on"});
     CHECK_FALSE(records[0].in_category);
     CHECK(records[0].settings.find("skip_intros = on") != std::string::npos);
+
+    // widescreen and texture_pack (#408): they reach guest memory, so they are run variables;
+    // a pack is recorded as on, never by its folder.
+    s = fe::Settings{};
+    s.widescreen = fe::Widescreen::kAuto;
+    s.texture_pack = "/somewhere/my pack";
+    t.on_event(event(MT_GAME_EVENT_NEW_CHARACTER, 0));
+    CHECK(t.variables()[2] == std::pair<std::string, std::string>{"widescreen", "auto"});
+    CHECK(t.variables()[3] == std::pair<std::string, std::string>{"texture_pack", "on"});
+    CHECK_FALSE(t.in_category());
+    CHECK(t.assists().empty());
+    t.reset();
+    t.take_records();
+    s = fe::Settings{};
+    s.skip_intros = true;
 
     // A category that allows it.
     std::vector<std::string> problems;
@@ -375,6 +443,15 @@ TEST_CASE("run categories: the parser refuses malformed files by line") {
         {"title = A\nsplit chapter_end 0\n", "line 2: no '='"},
         {"title = A\n= x\nsplit chapter_end 0 = T\n", "line 2: nothing before '='"},
         {"title = A\ntitle = B\nsplit chapter_end 0 = T\n", "line 2: a second title"},
+        {"title = A\nstart = map_change 2\nsplit chapter_end 0 = T\n",
+         "line 2: start: map_change takes AREA.MAP"},
+        {"title = A\nstart x = chapter_end 1\nsplit chapter_end 0 = T\n",
+         "line 2: start takes nothing before '='"},
+        {"title = A\nstart = chapter_end 1\nstart = chapter_end 2\nsplit chapter_end 0 = T\n",
+         "line 3: a second start"},
+        {"title = A\nsplit load_character 0 = T\n", "line 2: a split's event is"},
+        {"title = A\nstart = level_up 3\nsplit chapter_end 0 = T\n",
+         "line 2: start: a start's event is load_character"},
         {"title =\nsplit chapter_end 0 = T\n", "line 1: the title is not"},
         {"title = A\nsplit chapter_end = T\n", "line 2: chapter_end takes one value"},
         {"title = A\nsplit chapter_end 256 = T\n", "line 2: chapter_end takes one value"},
@@ -392,6 +469,8 @@ TEST_CASE("run categories: the parser refuses malformed files by line") {
          "line 2: skip_intros: 'maybe' is not on or off"},
         {"title = A\nallow skip_intros = on\nallow skip_intros = off\nsplit chapter_end 0 = T\n",
          "line 3: a second allow for skip_intros"},
+        {"title = A\nallow texture_pack = /my/pack\nsplit chapter_end 0 = T\n",
+         "line 2: texture_pack: '/my/pack' is not off or on"},
         {"title = A\nname = B\nsplit chapter_end 0 = T\n", "line 2: unknown line 'name = B'"},
         {"split chapter_end 0 = T\n", "no title line"},
         {"title = A\n# no splits\n", "no split line"},
@@ -553,7 +632,8 @@ TEST_CASE("run timer: the overlay's lines and the times' text") {
     clock.advance(75.25, 1505);
     CHECK(t.overlay_lines() == std::vector<std::string>{"Test%  1:15.2", "next: Tutorial (1/3)",
                                                         "no personal best yet", "clean",
-                                                        "fix_original_bugs off  skip_intros off"});
+                                                        "fix_original_bugs off  skip_intros off",
+                                                        "widescreen off  texture_pack off"});
     t.on_event(event(MT_GAME_EVENT_CHAPTER_END, 0));
     t.on_event(event(MT_GAME_EVENT_JOB_ADVANCE, 2, 2));
     t.on_event(event(MT_GAME_EVENT_MAP_CHANGE, 4, 1));

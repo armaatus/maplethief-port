@@ -373,3 +373,10 @@ extern "C" double mt_runtape_host_time(void) noexcept {
     }
     return static_cast<double>(us) / 1e6 - MT_CF_ABSOLUTE_TIME_1970;
 }
+
+extern "C" uint64_t mt_runtape_guest_clock_us(void) noexcept {
+    if (g.mode == MT_RUNTAPE_OFF || !g.streams[MT_RUNTAPE_CLOCK].any) {
+        return 0;
+    }
+    return g.streams[MT_RUNTAPE_CLOCK].last;
+}
