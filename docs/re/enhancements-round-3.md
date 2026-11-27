@@ -32,6 +32,8 @@ Addresses are armv7 VM addresses; function pointers carry the Thumb bit. The fac
 
 **Verdict: go** (#396, M). The pop at a scene's start is the most visible seam left in the wide view, the decision function is the only code to change, and the per-scene check is automatable. Scenes that fail it stay 480.
 
+**Built (#396, 2026-11-27).** Corrected by the check: the boss maps (3.8 among them) are all 30 tiles wide, and the intro plays on 2.10, so the seam showed on the eight scenes that play on wider maps, not on the boss scenes. Seven are wide now. The speech box needed a fix too: its lines are wrapped to the view's width. [re/widescreen.md](widescreen.md#scenes-at-the-fields-width) has the table.
+
 ## Minimap: mobs and the map's name
 
 **Mobs.** The mob list is `CStateGame +0x34` (`CMobs`, also `0x11A9EC`): count `+0x04`, items `+0x08`; a `CMob`'s feet at `+0x04` / `+0x08`, dead flag `+0x0C` & `0x10`, mob.dat id `+0xA0` ([hud-extras.md](hud-extras.md#the-mobs-and-their-hp)). `read_minimap` already reads the `CStateGame` and the map's objects through a bounded `GuestSpan`; the mobs are one more bounded list. The PC game's minimap, which ADR 0098's addendum followed, shows no mobs, so they get their own key, off by default.
