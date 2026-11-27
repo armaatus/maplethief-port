@@ -61,8 +61,9 @@ function(maplethief_add_generated_code target gen_dir)
         # one overrides the other). /bigobj: a unit can hold more than 2^16 COFF sections.
         target_compile_options(${target} PRIVATE /W4 /utf-8 /bigobj /clang:-ffp-contract=off)
     elseif(MSVC)
-        # cl: /fp:precise does not contract since VS 2022.
-        target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:precise /bigobj)
+        # cl: /fp:precise does not contract since VS 2022. C4702: the trap after a call that
+        # never returns is unreachable by design (the guest program's code has one, #385).
+        target_compile_options(${target} PRIVATE /W4 /wd4702 /utf-8 /fp:precise /bigobj)
     else()
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -ffp-contract=off)
     endif()
