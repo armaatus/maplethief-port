@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (delegated by Joris, 2026-11-27)
 - **Date:** 2026-11-27
-- **Issue:** #387 (research); the work is the follow-up issue named on #387
+- **Issue:** #387 (research); the work is #425
 - **Builds on:** [ADR 0090](0090-widescreen.md) (the per-frame view width and its addenda), [ADR 0147](0147-what-v1-is-and-what-gates-it.md) (#382's finding that 568 is not the engine's limit), [ADR 0098](0098-port-drawn-minimap.md) (the minimap's corner), [ADR 0085](0085-borders-around-the-picture.md) (the borders beside the picture). The facts are in [re/widescreen.md, Past 568 points](../re/widescreen.md#past-568-points-387).
 
 ## Context
@@ -36,7 +36,7 @@ The backdrop:
 - `widescreen` gains a third value, `fill`: a 768-point renderbuffer, and the view width E each frame the map's width clamped to 480 … the window's width at 320 points high (at most 768). `auto` (568) and `off` keep their meaning; the default doesn't change.
 - The backdrop hook (`0x24DC9`) tiles a backdrop that repeats every 160 points (a copy at x = 480, clipped to E) and stretches one that doesn't. Which backdrops repeat is measured at load from the image (the columns at x and x + 160 equal), not from a list, so a pack's replacement backdrop gets the right treatment.
 - Everything else already takes the width as a value: the screens over the field stay at 480 in the middle, the key pad's groups move by (E − 480) / 2, the minimap's corner has more room, the scripted scenes and loading stay 3:2.
-- The work is the follow-up issue named on #387. It replaces the tests' literal 44-point offsets with (E − 480) / 2 and adds `play.widescreen_fill_on` (768, tick-equal to the off run) and a window-shot check that the tiled backdrop has no seam.
+- The work is #425. It replaces the tests' literal 44-point offsets with (E − 480) / 2 and adds `play.widescreen_fill_on` (768, tick-equal to the off run) and a window-shot check that the tiled backdrop has no seam.
 
 ## Consequences
 
@@ -44,4 +44,4 @@ The backdrop:
 - On the 11 maps exactly 48 tiles wide the whole map is on screen at 768, and the camera stops scrolling sideways. The game is unchanged (only drawing reads the width), but the player sees more of the map at once.
 - Bag, Cash and the compass are `UIButton`s in the 480-point screen image and stay at their 3:2 places, 144 points in from the picture's edges at 768.
 - Under `auto` the nine repeating backdrops stop being stretched: a small visible change at 568, the backdrop at its own proportions.
-- Judgement call (delegated): `fill` is opt-in, and the cap is 768. Joris can veto either in the follow-up's PR.
+- Judgement call (delegated): `fill` is opt-in, and the cap is 768. Joris can veto either here or in #425's PR.
