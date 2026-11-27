@@ -166,6 +166,9 @@ bool ipa_entry_parts(std::string_view name, std::vector<std::string> *parts, std
 // XML); false if it is neither, has no such key, or its value is not a string. The file is
 // untrusted: every offset, count and size is checked.
 bool plist_string(std::span<const std::uint8_t> plist, std::string_view key, std::string *value);
+// The bool value of `key` there (<true/> / <false/>, or the binary markers); false if there is
+// no such key or its value is not a bool (#374: Manifest.plist's IsEncrypted).
+bool plist_bool(std::span<const std::uint8_t> plist, std::string_view key, bool *value);
 
 // The cryptid of the LC_ENCRYPTION_INFO command of a thin 32-bit Mach-O (0 without one);
 // false if its load commands run outside it.

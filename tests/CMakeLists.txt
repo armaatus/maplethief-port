@@ -416,6 +416,7 @@ maplethief_add_cpp_test(
             cpp/presets_test.cpp
             cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
+            cpp/ios_backup_test.cpp
             cpp/desktop_test.cpp cpp/local_game_center_test.cpp cpp/menu_input_test.cpp
             cpp/prompts_test.cpp cpp/keypad_layout_test.cpp cpp/border_test.cpp
             cpp/settings_menu_test.cpp cpp/game_speed_test.cpp cpp/autosave_test.cpp

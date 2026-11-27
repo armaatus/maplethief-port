@@ -121,6 +121,11 @@ struct ImportResult {
 // written. False, with `why` (and result->problems for a refused set), otherwise.
 bool import_saves(const SaveLocation &loc, const std::string &source, const std::string &stamp,
                   ImportResult *result, std::string *why);
+// The same import of a set already read (#374: an iPhone backup's files, ios_backup.h): checked,
+// what it replaces backed up first, put back on a failed write. `from` names where the set came
+// from in a refusal. result->ignored stays empty (the reader keeps its own list).
+bool import_save_set(const SaveLocation &loc, const SaveSet &files, const std::string &from,
+                     const std::string &stamp, ImportResult *result, std::string *why);
 
 // --- Backups -----------------------------------------------------------------------------------
 
