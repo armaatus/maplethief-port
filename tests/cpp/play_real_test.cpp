@@ -12310,6 +12310,39 @@ void chapter_2_sides_f(Run &r, u64) {
     using namespace quest_bot;
     chapter_2_side_start(r, "sides_f", 9);
     const FarmStyle fight = chapter_2_fight();
+    then_farm(r, "item 72 from mob 44 on 10.1 (side 5)", 10, 1, {44}, ready(1, 5), 3600, fight);
+    then_talk_to(r, "SnowQueen: side 5 done", 9, 0, "SnowQueen", 1, quest_is(1, 5, 2), 1200);
+    then_talk_to(r, "Elma: side 21 done", 4, 0, "Elma", -1, quest_is(1, 21, 2), 1200);
+    then_talk_to(r, "Humanoid2: side 7 done", 4, 1, "Humanoid2", 4, quest_is(1, 7, 2));
+    then_quests_are(r, "part sides_f's quests", {{1, 5, 2}, {1, 7, 2}, {1, 21, 2}});
+    chapter_2_side_end(r, "sides_f");
+}
+void chapter_2_sides_f_checks(Run &, u64) {}
+
+// Jade's 38 and the Miner's 39: the climb of 9.9 and 9.10 (#299, synthetic: tests/starts/raise/
+// chapter_2_climb.json over part sides_f's save gives the Snowshoes' materials). Their steps are
+// 40 px of air apart: the running jumps across land a few px from the far step's end, and on
+// area 9's ice the landing slid the hero off it (9.10's platform 28, 360 tries in 1,800 s).
+// Snowshoes (shoes 52, a chapter-2 recipe: 3 of item 93, 8 of 94, 2 of 99) turn the slide off,
+// so the hero crafts and wears them first, as a player would.
+void chapter_2_climb(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_check(r, "chapter 2, the Snowshoes' materials", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return h.chapter == 2 && has_item(93, 3)(cpu) && has_item(94, 8)(cpu) &&
+               has_item(99, 2)(cpu);
+    });
+    then_spend_sp(r, "climb", k_chapter_2_build);
+    then_bag(r, "climb's start");
+    then_talk_to(r, "Pirate_Orbis (4.1): to 2.0 (list 1)", 4, 1, "Pirate_Orbis", 1,
+                 [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    then_craft(r, "smith: the Snowshoes (shoes 52)", 52, {5, 2});
+    then_equip(r, "the Snowshoes", 52, 4);
+    then_check(r, "the Snowshoes worn", [](mt_cpu *cpu) { return worn(cpu, 4) == 52; });
+    then_talk_to(
+        r, "Pirate (2.0): back to 4.1", 2, 0, "Pirate", -1,
+        [](mt_cpu *cpu) { return hero(cpu).on(4, 1); }, 900);
     then_talk_to(r, "Jade: side 38 given, item 87", 9, 0, "Jade", 3,
                  all_of({quest_is(1, 38, 1), has_item(87, 1)}));
     then_go(r, "the climb: 9.7 to 9.9 to 9.10", at_object(9, 10, "Miner2", 6), 1800);
@@ -12318,15 +12351,20 @@ void chapter_2_sides_f(Run &r, u64) {
     then_talk_to(r, "Miner2 (9.10): side 39 done (item 87)", 9, 10, "Miner2", -1,
                  quest_is(1, 39, 2));
     then_talk_to(r, "Jade: side 38 done", 9, 0, "Jade", 3, quest_is(1, 38, 2), 1200);
-    then_farm(r, "item 72 from mob 44 on 10.1 (side 5)", 10, 1, {44}, ready(1, 5), 3600, fight);
-    then_talk_to(r, "SnowQueen: side 5 done", 9, 0, "SnowQueen", 1, quest_is(1, 5, 2), 1200);
-    then_talk_to(r, "Elma: side 21 done", 4, 0, "Elma", -1, quest_is(1, 21, 2), 1200);
-    then_talk_to(r, "Humanoid2: side 7 done", 4, 1, "Humanoid2", 4, quest_is(1, 7, 2));
-    then_quests_are(r, "part sides_f's quests",
-                    {{1, 5, 2}, {1, 7, 2}, {1, 21, 2}, {1, 38, 2}, {1, 39, 2}});
-    chapter_2_side_end(r, "sides_f");
+    then_quests_are(r, "part climb's quests", {{1, 38, 2}, {1, 39, 2}});
+    // Every chapter-2 side quest but 16 (the 2nd job, taken in chapter 1 by the chain's hero:
+    // jobs_2_2_* and chapter_2_side_16_full) is done once the chain gets here; 42 is the 3rd job
+    // (part B).
+    std::vector<std::tuple<u32, u32, i32>> sides;
+    for (const u32 n :
+         {0u,  1u,  2u,  3u,  4u,  5u,  6u,  7u,  9u,  10u, 11u, 12u, 13u, 18u, 19u, 20u, 21u, 22u,
+          23u, 25u, 26u, 27u, 28u, 29u, 30u, 31u, 32u, 33u, 34u, 35u, 36u, 37u, 38u, 39u, 42u}) {
+        sides.emplace_back(1u, n, 2);
+    }
+    then_quests_are(r, "chapter 2's 35 side quests but 16", sides);
+    chapter_2_side_end(r, "climb");
 }
-void chapter_2_sides_f_checks(Run &, u64) {}
+void chapter_2_climb_checks(Run &, u64) {}
 
 // Side 16, the 2nd job, in chapter 2 with a full equipment bag (#299, synthetic:
 // tests/starts/raise/chapter_2_side_16_full.json over starts.jobs_ch2_rogue_30, the Rogue at
@@ -12352,10 +12390,9 @@ void chapter_2_side_16_full(Run &r, u64) {
         check(job_at(0, 1)(cpu) && quest_state(cpu, h, 1, 16) != 2 &&
                   equip_owned(cpu, h, 40) == 0 && jobs == 0,
               "branch " + std::to_string(rdi(cpu, h.addr + 0x88)) + " tier " +
-                  std::to_string(rdi(cpu, h.addr + 0x8C)) + ", side 16:" +
-                  std::to_string(quest_state(cpu, h, 1, 16)) + ", equipment 40: " +
-                  std::to_string(equip_owned(cpu, h, 40)) + ", job events " +
-                  std::to_string(jobs));
+                  std::to_string(rdi(cpu, h.addr + 0x8C)) +
+                  ", side 16:" + std::to_string(quest_state(cpu, h, 1, 16)) + ", equipment 40: " +
+                  std::to_string(equip_owned(cpu, h, 40)) + ", job events " + std::to_string(jobs));
     });
     then_finish(r);
 }
@@ -13400,6 +13437,7 @@ constexpr Mode k_modes[] = {
     {"chapter_2_sides_f", chapter_2_sides_f, chapter_2_sides_f_checks, 1},
     {"chapter_2_crafts", chapter_2_crafts, chapter_2_crafts_checks, 1},
     {"chapter_2_side_16_full", chapter_2_side_16_full, chapter_2_side_16_full_checks, 1},
+    {"chapter_2_climb", chapter_2_climb, chapter_2_climb_checks, 1},
     {"chapter_2_shops", chapter_2_shops, chapter_2_shops_checks, 1},
     {"chapter_2_shop_6", chapter_2_shop_6, chapter_2_shop_6_checks, 1},
     {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},

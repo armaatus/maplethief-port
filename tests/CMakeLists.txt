@@ -1863,6 +1863,20 @@ foreach(part IN LISTS _chapter_2_side_parts)
     set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_2_${part}")
 endforeach()
 _chapter_2_part(shops play.chapter_2_shops ${_previous_fixture} "${_previous_dir}")
+# Jade's 38 and the Miner's 39 (the climb of 9.9 and 9.10) from part sides_f's save with the
+# Snowshoes' materials (tests/starts/raise/chapter_2_climb.json: synthetic).
+add_test(NAME starts.chapter_2_climb
+         COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                 "${PROJECT_SOURCE_DIR}/tests/starts/raise/chapter_2_climb.json"
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2_climb/data/saves" --base
+                 "${_previous_dir}" --app "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+set_tests_properties(
+    starts.chapter_2_climb
+    PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_REQUIRED
+               ${_previous_fixture} FIXTURES_SETUP start_chapter_2_climb ENVIRONMENT
+               "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+_chapter_2_part(climb play.chapter_2_climb_synthetic start_chapter_2_climb
+                "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2_climb")
 _chapter_2_part(shop_6 play.chapter_2_shop_6 play_chapter_2_f
                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_2_f")
 add_test(NAME starts.chapter_2_crafts
