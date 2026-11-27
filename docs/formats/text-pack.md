@@ -37,6 +37,8 @@ A longer value is cut at a whole character and logged once. A key that names ano
 
 `Port.strings`' values are drawn as they are ([ADR 0206](../adr/0206-the-port-menus-draw-accents-and-hangul.md)): printable ASCII in the overlays' 5x7 font, any other character from the bundled fonts (NanumGothic, else Fira Sans), so Latin with accents, Hangul, Greek and Cyrillic show; a character neither font has shows as `?`. Text is laid out in cells, one per character and two per Hangul syllable or other East Asian wide character; a value longer than its room is cut at a whole character with `...`. The cash shop's price line (SDL's debug font) is the exception: it folds its text to ASCII (accents dropped, typographic quotes and dashes to `'`, `"` and `-`, anything else `?`). A value must keep the English text's places (`{0}`, `{1}`, ...), in any order; one that doesn't is logged and the English stays.
 
+The port ships its own menus in Dutch and Korean as text packs of this format, `platform/lang/<tag>/` (`textpack.strings` and `Port.strings` only), embedded in the frontend ([ADR 0222](../adr/0222-the-port-ships-its-menus-in-dutch-and-korean.md)). A pack's `Port.strings` wins over them key by key; a key the pack lacks shows in the menu language (`menu_language`), else in English. To start a new menu language, copy one of those folders, change `language` and `name`, and translate the values.
+
 ## The syntax
 
 The bytes must be valid UTF-8 (no overlong forms, no encoded surrogates, nothing above U+10FFFF), with an optional BOM (`EF BB BF`). Then any number of entries:
