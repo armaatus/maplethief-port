@@ -9144,6 +9144,12 @@ void mechanics_checks(Run &, u64) {
 // main quest 21 is row 2 of his quest list), then checks the job (hero +0x88 branch, +0x8C
 // job_tier) in guest memory and in the theif0 it saves, and the reward weapon in the bag. The
 // starts equal no chained state, so every mode's test is named synthetic (start-states.md).
+//
+// Each step also writes one line to OUT_DIR/jobs.txt, what the guest held before the talk and
+// the job after it (the compendium's advancement rows are checked against these by
+// tests/test_compendium_skills_port.py, #222):
+//   chapter <c> level <l> branch <b> tier <t> quests <sort>.<n>=<state>... -> branch <b> tier <t>
+// The quests are every one not at 0 (getQuestState's view: 1 active, 2 done).
 struct JobStep {
     std::vector<int> choices;
     i32 branch = 0, tier = 0;
@@ -9158,14 +9164,44 @@ Pred job_at(i32 branch, i32 tier) {
     };
 }
 
+// The guest's side of a jobs.txt line before the talk: chapter, level, job and the quests.
+std::string job_before(const mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    std::string out = "chapter " + std::to_string(h.chapter) + " level " + std::to_string(h.level) +
+                      " branch " + std::to_string(rdi(cpu, h.addr + 0x88)) + " tier " +
+                      std::to_string(rdi(cpu, h.addr + 0x8C)) + " quests";
+    for (u32 sort = 0; sort < 2; sort++) {
+        for (u32 n = 0; n < 100; n++) {
+            const i32 st = quest_state(cpu, h, sort, n);
+            if (st > 0) {
+                out +=
+                    " " + std::to_string(sort) + "." + std::to_string(n) + "=" + std::to_string(st);
+            }
+        }
+    }
+    return out;
+}
+
 void job_path(Run &r, const std::vector<JobStep> &steps) {
     using namespace quest_bot;
     from_save(r);
+    std::ofstream(r.out / "jobs.txt", std::ios::trunc);
+    auto before = std::make_shared<std::string>();
     for (const JobStep &s : steps) {
         const std::string what =
             "branch " + std::to_string(s.branch) + " job_tier " + std::to_string(s.tier);
+        then_do(r, "the hero before the talk",
+                [before](mt_cpu *cpu) { *before = job_before(cpu); });
         then_talk_to(r, "Dark Lord: the advancement to " + what, 0, 0, "Darklord", s.choices,
                      job_at(s.branch, s.tier), 600);
+        then_do(r, "the advancement in jobs.txt", [&r, before](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            const std::string line = *before + " -> branch " +
+                                     std::to_string(rdi(cpu, h.addr + 0x88)) + " tier " +
+                                     std::to_string(rdi(cpu, h.addr + 0x8C)) + "\n";
+            std::printf("jobs: %s", line.c_str());
+            std::ofstream(r.out / "jobs.txt", std::ios::app) << line;
+        });
         if (s.reward >= 0) {
             then_check(
                 r, "the advancement's weapon (equip " + std::to_string(s.reward) + ") in the bag",
