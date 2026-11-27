@@ -12,6 +12,7 @@ ctest --preset mac-debug -R "^(starts\.(korean|systems)|play\.(korean|inventory_
 | `play.korean_offer_2_synthetic` | `chapter_2.json`, built in Korean | Korean: chapter 2's first quest offer (Heracle on 4.0) |
 | `play.korean_offer_3_synthetic` | `korean_ch3.json` | Korean: chapter 3's first quest offer (the Zenumist President on 7.0) |
 | `play.korean_missing_key_synthetic` | `korean_ch3_key.json` | Korean: the line `ko.lproj` lacks ([original bug 15](../re/original-bugs.md#15-a-dialogue-key-missing-in-korean)), shown in English with `fix_original_bugs` on |
+| `play.korean_missing_key_original_synthetic` | `korean_ch3_key.json` | the same line with `fix_original_bugs` off: the key, cut across lines by the wrap guard ([#419](https://github.com/armaatus/maplethief-port/issues/419)); the run lives |
 | `play.slots_create_synthetic` | `systems_slot0.json` | Slots 2 and 3: created with New, played through the tutorial, saved, left by the option tab's exit; slot 1 untouched |
 | `play.slots_reload_synthetic` | the run before (a fresh process) | Slots 2 and 3 loaded as saved (map, x, Red Potions), then deleted; slot 1 untouched |
 | `play.inventory_full_synthetic` | `systems_inventory_full.json` | A 48 + 48 bag: a drop is refused and stays; a sale empties a cell, pays the price, and the bag keeps its order |
@@ -36,7 +37,7 @@ The missing key: his fallback line plays only when main 0 is done, main 1 to 3 a
 
 The run reads the English line's first word from `en.lproj` at run time. It checks that a box shows it and that no box shows the key.
 
-**With the setting off,** the port dies on that line. `Text_Wrap` reads past guest memory on the unbroken key, a SIGBUS ([#419](https://github.com/armaatus/maplethief-port/issues/419)). So the run sets `fix_original_bugs` itself.
+**With the setting off,** the port died on that line: `Text_Wrap` ran away on the unbroken key and read past guest memory, a SIGBUS. Since [#419](https://github.com/armaatus/maplethief-port/issues/419) the wrap guard cuts the key across lines; `play.korean_missing_key_original_synthetic` runs it with the setting off. This run sets `fix_original_bugs` itself.
 
 ## Slots
 
