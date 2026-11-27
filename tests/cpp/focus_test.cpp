@@ -1167,6 +1167,48 @@ const mt_uikit_control *find(const std::vector<mt_uikit_control> &c, u32 object)
 
 } // namespace
 
+TEST_CASE("focus: the walk's steps: screen boxes, their clipping, a button's action") {
+    Guest g;
+    const u32 menu = g.add(g.root, "MainMenuView", 0, 0, 480, 320);
+    const u32 play = g.button(menu, 46, 148, 120, 48, menu, "clickPlay:");
+    const auto box_of = [&](u32 obj) {
+        const mt_ui::View *v = mt_ui::view_of(&g.cpu, obj);
+        REQUIRE(v != nullptr);
+        return mt_ui::screen_box(&g.cpu, *v);
+    };
+    const auto same = [](const mt_ui::ScreenBox &b, double x0, double y0, double x1, double y1) {
+        INFO(b.x0, " ", b.y0, " ", b.x1, " ", b.y1);
+        CHECK(b.x0 == x0);
+        CHECK(b.y0 == y0);
+        CHECK(b.x1 == x1);
+        CHECK(b.y1 == y1);
+    };
+    // The portrait window turned to the landscape screen, the root turned back inside it.
+    const mt_ui::ScreenBox window = box_of(mt_ui::state(&g.cpu).windows.at(0));
+    same(window, 0, 0, 480, 320);
+    same(box_of(g.root), 0, 0, 480, 320);
+    const mt_ui::ScreenBox button = box_of(play);
+    same(button, 46, 148, 166, 196);
+
+    const mt_ui::ScreenBox screen{0, 0, 480, 320};
+    same(mt_ui::intersect(screen, window), 0, 0, 480, 320);
+    same(mt_ui::intersect(window, button), 46, 148, 166, 196);
+    same(mt_ui::intersect(button, mt_ui::ScreenBox{100, 0, 480, 160}), 100, 148, 166, 160);
+    CHECK_FALSE(screen.empty());
+    CHECK_FALSE(button.empty());
+    CHECK(mt_ui::ScreenBox{10, 10, 10.4, 50}.empty());
+    CHECK(mt_ui::ScreenBox{10, 10, 50, 10.4}.empty());
+    CHECK(mt_ui::intersect(button, mt_ui::ScreenBox{200, 0, 480, 320}).empty());
+
+    const mt_ui::View *v = mt_ui::view_of(&g.cpu, play);
+    REQUIRE(v != nullptr);
+    const mt_ui::TargetAction *action = mt_ui::tap_action(*v);
+    REQUIRE(action != nullptr);
+    CHECK(action->target == menu);
+    CHECK(action->action == mt_objc_sel(g.rt, "clickPlay:"));
+    CHECK(mt_ui::tap_action(*mt_ui::view_of(&g.cpu, menu)) == nullptr);
+}
+
 TEST_CASE("focus: mt_uikit_controls lists what a tap reaches, as the hit test does") {
     Guest g;
     const u32 menu = g.add(g.root, "MainMenuView", 0, 0, 480, 320);
