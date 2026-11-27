@@ -1,0 +1,10 @@
+--- !tapi-tbd
+# The guest program's link stub (#385, ADR 0213): the symbols it imports, under the install
+# name the game imports them from. Written by hand; no SDK file.
+tbd-version: 4
+targets: [ armv7-ios ]
+install-name: '/System/Library/Frameworks/QuartzCore.framework/QuartzCore'
+exports:
+  - targets: [ armv7-ios ]
+    objc-classes: [ CAEAGLLayer ]
+...
