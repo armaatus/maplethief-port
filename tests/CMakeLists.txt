@@ -330,7 +330,8 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # the level curve, the escalation, the floors, the counters file and the price line's text
 # (the running shop on a synthetic guest is stubs_test.cpp's). Display-locked pacing (#80, ADR
 # 0075, pacing_test.cpp): the plan for 60/120/144 Hz and the rest, the paced clock on a fake
-# host clock, and the game's tick gate on it at 60, 120, 59.94 and 60.06 Hz. The save tools
+# host clock, and the game's tick gate on it at 60, 120, 59.94 and 60.06 Hz; the display's rates
+# that would lock and the log's advice where it cannot (#410). The save tools
 # (#148, ADR 0078, save_tools_test.cpp): export and import round trips, hostile sets refused
 # with nothing written, the import's backup and roll-back, backups rotating at N, the
 # SaveQuestData hook, zips, portable mode. The desktop conveniences (#145, ADR 0077,

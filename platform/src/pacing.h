@@ -71,6 +71,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "settings.h"
 
@@ -113,6 +114,27 @@ struct PacingPlan {
 // pacing = display and the interval known, what the display cannot lock gets the 1 ms grid.
 PacingPlan plan_pacing(PacingMode mode, double refresh_hz, bool vsync, std::int64_t tick_ms,
                        std::uint32_t rate = 1);
+
+// plan_pacing's reason for the 1 ms grid when vsync is on and the rate known, but a tick is not
+// a whole number of its refreshes (144, 75, 165 Hz at 50 ms).
+inline constexpr const char *kWhyNotMultiple =
+    "the refresh rate is not a multiple of the tick rate";
+
+// Which of a display's refresh rates (`modes_hz`, its modes' rates in any order, repeats and
+// unknown ones allowed) would lock to a tick of `tick_ms` by plan_pacing's rule (#410): refresh x
+// interval within kLockTolerance of a whole number of refreshes. Each rate once (to 0.01 Hz),
+// highest first. 59.94 Hz locks as 60 does; 75 Hz locks the 40 ms tick, not the 50 ms one.
+std::vector<double> lockable_rates(const std::vector<double> &modes_hz, std::int64_t tick_ms);
+
+// The log's advice when the display cannot lock (#410, after #366): "" unless `plan` is the 1 ms
+// grid because the refresh rate `refresh_hz` is not a multiple of the tick rate (not for a locked
+// plan, vsync off, an unknown rate, pacing = wall or fast-forward). Otherwise "144 Hz cannot lock
+// to the 50 ms tick; this display also offers 120, 60 Hz, which would", or with none of
+// `modes_hz` lockable "75 Hz cannot lock to the 50 ms tick; set the display to a multiple of
+// 20 Hz". A judder this cannot cure: a tick of 7.2 refreshes is shown for 7 or 8 whatever the
+// clock; only a lockable rate or frame_rate = smooth (ADR 0091) removes it.
+std::string lock_advice(const PacingPlan &plan, double refresh_hz,
+                        const std::vector<double> &modes_hz);
 
 // One line for the log: "locked to the display: 60.00 Hz, 3 refreshes a 50 ms tick", "a 1 ms grid
 // (vsync off), a 50 ms tick", "the wall clock (pacing = wall)" or "the wall clock x2

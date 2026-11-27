@@ -8,6 +8,7 @@ What is open today, each with where it's tracked. An entry holds for as long as 
 |---|---|---|
 | Text uses an open font instead of Apple's fonts, so it looks plainer and widths differ a little. It hasn't been compared with a real device, so a line may wrap or clip differently | None | [#118](https://github.com/armaatus/maplethief-port/issues/118), [ADR 0036](adr/0036-coregraphics-and-uikit-drawing.md) |
 | The cash shop can't take real money: every payment is cancelled, as Apple's store is not there | `cash_shop = meso` lets it pay in the game's meso ([settings](play/settings.md)) | [ADR 0034](adr/0034-offline-services.md), [ADR 0072](adr/0072-offline-cash-shop-and-revives.md) |
+| On a 75, 144 or 165 Hz screen movement can stutter faintly: a game frame lasts 7.2 refreshes at 144 Hz, so it's shown for 7 or 8 (75 Hz: 3 or 4; 165 Hz: 8 or 9). The speed stays exact | Set the screen to a rate that is a multiple of 20 Hz (often 120 or 60 Hz; the log's `pacing:` line names the ones it offers), or `frame_rate = smooth` with `gfx_backend = gpu` ([Troubleshooting](play/troubleshooting.md#while-playing)) | [ADR 0075](adr/0075-display-locked-frame-pacing.md), [ADR 0131](adr/0131-a-1-ms-grid-where-the-display-cannot-lock.md), [#410](https://github.com/armaatus/maplethief-port/issues/410) |
 | More Games and the banner do nothing: they opened Nexon's pages, which are gone | `hide_online_ui = on` hides them | [Troubleshooting](play/troubleshooting.md#while-playing) |
 
 ## Getting it running
