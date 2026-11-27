@@ -59,8 +59,15 @@ MT_EXTERN_C_BEGIN
  * Text_SubChars (owner, text, from, to); a text pack steps them by UTF-8 lengths */
 #define MT_HOOK_FN_TEXT_CHAR_COUNT 0x22989u
 #define MT_HOOK_FN_TEXT_SUB_CHARS 0x22A1Du
-#define MT_HOOK_FN_DRAW_IMAGE 0x24DC9u      /* (image, x, y): draws a CMImage at its top left */
+#define MT_HOOK_FN_DRAW_IMAGE 0x24DC9u /* (image, x, y): draws a CMImage at its top left */
+/* CChatBox::NextPage and CChatBox::FirstPage (box): an NPC dialogue page set, wrapped whole
+ * (#391: the text events read it after them, maplethief/text_events.h) */
+#define MT_HOOK_FN_CHAT_BOX_NEXT_PAGE 0x34A05u
+#define MT_HOOK_FN_CHAT_BOX_FIRST_PAGE 0x34CD1u
 #define MT_HOOK_FN_SAVE_QUEST_DATA 0x38F55u /* CDataMgr::SaveQuestData (data manager, hero) */
+/* Popup_Open (mgr, id, text, kind): the engine's popup (#392: the text events read it after it,
+ * maplethief/text_events.h) */
+#define MT_HOOK_FN_POPUP_OPEN 0x3EAA1u
 /* Shop_OnKey (shop, key, game): the NPC shop's keys (game mode 2); the platform moves the list's
  * cursor by item and scrolls the drawn list to it (docs/re/original-bugs.md) */
 #define MT_HOOK_FN_SHOP_ON_KEY 0x46DB9u
@@ -90,9 +97,14 @@ MT_EXTERN_C_BEGIN
 /* CMapleObject_Touches (object, left, top, right, bottom at sp): the object's box meets the rect;
  * the drops' pick-up test (#175: auto_loot widens the drop's rect, CDropItems::Update's call) */
 #define MT_HOOK_FN_OBJECT_TOUCHES 0x6CF01u
+/* CNotifyTextList::Add (list, text, colour): a notify line (#392: the text events read it) */
+#define MT_HOOK_FN_NOTIFY_TEXT_ADD 0x78339u
 /* CStateGame::PaintExitToMenu (this): the scene runner, from CStateGame::Paint */
 #define MT_HOOK_FN_SCENE_RUNNER 0x83C71u
-#define MT_HOOK_FN_STATE_GAME_PAINT 0x87501u     /* CStateGame::Paint (this): the field's frame */
+#define MT_HOOK_FN_STATE_GAME_PAINT 0x87501u /* CStateGame::Paint (this): the field's frame */
+/* CStateGame::OnKeyPressed (this, key): the field's keys and popups; #336 checks the autosave's
+ * guards on the death popup's exit to the main menu (popup 0x6D) */
+#define MT_HOOK_FN_STATE_GAME_ON_KEY 0x8D4C9u
 #define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u /* -[MainMenuView clickPlay:] */
 /* -[TouchKeyPadView colorAtPixel:onImage:] (self, _cmd, CGPoint in r2/r3, UIImage at sp) */
 #define MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL 0xB4DB5u

@@ -97,6 +97,7 @@ const Expected kExpected[] = {
     {"speech", {nullptr, nullptr, nullptr}},
     {"speech_rate", {nullptr, nullptr, nullptr}},
     {"speech_volume", {nullptr, nullptr, nullptr}},
+    {"speech_notices", {nullptr, nullptr, nullptr}},
     {"brightness", {nullptr, nullptr, nullptr}},
     {"contrast", {nullptr, nullptr, nullptr}},
     {"saturation", {nullptr, nullptr, nullptr}},
@@ -116,6 +117,8 @@ const Expected kExpected[] = {
     {"stick_mode", {"4way", "4way", "4way"}},
     {"direction_priority", {"game", "game", "last"}},
     {"update_check", {nullptr, nullptr, nullptr}}, // #199: opt-in, in no preset
+    {"run_timer", {nullptr, nullptr, nullptr}},    // #406: the speedrun timer, in no preset
+    {"run_category", {nullptr, nullptr, nullptr}},
     {"record_runs", {nullptr, nullptr, nullptr}},  // #405: opt-in, in no preset
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
@@ -133,6 +136,9 @@ std::string other_value(const SettingInfo &info, const std::string &not_this) {
     }
     if (std::string_view(info.key) == "save_dir") {
         return not_this == "/saves/a" ? "/saves/b" : "/saves/a";
+    }
+    if (std::string_view(info.key) == "run_category") {
+        return not_this == "any" ? "chapter_1" : "any";
     }
     if (std::string(info.key) == "keypad_layout") {
         return not_this == "original" ? "dpad=80,10,-10,60" : "original";

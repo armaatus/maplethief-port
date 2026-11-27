@@ -203,12 +203,13 @@ QuickResult QuickStates::run(QuickRequest r, const QuickOps &ops, const std::str
     return out;
 }
 
-QuickResult QuickStates::save(const QuickOps &ops, const std::string &data_dir) {
+QuickResult save_state_to(const QuickOps &ops, const std::function<std::string(int)> &path_of,
+                          const std::string &what) {
     QuickResult out;
     out.request = QuickRequest::kSave;
-    const auto refuse = [&out](const std::string &why, const std::string &log) {
+    const auto refuse = [&out, &what](const std::string &why, const std::string &log) {
         out.notice = tr(Txt::state_save_refused, {why});
-        out.log = "quick_save refused: " + log;
+        out.log = what + " refused: " + log;
         return out;
     };
     std::string why;
@@ -216,7 +217,7 @@ QuickResult QuickStates::save(const QuickOps &ops, const std::string &data_dir) 
         return refuse(quick_state_reason(why), why);
     }
     const int slot = ops.slot();
-    const std::string path = quick_state_path(data_dir, slot);
+    const std::string path = slot >= 0 && slot <= 2 ? path_of(slot) : std::string();
     if (path.empty()) {
         return refuse(tr(Txt::state_why_no_game), "no character slot in play");
     }
@@ -228,21 +229,21 @@ QuickResult QuickStates::save(const QuickOps &ops, const std::string &data_dir) 
     if (!ops.write(path, bytes)) {
         return refuse(tr(Txt::state_why_not_written), path + " could not be written");
     }
-    stats_.saves++;
-    stats_.last_bytes = bytes.size();
     out.done = true;
+    out.bytes = bytes.size();
     out.notice = tr(Txt::state_saved);
-    out.log = "quick_save: slot " + std::to_string(slot) + ", " + std::to_string(bytes.size()) +
+    out.log = what + ": slot " + std::to_string(slot) + ", " + std::to_string(bytes.size()) +
               " bytes in " + elapsed_ms(t0) + " to " + path;
     return out;
 }
 
-QuickResult QuickStates::load(const QuickOps &ops, const std::string &data_dir) {
+QuickResult load_state_from(const QuickOps &ops, const std::function<std::string(int)> &path_of,
+                            const std::string &what, Txt none) {
     QuickResult out;
     out.request = QuickRequest::kLoad;
-    const auto refuse = [&out](const std::string &why, const std::string &log) {
+    const auto refuse = [&out, &what](const std::string &why, const std::string &log) {
         out.notice = tr(Txt::state_load_refused, {why});
-        out.log = "quick_load refused: " + log;
+        out.log = what + " refused: " + log;
         return out;
     };
     // The safe point, but for held input: a load lets go of it (the state's own replaces it).
@@ -252,13 +253,13 @@ QuickResult QuickStates::load(const QuickOps &ops, const std::string &data_dir) 
         return refuse(quick_state_reason(why), why);
     }
     const int slot = ops.slot();
-    const std::string path = quick_state_path(data_dir, slot);
+    const std::string path = slot >= 0 && slot <= 2 ? path_of(slot) : std::string();
     if (path.empty()) {
         return refuse(tr(Txt::state_why_no_game), "no character slot in play");
     }
     const std::optional<std::vector<std::uint8_t>> bytes = ops.read(path);
     if (!bytes) {
-        return refuse(tr(Txt::state_why_none), "no state at " + path);
+        return refuse(tr(none), "no state at " + path);
     }
     if (const std::string bad = ops.check(*bytes, static_cast<std::uint32_t>(slot)); !bad.empty()) {
         return refuse(bad, path + ": " + bad);
@@ -267,12 +268,32 @@ QuickResult QuickStates::load(const QuickOps &ops, const std::string &data_dir) 
     if (!ops.restore(*bytes, static_cast<std::uint32_t>(slot), &why)) {
         return refuse(quick_state_reason(why), why);
     }
-    stats_.loads++;
-    stats_.last_bytes = bytes->size();
     out.done = true;
+    out.bytes = bytes->size();
     out.notice = tr(Txt::state_loaded);
-    out.log = "quick_load: slot " + std::to_string(slot) + ", " + std::to_string(bytes->size()) +
+    out.log = what + ": slot " + std::to_string(slot) + ", " + std::to_string(bytes->size()) +
               " bytes in " + elapsed_ms(t0) + " from " + path;
+    return out;
+}
+
+QuickResult QuickStates::save(const QuickOps &ops, const std::string &data_dir) {
+    QuickResult out = save_state_to(
+        ops, [&data_dir](int slot) { return quick_state_path(data_dir, slot); }, "quick_save");
+    if (out.done) {
+        stats_.saves++;
+        stats_.last_bytes = out.bytes;
+    }
+    return out;
+}
+
+QuickResult QuickStates::load(const QuickOps &ops, const std::string &data_dir) {
+    QuickResult out = load_state_from(
+        ops, [&data_dir](int slot) { return quick_state_path(data_dir, slot); }, "quick_load",
+        Txt::state_why_none);
+    if (out.done) {
+        stats_.loads++;
+        stats_.last_bytes = out.bytes;
+    }
     return out;
 }
 

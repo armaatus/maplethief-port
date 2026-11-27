@@ -14,7 +14,8 @@
 //                                             play.cash_shop_meso, play.cash_shop_off, #156;
 //                                             confirm_guard: CTest play.confirm_guard, #147;
 //                                             autosave_*: CTests play.autosave_*, #150 (and
-//                                             autosave_exit, #179);
+//                                             autosave_exit, #179; autosave_death_exit,
+//                                             #336);
 //                                             widescreen_off, then widescreen_on with
 //                                             MT_WIDESCREEN_BASE: CTests play.widescreen_off,
 //                                             play.widescreen_on, #86; widescreen_pad_off,
@@ -41,7 +42,9 @@
 //                                             hud_extras: CTest play.hud_extras, #191,
 //                                             ADR 0109;
 //                                             mechanics: CTest play.mechanics, #214,
-//                                             docs/re/mechanics.md)
+//                                             docs/re/mechanics.md;
+//                                             systems2_*: CTests play.systems2_*_synthetic,
+//                                             #304, docs/testing/systems-sweep-2.md)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -76,10 +79,12 @@
 #include <SDL3/SDL.h>
 
 #include <cstdio>
+#include <sstream>
 #include <string>
 
 #if defined(MT_HAVE_GENERATED_CODE)
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <fstream>
@@ -102,6 +107,7 @@
 #include "live_settings.h"
 #include "maplethief/audio.h"
 #include "maplethief/cashshop.h"
+#include "maplethief/cg.h"
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
@@ -110,18 +116,24 @@
 #include "maplethief/saves.h"
 #include "maplethief/snapshot.h"
 #include "maplethief/texpack.h"
+#include "maplethief/text_events.h"
 #include "maplethief/textpack.h"
 #include "maplethief/widescreen.h"
 #include "minimap.h"
+#include "port_text.h"
+#include "practice_state.h"
 #include "present.h"
 #include "price_line.h"
 #include "quest_bot.h"
 #include "quick_state.h"
 #include "recovery.h"
+#include "run_timer.h"
 #include "save_state_input.h"
 #include "save_tools.h"
 #include "settings.h"
 #include "skill_rules.h"
+#include "speech.h"
+#include "speech_text.h"
 
 namespace {
 
@@ -1079,7 +1091,7 @@ void save_migrate_checks(Run &r, u64) {
 //   autosave_reload  a second process on autosave_quit's data: the files are as autosaved, and
 //                    slot 0 loads the hero with that progress
 
-void from_save(Run &r); // below, with chapter 1's parts
+void from_save(Run &r, Pred ready = nullptr); // below, with chapter 1's parts
 
 struct AutoRun {
     fe::Lifecycle lifecycle{true};
@@ -1414,6 +1426,61 @@ void autosave_exit(Run &r, u64) {
     });
 }
 void autosave_exit_checks(Run &, u64) {}
+
+// autosave_death_exit (#336): from a save in Henesys, a fall (the game's CHero::TakeDamage), then
+// the death popup's B ("Go to main menu", popup 0x6D) and OK on its Yes: CStateGame::OnKeyPressed's
+// hook checks the guards before the game leaves for the main menu, which never saves, and the
+// dead hero refuses (the dying guard): slot 0 is unchanged. MT_AUTOSAVE_MODE=off: nothing is
+// checked.
+void fall(mt_cpu *cpu); // below, with the cash shop's runs
+
+void autosave_death_exit(Run &r, u64) {
+    const char *mode_env = std::getenv("MT_AUTOSAVE_MODE");
+    static fe::Autosave mode = fe::Autosave::kOnQuit;
+    mode = mode_env != nullptr && std::string(mode_env) == "off" ? fe::Autosave::kOff
+                                                                 : fe::Autosave::kOnQuit;
+    g_auto.saver.install_exit_to_menu(&mode, [&r] { return r.t; });
+    from_save(r);
+    auto before =
+        std::make_shared<std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>>>();
+    then_wait_for(r, "the hero stands", 10, settled, 0.5);
+    then_do(r, "the files before the fall", [&r, before](mt_cpu *cpu) {
+        *before = slot0_files(r);
+        fall(cpu);
+    });
+    then_wait_for(
+        r, "the death popup (0x68)", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+    then_press(r, B); // Go to main menu
+    then_wait_for(r, "\"Do you really want to go MainMenu?\" (popup 0x6D)", 5,
+                  [](mt_cpu *cpu) { return popup_id(cpu) == fe::kAutosaveDeathExitPopup; });
+    then_do(r, "the guards on popup 0x6D", [](mt_cpu *cpu) {
+        const fe::AutosaveCheck c = fe::check_autosave(cpu, fe::kAutosaveDeathExitPopup);
+        check(c.guard == fe::AutosaveGuard::kDying && hero(cpu).hp <= 0,
+              "with popup 0x6D let through, the dead hero refuses: " + c.describe());
+    });
+    then_wait_for(r, "Yes picked (the popup opens on it)", 3, exit_yes_picked);
+    then_press(r, A);
+    then_wait_for(r, "the main menu (the game left)", 20, [](mt_cpu *cpu) {
+        return fe::check_autosave(cpu).guard == fe::AutosaveGuard::kNotInGame;
+    });
+    then_do(r, "the death exit's check", [&r, before](mt_cpu *) {
+        const auto after = slot0_files(r);
+        const fe::Autosaver::Stats &st = g_auto.saver.stats();
+        if (mode == fe::Autosave::kOnQuit) {
+            check(st.saves == 0 && st.skips == 1 && st.last == fe::AutosaveGuard::kDying &&
+                      after == *before,
+                  "Yes on popup 0x6D checked the guards once and the dying guard refused: slot 0 "
+                  "unchanged, as the game");
+        } else {
+            check(st.saves + st.skips == 0 && after == *before,
+                  "with autosave = off the death popup's exit checks nothing and saves nothing");
+        }
+        release_all(r);
+        r.on_turn = nullptr;
+        r.done = true;
+    });
+}
+void autosave_death_exit_checks(Run &, u64) {}
 
 void autosave_reload(Run &r, u64) {
     for (const char *name : {"theif0", "quest0"}) {
@@ -2096,10 +2163,9 @@ Pred both(Pred a, Pred b) {
 
 // Part A: a new game through the tutorial, then Elder's Advice (main 7), Find the Dark Lord (8)
 // and the Job Advancement Evaluation (21), and the save.
-void chapter_1_a(Run &r, u64) {
+// Part a's play after the pad is attached (korean_chapter_1_a plays it too).
+void chapter_1_a_steps(Run &r) {
     using namespace quest_bot;
-    attach_pad(r);
-    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
     then_new_game(r);
     then_tutorial(r);
     then_stock(r, "Red Potions from Mr. Wang (Etc20, Henesys)", 2, 3, 20, 100);
@@ -2117,12 +2183,22 @@ void chapter_1_a(Run &r, u64) {
     then_save(r);
     then_finish(r);
 }
+void chapter_1_a(Run &r, u64) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    chapter_1_a_steps(r);
+}
 void chapter_1_a_checks(Run &, u64) {}
 
 // The run events (#403, ADR 0156) a part sees: a listener beside the frontend's, installed by
 // from_save, keeps the speedrun kinds and prints each one as it comes.
 std::vector<mt_game_event> g_run_events;
+// The speedrun timer a part times (#406, run_timer.h): fed every event the listener hears.
+maplethief::frontend::RunTimer *g_run_timer = nullptr;
 void hear_run_event(void *, const mt_game_event *e) {
+    if (g_run_timer != nullptr) {
+        g_run_timer->on_event(*e);
+    }
     if (e->kind < MT_GAME_EVENT_CHAPTER_END || e->kind > MT_GAME_EVENT_MAP_CHANGE) {
         return;
     }
@@ -2151,7 +2227,7 @@ void then_run_event(Run &r, const std::string &what, mt_game_event_kind kind, i3
 
 // The start of a part that goes on from an earlier part's save (MT_FROM_SAVE): the main menu,
 // slot 0, the field.
-void from_save(Run &r) {
+void from_save(Run &r, Pred ready) {
     g_run_events.clear();
     mt_game_events_add_listener(hear_run_event, nullptr);
     // MT_MAP_DUMP="1.0 2.6": the route planner's platforms and moves of those maps, printed.
@@ -2165,7 +2241,7 @@ void from_save(Run &r) {
     g_play.anywhere = true;
     attach_pad(r);
     r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
-    then_load_slot0(r);
+    then_load_slot0(r, ready);
     then_do(r, "the save loaded",
             [](mt_cpu *cpu) { std::printf("loaded: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
 }
@@ -2689,6 +2765,31 @@ void chapter_1_k_checks(Run &, u64) {}
 void chapter_1_l(Run &r, u64) {
     using namespace quest_bot;
     from_save(r);
+    // The speedrun timer (#406) on Chapter 1's last split, from this save before the trip to
+    // Orbis: a run of the shipped category's last split only (the ones before it are earlier
+    // parts'), started now on the host's monotonic clock and the game's ticks.
+    namespace fe = maplethief::frontend;
+    static fe::RunTimer timer(fe::RunClock{[] {
+                                               return fe::RunInstant{
+                                                   static_cast<double>(SDL_GetTicksNS()) / 1e9,
+                                                   mt_input_get_stats().ticks};
+                                           },
+                                           [] { return std::string("2026-11-26 00:00:00"); }});
+    then_do(r, "the speedrun timer: Chapter 1's last split, from here", [](mt_cpu *) {
+        std::vector<std::string> problems;
+        std::optional<fe::RunCategory> last;
+        for (const auto &[name, text] : fe::shipped_run_category_files()) {
+            if (name == "chapter_1") {
+                last = fe::parse_run_category(name, text, &problems);
+            }
+        }
+        check(last.has_value() && problems.empty(), "the shipped chapter_1 category parses");
+        last->splits.erase(last->splits.begin(), last->splits.end() - 1);
+        timer.set_category(*last, std::nullopt);
+        g_run_timer = &timer;
+        timer.start();
+        check(timer.state() == fe::RunTimer::State::kRunning, "the timer runs");
+    });
     const FarmStyle fight = chapter_1_fight();
     const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
     then_spend_sp(r, "Critical Stab, HP Mastery", build);
@@ -2717,6 +2818,29 @@ void chapter_1_l(Run &r, u64) {
                  });
     then_run_event(r, "chapter 1 ends (the trip to Orbis)", MT_GAME_EVENT_CHAPTER_END, 1);
     then_run_event(r, "the trip to Orbis (4.1)", MT_GAME_EVENT_MAP_CHANGE, 4, {1});
+    then_do(r, "the speedrun timer: Chapter 1's last split fired, the log has both times",
+            [&r](mt_cpu *) {
+                namespace fe = maplethief::frontend;
+                g_run_timer = nullptr;
+                std::vector<fe::RunRecord> runs = timer.take_records();
+                check(timer.state() == fe::RunTimer::State::kFinished && runs.size() == 1,
+                      "the run finished at the split (" + std::to_string(runs.size()) +
+                          " records)");
+                std::string path, why;
+                bool best = false;
+                check(fe::write_run(r.out.string(), runs[0], nullptr, &path, &best, &why),
+                      "the run log written: " + why);
+                std::ifstream in(path, std::ios::binary);
+                const std::string text{std::istreambuf_iterator<char>(in),
+                                       std::istreambuf_iterator<char>()};
+                std::printf("run log %s:\n%s", path.c_str(), text.c_str());
+                std::vector<std::string> problems;
+                const std::optional<fe::RunRecord> back = fe::parse_run_log(text, &problems);
+                check(back.has_value() && back->finished && back->times.size() == 1 &&
+                          back->times[0].ms > 0 && back->times[0].ticks > 0 &&
+                          back->times[0] == back->end,
+                      "the log holds the split's real time and game ticks");
+            });
     then_do(r, "chapter 2 on Orbis (4.1) in guest memory", [](mt_cpu *cpu) {
         const Hero h = hero(cpu);
         std::string q;
@@ -4867,7 +4991,8 @@ struct ChatRun {
 };
 ChatRun g_chat;
 
-void chat_text(Run &r, u64) {
+// chat_text's flow up to the field after MacArthur's dialog (speech_dialogue's too).
+void queue_chat_text(Run &r) {
     attach_pad(r);
     g_chat = ChatRun{};
     r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
@@ -4940,6 +5065,10 @@ void chat_text(Run &r, u64) {
         return field(cpu) && hero(cpu).on(2, 8) && quest_state(cpu, hero(cpu), 0, 0) >= 1;
     });
     then_wait_field(r);
+}
+
+void chat_text(Run &r, u64) {
+    queue_chat_text(r);
     then_finish(r);
 }
 
@@ -7436,6 +7565,207 @@ void quick_state_checks(Run &r, u64) {
     }
 }
 
+// --- practice states per split (#409, practice_state.h, ADR 0189) ------------------------------
+//
+// practice_state: from part c's save (MT_FROM_SAVE), the hero in Perion (1.0), the speedrun timer
+// times a synthetic category of three splits: the map change to 1.2, the one back to 1.0, and
+// one never reached. The run starts at once (a run from a save, as chapter_1_l's). Each split
+// arms a practice state, taken at the first safe turn after it (PracticeStates on the frontend's
+// game_quick_ops, as game.cpp's turn hook runs it) to OUT_DIR/data/states/practice_test/: two
+// splits, two states. Then F7 picks the first split's state and F8 loads it: the guest digest
+// (the FNV-1a of mt_snapshot_save of the game right after the load) equals the state file's as
+// taken, the hero's state line is the one at the take, and the timer is practice with its segment
+// timer back at zero. The way back to 1.0 then ends the practised segment (and, a split of the
+// practice, takes split 2's state again).
+namespace practice_test {
+fe::PracticeStates g_states;
+fe::RunTimer *g_timer = nullptr;
+struct Taken {
+    std::string path, digest, state;
+};
+std::map<std::size_t, Taken> g_taken;
+std::string g_loaded_digest, g_loaded_state, g_load_log;
+fe::RunTime g_before_load, g_after_load;
+std::size_t g_picked = 0;
+std::uint64_t g_saves_at_load = 0; // the practice states taken before the load
+bool g_practice = false;
+std::size_t g_next = 0;
+std::optional<fe::RunTime> g_segment;
+std::vector<fe::RunRecord> g_records;
+constexpr const char *k_category = "practice_test";
+
+// The hero's state, without the harness's own counters (a load does not rewind them).
+std::string hero_state(mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    char buf[200];
+    std::snprintf(buf, sizeof buf, "map=%d.%d x=%d y=%d hp=%d mp=%d level=%d exp=%d meso=%d",
+                  h.area, h.map, h.x, h.y, h.hp, h.mp, h.level, h.exp, h.meso);
+    return buf;
+}
+
+std::string bytes_digest(const std::vector<std::uint8_t> &b) {
+    return fe::hex64(fe::fnv1a64(b.data(), b.size()));
+}
+
+// The guest digest now: the game's state file at this moment, as a practice state takes it.
+std::string guest_digest(mt_cpu *cpu, std::uint32_t slot) {
+    mt_snapshot_meta meta = mt_snapshot_meta_default();
+    mt_process_image_sha256(mt_process_current(), meta.binary_sha256);
+    meta.slot = slot;
+    std::uint8_t *bytes = nullptr;
+    std::size_t size = 0;
+    char why[256] = {};
+    if (mt_snapshot_save(cpu, &meta, &bytes, &size, why, sizeof why) != 0) {
+        return std::string("no save: ") + why;
+    }
+    const std::string d = fe::hex64(fe::fnv1a64(bytes, size));
+    std::free(bytes);
+    return d;
+}
+
+fe::RunCategory category() {
+    std::vector<std::string> problems;
+    std::optional<fe::RunCategory> c = fe::parse_run_category(k_category,
+                                                              "title = Practice test\n"
+                                                              "split map_change 1.2 = Dark Stumps\n"
+                                                              "split map_change 1.0 = Perion\n"
+                                                              "split chapter_end 9 = Never\n",
+                                                              &problems);
+    check(c.has_value() && problems.empty(), "the test category parses");
+    return c.value_or(fe::RunCategory{});
+}
+} // namespace practice_test
+
+void practice_state(Run &r, u64) {
+    using namespace quest_bot;
+    namespace pt = practice_test;
+    from_save(r);
+    static fe::RunTimer timer(fe::RunClock{[] {
+                                               return fe::RunInstant{
+                                                   static_cast<double>(SDL_GetTicksNS()) / 1e9,
+                                                   mt_input_get_stats().ticks};
+                                           },
+                                           [] { return std::string("2026-11-27 00:00:00"); }});
+    pt::g_timer = &timer;
+    // Every turn: a split the timer reached arms its state; an armed state is taken at the first
+    // safe turn.
+    r.on_turn = [&r, monitor_turn = r.on_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        if (const std::optional<std::size_t> s = pt::g_timer->take_reached()) {
+            pt::g_states.reached(*s, pt::g_timer->category().splits.size());
+            std::printf("practice: split %zu reached at step %llu\n", *s,
+                        static_cast<unsigned long long>(r.step()));
+        }
+        if (!pt::g_states.armed()) {
+            return;
+        }
+        const std::size_t split = *pt::g_states.armed();
+        const fe::QuickResult res =
+            pt::g_states.take_armed(run_quick_ops(r, cpu), r.data.string(), pt::k_category);
+        if (res.done) {
+            const fe::AutosaveCheck c = fe::check_autosave(cpu);
+            pt::Taken t;
+            t.path = fe::practice_state_path(r.data.string(), pt::k_category, c.slot, split);
+            t.digest = pt::bytes_digest(
+                fe::read_quick_state(t.path).value_or(std::vector<std::uint8_t>{}));
+            t.state = pt::hero_state(cpu);
+            std::printf("practice: %s; digest %s, %s\n", res.log.c_str(), t.digest.c_str(),
+                        t.state.c_str());
+            pt::g_taken[split] = t;
+        }
+    };
+    then_do(r, "the speedrun timer: the test category, a run from here", [](mt_cpu *) {
+        g_run_timer = pt::g_timer;
+        pt::g_timer->set_category(pt::category(), std::nullopt);
+        pt::g_timer->start();
+        check(pt::g_timer->state() == fe::RunTimer::State::kRunning, "the timer runs");
+    });
+    const wm::Object *back = wm::get(1, 2).portal(1); // 1.2's portal to Perion
+    const Goal on_1_2 = back != nullptr ? Goal{1, 2, back->x, back->y, 40} : Goal{1, 2, 0, 0, 40};
+    then_go(r, "the Dark Stumps' map (1.2), by its portal back", on_1_2, 300);
+    then_wait_for(r, "the practice state after split 1 (1.2)", 60,
+                  [](mt_cpu *) { return pt::g_taken.count(1) == 1; });
+    then_go(r, "back to Perion (1.0)", {1, 0, 376, 399, 30}, 300);
+    then_wait_for(r, "the practice state after split 2 (1.0)", 60,
+                  [](mt_cpu *) { return pt::g_taken.count(2) == 1; });
+    then_wait(r, 1);
+    // F7 picks the first split with a state, F8 loads it, as game.cpp's run_practice_state.
+    then_do(r, "F7: pick; F8: load the first split's state", [&r](mt_cpu *cpu) {
+        const fe::QuickOps ops = run_quick_ops(r, cpu);
+        const fe::RunCategory &c = pt::g_timer->category();
+        tap_key(r, SDLK_F7);
+        check(pt::g_states.take(r.actions, true) == fe::PracticeRequest::kPick, "F7 picks");
+        const std::optional<std::size_t> picked =
+            pt::g_states.pick(pt::g_timer->picked(), c.splits.size(), ops, r.data.string(),
+                              pt::k_category, fe::practice_state_exists);
+        pt::g_picked = picked.value_or(0);
+        pt::g_timer->set_picked(picked);
+        tap_key(r, SDLK_F8);
+        check(pt::g_states.take(r.actions, true) == fe::PracticeRequest::kLoad, "F8 loads");
+        pt::g_before_load = pt::g_timer->elapsed();
+        pt::g_saves_at_load = pt::g_states.stats().saves;
+        const fe::QuickResult res =
+            pt::g_states.load(ops, r.data.string(), pt::k_category, pt::g_picked);
+        pt::g_load_log = res.log;
+        if (!res.done) {
+            return;
+        }
+        const fe::AutosaveCheck slot = fe::check_autosave(cpu);
+        pt::g_loaded_digest = pt::guest_digest(cpu, static_cast<std::uint32_t>(slot.slot));
+        pt::g_loaded_state = pt::hero_state(cpu);
+        pt::g_timer->start_practice(pt::g_picked);
+        pt::g_practice = pt::g_timer->practice();
+        pt::g_next = pt::g_timer->next_split();
+        pt::g_after_load = pt::g_timer->elapsed();
+        pt::g_records = pt::g_timer->take_records();
+        std::printf("practice: %s; digest %s, %s; overlay:\n", res.log.c_str(),
+                    pt::g_loaded_digest.c_str(), pt::g_loaded_state.c_str());
+        for (const std::string &line : pt::g_timer->overlay_lines()) {
+            std::printf("  %s\n", line.c_str());
+        }
+    });
+    then_go(r, "back to Perion (1.0) again: the practised segment", {1, 0, 376, 399, 30}, 300);
+    then_do(r, "the practised segment's time", [](mt_cpu *) {
+        pt::g_segment = pt::g_timer->last_segment();
+        for (const std::string &line : pt::g_timer->overlay_lines()) {
+            std::printf("  %s\n", line.c_str());
+        }
+        g_run_timer = nullptr;
+    });
+    then_finish(r);
+}
+
+void practice_state_checks(Run &, u64) {
+    namespace pt = practice_test;
+    check(pt::g_taken.size() == 2 && pt::g_saves_at_load == 2,
+          "two splits took two practice states before the load (" +
+              std::to_string(pt::g_saves_at_load) + ")");
+    std::error_code ec;
+    for (const auto &[split, t] : pt::g_taken) {
+        check(fs::is_regular_file(t.path, ec),
+              "split " + std::to_string(split) + "'s state is a file: " + t.path);
+    }
+    check(pt::g_picked == 1, "F7 picked the first split (" + std::to_string(pt::g_picked) + ")");
+    check(pt::g_states.stats().loads == 1, "F8 loaded it: " + pt::g_load_log);
+    const pt::Taken &first = pt::g_taken[1];
+    check(!first.digest.empty() && pt::g_loaded_digest == first.digest,
+          "the guest digest after the load is the one taken (" + pt::g_loaded_digest + ", taken " +
+              first.digest + ")");
+    check(pt::g_loaded_state == first.state,
+          "the hero is where the state was taken (" + pt::g_loaded_state + ")");
+    check(pt::g_practice && pt::g_next == 1,
+          "the load marked the run as practice, timing split 2 (next " +
+              std::to_string(pt::g_next) + ")");
+    check(pt::g_records.size() == 1 && !pt::g_records[0].finished,
+          "the run before the load ended as reset");
+    check(pt::g_after_load.ms < pt::g_before_load.ms && pt::g_after_load.ms < 1000,
+          "the segment timer restarted (" + fe::format_run_time(pt::g_before_load.ms) + " -> " +
+              fe::format_run_time(pt::g_after_load.ms) + ")");
+    check(pt::g_segment.has_value() && pt::g_segment->ms > 0 && pt::g_segment->ticks > 0,
+          "the way back to 1.0 ended the practised segment (" +
+              (pt::g_segment ? fe::format_run_time(pt::g_segment->ms) : std::string("none")) + ")");
+}
+
 // --- the save-state census (#202, ADR 0105, docs/re/save-states.md) -----------------------------
 //
 // --- crash recovery points across two processes (#335, ADR 0151, recovery.h) -------------------
@@ -9562,6 +9892,2250 @@ void skills_bandit_checks(Run &, u64) {
     check(g_skills->stats[22].guard_ok > 0, "Meso Guard: blows paid in meso");
 }
 
+// --- Speech: dialogue and the scenes' speech boxes (#391, ADR 0187, speech_text.h) -------------
+//
+// speech_dialogue: chat_text's flow (a new game through the intro's speech boxes and MacArthur's
+// first dialog on 2.8, A as soon as each box shows) with the speech on the log backend
+// (MT_SPEECH=on) or off (unset: the base run). The flow's own monitor reads every box from guest
+// memory each tick; the run records each text event (maplethief/text_events.h) and each
+// utterance the log backend is asked to say. In the field after the dialog the state is written
+// to OUT_DIR/speech_state.txt: the game's rand() state (0x11A510), the tick, and the hero, the
+// quests and the mobs as scene_state reads them. Checks, with the speech on:
+//   - every box the monitor saw is one event, in the same order, of the same kind, with the same
+//     text (white space aside); each event has a speaker and valid UTF-8 text;
+//   - each page and each scene box is one utterance, in the same order, "speaker: text";
+//   - MT_SPEECH_BASE=<the off run's OUT_DIR>: every state line equals the off run's.
+// With it off: no event and no utterance (the wrappers are off). Only counts and hashes are
+// printed and compared, never the game's text.
+struct SpeechRun {
+    bool on = false;
+    std::unique_ptr<fe::Speech> speech;
+    std::unique_ptr<fe::SpeechText> text;
+    struct Event {
+        std::uint32_t kind = 0, speaker_kind = 0;
+        std::string speaker, text;
+    };
+    std::vector<Event> events;
+    fe::LogSpeechBackend *log = nullptr;                    // the speech's backend
+    std::vector<std::string> said;                          // what it was asked to say
+    std::vector<std::pair<std::string, std::string>> boxes; // the monitor's: kind, lines
+    ChatBoxView last;
+    u64 last_tick = 0;
+    std::vector<std::pair<std::string, std::string>> state;
+} g_sd;
+
+void record_text_event(void *, const mt_text_event *e) {
+    g_sd.events.push_back(SpeechRun::Event{e->kind, e->speaker_kind, e->speaker, e->text});
+}
+
+// The text without its white space (the scene boxes' lines end in "\r") and the monitor's
+// line ends ('|').
+std::string bare(const std::string &s) {
+    std::string out;
+    for (const char c : s) {
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '|') {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+bool valid_utf8(const std::string &s) {
+    for (std::size_t i = 0; i < s.size();) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        const std::size_t n = c < 0x80                 ? 1
+                              : c >= 0xC2 && c <= 0xDF ? 2
+                              : c >= 0xE0 && c <= 0xEF ? 3
+                              : c >= 0xF0 && c <= 0xF4 ? 4
+                                                       : 0;
+        if (n == 0 || i + n > s.size()) {
+            return false;
+        }
+        for (std::size_t k = 1; k < n; k++) {
+            if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) {
+                return false;
+            }
+        }
+        i += n;
+    }
+    return true;
+}
+
+void speech_dialogue(Run &r, u64) {
+    r.settings_from_env = false; // the on and off runs alike, whatever MAPLETHIEF_SETTINGS says
+    g_sd.on = std::getenv("MT_SPEECH") != nullptr && std::string(std::getenv("MT_SPEECH")) == "on";
+    auto backend = std::make_unique<fe::LogSpeechBackend>([](const std::string &) {});
+    g_sd.log = backend.get();
+    g_sd.speech = std::make_unique<fe::Speech>(std::move(backend));
+    g_sd.speech->set_enabled(g_sd.on);
+    g_sd.text = std::make_unique<fe::SpeechText>();
+    mt_text_events_add_listener(record_text_event, nullptr);
+    queue_chat_text(r);
+    const std::function<void(mt_cpu *)> monitor_turn = r.on_turn;
+    r.on_turn = [&r, monitor_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        // As game.cpp's turn: the events since the last turn said, then the speech's own turn.
+        g_sd.text->turn(*g_sd.speech, r.settings, r.t);
+        g_sd.speech->turn(r.t);
+        if (r.ticks == g_sd.last_tick) {
+            return;
+        }
+        g_sd.last_tick = r.ticks;
+        const ChatBoxView v = chat_box_view(cpu);
+        if (!v.kind.empty() && (!v.same_box(g_sd.last) || v.text != g_sd.last.text)) {
+            g_sd.boxes.emplace_back(v.kind, v.text);
+        }
+        g_sd.last = v;
+    };
+    then_do(r, "the state in the field after the dialog", [&r](mt_cpu *cpu) {
+        g_sd.state = scene_state(cpu);
+        g_sd.state.emplace_back("ticks", std::to_string(r.ticks));
+        std::ofstream f(r.out / "speech_state.txt", std::ios::trunc);
+        for (const auto &[k, v] : g_sd.state) {
+            f << k << " = " << v << "\n";
+        }
+    });
+    then_finish(r);
+}
+
+void speech_dialogue_checks(Run &, u64) {
+    SpeechRun &s = g_sd;
+    mt_text_events_remove_listener(record_text_event, nullptr);
+    for (const fe::Utterance &u : s.log->said()) {
+        s.said.push_back(u.text);
+    }
+    u64 pages = 0, answers = 0, scene_boxes = 0;
+    for (const SpeechRun::Event &e : s.events) {
+        pages += e.kind == MT_TEXT_EVENT_PAGE ? 1 : 0;
+        answers += e.kind == MT_TEXT_EVENT_ANSWER ? 1 : 0;
+        scene_boxes += e.kind == MT_TEXT_EVENT_SCENE_BOX ? 1 : 0;
+    }
+    std::string all;
+    for (const std::string &u : s.said) {
+        all += u + "\n";
+    }
+    const fe::SpeechStats st = s.speech->stats();
+    // Released here: left to the process's exit, the destructors aborted it.
+    s.text.reset();
+    s.speech.reset();
+    std::printf("speech_dialogue (speech %s): %zu boxes seen; events: %llu pages, %llu answers, "
+                "%llu scene boxes; %zu utterances (hash %s); said %llu, interrupted %llu\n",
+                s.on ? "on" : "off", s.boxes.size(), static_cast<unsigned long long>(pages),
+                static_cast<unsigned long long>(answers),
+                static_cast<unsigned long long>(scene_boxes), s.said.size(),
+                fe::hex64(fe::fnv1a64(all.data(), all.size())).c_str(),
+                static_cast<unsigned long long>(st.spoken),
+                static_cast<unsigned long long>(st.interrupted));
+    check(!s.state.empty(), "the run reached the field after MacArthur's dialog");
+    if (!s.on) {
+        check(s.events.empty() && s.said.empty(),
+              "speech off: no text event and nothing said (" + std::to_string(s.events.size()) +
+                  " events, " + std::to_string(s.said.size()) + " utterances)");
+    } else {
+        // The events but the answers, against the boxes the monitor saw.
+        std::vector<const SpeechRun::Event *> shown;
+        for (const SpeechRun::Event &e : s.events) {
+            if (e.kind != MT_TEXT_EVENT_ANSWER) {
+                shown.push_back(&e);
+            }
+        }
+        u64 npc = 0, speech = 0;
+        bool same = shown.size() == s.boxes.size();
+        for (std::size_t i = 0; i < s.boxes.size(); i++) {
+            const bool is_npc = s.boxes[i].first == "npc";
+            (is_npc ? npc : speech)++;
+            same = same && i < shown.size() &&
+                   shown[i]->kind == (is_npc ? MT_TEXT_EVENT_PAGE : MT_TEXT_EVENT_SCENE_BOX) &&
+                   bare(shown[i]->text) == bare(s.boxes[i].second);
+        }
+        check(npc >= 2 && speech >= 1, "the run shows NPC pages and scene speech boxes (" +
+                                           std::to_string(npc) + " pages, " +
+                                           std::to_string(speech) + " speech boxes)");
+        check(same, "every box shown is one text event, in order, of its kind, with its text (" +
+                        std::to_string(shown.size()) + " events, " +
+                        std::to_string(s.boxes.size()) + " boxes)");
+        bool whole = true, named = true;
+        for (const SpeechRun::Event &e : s.events) {
+            whole = whole && valid_utf8(e.text) && valid_utf8(e.speaker) &&
+                    (e.kind == MT_TEXT_EVENT_ANSWER || !e.text.empty());
+            named = named && !e.speaker.empty() && e.speaker_kind != MT_TEXT_SPEAKER_NONE;
+        }
+        check(whole, "every event's text and speaker are whole UTF-8");
+        check(named, "every event has a speaker");
+        bool lines = s.said.size() == shown.size();
+        for (std::size_t i = 0; lines && i < s.said.size(); i++) {
+            lines = valid_utf8(s.said[i]) &&
+                    s.said[i].rfind(shown[i]->speaker + ": " + shown[i]->text, 0) == 0;
+        }
+        check(lines, "each page and scene box is said once, in order, as \"speaker: text\" (" +
+                         std::to_string(s.said.size()) + " utterances)");
+    }
+    const char *base_dir = std::getenv("MT_SPEECH_BASE");
+    if (base_dir == nullptr || *base_dir == 0) {
+        return;
+    }
+    std::ifstream in(fs::path(base_dir) / "speech_state.txt", std::ios::binary);
+    std::vector<std::pair<std::string, std::string>> base;
+    for (std::string line; std::getline(in, line);) {
+        const std::size_t eq = line.find(" = ");
+        if (eq != std::string::npos) {
+            base.emplace_back(line.substr(0, eq), line.substr(eq + 3));
+        }
+    }
+    std::size_t differ = 0;
+    for (std::size_t i = 0; i < s.state.size() && i < base.size(); i++) {
+        if (s.state[i] != base[i]) {
+            differ++;
+            std::printf("speech_dialogue: %s differs from the off run's\n",
+                        s.state[i].first.c_str());
+        }
+    }
+    check(!base.empty() && base.size() == s.state.size() && differ == 0,
+          "the rand() state, the tick, the hero, the quests and the mobs equal the off run's (" +
+              std::to_string(s.state.size()) + " lines, " + std::to_string(differ) + " differ)");
+}
+
+// --- systems sweep 2 (#304): the cash shop's tiles and restores, scrolls, Pigmy, portal620 ------
+//
+// Each mode starts from a built save (tests/starts/systems2_*.json, MT_FROM_SAVE) that equals no
+// chained state, so every test is named synthetic (docs/testing/start-states.md). What each one
+// asserts is in docs/testing/systems-sweep-2.md.
+
+// A guest word written by the test, where the game's own code would have written it.
+void wr(mt_cpu *cpu, u32 addr, u32 v) {
+    if (addr != 0 && addr + 4ull <= cpu->mem_size) {
+        std::memcpy(cpu->mem + addr, &v, 4);
+    }
+}
+
+// A guest function called from the turn hook, the registers kept.
+u32 call(mt_cpu *cpu, u32 fn, std::vector<u32> args) {
+    u32 saved[16];
+    std::memcpy(saved, cpu->r, sizeof saved);
+    const u32 r0 = mt_call_guest(cpu, fn, args.data(), static_cast<u32>(args.size()), fn);
+    std::memcpy(cpu->r, saved, sizeof saved);
+    return r0;
+}
+
+// CHero::ExpToLevelUp 0x65919: the EXP the hero's level needs.
+i32 exp_need(mt_cpu *cpu) { return static_cast<i32>(call(cpu, 0x65919u, {hero(cpu).addr})); }
+
+// The hero's level and EXP after `gain` EXP (CHero::setExp carries the rest into a level-up).
+std::pair<i32, i32> after_exp(i32 level, i32 exp, i32 need, i32 gain) {
+    return exp + gain >= need ? std::pair{level + 1, exp + gain - need}
+                              : std::pair{level, exp + gain};
+}
+
+// Presses A on every popup until `done` holds in the field, each popup id seen kept in `seen`.
+// With `in_field` false, `done` alone ends it (a screen other than the field may follow).
+void then_answer(Run &r, std::string what, Pred done, std::shared_ptr<std::set<i32>> seen,
+                 SDL_GamepadButton first = A, bool in_field = true, double timeout = 60) {
+    struct S {
+        double opened = -1;
+        bool firsted = false;
+    };
+    auto s = std::make_shared<S>();
+    then(r, what, timeout, [&r, done, seen, first, in_field, s](mt_cpu *cpu, double el) {
+        const i32 p = popup_id(cpu);
+        if (p != -1) {
+            seen->insert(p);
+            s->opened = s->opened < 0 ? el : s->opened;
+            const double o = el - s->opened;
+            const SDL_GamepadButton b = s->firsted ? A : first;
+            hold(r, b, o >= 0.6 && std::fmod(o - 0.6, 1.0) < 0.1);
+            if (o >= 0.6 && std::fmod(o - 0.6, 1.0) < 0.1) {
+                s->firsted = true;
+            }
+            return false;
+        }
+        s->opened = -1;
+        release_all(r);
+        return (field(cpu) || !in_field) && done(cpu);
+    });
+}
+
+std::string seen_text(const std::set<i32> &seen) {
+    std::string s;
+    for (const i32 p : seen) {
+        char b[16];
+        std::snprintf(b, sizeof b, "%s0x%X", s.empty() ? "" : " ", static_cast<unsigned>(p));
+        s += b;
+    }
+    return s;
+}
+
+// --- Speech: notify lines and popups (#392, ADR 0191, speech_text.h) ---------------------------
+//
+// speech_notices: from a built start (tests/starts/speech_notices.json, MT_FROM_SAVE: a level-10
+// Beginner with a knife on the hunting field 2.3), the hunt until the hero has gained EXP and
+// the notify list has shown a line besides the kill's (a pick-up or meso); then a fall, the
+// death popup (0x68) and its Return to town, answered with OK and Yes (0x69), back in town.
+// With the speech on the log backend (MT_SPEECH=on) or off (unset: the base run). Each turn the
+// run reads the notify list (+0x4C) from guest memory and keeps every new line; the text events
+// and the utterances are recorded. In town the state goes to OUT_DIR/speech_state.txt as
+// speech_dialogue's. Checks, with the speech on:
+//   - each notice event is a line the list showed, in the same order; at least one EXP line
+//     (the kill) and one other on the list +0x4C (the pick-up or meso);
+//   - the popups 0x68 (no message, kind 0) then 0x69 (a message, kind 1: Yes / No);
+//   - the notices said as kNotice utterances (a turn's lines in one), the popups as kDialogue:
+//     the death popup in the port's words, 0x69 its message then "Yes or No.";
+//   - MT_SPEECH_BASE=<the off run's OUT_DIR>: every state line equals the off run's.
+// With it off: no event and no utterance. Only counts and hashes are printed, never the text.
+struct NoticesRun {
+    bool on = false;
+    std::unique_ptr<fe::Speech> speech;
+    std::unique_ptr<fe::SpeechText> text;
+    struct Event {
+        std::uint32_t kind = 0;
+        i32 index = 0, value = 0;
+        std::string speaker, text;
+    };
+    std::vector<Event> events;
+    fe::LogSpeechBackend *log = nullptr;
+    std::set<std::pair<u32, std::uint64_t>> seen; // the list's entries seen: address, time
+    std::vector<std::string> lines;               // their text, in order
+    std::size_t lines_at_hunt = 0;
+    i32 exp_at_hunt = -1;
+    std::shared_ptr<std::set<i32>> popups = std::make_shared<std::set<i32>>();
+    std::vector<std::pair<std::string, std::string>> state;
+} g_sn;
+
+void record_notice_event(void *, const mt_text_event *e) {
+    g_sn.events.push_back(NoticesRun::Event{e->kind, e->index, e->value, e->speaker, e->text});
+}
+
+void speech_notices(Run &r, u64) {
+    r.settings_from_env = false;
+    g_sn.on = std::getenv("MT_SPEECH") != nullptr && std::string(std::getenv("MT_SPEECH")) == "on";
+    auto backend = std::make_unique<fe::LogSpeechBackend>([](const std::string &) {});
+    g_sn.log = backend.get();
+    g_sn.speech = std::make_unique<fe::Speech>(std::move(backend));
+    g_sn.speech->set_enabled(g_sn.on);
+    g_sn.text = std::make_unique<fe::SpeechText>();
+    mt_text_events_add_listener(record_notice_event, nullptr);
+    from_save(r);
+    const std::function<void(mt_cpu *)> monitor_turn = r.on_turn;
+    r.on_turn = [&r, monitor_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        g_sn.text->turn(*g_sn.speech, r.settings, r.t);
+        g_sn.speech->turn(r.t);
+        for (const NotifyLine &l : notify_lines(cpu)) {
+            if (g_sn.seen.insert({l.addr, l.time}).second) {
+                g_sn.lines.push_back(l.text);
+            }
+        }
+    };
+    then_wait_field(r);
+    then_do(r, "the hunt begins", [](mt_cpu *cpu) {
+        g_play.hunting = true;
+        g_sn.lines_at_hunt = g_sn.lines.size();
+        g_sn.exp_at_hunt = hero(cpu).exp;
+        std::printf("speech_notices: the hunt from %s\n", hero_text(cpu, hero(cpu)).c_str());
+    });
+    then_hunt(r, "map 2.3 until a kill's EXP and a pick-up's line",
+              [](mt_cpu *cpu) {
+                  return hero(cpu).exp > g_sn.exp_at_hunt &&
+                         g_sn.lines.size() >= g_sn.lines_at_hunt + 2;
+              },
+              600, {2, 0, 42, 2, 3});
+    then_do(r, "the hero falls", [&r](mt_cpu *cpu) {
+        g_play.hunting = false;
+        release_all(r);
+        fall(cpu);
+    });
+    then_wait_for(
+        r, "the death popup (0x68)", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+    then_answer(
+        r, "Return to town (0x68 OK, 0x69 Yes)",
+        [](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            return h.hp > 0 && h.on(2, 0);
+        },
+        g_sn.popups);
+    then_do(r, "the state in town", [&r](mt_cpu *cpu) {
+        g_sn.state = scene_state(cpu);
+        g_sn.state.emplace_back("ticks", std::to_string(r.ticks));
+        std::ofstream f(r.out / "speech_state.txt", std::ios::trunc);
+        for (const auto &[k, v] : g_sn.state) {
+            f << k << " = " << v << "\n";
+        }
+    });
+    then_finish(r);
+}
+
+void speech_notices_checks(Run &, u64) {
+    NoticesRun &s = g_sn;
+    mt_text_events_remove_listener(record_notice_event, nullptr);
+    // The notices still queued behind the last popup, said as the voice frees up.
+    for (int i = 1; i <= 60; i++) {
+        s.speech->turn(1e6 + 30.0 * i);
+    }
+    std::vector<std::pair<fe::SpeechKind, std::string>> said;
+    for (const fe::Utterance &u : s.log->said()) {
+        said.emplace_back(u.kind, u.text);
+    }
+    std::vector<const NoticesRun::Event *> notices, popups;
+    for (const NoticesRun::Event &e : s.events) {
+        (e.kind == MT_TEXT_EVENT_NOTICE ? notices : popups).push_back(&e);
+    }
+    std::string all;
+    for (const auto &[k, t] : said) {
+        all += (k == fe::SpeechKind::kNotice ? "n " : "d ") + t + "\n";
+    }
+    const fe::SpeechText::Stats ts = s.text->stats();
+    s.text.reset();
+    s.speech.reset();
+    std::printf("speech_notices (speech %s): %zu list lines seen, popups %s; events: %zu "
+                "notices, %zu popups; %zu utterances (hash %s), %llu notice utterances\n",
+                s.on ? "on" : "off", s.lines.size(), seen_text(*s.popups).c_str(), notices.size(),
+                popups.size(), said.size(), fe::hex64(fe::fnv1a64(all.data(), all.size())).c_str(),
+                static_cast<unsigned long long>(ts.notice_utterances));
+    check(!s.state.empty(), "the run reached the town after the death popup");
+    check(s.popups->count(0x68) == 1 && s.popups->count(0x69) == 1,
+          "the game showed the death popup and its Return to town (" + seen_text(*s.popups) + ")");
+    if (!s.on) {
+        check(s.events.empty() && said.empty(), "speech off: no text event and nothing said (" +
+                                                    std::to_string(s.events.size()) + " events, " +
+                                                    std::to_string(said.size()) + " utterances)");
+    } else {
+        // The list +0x4C's lines, against the notice events of that list.
+        std::vector<std::string> heard;
+        u64 exp = 0, other = 0;
+        for (const NoticesRun::Event *e : notices) {
+            if (e->value == 0) {
+                heard.push_back(e->text);
+                (e->text.rfind("EXP ", 0) == 0 ? exp : other)++;
+            }
+        }
+        // The run reads the list once a turn, so a line the list drops within the turn it came
+        // (its most entries reached) is an event the run never saw listed: the lines are the
+        // events in order, some events between them.
+        std::size_t at = 0;
+        for (std::size_t i = 0; at < s.lines.size() && i < heard.size(); i++) {
+            at += bare(heard[i]) == bare(s.lines[at]) ? 1 : 0;
+        }
+        check(at == s.lines.size() && !s.lines.empty(),
+              "each line the notify list showed is a notice event, in order, with its text (" +
+                  std::to_string(heard.size()) + " events, " + std::to_string(s.lines.size()) +
+                  " lines)");
+        check(exp >= 1 && other >= 1, "a kill's EXP line and a pick-up or meso line (" +
+                                          std::to_string(exp) + " EXP, " + std::to_string(other) +
+                                          " other)");
+        bool whole = true;
+        for (const NoticesRun::Event &e : s.events) {
+            whole = whole && valid_utf8(e.text) && valid_utf8(e.speaker);
+        }
+        check(whole, "every event's text is whole UTF-8");
+        // The popups: 0x68 then 0x69 (the death popup is reopened after a sub-popup it cancels;
+        // here none is cancelled).
+        std::vector<i32> ids;
+        for (const NoticesRun::Event *e : popups) {
+            ids.push_back(e->index);
+        }
+        const auto death = std::find(ids.begin(), ids.end(), 0x68);
+        const auto town = std::find(ids.begin(), ids.end(), 0x69);
+        check(death != ids.end() && town != ids.end() && death < town,
+              "the popup events: the death popup, then its Return to town");
+        const NoticesRun::Event *ask = town != ids.end() ? popups[town - ids.begin()] : nullptr;
+        check(ask != nullptr && ask->value == 1 && !ask->text.empty(),
+              "Return to town: kind 1 (Yes / No) with a message");
+        // The utterances: the notices as kNotice, the popups as kDialogue in their words.
+        std::string notice_text;
+        u64 dialogue = 0;
+        bool death_said = false, town_said = false;
+        for (const auto &[k, t] : said) {
+            if (k == fe::SpeechKind::kNotice) {
+                notice_text += t + "\n";
+            } else {
+                dialogue++;
+                death_said = death_said || t == fe::tr(fe::Txt::speech_death_popup);
+                const std::string yes_no = fe::tr(fe::Txt::speech_popup_yes_no);
+                town_said = town_said || (ask != nullptr && t == ask->text + " " + yes_no);
+            }
+        }
+        bool every = true;
+        for (const std::string &h : heard) {
+            every = every && notice_text.find(h) != std::string::npos;
+        }
+        check(every && ts.notice_utterances >= 1 && ts.notice_utterances <= notices.size(),
+              "each notify line is said in a kNotice utterance (" +
+                  std::to_string(ts.notice_utterances) + " utterances for " +
+                  std::to_string(notices.size()) + " lines)");
+        check(death_said && town_said && dialogue == popups.size(),
+              "the death popup said in the port's words, Return to town as its message and "
+              "\"Yes or No.\", each popup one dialogue utterance");
+    }
+    const char *base_dir = std::getenv("MT_SPEECH_BASE");
+    if (base_dir == nullptr || *base_dir == 0) {
+        return;
+    }
+    std::ifstream in(fs::path(base_dir) / "speech_state.txt", std::ios::binary);
+    std::vector<std::pair<std::string, std::string>> base;
+    for (std::string line; std::getline(in, line);) {
+        const std::size_t eq = line.find(" = ");
+        if (eq != std::string::npos) {
+            base.emplace_back(line.substr(0, eq), line.substr(eq + 3));
+        }
+    }
+    std::size_t differ = 0;
+    for (std::size_t i = 0; i < s.state.size() && i < base.size(); i++) {
+        if (s.state[i] != base[i]) {
+            differ++;
+            std::printf("speech_notices: %s differs from the off run's\n",
+                        s.state[i].first.c_str());
+        }
+    }
+    check(!base.empty() && base.size() == s.state.size() && differ == 0,
+          "the rand() state, the tick, the hero, the quests and the mobs equal the off run's (" +
+              std::to_string(s.state.size()) + " lines, " + std::to_string(differ) + " differ)");
+}
+
+// --- the cash shop's tiles, the Comeback Pack and the Reverse item ------------------------------
+//
+// systems2_cash_tiles: cash_shop = meso, a level-30 Rogue on 0.0 with 3,000,000 meso, 50 Red
+// Potions and one Reverse (item_etc 130). Every tile tapped once by the focus: the six products
+// the policy sells are bought at the quote shown (InitializeSP and SP Marble: item 129 / 132 in
+// the bag; EXP Explosion 40 % / 80 %: that share of the level's need, carried into a level-up),
+// the fake server confirms each receipt and crestore is empty after it; the four meso packs are
+// not sold (ADR 0072): the payment is cancelled, nothing changes and nothing connects. Then a
+// fall and the Comeback Pack (Y, -35): revived, 30 Power Elixirs, 40 % EXP, riprestore2 empty.
+// Then a fall with Reverse in the bag and Return to town: the death popup's OK always asks 0x69
+// and returns to town; the Reverse's revive is the handler of popup 0x6B, which no code opens
+// (docs/re/mechanics.md), so the Reverse stays in the bag.
+struct CashTile {
+    const char *action;
+    u32 product;
+    i32 item; // the item granted, -1 none
+};
+constexpr CashTile k_cash_tiles[] = {
+    {"releaseMeso3000Button:", MT_CASH_INITIALIZE_SP, 129},
+    {"releaseMeso10000Button:", MT_CASH_SP_MARBLE, 132},
+    {"releaseMeso22000Button:", MT_CASH_MESOPACK3, -1},
+    {"releaseMeso50000Button:", MT_CASH_MESOPACK4, -1},
+    {"releaseMeso120000Button:", MT_CASH_MESOPACK5, -1},
+    {"releaseMeso300000Button:", MT_CASH_MESOPACK6, -1},
+    {"releaseExp40Button:", MT_CASH_EXP40, -1},
+    {"releaseExp80Button:", MT_CASH_EXP80, -1},
+};
+
+struct Before {
+    Hero h{};
+    i32 need = 0, item = 0, elixirs = 0, reverse = 0;
+    std::int64_t quote = 0;
+    std::size_t log = 0;
+    mt_cash_stats stats{};
+    mt_stubs_server_stats server{};
+};
+Before g_before;
+
+void remember(Run &r, mt_cpu *cpu, u32 product, i32 item) {
+    g_before = Before{};
+    g_before.h = hero(cpu);
+    g_before.need = exp_need(cpu);
+    g_before.item = item >= 0 ? item_count(cpu, g_before.h, item) : 0;
+    g_before.elixirs = item_count(cpu, g_before.h, 10);
+    g_before.reverse = item_count(cpu, g_before.h, 130);
+    g_before.quote = product < MT_CASH_PRODUCT_COUNT ? mt_cash_shop_quote(product) : -1;
+    g_before.log = r.log.size();
+    g_before.stats = mt_cash_shop_get_stats();
+    g_before.server = mt_stubs_get_server_stats();
+}
+
+bool shop_open(Run &r, mt_cpu *cpu) {
+    return mt_input_panel() == 9 && game_mode(cpu) == 0xB && r.focus.active();
+}
+
+// The EXP of `pct` % of the need remembered, against the hero now.
+void check_exp_gain(mt_cpu *cpu, i32 pct, const std::string &what) {
+    const Hero h = hero(cpu);
+    const i32 gain = g_before.need * pct / 100;
+    const auto [level, exp] = after_exp(g_before.h.level, g_before.h.exp, g_before.need, gain);
+    check(h.level == level && h.exp == exp,
+          what + ": +" + std::to_string(pct) + " % of " + std::to_string(g_before.need) +
+              " EXP: level " + std::to_string(g_before.h.level) + " EXP " +
+              std::to_string(g_before.h.exp) + " -> level " + std::to_string(h.level) + " EXP " +
+              std::to_string(h.exp) + " (expected " + std::to_string(level) + " / " +
+              std::to_string(exp) + ")");
+}
+
+void systems2_cash_tiles(Run &r, u64) {
+    mt_cash_shop_install(MT_CASH_SHOP_MESO);
+    from_save(r);
+    for (const CashTile &t : k_cash_tiles) {
+        const std::string name = mt_cash_product_suffix(t.product);
+        then_cash_shop_open(r);
+        then_do(r, name + ": before the tap", [&r, t](mt_cpu *cpu) {
+            remember(r, cpu, t.product, t.item);
+            const mt_cash_view v = mt_cash_shop_view();
+            check(view_quote(v, t.product) == g_before.quote,
+                  std::string(mt_cash_product_suffix(t.product)) + ": the price line quotes " +
+                      std::to_string(g_before.quote) + " (" + lines_text(v) + ")");
+        });
+        then_focus(r, t.action);
+        then_press(r, A, 0.1, 0.2);
+        if (mt_cash_price(mt_cash_default_knobs(), t.product, 1, 0, 0) >= 0) {
+            then_wait_for(r, name + ": Purchase complete! (popup 0x26C)", 30,
+                          [](mt_cpu *cpu) { return popup_id(cpu) == 0x26C; });
+            then_do(r, name + ": bought for meso", [&r, t, name](mt_cpu *cpu) {
+                const Hero h = hero(cpu);
+                const mt_cash_stats st = mt_cash_shop_get_stats();
+                const mt_stubs_server_stats sv = mt_stubs_get_server_stats();
+                check(g_before.quote > 0 && h.meso == g_before.h.meso - g_before.quote &&
+                          st.sold == g_before.stats.sold + 1 && st.last_price == g_before.quote,
+                      name +
+                          ": the meso went down by the quote: " + std::to_string(g_before.h.meso) +
+                          " - " + std::to_string(g_before.quote) + " = " + std::to_string(h.meso));
+                if (t.item >= 0) {
+                    check(item_count(cpu, h, t.item) == g_before.item + 1,
+                          name + ": item_etc " + std::to_string(t.item) + " in the bag (" +
+                              std::to_string(g_before.item) + " -> " +
+                              std::to_string(item_count(cpu, h, t.item)) + ")");
+                } else {
+                    check_exp_gain(cpu, t.product == MT_CASH_EXP40 ? 40 : 80, name);
+                }
+                check(sv.accepted == g_before.server.accepted + 1 &&
+                          sv.confirmed == g_before.server.confirmed + 1 &&
+                          logged(r, g_before.log,
+                                 "fake server: receipt (op 2) for " MT_CASH_PRODUCT_PREFIX + name),
+                      name + ": the fake server confirmed its receipt (op 2 -> op 3)");
+                check(receipts(r, "crestore") == 0, name + ": crestore holds no receipt");
+                check(saved_meso(r) == h.meso, name + ": theif0 saved with the meso after it");
+            });
+            then_press(r, A); // OK: back to the shop
+            then_wait_for(
+                r, name + ": the shop again", 10, [&r](mt_cpu *cpu) { return shop_open(r, cpu); },
+                0.5);
+        } else {
+            then_wait_for(
+                r, name + ": the payment cancelled, the shop back", 15,
+                [&r](mt_cpu *cpu) {
+                    return mt_cash_shop_get_stats().refused > g_before.stats.refused &&
+                           shop_open(r, cpu);
+                },
+                1.0);
+            then_do(r, name + ": not sold", [name](mt_cpu *cpu) {
+                const Hero h = hero(cpu);
+                check(g_before.quote == -1 && h.meso == g_before.h.meso &&
+                          h.exp == g_before.h.exp &&
+                          mt_cash_shop_get_stats().sold == g_before.stats.sold &&
+                          mt_stubs_get_server_stats().accepted == g_before.server.accepted,
+                      name + ": a meso pack is not sold for meso (ADR 0072): cancelled, " +
+                          hero_text(cpu, h));
+            });
+        }
+        then_press(r, B);
+        then_wait_field(r);
+    }
+    // The Comeback Pack on the death popup.
+    then_do(r, "the hero falls", [&r](mt_cpu *cpu) {
+        remember(r, cpu, MT_CASH_COMEBACK, -1);
+        fall(cpu);
+    });
+    then_wait_for(
+        r, "the death popup (0x68)", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+    then_do(r, "the Comeback Pack's price", [](mt_cpu *) {
+        g_before.quote = view_quote(mt_cash_shop_view(), MT_CASH_COMEBACK);
+        check(g_before.quote > 0,
+              "the price line quotes the Comeback Pack: " + lines_text(mt_cash_shop_view()));
+    });
+    then_press(r, Y, 0.1, 0.2); // -35: Grade revival
+    then_wait_for(
+        r, "revived in place", 30,
+        [](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            return field(cpu) && popup_id(cpu) == -1 && h.hp == h.max_hp && h.hp > 0;
+        },
+        1.0);
+    then_do(r, "the Comeback Pack bought for meso", [&r](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        check(h.meso == g_before.h.meso - g_before.quote &&
+                  item_count(cpu, h, 10) == g_before.elixirs + 30 &&
+                  h.on(g_before.h.area, g_before.h.map),
+              "Comeback Pack: revived on " + where(cpu) + " for " + std::to_string(g_before.quote) +
+                  " meso with 30 Power Elixirs (" + std::to_string(g_before.elixirs) + " -> " +
+                  std::to_string(item_count(cpu, h, 10)) + ")");
+        check_exp_gain(cpu, 40, "Comeback Pack");
+        check(receipts(r, "riprestore2") == 0 &&
+                  mt_stubs_get_server_stats().confirmed == g_before.server.confirmed + 1,
+              "Comeback Pack: the fake server confirmed it, riprestore2 holds no receipt");
+    });
+    // The Reverse: Return to town on the death popup with item 130 in the bag.
+    then_do(r, "the hero falls with a Reverse", [&r](mt_cpu *cpu) {
+        remember(r, cpu, MT_CASH_PRODUCT_COUNT, -1);
+        fall(cpu);
+    });
+    then_wait_for(
+        r, "the death popup again", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+    auto seen = std::make_shared<std::set<i32>>();
+    then_answer(
+        r, "Return to town with a Reverse",
+        [](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            return h.hp > 0;
+        },
+        seen);
+    then_do(r, "Return to town with a Reverse", [seen](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::printf("reverse: popups %s; %s\n", seen_text(*seen).c_str(),
+                    hero_text(cpu, h).c_str());
+        check(seen->count(0x69) == 1 && seen->count(0x6B) == 0,
+              "Return to town asks 0x69, never the Reverse's popup 0x6B (" + seen_text(*seen) +
+                  ")");
+        check(
+            item_count(cpu, h, 130) == g_before.reverse && g_before.reverse == 1 &&
+                h.meso == g_before.h.meso - g_before.h.meso / 10 && h.hp == h.max_hp,
+            "the Reverse stays in the bag and the hero returns to town for a tenth of its meso (" +
+                std::to_string(g_before.h.meso) + " -> " + std::to_string(h.meso) + ")");
+    });
+    then_finish(r);
+}
+
+// --- the four restores --------------------------------------------------------------------------
+//
+// systems2_cash_restores: cash_shop = off, the same start, with a synthetic receipt (the port's
+// "maplethief-offline 1 <product id>") written into each of the game's four receipt lists before
+// the boot, as a session killed between a purchase and its grant leaves them. The fake server
+// answers restores of synthetic receipts in every mode (ADR 0072), so each list is restored by the
+// game's own flow (docs/re/cash-shop.md, Restores), free: totalrestore (exppack1) in the field
+// (popup 0x267, op 4 -> op 5, 0x269), crestore (InitializeSP) on the Cash button (0x25D, op 2 ->
+// op 3, 0x25E), riprestore1 (powpackage) on Revival (0x262) and riprestore2 (ComebackPack) on
+// Grade revival (0x263). Each list ends empty, no meso is taken. The two revivals grant as a
+// purchase does; the other two are original bugs 17 and 18 (docs/re/original-bugs.md): crestore
+// sends its one receipt twice and grants it twice, and totalrestore's op 5 grants no EXP pack
+// (the list emptied, "Restoration Complete!", then the shop opens).
+int systems2_cash_restores_setup(Run &r) {
+    const auto write_list = [&r](const char *name, const char *product) {
+        char text[200];
+        const std::string id = std::string(MT_CASH_PRODUCT_PREFIX) + product;
+        const u32 n = mt_stubs_receipt_text(id.c_str(), text, sizeof text);
+        std::string bytes;
+        bytes += '\1'; // i16 count
+        bytes += '\0';
+        bytes += '\0'; // flag
+        bytes += static_cast<char>(n & 0xFF);
+        bytes += static_cast<char>(n >> 8);
+        bytes.append(text, n);
+        std::ofstream(r.data / "saves" / name, std::ios::binary) << bytes;
+    };
+    write_list("totalrestore", "exppack1");
+    write_list("crestore", "InitializeSP");
+    write_list("riprestore1", "powpackage");
+    write_list("riprestore2", "ComebackPack");
+    return 0;
+}
+
+void systems2_cash_restores(Run &r, u64) {
+    mt_cash_shop_install(MT_CASH_SHOP_OFF);
+    // The game asks for totalrestore's restore (popup 0x267) as soon as the field shows.
+    from_save(r, [](mt_cpu *cpu) { return field(cpu) || popup_id(cpu) == 0x267; });
+    auto seen = std::make_shared<std::set<i32>>();
+    // totalrestore: CStateGame::Paint finds it in the field.
+    then_do(r, "before the restores", [&r](mt_cpu *cpu) {
+        remember(r, cpu, MT_CASH_PRODUCT_COUNT, 129);
+        g_before.server = mt_stubs_server_stats{};
+        check(receipts(r, "totalrestore") == 1 && receipts(r, "crestore") == 1 &&
+                  receipts(r, "riprestore1") == 1 && receipts(r, "riprestore2") == 1,
+              "one synthetic receipt in each of the four lists");
+    });
+    then_answer(
+        r, "totalrestore restored",
+        [seen](mt_cpu *cpu) {
+            return seen->count(0x269) == 1 && popup_id(cpu) == -1 && game_mode(cpu) != 0;
+        },
+        seen, A, false);
+    then_do(r, "after totalrestore", [&r](mt_cpu *cpu) {
+        std::printf("totalrestore: game mode %d panel %d, list %d; %s\n", game_mode(cpu),
+                    static_cast<int>(mt_input_panel()), receipts(r, "totalrestore"),
+                    hero_text(cpu, hero(cpu)).c_str());
+        check(game_mode(cpu) == 11, "totalrestore: the cash shop opens after 0x269");
+    });
+    then(r, "the shop closed", 20, [&r](mt_cpu *cpu, double el) {
+        hold(r, B, !field(cpu) && std::fmod(el, 1.0) < 0.1);
+        return field(cpu) && popup_id(cpu) == -1 && el > 1.0;
+    });
+    then_do(r, "totalrestore: the list emptied, no EXP", [&r, seen](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::printf("totalrestore: list %d; %s\n", receipts(r, "totalrestore"),
+                    hero_text(cpu, h).c_str());
+        check(seen->count(0x267) == 1 && seen->count(0x269) == 1,
+              "totalrestore: popups 0x267 and 0x269 (" + seen_text(*seen) + ")");
+        check(receipts(r, "totalrestore") == 0, "totalrestore: the list is empty");
+        check(h.level == g_before.h.level && h.exp == g_before.h.exp && h.meso == g_before.h.meso,
+              "original bug 18: totalrestore's op 5 grants no EXP Explosion 40 % (" +
+                  hero_text(cpu, h) + ")");
+        check(logged(r, g_before.log,
+                     "fake server: receipt (op 4) for " MT_CASH_PRODUCT_PREFIX "exppack1"),
+              "totalrestore: the receipt went as op 4");
+        seen->clear();
+        remember(r, cpu, MT_CASH_PRODUCT_COUNT, 129);
+    });
+    // crestore: the Cash button.
+    then_trigger(r, SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
+    then_answer(
+        r, "crestore restored", [&r](mt_cpu *) { return receipts(r, "crestore") == 0; }, seen, A,
+        false);
+    then_do(r, "crestore: Initialize SP granted", [&r, seen](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        check(seen->count(0x25D) == 1 && seen->count(0x25E) == 1,
+              "crestore: popups 0x25D and 0x25E (" + seen_text(*seen) + ")");
+        check(receipts(r, "crestore") == 0, "crestore: the list is empty");
+        check(count_logged(r, g_before.log,
+                           "fake server: receipt (op 2) for " MT_CASH_PRODUCT_PREFIX
+                           "InitializeSP") == 2,
+              "original bug 17: crestore sends its one receipt twice (op 2)");
+        check(item_count(cpu, h, 129) == g_before.item + 2 && h.meso == g_before.h.meso,
+              "original bug 17: two Initialize SP for one receipt, free (" +
+                  std::to_string(g_before.item) + " -> " + std::to_string(item_count(cpu, h, 129)) +
+                  "; " + hero_text(cpu, h) + ")");
+        seen->clear();
+    });
+    then(r, "the shop closed", 20, [&r](mt_cpu *cpu, double el) {
+        hold(r, B, !field(cpu) && std::fmod(el, 1.0) < 0.1);
+        return field(cpu) && popup_id(cpu) == -1 && el > 1.0;
+    });
+    // riprestore1 and riprestore2: the two revive buttons of the death popup.
+    for (const auto &[name, b, a, e] :
+         {std::tuple{"riprestore1", X, 0x262, 0}, std::tuple{"riprestore2", Y, 0x263, 40}}) {
+        const std::string list = name;
+        const SDL_GamepadButton button = b;
+        const i32 ask = a, exp = e;
+        then_do(r, list + ": the hero falls", [&r](mt_cpu *cpu) {
+            remember(r, cpu, MT_CASH_PRODUCT_COUNT, -1);
+            fall(cpu);
+        });
+        then_wait_for(
+            r, list + ": the death popup", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; },
+            1.0);
+        then_answer(
+            r, list + " restored",
+            [&r, list](mt_cpu *cpu) { return receipts(r, list.c_str()) == 0 && hero(cpu).hp > 0; },
+            seen, button);
+        then_do(r, list + ": revived", [list, ask, exp, seen](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            check(seen->count(ask) == 1, list + ": the restore's popup (" + seen_text(*seen) + ")");
+            check(h.hp == h.max_hp && h.on(g_before.h.area, g_before.h.map) &&
+                      item_count(cpu, h, 10) == g_before.elixirs + 30 && h.meso == g_before.h.meso,
+                  list + ": revived in place with 30 Power Elixirs, free (" + hero_text(cpu, h) +
+                      ")");
+            if (exp > 0) {
+                check_exp_gain(cpu, exp, list + " (ComebackPack)");
+            }
+            seen->clear();
+        });
+    }
+    then_do(r, "the server's count", [](mt_cpu *) {
+        const mt_stubs_server_stats sv = mt_stubs_get_server_stats();
+        check(sv.accepted >= 4 && sv.confirmed == 5 && sv.rejected == 0,
+              "the fake server confirmed 5 receipts, crestore's twice (" +
+                  std::to_string(sv.accepted) + " connects accepted, " +
+                  std::to_string(sv.confirmed) + " confirmed)");
+    });
+    then_finish(r);
+}
+
+void systems2_cash_checks(Run &, u64) { mt_cash_shop_uninstall(); }
+
+// --- the upgrade scrolls ------------------------------------------------------------------------
+//
+// A level-30 Bandit on 0.0 wearing five fixed-stat items (hat 4, weapon 28, overall 16,
+// earrings 64, shoes 53), each with 2 upgrade slots, and the 10 scrolls in the bag. Each scroll
+// is used by the pad from the item tab (A on its cell, A on "use", Yes on the question 0x65), and
+// the result (popup 0x66, CDataMgr +0x109) and the worn item are checked against
+// docs/re/mechanics.md: the target slot (ScrollTargetSlot 0x691E5), one upgrade slot used, the
+// chance from the successes so far (fixed stats: 100, 75, 50, 25, 10, 0, 0 %; type 8 always),
+// and on success the scroll's six item_etc stats added to the item (+0xD8 ATT ... +0xEC MP) and
+// to the hero.
+//   systems2_scrolls_success: no success yet: every scroll succeeds (100 %).
+//   systems2_scrolls_failure: 5 successes each: the five type-3 scrolls fail (0 %), the five
+//     type-8 ones still succeed; then the item tab refuses a scroll on an item with no slot left
+//     (popup 0x67), and its sub-list offers no quick slot (CHero::KeyAttack would use a scroll
+//     there with none of the checks).
+struct ScrollRow {
+    i32 type = 0;
+    std::array<i32, 6> stats{}; // ATT, DEF, ACC, AVOID, HP, MP
+};
+std::map<i32, ScrollRow> scroll_rows() {
+    std::map<i32, ScrollRow> out;
+    const std::vector<std::uint8_t> etc =
+        world_map::read_bytes(fs::path(MT_BUNDLE_DIR) / "English" / "data" / "item_etc.dat");
+    const std::size_t stride =
+        etc.size() >= 6 ? static_cast<std::size_t>(etc[4] | (etc[5] << 8)) : 0;
+    const auto i16 = [&etc](std::size_t at) {
+        return static_cast<i32>(static_cast<std::int16_t>(etc[at] | (etc[at + 1] << 8)));
+    };
+    for (const i32 id : {19, 20, 21, 22, 23, 133, 134, 135, 136, 137}) {
+        const std::size_t at = 6 + stride * static_cast<std::size_t>(id);
+        if (stride == 0 || at + 0x4E > etc.size() || etc[at] != id) {
+            continue;
+        }
+        ScrollRow s;
+        s.type = etc[at + 0x41];
+        s.stats = {i16(at + 0x46), i16(at + 0x48), i16(at + 0x4A),
+                   i16(at + 0x4C), i16(at + 0x42), i16(at + 0x44)};
+        out[id] = s;
+    }
+    return out;
+}
+
+// ScrollTargetSlot 0x691E5: the worn slot (0 hat, 1 weapon, 2 overall, 3 earrings, 4 shoes).
+i32 scroll_slot(i32 id) {
+    switch (id) {
+    case 19:
+    case 134:
+        return 1;
+    case 20:
+    case 133:
+        return 2;
+    case 21:
+    case 137:
+        return 0;
+    case 22:
+    case 136:
+        return 4;
+    default:
+        return 3;
+    }
+}
+
+struct Worn {
+    i32 id = -1, rolled = 0, slots = 0, successes = 0;
+    std::array<i32, 6> stats{};
+};
+Worn worn_item(mt_cpu *cpu, i32 slot) {
+    Worn w;
+    const Hero h = hero(cpu);
+    const u32 eq = h.addr != 0 ? rd(cpu, h.addr + 0xDC) : 0;
+    const u32 it = eq != 0 ? rd(cpu, eq + 4 * static_cast<u32>(slot)) : 0;
+    if (it != 0) {
+        w.id = rdi(cpu, it + 0x90);
+        w.rolled = rdi(cpu, it + 0xD4);
+        w.slots = rdi(cpu, it + 0xCC);
+        w.successes = rdi(cpu, it + 0xD0);
+        for (u32 i = 0; i < 6; i++) {
+            w.stats[i] = rdi(cpu, it + 0xD8 + 4 * i);
+        }
+    }
+    return w;
+}
+
+// CItem::ApplyScroll 0x69511's chance for the item as it is.
+i32 scroll_chance(const Worn &w, i32 type) {
+    constexpr i32 fixed[7] = {100, 75, 50, 25, 10, 0, 0};
+    constexpr i32 rolled[7] = {100, 80, 60, 40, 30, 20, 10};
+    if (type == 8) {
+        return 100;
+    }
+    const i32 n = std::clamp(w.successes, 0, 6);
+    return w.rolled != 0 ? rolled[n] : fixed[n];
+}
+
+std::string worn_text(const Worn &w) {
+    std::string s = "item " + std::to_string(w.id) + ", " + std::to_string(w.slots) + " slots, " +
+                    std::to_string(w.successes) + " successes, stats";
+    for (const i32 v : w.stats) {
+        s += " " + std::to_string(v);
+    }
+    return s;
+}
+
+struct ScrollRun {
+    std::map<i32, ScrollRow> rows;
+    Worn before{};
+    std::array<i32, 7> hero_before{};
+    i32 count = 0;
+    std::set<i32> popups;
+    i32 result = -1; // CDataMgr +0x109 when popup 0x66 opened
+    u64 successes = 0, failures = 0, refusals = 0;
+    i32 sub_rows = 0; // the rows of the scroll's sub-list, when a run asked for row 2
+};
+std::shared_ptr<ScrollRun> g_scrolls;
+
+// The hero's etc item `id`: its cell in the item tab's list (the carried items in order).
+i32 etc_cell(mt_cpu *cpu, i32 id) {
+    const Hero h = hero(cpu);
+    const u32 inv = h.addr != 0 ? rd(cpu, h.addr + 0xD8) : 0;
+    i32 cell = 0;
+    for (u32 i = 0; inv != 0 && i < 48; i++) {
+        const u32 it = rd(cpu, inv + 4 * i);
+        if (it != 0 && rdi(cpu, it + 0x90) == id) {
+            return cell;
+        }
+        cell += it != 0 ? 1 : 0;
+    }
+    return -1;
+}
+
+// Scroll `id` from the item tab by the pad: Start, right to the item tab (1), A opens its list,
+// left / right to the scroll's cell, A opens its sub-list (CDataMgr +0xBC; the row +0xC8), and
+// A on row `entry`: 0 uses it (the game asks 0x65, Yes), 2 puts it on a quick slot (the slot
+// +0xD0, left / right, A); a sub-list that wraps back to row 0 before row `entry` ends the
+// task with its row count in g_scrolls->sub_rows. Every popup is answered with A and
+// remembered; B to the field.
+void then_item_tab(Run &r, std::string what, i32 id, i32 entry, u32 quick = 1) {
+    struct S {
+        double pressed = -10;
+        bool acted = false, used = false;
+        i32 last_row = -1; // the sub-list's row before the last down
+    };
+    auto s = std::make_shared<S>();
+    then(r, "item tab: " + what, 60, [&r, s, id, entry, quick](mt_cpu *cpu, double el) {
+        const auto press = [&](SDL_GamepadButton b) {
+            s->pressed = el;
+            hold(r, b, true);
+            if (quest_bot::trace_on()) {
+                const u32 dm = data_mgr(cpu);
+                std::printf("item tab: %s: mode %d tab %d sub %d list %d cursor %d row %d slot "
+                            "choice %d popup %d\n",
+                            SDL_GetGamepadStringForButton(b), game_mode(cpu), menu_tab(cpu),
+                            menu_sub(cpu), cpu->mem[dm + 0xBC], rdi(cpu, dm + 0xD8),
+                            rdi(cpu, dm + 0xC8), cpu->mem[dm + 0xCC], popup_id(cpu));
+            }
+        };
+        if (el - s->pressed >= 0.1) {
+            release_all(r);
+        }
+        if (el - s->pressed < 0.5) {
+            return false;
+        }
+        const u32 m = data_mgr(cpu);
+        const i32 p = popup_id(cpu);
+        if (p != -1) {
+            g_scrolls->popups.insert(p);
+            if (p == 0x66 && g_scrolls->result < 0) {
+                g_scrolls->result = cpu->mem[m + 0x109];
+            }
+            s->acted = s->acted || p != 0x65;
+            s->used = s->used || p == 0x65;
+            press(A);
+            return false;
+        }
+        const Hero h = hero(cpu);
+        const bool slotted =
+            rdi(cpu, h.addr + 0xE0 + 8 * quick) == 1 && rdi(cpu, h.addr + 0xE4 + 8 * quick) == id;
+        s->acted = s->acted || (entry == 2 && slotted);
+        if (s->used && !s->acted) {
+            if (quest_bot::trace_on() && std::fmod(el, 1.0) < 0.02) {
+                const Worn w = worn_item(cpu, 1);
+                std::printf("item tab: waiting: mode %d popup %d applying %d result %d hero "
+                            "effect %d; %s\n",
+                            game_mode(cpu), popup_id(cpu), cpu->mem[m + 0x108], cpu->mem[m + 0x109],
+                            rdi(cpu, h.addr + 0x138), worn_text(w).c_str());
+            }
+            return false; // the scroll's effect plays; CHero::Flush ends it with popup 0x66
+        }
+        if (field(cpu)) {
+            if (s->acted) {
+                return true;
+            }
+            press(START);
+            return false;
+        }
+        if (game_mode(cpu) != 1) {
+            return false;
+        }
+        if (s->acted) {
+            press(B);
+            return false;
+        }
+        if (menu_tab(cpu) != 1) {
+            press(menu_sub(cpu) != 0 ? B : menu_tab(cpu) < 1 ? RIGHT : LEFT);
+            return false;
+        }
+        if (menu_sub(cpu) == 0) {
+            press(A);
+            return false;
+        }
+        if (cpu->mem[m + 0xCC] != 0) { // choosing the quick slot
+            const i32 slot = rdi(cpu, m + 0xD0);
+            press(slot < static_cast<i32>(quick)   ? RIGHT
+                  : slot > static_cast<i32>(quick) ? LEFT
+                                                   : A);
+            return false;
+        }
+        if (cpu->mem[m + 0xBC] == 0) {
+            const i32 cursor = rdi(cpu, m + 0xD8);
+            const i32 cell = etc_cell(cpu, id);
+            if (cell < 0) {
+                s->acted = true;
+                return false;
+            }
+            press(cursor < cell ? RIGHT : cursor > cell ? LEFT : A);
+            return false;
+        }
+        const i32 row = rdi(cpu, m + 0xC8);
+        if (s->last_row > 0 && row == 0 && row < entry) { // wrapped: no row `entry`
+            g_scrolls->sub_rows = s->last_row + 1;
+            s->acted = true;
+            return false;
+        }
+        s->last_row = row < entry ? row : -1;
+        press(row < entry ? DOWN : row > entry ? UP : A);
+        return false;
+    });
+}
+
+enum class ScrollWant { kSuccess, kFailure, kRefused };
+
+void then_scroll(Run &r, i32 id, ScrollWant want) {
+    const std::string name = "scroll " + std::to_string(id);
+    then_do(r, name + ": before", [id](mt_cpu *cpu) {
+        ScrollRun &k = *g_scrolls;
+        const Hero h = hero(cpu);
+        k.before = worn_item(cpu, scroll_slot(id));
+        k.hero_before = hero_stats(cpu, h);
+        k.count = item_count(cpu, h, id);
+        k.popups.clear();
+        k.result = -1;
+    });
+    then_item_tab(r, name, id, 0);
+    then_do(r, name + ": after", [id, want, name](mt_cpu *cpu) {
+        ScrollRun &k = *g_scrolls;
+        const Hero h = hero(cpu);
+        const ScrollRow &row = k.rows[id];
+        const Worn w = worn_item(cpu, scroll_slot(id));
+        const std::array<i32, 7> hs = hero_stats(cpu, h);
+        const i32 chance = scroll_chance(k.before, row.type);
+        std::printf("%s (type %d, chance %d %%): popups %s, result %d; %s -> %s\n", name.c_str(),
+                    row.type, chance, seen_text(k.popups).c_str(), k.result,
+                    worn_text(k.before).c_str(), worn_text(w).c_str());
+        if (want == ScrollWant::kRefused) {
+            k.refusals++;
+            check(k.popups.count(0x67) == 1 && k.popups.count(0x65) == 0 &&
+                      w.slots == k.before.slots && w.successes == k.before.successes &&
+                      w.stats == k.before.stats && item_count(cpu, h, id) == k.count,
+                  name + ": no upgrade slot left: refused (popup 0x67), the scroll kept");
+            return;
+        }
+        const bool success = want == ScrollWant::kSuccess;
+        check(chance == (success ? 100 : 0),
+              name + ": the chance from the item's history is " + std::to_string(chance) + " %");
+        check(k.popups.count(0x65) == 1 && k.popups.count(0x66) == 1 &&
+                  k.result == (success ? 1 : 0),
+              name + (success ? ": succeeded" : ": failed") + " (popup 0x66, result " +
+                  std::to_string(k.result) + ")");
+        std::array<i32, 6> stats = k.before.stats;
+        for (std::size_t i = 0; success && i < 6; i++) {
+            stats[i] += row.stats[i];
+        }
+        check(w.id == k.before.id && w.slots == k.before.slots - 1 &&
+                  w.successes == k.before.successes + (success ? 1 : 0) && w.stats == stats,
+              name + ": the worn item in slot " + std::to_string(scroll_slot(id)) +
+                  ": one slot used" + (success ? ", the scroll's stats added" : ", unchanged"));
+        // The hero's ATT, DEF, ACC, AVOID, max HP and max MP follow the item (hero_stats:
+        // attack, defense, accuracy, avoid, critical, max HP, max MP).
+        const std::array<i32, 6> delta = {hs[0] - k.hero_before[0], hs[1] - k.hero_before[1],
+                                          hs[2] - k.hero_before[2], hs[3] - k.hero_before[3],
+                                          hs[5] - k.hero_before[5], hs[6] - k.hero_before[6]};
+        std::array<i32, 6> expect{};
+        for (std::size_t i = 0; success && i < 6; i++) {
+            expect[i] = row.stats[i];
+        }
+        check(delta == expect, name + ": the hero's stats changed by the scroll's");
+        check(item_count(cpu, h, id) == k.count - 1, name + ": one scroll used");
+        (success ? k.successes : k.failures)++;
+    });
+}
+
+void scrolls_run(Run &r, bool fresh) {
+    g_scrolls = std::make_shared<ScrollRun>();
+    g_scrolls->rows = scroll_rows();
+    from_save(r);
+    then_wait_field(r);
+    then_do(r, "the worn items", [fresh](mt_cpu *cpu) {
+        check(g_scrolls->rows.size() == 10, "item_etc: the 10 scrolls' rows");
+        for (i32 slot = 0; slot < 5; slot++) {
+            const Worn w = worn_item(cpu, slot);
+            check(w.slots == 2 && w.successes == (fresh ? 0 : 5) && w.rolled == 0,
+                  "slot " + std::to_string(slot) + ": " + worn_text(w));
+        }
+    });
+    for (const i32 id : {19, 20, 21, 22, 23}) {
+        then_scroll(r, id, fresh ? ScrollWant::kSuccess : ScrollWant::kFailure);
+    }
+    for (const i32 id : {133, 134, 135, 136, 137}) {
+        then_scroll(r, id, ScrollWant::kSuccess);
+    }
+    if (fresh) {
+        then_finish(r);
+        return;
+    }
+    // No slot left: the item tab refuses both kinds.
+    for (const i32 id : {19, 133}) {
+        then_scroll(r, id, ScrollWant::kRefused);
+    }
+    // A scroll on quick slot 1 would reach CHero::KeyAttack, which calls UseItem with none of the
+    // item tab's checks; but the scroll's sub-list has no row 2 (assign a quick slot).
+    then_item_tab(r, "Weapon Enchantment Scroll to a quick slot", 19, 2, 1);
+    then_do(r, "no quick slot for a scroll", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::printf("scroll sub-list: %d rows; quick slot 1 kind %d item %d\n", g_scrolls->sub_rows,
+                    rdi(cpu, h.addr + 0xE8), rdi(cpu, h.addr + 0xEC));
+        check(g_scrolls->sub_rows == 2,
+              "a scroll's sub-list has two rows (use, throw away): no quick slot");
+        check(rdi(cpu, h.addr + 0xE8) != 1 || rdi(cpu, h.addr + 0xEC) != 19,
+              "quick slot 1 does not hold the scroll");
+    });
+    then_finish(r);
+}
+
+void systems2_scrolls_success(Run &r, u64) { scrolls_run(r, true); }
+void systems2_scrolls_failure(Run &r, u64) { scrolls_run(r, false); }
+void systems2_scrolls_checks(Run &, u64) {
+    const ScrollRun &k = *g_scrolls;
+    std::printf("scrolls: %llu succeeded, %llu failed, %llu refused\n",
+                static_cast<unsigned long long>(k.successes),
+                static_cast<unsigned long long>(k.failures),
+                static_cast<unsigned long long>(k.refusals));
+}
+
+// --- the Pigmy dialog ---------------------------------------------------------------------------
+//
+// systems2_pigmy: no shipped map places the Pigmy NPCs (obj kinds 40 and 41), so the test does
+// what the object handler 0x63191 does for kind 40 (CStateGame +0xAC = 36, +0xCC = 0) and calls
+// the game's CStateGame::SetPigmeState(state, 1) 0x823A1. A level-30 Rogue with a Pink Pigmy Egg
+// (item_etc 91) walks the dialog by the pad (state CStateGame +0xC8):
+//   1. Row 1 of state 1 (hatch: the egg is there, the bag has room) leads to state 6, Accept /
+//      Refuse. Its OK goes on only with the chat box's row +0x30 at 0, but the box copies
+//      questSelector there, still 1 from the list's row, and nothing in Accept / Refuse sets it:
+//      Accept closes the dialog as Refuse (the Pigmy is unreachable content,
+//      docs/re/original-bugs.md). No connect.
+//   2. The test then calls SetPigmeState(state, 7), the state Accept would reach: Accept (row 0
+//      after the close) goes to 0xF ("Connecting to network."), where the game connects
+//      CMSocket. The stub refuses at once (no synthetic receipt waits; network.md), so the state
+//      goes through 0x10 (the failure) to 0x11 within a tick, OK closes it: one connect, none
+//      accepted, no frame.
+// The egg stays in the bag.
+struct PigmyRun {
+    std::array<std::vector<i32>, 2> states;
+    std::array<mt_stubs_server_stats, 3> stats{}; // before each phase and at the end
+    i32 eggs = 0;
+};
+std::shared_ptr<PigmyRun> g_pigmy;
+
+i32 pigme_state(const mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    return h.world != 0 ? rdi(cpu, h.world + 0xC8) : -1;
+}
+
+std::string pigmy_states(const std::vector<i32> &states) {
+    std::string out;
+    for (const i32 st : states) {
+        char b[16];
+        std::snprintf(b, sizeof b, " 0x%X", static_cast<unsigned>(st));
+        out += b;
+    }
+    return out;
+}
+
+// SetPigmeState(state, `first`), then the pad through the dialog until the field shows: row 1 (the
+// hatch) in a list, OK on everything else.
+void then_pigmy_dialog(Run &r, std::size_t phase, i32 first) {
+    then_do(r, "the Pigmy dialog (SetPigmeState " + std::to_string(first) + ")",
+            [phase, first](mt_cpu *cpu) {
+                const Hero h = hero(cpu);
+                g_pigmy->stats[phase] = mt_stubs_get_server_stats();
+                wr(cpu, h.world + 0xAC, 36);
+                wr(cpu, h.world + 0xCC, 0);
+                call(cpu, 0x823A1u, {h.world, static_cast<u32>(first)});
+            });
+    auto pressed = std::make_shared<double>(-10);
+    then(r, "the Pigmy dialog to the field", 120, [&r, pressed, phase](mt_cpu *cpu, double el) {
+        const i32 st = pigme_state(cpu);
+        std::vector<i32> &states = g_pigmy->states[phase];
+        if (states.empty() || states.back() != st) {
+            states.push_back(st);
+        }
+        if (el - *pressed >= 0.1) {
+            release_all(r);
+        }
+        if (el - *pressed < 0.8) {
+            return false;
+        }
+        if (field(cpu) && !quest_bot::chatting(cpu)) {
+            return el > 2.0;
+        }
+        const quest_bot::Chat c = quest_bot::chat(cpu);
+        std::printf("pigmy: state 0x%X, chat mode %d page %d of %d, row %d, popup %d\n",
+                    static_cast<unsigned>(st), c.mode, c.page, c.pages, c.sel, popup_id(cpu));
+        *pressed = el;
+        if (popup_id(cpu) == -1 && c.mode == 2 && c.sel != 1) {
+            hold(r, c.sel < 1 ? DOWN : UP, true);
+            return false;
+        }
+        hold(r, A, true);
+        return false;
+    });
+}
+
+void systems2_pigmy(Run &r, u64) {
+    g_pigmy = std::make_shared<PigmyRun>();
+    from_save(r);
+    then_wait_field(r);
+    then_do(r, "the egg", [](mt_cpu *cpu) { g_pigmy->eggs = item_count(cpu, hero(cpu), 91); });
+    then_pigmy_dialog(r, 0, 1);
+    then_pigmy_dialog(r, 1, 7);
+    then_do(r, "the Pigmy dialog left", [](mt_cpu *cpu) {
+        PigmyRun &k = *g_pigmy;
+        k.stats[2] = mt_stubs_get_server_stats();
+        for (std::size_t i = 0; i < 2; i++) {
+            std::printf("pigmy %zu: states%s; connects %u accepted %u frames %u\n", i + 1,
+                        pigmy_states(k.states[i]).c_str(),
+                        k.stats[i + 1].connects - k.stats[i].connects,
+                        k.stats[i + 1].accepted - k.stats[i].accepted,
+                        k.stats[i + 1].frames - k.stats[i].frames);
+        }
+        const auto has = [&k](std::size_t i, i32 st) {
+            return std::find(k.states[i].begin(), k.states[i].end(), st) != k.states[i].end();
+        };
+        check(has(0, 1) && has(0, 6) && !has(0, 7) && !has(0, 0xF),
+              "the hatch's Accept (state 6) closes as Refuse, no state 7:" +
+                  pigmy_states(k.states[0]));
+        check(k.stats[1].connects == k.stats[0].connects && k.stats[1].frames == k.stats[0].frames,
+              "the first dialog connected nowhere");
+        check(has(1, 7) && has(1, 0xF) && has(1, 0x11),
+              "from state 7: 0xF (connecting) -> 0x11 (through 0x10, the failure):" +
+                  pigmy_states(k.states[1]));
+        check(k.stats[2].connects == k.stats[1].connects + 1 &&
+                  k.stats[2].accepted == k.stats[1].accepted &&
+                  k.stats[2].frames == k.stats[1].frames,
+              "the network stub: one connect, refused, no frame sent");
+        check(item_count(cpu, hero(cpu), 91) == k.eggs && k.eggs == 1,
+              "the Pink Pigmy Egg is still in the bag");
+        check(field(cpu) && !quest_bot::chatting(cpu),
+              "the dialog is closed, the hero in the field");
+    });
+    then_finish(r);
+}
+void systems2_pigmy_checks(Run &, u64) {}
+
+// --- portal620 ----------------------------------------------------------------------------------
+//
+// systems2_portal620: a level-60 Bandit of chapter 2 on 6.2 walks to its only portal, portal620,
+// and takes it. common/portal620 warps to (6, 1, 2), and 6.1 has no portal of kind 2, so the map
+// change 0x868D5 writes no position: the hero lands on 6.1 at the coordinates it had on 6.2, not
+// at portal611 (docs/re/original-bugs.md, bug 14). The run reads the first position on 6.1.
+struct PortalRun {
+    i32 x62 = 0, y62 = 0, x61 = 0, y61 = 0;
+    bool landed = false;
+};
+std::shared_ptr<PortalRun> g_portal;
+
+void systems2_portal620(Run &r, u64) {
+    g_portal = std::make_shared<PortalRun>();
+    from_save(r);
+    then_wait_field(r);
+    quest_bot::then_go(r, "portal620 on 6.2", quest_bot::at_object(6, 2, "portal620", 4), 120);
+    then(r, "portal620", 30, [&r](mt_cpu *cpu, double el) {
+        const Hero h = hero(cpu);
+        if (h.on(6, 2)) {
+            g_portal->x62 = h.x;
+            g_portal->y62 = h.y;
+            hold(r, UP, std::fmod(el, 1.5) < 0.4);
+            return false;
+        }
+        hold(r, UP, false);
+        if (h.on(6, 1) && !g_portal->landed) {
+            g_portal->landed = true;
+            g_portal->x61 = h.x;
+            g_portal->y61 = h.y;
+        }
+        return g_portal->landed;
+    });
+    then_wait_field(r);
+    then_do(r, "where the hero landed on 6.1", [](mt_cpu *cpu) {
+        const PortalRun &k = *g_portal;
+        const world_map::Object *p611 = world_map::get(6, 1).object("portal611");
+        const world_map::Object *p610 = world_map::get(6, 1).object("portal610");
+        std::printf("portal620: left 6.2 at (%d, %d), landed on 6.1 at (%d, %d); portal610 (%d, "
+                    "%d), portal611 (%d, %d); now %s\n",
+                    k.x62, k.y62, k.x61, k.y61, p610 != nullptr ? p610->x : -1,
+                    p610 != nullptr ? p610->y : -1, p611 != nullptr ? p611->x : -1,
+                    p611 != nullptr ? p611->y : -1, where(cpu).c_str());
+        check(k.landed, "portal620 leads to 6.1");
+        check(k.x61 == k.x62 && k.y61 == k.y62,
+              "original bug 14: the hero keeps its 6.2 coordinates on 6.1");
+        check(p611 != nullptr && std::abs(k.x61 - p611->x) > 100,
+              "the hero is not at portal611, the portal back to 6.2");
+        check(hero(cpu).hp > 0 && field(cpu), "the hero is alive in the field on 6.1");
+    });
+    then_finish(r);
+}
+void systems2_portal620_checks(Run &, u64) {}
+// --- Korean (#303, docs/testing/systems-sweep-1.md) ----------------------------------------------
+//
+// korean_*: MAPLETHIEF_LANGUAGE=ko. The terms are agreed by the pad (the data directory has no
+// CTerms), then a part of the game. Every text the game draws reaches the CG text observer
+// (mt_cg_set_text_observer, after the draw): a character no font has a glyph for (where the
+// device drew a box) or a single line running past its bitmap (cut) fails the run, and so does
+// a dialogue line that is not whole UTF-8 (Text_Wrap cut a character). Checkpoints: the screen
+// after the terms, the first field, each NPC chat's first and last page (a quest offer's Accept
+// is on its last), each shop; each goes to OUT_DIR/ko_<n>_<name>.png and its FNV-1a with the
+// texts drawn since the checkpoint before to OUT_DIR/checkpoints.txt. The screens are compared
+// with our own recorded renders: MT_KOREAN_BASE=<an earlier run's OUT_DIR> (CTest: a directory
+// kept beside the outputs, filled on the first run) makes every checkpoint's screen equal the
+// recorded one's, the run being deterministic on the virtual clock.
+
+void then_character_select(Run &r); // below, with the slots
+
+struct KoreanRun {
+    u64 draws = 0, hangul = 0, missing = 0, clipped = 0, box_lines = 0, broken = 0;
+    std::set<std::string> since; // texts drawn since the last checkpoint
+    std::string last_box;
+    std::string key; // a text a box must show (the English line of the key ko.lproj lacks)
+    u64 key_shown = 0, raw_key = 0;          // how often a box showed it, and the key itself
+    std::map<std::string, std::string> base; // the recorded checkpoints: name -> FNV-1a
+    fs::path base_dir;                       // MT_KOREAN_BASE
+    bool recording = false;
+    std::vector<std::string> names;
+    u64 compared = 0, differ = 0;
+    std::ofstream file;
+    // The automatic checkpoints' state.
+    i32 chat_page = -2, chat_pages = 0;
+    double chat_since = -1;
+    bool shop = false, field_seen = false;
+    double shop_since = -1;
+};
+KoreanRun g_ko;
+
+void korean_observe(void *, const mt_cg_drawn_text *t) {
+    KoreanRun &k = g_ko;
+    k.draws++;
+    const std::string s = t->utf8;
+    if (!k.since.insert(s).second) {
+        return;
+    }
+    whole_utf8(s, &k.hangul);
+    if (t->missing > 0) {
+        k.missing++;
+        std::printf("korean: FAIL: %u character(s) without a glyph in \"%s\"\n", t->missing,
+                    s.c_str());
+    }
+    if (t->newlines == 0 && t->right > t->limit + 0.5f) {
+        k.clipped++;
+        std::printf("korean: FAIL: \"%s\" ends at %.1f points, its bitmap is %.0f: cut\n",
+                    s.c_str(), static_cast<double>(t->right), static_cast<double>(t->limit));
+    }
+}
+
+int korean_setup(Run &r) {
+    g_ko = KoreanRun{};
+    const char *lang = std::getenv("MAPLETHIEF_LANGUAGE");
+    if (lang == nullptr || std::string(lang) != "ko") {
+        std::printf("FAIL: korean_* runs with MAPLETHIEF_LANGUAGE=ko\n");
+        return 1;
+    }
+    // The terms are part of the run: a save copied in (MT_FROM_SAVE) brings none.
+    fs::remove(r.data / "saves" / "CTerms");
+    if (const char *b = std::getenv("MT_KOREAN_BASE"); b != nullptr && *b != 0) {
+        g_ko.base_dir = b;
+        std::ifstream in(g_ko.base_dir / "checkpoints.txt");
+        for (std::string line; std::getline(in, line);) {
+            std::istringstream f(line); // "name hash count", then the texts indented
+            std::string name, hash;
+            if (!line.empty() && line[0] != ' ' && f >> name >> hash) {
+                g_ko.base[name] = hash;
+            }
+        }
+        g_ko.recording = g_ko.base.empty();
+        std::printf("korean: %zu recorded checkpoint(s) in %s%s\n", g_ko.base.size(), b,
+                    g_ko.recording ? ": this run records them" : "");
+    }
+    g_ko.file.open(r.out / "checkpoints.txt", std::ios::trunc);
+    mt_cg_set_text_observer(korean_observe, nullptr);
+    return 0;
+}
+
+void korean_checkpoint(Run &r, mt_cpu *cpu, const std::string &what) {
+    KoreanRun &k = g_ko;
+    const std::string name = std::to_string(k.names.size()) + "_" + what;
+    k.names.push_back(name);
+    u64 hash = 0;
+    const bool shot = save_shot(r, cpu, "ko_" + name, &hash);
+    check(shot, "korean: checkpoint " + name + " has a screen");
+    const std::string h = fe::hex64(hash);
+    k.file << name << ' ' << h << ' ' << k.since.size() << '\n';
+    for (const std::string &t : k.since) {
+        k.file << "  " << t << '\n';
+    }
+    k.file.flush();
+    std::printf("korean: checkpoint %s: %s, %zu text(s) drawn since the last\n", name.c_str(),
+                h.c_str(), k.since.size());
+    k.since.clear();
+    if (const auto it = k.base.find(name); it != k.base.end()) {
+        k.compared++;
+        if (it->second != h) {
+            k.differ++;
+            std::printf("korean: FAIL: checkpoint %s's screen %s, recorded %s\n", name.c_str(),
+                        h.c_str(), it->second.c_str());
+        }
+    } else if (!k.base.empty()) {
+        k.differ++;
+        std::printf("korean: FAIL: checkpoint %s was not recorded\n", name.c_str());
+    }
+}
+
+// Every turn: the box lines, and the automatic checkpoints (a chat's first and last page once
+// shown for 0.5 s, a shop once shown for 1 s, the first field).
+void korean_turn(Run &r, mt_cpu *cpu) {
+    KoreanRun &k = g_ko;
+    const ChatBoxView v = chat_box_view(cpu);
+    if (!v.kind.empty() && v.text != k.last_box) {
+        k.last_box = v.text;
+        if (!k.key.empty() && v.text.find(k.key) != std::string::npos) {
+            k.key_shown++;
+            std::printf("korean: the box shows the English line (%s ...)\n", k.key.c_str());
+        }
+        k.raw_key += v.text.find("Chapter3_Quest_Zenumist_Chief") != std::string::npos ? 1 : 0;
+        for (std::size_t a = 0, b = 0; (b = v.text.find('|', a)) != std::string::npos; a = b + 1) {
+            k.box_lines++;
+            if (!whole_utf8(v.text.substr(a, b - a))) {
+                k.broken++;
+                std::printf("korean: FAIL: a %s box line is not whole UTF-8\n", v.kind.c_str());
+            }
+        }
+    }
+    if (!k.field_seen && field(cpu)) {
+        k.field_seen = true;
+        korean_checkpoint(r, cpu, "field");
+    }
+    const quest_bot::Chat c = quest_bot::chatting(cpu) ? quest_bot::chat(cpu) : quest_bot::Chat{};
+    if (c.addr == 0) {
+        k.chat_page = -2;
+    } else if (c.page != k.chat_page) {
+        k.chat_page = c.page;
+        k.chat_pages = c.pages;
+        k.chat_since = r.t;
+    } else if (k.chat_since >= 0 && r.t - k.chat_since >= 0.5) {
+        k.chat_since = -1;
+        if (c.page == 0 || c.last_page()) {
+            korean_checkpoint(r, cpu, c.page == 0 ? "chat" : "chat_end");
+        }
+    }
+    const bool shop = quest_bot::in_shop(cpu);
+    if (shop && !k.shop) {
+        k.shop_since = r.t;
+    } else if (shop && k.shop_since >= 0 && r.t - k.shop_since >= 1.0) {
+        k.shop_since = -1;
+        korean_checkpoint(r, cpu, "shop");
+    }
+    k.shop = shop;
+}
+
+// The terms by the pad: the focus starts on the agreement, A agrees (CTerms is written).
+void then_korean_terms(Run &r) {
+    then_wait_for(
+        r, "the Korean terms, the focus on the agreement", 20,
+        [&r](mt_cpu *) { return focused(r, "releaseAgreementButton:"); }, 1.0);
+    then_do(r, "the terms, a checkpoint",
+            [&r](mt_cpu *cpu) { korean_checkpoint(r, cpu, "terms"); });
+    then_press(r, A);
+    then_wait_for(r, "CTerms written", 5, [&r](mt_cpu *) {
+        std::error_code ec;
+        return fs::file_size(r.data / "saves" / "CTerms", ec) == 2;
+    });
+}
+
+void korean_attach(Run &r) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        korean_turn(r, cpu);
+    };
+    then_korean_terms(r);
+}
+
+void korean_checks(Run &r, u64) {
+    mt_cg_set_text_observer(nullptr, nullptr);
+    g_ko.file.close();
+    const KoreanRun &k = g_ko;
+    std::printf("korean: %llu draws, %llu Hangul syllables in distinct texts, %llu box lines, %zu "
+                "checkpoints (%llu compared with the recorded ones)\n",
+                static_cast<unsigned long long>(k.draws), static_cast<unsigned long long>(k.hangul),
+                static_cast<unsigned long long>(k.box_lines), k.names.size(),
+                static_cast<unsigned long long>(k.compared));
+    check(k.draws > 0 && k.hangul > 0, "the game drew Korean text");
+    check(k.missing == 0, "no drawn character lacks a glyph (no box)");
+    check(k.clipped == 0, "no drawn line runs past its bitmap");
+    check(k.broken == 0, "every box line is whole UTF-8");
+    check(k.box_lines > 0, "boxes were read");
+    check(k.differ == 0, "every checkpoint's screen equals the recorded one");
+    if (!k.key.empty()) {
+        check(k.key_shown > 0, "a box showed the English line of the key ko.lproj lacks");
+    }
+    // The first run with an empty base records it, if its own checks held.
+    if (k.recording && k.missing == 0 && k.clipped == 0 && k.broken == 0 && !k.names.empty()) {
+        std::error_code ec;
+        fs::create_directories(k.base_dir, ec);
+        fs::copy_file(r.out / "checkpoints.txt", k.base_dir / "checkpoints.txt",
+                      fs::copy_options::overwrite_existing, ec);
+        check(!ec, "korean: recorded " + std::to_string(k.names.size()) + " checkpoints in " +
+                       k.base_dir.string());
+    }
+}
+
+// A built save's slot 0 after the terms: the character select, A on the slot, Start.
+void then_korean_load(Run &r) {
+    g_play.anywhere = true; // the play starts in the save's field
+    then_character_select(r);
+    then_press(r, A); // the slot is chosen and the focus goes on to Start (ADR 0102)
+    then_wait_for(r, "the focus on Start", 5, [&r](mt_cpu *) { return focused(r, "clickStart:"); });
+    then_wait(r, 1.0);
+    then_press(r, A);
+    then_wait_for(r, "the game", 30, field, 1.0);
+}
+
+// Tutorial, chapter 1's part a (Mr. Wang's shop, Stan's and the Dark Lord's quests), in Korean.
+void korean_chapter_1_a(Run &r, u64) {
+    korean_attach(r);
+    chapter_1_a_steps(r);
+}
+
+// Chapter 2's first offer (tests/starts/chapter_2.json built in Korean: part L's end): Heracle
+// on 4.0 gives Fighting Monsters (main 0), accepted.
+void korean_offer_2(Run &r, u64) {
+    using namespace quest_bot;
+    korean_attach(r);
+    then_korean_load(r);
+    then_talk_to(r, "Heracle: Fighting Monsters (main 0) offered and taken", 4, 0, "Heracle", -1,
+                 main_quest(0, 1));
+    then_finish(r);
+}
+
+// Chapter 3's first offer (tests/starts/korean_ch3.json): the Zenumist President on 7.0 ends
+// main 40 and gives Join the Zenumist Association (main 0), accepted.
+void korean_offer_3(Run &r, u64) {
+    using namespace quest_bot;
+    korean_attach(r);
+    then_korean_load(r);
+    then_talk_to(r, "the Zenumist President: main 40 done, main 0 offered and taken", 7, 0,
+                 "ZenumistChief", -1, main_quests(40, 0));
+    then_finish(r);
+}
+
+// The key ko.lproj lacks (re/original-bugs.md #15; tests/starts/korean_ch3_key.json): with main
+// 0-3 and every side quest he gives done, the Zenumist President's only line is
+// Chapter3_Quest_Zenumist_Chief.dialog.1, shown as the field is entered. Without a Korean text
+// the box gets the key, one 38-character word wider than the box, and Text_Wrap reads past the
+// end of memory (the process dies). With fix_original_bugs (on here) the line is the English
+// table's: the box shows it whole, and never the key.
+void korean_missing_key(Run &r, u64) {
+    using namespace quest_bot;
+    r.settings.fix_original_bugs = true;
+    const std::vector<std::uint8_t> raw =
+        read_file((fs::path(MT_BUNDLE_DIR) / "en.lproj/Scripts.strings").string());
+    mt_ns::PlistValue table;
+    std::string why;
+    const mt_ns::PlistValue *line = nullptr;
+    if (mt_ns::plist_parse(raw.data(), raw.size(), &table, &why)) {
+        line = table.find(u"Chapter3_Quest_Zenumist_Chief.dialog.1");
+    }
+    check(line != nullptr && line->kind == mt_ns::PlistValue::string,
+          "en.lproj/Scripts.strings has the key ko.lproj lacks");
+    // The box's first line: the English text up to its first space.
+    const std::string english = line != nullptr ? utf8_of(line->s) : std::string();
+    g_ko.key = english.substr(0, english.find(' '));
+    korean_attach(r);
+    then_korean_load(r);
+    then_talk_to(r, "the Zenumist President: the line without a Korean text", 7, 0, "ZenumistChief",
+                 -1, [](mt_cpu *) { return g_ko.key_shown > 0; });
+    then_do(r, "the key never shown",
+            [](mt_cpu *) { check(g_ko.raw_key == 0, "no box showed the key itself"); });
+    then_finish(r);
+}
+
+// --- Slots 2 and 3 (#303, docs/testing/systems-sweep-1.md) ---------------------------------------
+//
+// slots_create, on a data directory holding only a built slot 0 (tests/starts/systems_slot0):
+// twice the character select's New (its popup's Yes), the intro and the tutorial (its maps
+// cannot be saved on) to Stan in Henesys, Red Potions drunk (one in the second slot, two in the
+// third, so the two saves differ), Save on the option tab, and the option tab's exit to the
+// main menu. Each slot's map, x and Red Potions go to OUT_DIR/slots.txt. slots_reload, a fresh
+// process on the same data directory: each new slot chosen and started, the hero where and as
+// it was saved; then both deleted (Delete, its alert's Yes): their files are gone, slot 0's are
+// as built.
+
+struct SlotState {
+    i32 area = -1, map = -1, x = 0, red = -1;
+};
+struct SlotsRun {
+    std::vector<std::uint8_t> slot0, quest0; // slot 0 as the run found it
+};
+SlotsRun g_slots;
+
+std::string slot_file(const char *kind, int slot) { return kind + std::to_string(slot); }
+
+// OUT_DIR/slots.txt: "slot area map x red" per saved slot.
+std::map<int, SlotState> saved_slots(const Run &r) {
+    std::map<int, SlotState> out;
+    std::ifstream in(r.out / "slots.txt");
+    int slot = 0;
+    SlotState s;
+    while (in >> slot >> s.area >> s.map >> s.x >> s.red) {
+        out[slot] = s;
+    }
+    return out;
+}
+
+int slots_setup(Run &r) {
+    g_slots = SlotsRun{};
+    g_slots.slot0 = read_save(r, "theif0");
+    g_slots.quest0 = read_save(r, "quest0");
+    if (g_slots.slot0.size() != 1124) {
+        std::printf("skipped: no slot 0 in %s (starts.systems_slot0 first)\n",
+                    r.data.string().c_str());
+        return 77;
+    }
+    return 0;
+}
+
+// The main menu's Play to the character select (B first on the promo banner, if it shows).
+void then_character_select(Run &r) {
+    then(r, "the main menu, the focus on Play", 30, [&r](mt_cpu *, double el) {
+        bool banner = false;
+        for (const fe::FocusTarget &f : r.focus.targets()) {
+            banner = banner || f.action == "clickADClose:";
+        }
+        hold(r, B, banner && std::fmod(el, 1.0) < 0.1);
+        return !banner && el > 1.0 && focused(r, "clickPlay:");
+    });
+    then_press(r, A);
+    then_wait_for(
+        r, "the character select", 10, [&r](mt_cpu *) { return focused(r, "chooseCharacterOne:"); },
+        0.5);
+}
+
+// The option tab's exit (item 3), popup 14's Yes: the main menu.
+void then_exit_to_menu(Run &r) {
+    then_wait_field(r);
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; });
+    then_press(r, LEFT);
+    then_wait_for(r, "the option tab", 5, [](mt_cpu *cpu) { return menu_tab(cpu) == 5; });
+    for (int i = 0; i < 3; i++) {
+        then_press(r, DOWN, 0.1, 0.6);
+    }
+    then_press(r, A);
+    then_wait_for(r, "exit? (popup 14)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 14; });
+    then_wait_for(r, "Yes picked", 3, exit_yes_picked);
+    then_press(r, A);
+    then_wait_for(
+        r, "the main menu (the game left)", 20, [&r](mt_cpu *) { return focused(r, "clickPlay:"); },
+        1.0);
+}
+
+void then_new_slot(Run &r, int slot) {
+    then_character_select(r);
+    then_focus(r, "clickNew:");
+    then_press(r, A);
+    then_wait_for(r, "New asks (the engine's popup on panel 7)", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 7 && popup_id(cpu) >= 0; });
+    then_press(r, A);
+    then_wait_for(r, "slot " + std::to_string(slot) + "'s files", 10, [&r, slot](mt_cpu *) {
+        return read_save(r, slot_file("theif", slot).c_str()).size() == 1124 &&
+               read_save(r, slot_file("quest", slot).c_str()).size() == 4781;
+    });
+    then_tutorial(r);
+    then_check(r, "the game plays slot " + std::to_string(slot),
+               [slot](mt_cpu *cpu) { return rdi(cpu, data_mgr(cpu) + 0x4E4) == slot; });
+    auto red = std::make_shared<i32>(0);
+    then_do(r, "the Red Potions", [red](mt_cpu *cpu) { *red = item_count(cpu, hero(cpu), 3); });
+    for (int i = 0; i < slot; i++) {
+        then_press(r, Y, 0.1, 1.0); // quick slot 1: a Red Potion
+    }
+    then_check(r, std::to_string(slot) + " Red Potion(s) drunk",
+               [red, slot](mt_cpu *cpu) { return item_count(cpu, hero(cpu), 3) == *red - slot; });
+    then_save(r, [&r, slot](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const i32 red_now = item_count(cpu, h, 3);
+        std::printf("slot %d saved: map %d.%d x %d, %d Red Potions\n", slot, h.area, h.map, h.x,
+                    red_now);
+        std::ofstream(r.out / "slots.txt", std::ios::app)
+            << slot << ' ' << h.area << ' ' << h.map << ' ' << h.x << ' ' << red_now << '\n';
+    });
+    then_exit_to_menu(r);
+}
+
+void slots_create(Run &r, u64) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    g_play.anywhere = true;
+    fs::remove(r.out / "slots.txt");
+    then_new_slot(r, 1);
+    then_new_slot(r, 2);
+    then_do(r, "slot 0 untouched", [&r](mt_cpu *) {
+        check(read_save(r, "theif0") == g_slots.slot0 && read_save(r, "quest0") == g_slots.quest0,
+              "slot 0's files are as built");
+        check(saved_slots(r).size() == 2, "two slots saved");
+    });
+    then_finish(r);
+}
+void slots_create_checks(Run &, u64) {}
+
+const char *const k_slot_actions[3] = {
+    "chooseCharacterOne:", "chooseCharacterTwo:", "chooseCharacterThree:"};
+
+void then_load_slot(Run &r, int slot) {
+    then_character_select(r);
+    then_focus(r, k_slot_actions[slot]);
+    then_press(r, A); // chosen: the focus goes on to Start (ADR 0102)
+    then_wait_for(r, "the focus on Start", 5, [&r](mt_cpu *) { return focused(r, "clickStart:"); });
+    then_wait(r, 1.0);
+    then_press(r, A);
+    then_wait_for(r, "the game", 30, field, 1.0);
+    then_check(
+        r, "slot " + std::to_string(slot) + " loads as it was saved", [&r, slot](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            const SlotState s = saved_slots(r)[slot];
+            std::printf("slot %d loaded: map %d.%d x %d, %d Red Potions; saved map %d.%d "
+                        "x %d, %d\n",
+                        slot, h.area, h.map, h.x, item_count(cpu, h, 3), s.area, s.map, s.x, s.red);
+            return rdi(cpu, data_mgr(cpu) + 0x4E4) == slot && h.on(s.area, s.map) &&
+                   std::abs(h.x - s.x) <= 8 && item_count(cpu, h, 3) == s.red;
+        });
+    then_exit_to_menu(r);
+}
+
+void then_delete_slot(Run &r, int slot) {
+    then_character_select(r);
+    then_focus(r, k_slot_actions[slot]);
+    then_press(r, A);
+    then_focus(r, "clickDelete:");
+    then_press(r, A);
+    then_wait_for(r, "Delete asks, the focus on No", 5,
+                  [&r](mt_cpu *) { return focused(r, "cancelAlert:"); });
+    then_focus(r, "okDeleteAlert:");
+    then_press(r, A);
+    then_wait_for(r, "slot " + std::to_string(slot) + "'s files deleted", 5, [&r, slot](mt_cpu *) {
+        std::error_code ec;
+        return !fs::exists(r.data / "saves" / slot_file("theif", slot), ec) &&
+               !fs::exists(r.data / "saves" / slot_file("quest", slot), ec);
+    });
+    then_press(r, B); // Back: the main menu
+    then_wait_for(r, "the main menu", 5, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
+}
+
+void slots_reload(Run &r, u64) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    g_play.anywhere = true;
+    then_load_slot(r, 1);
+    then_load_slot(r, 2);
+    then_delete_slot(r, 1);
+    then_delete_slot(r, 2);
+    then_do(r, "slot 0 untouched", [&r](mt_cpu *) {
+        check(read_save(r, "theif0") == g_slots.slot0 && read_save(r, "quest0") == g_slots.quest0,
+              "slot 0's files are as built");
+    });
+    then_finish(r);
+}
+void slots_reload_checks(Run &, u64) {}
+
+// --- A full inventory and the level cap (#303, docs/testing/systems-sweep-1.md) ------------------
+
+// The hero's bag: the etc items' (id, count) by slot and the equipment ids by slot (-1 empty).
+struct Bag {
+    std::vector<std::pair<i32, i32>> etc;
+    std::vector<i32> equip;
+    i32 etc_used() const {
+        return static_cast<i32>(
+            std::count_if(etc.begin(), etc.end(), [](const auto &e) { return e.first >= 0; }));
+    }
+    i32 equip_used() const {
+        return static_cast<i32>(
+            std::count_if(equip.begin(), equip.end(), [](i32 id) { return id >= 0; }));
+    }
+};
+Bag bag_of(mt_cpu *cpu) {
+    Bag b;
+    const Hero h = hero(cpu);
+    for (i32 i = 0; i < 48; i++) {
+        const EtcItem e = etc_item(cpu, h, i);
+        b.etc.emplace_back(e.id, e.count);
+    }
+    const u32 equips = h.addr != 0 ? rd(cpu, h.addr + 0xD4) : 0;
+    for (i32 i = 0; i < 48; i++) {
+        const u32 it = equips != 0 ? rd(cpu, equips + 4 * static_cast<u32>(i)) : 0;
+        b.equip.push_back(it != 0 ? rdi(cpu, it + 0x90) : -1);
+    }
+    return b;
+}
+
+// inventory_full_synthetic (tests/starts/systems_inventory_full.json): a Bandit on 2.3 with 48
+// equipment items and 48 etc stacks, none of them a Red Snail's drop. Hunting there, a drop the
+// hero touches is refused (the drop's +0x10C) and stays, and the bag is unchanged; meso still
+// comes in. Then Mr. Wang's Sell tab (Henesys): one stack sold, its price times its count paid,
+// and the bag's order afterwards.
+struct InventoryRun {
+    Bag before;
+    i32 sold_id = -1, sold_count = 0;
+    u64 refused = 0;
+};
+InventoryRun g_inv;
+
+// Sells the etc stack in bag slot `slot` at Mr. Wang's (Henesys): goes there, up opens the
+// shop, RB the Sell tab, down to the row, A through its popups, B closes the shop. Checks that
+// the stack left the bag, the meso it paid, and the order of the rest.
+void then_sell(Run &r, i32 slot) {
+    using namespace quest_bot;
+    struct S {
+        Nav nav;
+        double pressed = -10;
+        bool closing = false;
+        Bag before;
+        i32 meso = 0;
+        bool sold = false;
+    };
+    auto st = std::make_shared<S>();
+    const Goal g = shop_goal(2, 3);
+    then(r, "sell bag slot " + std::to_string(slot) + " at Mr. Wang's", 300,
+         [&r, st, g, slot](mt_cpu *cpu, double el) {
+             const auto press = [&](SDL_GamepadButton b) {
+                 if (el - st->pressed >= 0.5) {
+                     st->pressed = el;
+                 }
+                 hold(r, b, el - st->pressed < 0.1);
+             };
+             const Hero h = hero(cpu);
+             if (game_mode(cpu) == 2) {
+                 hold(r, UP, false);
+                 if (!in_shop(cpu)) {
+                     press(A); // a popup: how many, sell?, sold
+                     return false;
+                 }
+                 const Shop sh = shop(cpu);
+                 if (st->before.etc.empty()) {
+                     st->before = bag_of(cpu);
+                     st->meso = h.meso;
+                     const EtcItem e = etc_item(cpu, h, slot);
+                     g_inv.sold_id = e.id;
+                     g_inv.sold_count = e.count;
+                 }
+                 if (!st->closing && bag_of(cpu).etc_used() < st->before.etc_used()) {
+                     st->closing = true;
+                 }
+                 if (st->closing) {
+                     press(B);
+                 } else if (sh.tab != 1) {
+                     press(RB);
+                 } else if (sh.selected != slot) {
+                     press(sh.selected < slot ? DOWN : UP);
+                 } else {
+                     press(A);
+                 }
+                 return false;
+             }
+             if (interrupted(r, cpu, el)) {
+                 return false;
+             }
+             if (st->closing) {
+                 release_all(r);
+                 const Bag now = bag_of(cpu);
+                 const i32 paid = h.meso - st->meso;
+                 std::printf("sold: item %d x %d: %d meso paid; etc stacks %d -> %d\n",
+                             g_inv.sold_id, g_inv.sold_count, paid, st->before.etc_used(),
+                             now.etc_used());
+                 std::string order;
+                 for (const auto &[id, count] : now.etc) {
+                     order += " " + std::to_string(id);
+                 }
+                 std::printf("the bag after the sale:%s\n", order.c_str());
+                 // The rest in their order, the sold stack's slot taken by the next.
+                 std::vector<std::pair<i32, i32>> want = st->before.etc;
+                 want.erase(want.begin() + slot);
+                 want.emplace_back(-1, 0);
+                 check(item_count(cpu, h, g_inv.sold_id) == 0, "the sold stack left the bag");
+                 // Slot 10 holds item 45, one of it; item_etc lists its price as 7 meso.
+                 check(g_inv.sold_id == 45 && g_inv.sold_count == 1 && paid == 7,
+                       "the sale paid item_etc's price, 7 meso, for one item 45");
+                 check(now.etc == want, "the rest keep their order, the gap closed");
+                 check(now.equip == st->before.equip, "the equipment is unchanged");
+                 return true;
+             }
+             if (!drive(r, cpu, el, st->nav, g)) {
+                 return false;
+             }
+             press(UP);
+             return false;
+         });
+}
+
+void inventory_full(Run &r, u64) {
+    using namespace quest_bot;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        for (const Drop &d : drops(cpu)) {
+            g_inv.refused += d.refused ? 1 : 0;
+        }
+    };
+    g_play.anywhere = true;
+    then_load_slot0(r);
+    then_do(r, "the full bag", [](mt_cpu *cpu) {
+        g_inv.before = bag_of(cpu);
+        std::printf("bag: %d etc stacks, %d equipment items\n", g_inv.before.etc_used(),
+                    g_inv.before.equip_used());
+        check(g_inv.before.etc_used() == 48 && g_inv.before.equip_used() == 48,
+              "the bag is full: 48 etc stacks and 48 equipment items");
+    });
+    then_farm(
+        r, "Red Snails on 2.3 until a drop is refused", 2, 3, {2},
+        [](mt_cpu *) { return g_inv.refused > 0; }, 900);
+    then_wait(r, 2.0);
+    then_do(r, "the refused drop", [](mt_cpu *cpu) {
+        const Bag now = bag_of(cpu);
+        u64 lying = 0;
+        for (const Drop &d : drops(cpu)) {
+            lying += d.refused && d.state == 0 ? 1 : 0;
+        }
+        std::printf("refused drops: %llu turns seen, %llu lying refused\n",
+                    static_cast<unsigned long long>(g_inv.refused),
+                    static_cast<unsigned long long>(lying));
+        check(lying > 0, "a refused drop stays on the ground");
+        check(now.etc == g_inv.before.etc && now.equip == g_inv.before.equip,
+              "the bag is unchanged by the refused pick-up");
+    });
+    then_sell(r, 10);
+    then_finish(r);
+}
+void inventory_full_checks(Run &, u64) {}
+
+// level_cap_synthetic (tests/starts/systems_level_99.json): a level-99 Bandit with 71,735 EXP,
+// 5 short of level 99's need in hero.dat (71,740), kills Red Snails on 2.3. CHero::setExp
+// 0x6654D calls CHero::LevelUp 0x65089 when the need is reached, which returns at once above
+// level 98, and then sets EXP to 0: the level stays 99, EXP drops to 0 and counts up again.
+// Then the way to Henesys (2.0), a map change, reports the total ranking (99 x 999000 + EXP) /
+// 1000 (CMapleWorld::changeMap 0x81369), which gamecenter.json keeps.
+struct CapRun {
+    u64 kills0 = 0;
+    i32 last_exp = -1, resets = 0, reset_to = -1, level_max = 0;
+};
+CapRun g_cap;
+
+void level_cap(Run &r, u64) {
+    using namespace quest_bot;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        const Hero h = hero(cpu);
+        if (h.addr == 0) {
+            return;
+        }
+        CapRun &c = g_cap;
+        if (c.last_exp >= 0 && h.exp < c.last_exp) {
+            c.resets++;
+            c.reset_to = h.exp;
+            std::printf("level cap: EXP %d -> %d at level %d\n", c.last_exp, h.exp, h.level);
+        }
+        c.last_exp = h.exp;
+        c.level_max = std::max(c.level_max, h.level);
+    };
+    g_play.anywhere = true;
+    then_load_slot0(r);
+    then_do(r, "level 99", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        g_cap.kills0 = g_play.kills;
+        check(h.level == 99 && h.exp == 71735, "the hero is level 99 with 71,735 EXP");
+    });
+    then_farm(
+        r, "Red Snails on 2.3 at level 99", 2, 3, {2},
+        [](mt_cpu *cpu) { return g_cap.resets > 0 && hero(cpu).exp > 0; }, 900);
+    then_do(r, "EXP at the cap", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::printf("level cap: %llu kills, level %d (most %d), EXP %d, %d reset(s) to %d\n",
+                    static_cast<unsigned long long>(g_play.kills - g_cap.kills0), h.level,
+                    g_cap.level_max, h.exp, g_cap.resets, g_cap.reset_to);
+        check(h.level == 99 && g_cap.level_max == 99, "the level stays 99");
+        check(g_cap.resets == 1 && g_cap.reset_to == 0,
+              "reaching level 99's need sets EXP to 0, once");
+        check(h.exp > 0 && h.exp < 71740, "EXP counts up again from 0");
+    });
+    auto exp = std::make_shared<i32>(-1);
+    then_go(r, "Henesys (2.0)", at_object(2, 0, "Stan", 30), 300);
+    then_do(r, "the score", [exp](mt_cpu *cpu) {
+        static const char *const k_ranking = "com.nexonmobile.maplestory.thief.totalranking";
+        *exp = hero(cpu).exp;
+        const std::int64_t want = (99ll * 999000 + *exp) / 1000;
+        mt_gamekit_entry e[8];
+        const u32 n = mt_gamekit_entries(k_ranking, e, 8);
+        std::printf("gamecenter.json: %u entr%s", n, n == 1 ? "y" : "ies");
+        bool found = false;
+        for (u32 i = 0; i < n && i < 8; i++) {
+            std::printf("; %s best %lld last %lld (%lld reports)", e[i].player,
+                        static_cast<long long>(e[i].best), static_cast<long long>(e[i].last),
+                        static_cast<long long>(e[i].reports));
+            found = found || e[i].last == want;
+        }
+        std::printf("\n");
+        check(found, "gamecenter.json's last total ranking is " + std::to_string(want) +
+                         " (level 99, " + std::to_string(*exp) + " EXP) after the map change");
+    });
+    then_finish(r);
+}
+void level_cap_checks(Run &, u64) {}
+
+// --- Quick slots and the trash (#303, docs/testing/systems-sweep-1.md) ---------------------------
+//
+// quick_slots_trash_synthetic (tests/starts/systems_carry.json): a Bandit with Double Step
+// (skill 3) and Nimble Body (4) learned, by the pad only through the port's pick up and drop
+// (ADR 0129, #140): Double Step picked up on the skill tab and dropped on quick slot 3, then
+// used from it in the field (LB: MP paid); a stack of Snail Shells taken to the trash, the
+// game's popup 20 declined (B: the shells stay), then taken again and accepted (A: gone).
+
+constexpr i32 k_double_step = 3, k_shells = 32;
+
+// One press of `b` at a time (0.1 s down, 0.4 s up) until `done`.
+void then_press_until(Run &r, const std::string &what, double timeout,
+                      std::function<SDL_GamepadButton(mt_cpu *)> next, Pred done) {
+    auto at = std::make_shared<double>(-10);
+    then(r, what, timeout, [&r, next, done, at](mt_cpu *cpu, double el) {
+        if (el - *at < 0.5) {
+            if (el - *at >= 0.1) {
+                release_all(r);
+            }
+            return false;
+        }
+        if (done(cpu)) {
+            release_all(r);
+            return true;
+        }
+        *at = el;
+        hold(r, next(cpu), true);
+        return false;
+    });
+}
+
+// The carry's drop spot moved to quick slot n (up / down over the slot column), then A drops.
+void then_drop_on_slot(Run &r, i32 n) {
+    then_press_until(
+        r, "the carry on quick slot " + std::to_string(n), 10,
+        [&r, n](mt_cpu *) {
+            const fe::FocusTarget *t = r.focus.carry_target();
+            return t == nullptr || t->action != "slot" ? RIGHT
+                   : t->order < static_cast<u32>(n)    ? UP // the slot column: up to slot 4
+                                                       : DOWN;
+        },
+        [&r, n](mt_cpu *) {
+            const fe::FocusTarget *t = r.focus.carry_target();
+            return t != nullptr && t->action == "slot" && t->order == static_cast<u32>(n);
+        });
+    then_press(r, A);
+}
+
+// The index of etc item `id` in the hero's item list (the item grid's cell), or -1.
+i32 bag_cell(const mt_cpu *cpu, i32 id) {
+    const u32 items = rd(cpu, hero(cpu).addr + 0xD8);
+    for (u32 i = 0; items != 0 && i < 48; i++) {
+        const u32 it = rd(cpu, items + 4 * i);
+        if (it != 0 && rdi(cpu, it + 0x90) == id) {
+            return static_cast<i32>(i);
+        }
+    }
+    return -1;
+}
+// The item grid's cursor cell: CDataMgr +0xD8 plus 6 cells a scrolled row.
+i32 item_cursor(mt_cpu *cpu) {
+    const u32 mgr = data_mgr(cpu);
+    const u32 scroll = rd(cpu, mgr + 0x10C);
+    return rdi(cpu, mgr + 0xD8) + 6 * (scroll != 0 ? rdi(cpu, scroll + 4) : 0);
+}
+
+// The item grid open (the popup menu, right, A) with its cursor on etc item `id`, from the field.
+void then_item_cell(Run &r, i32 id) {
+    then_press(r, START, 0.1, 0.6);
+    then_wait_for(r, "the popup menu", 5, [](mt_cpu *cpu) { return game_mode(cpu) == 1; }, 0.3);
+    then_press(r, RIGHT);
+    then_press(r, A);
+    then_wait_for(r, "the item grid", 5, [](mt_cpu *cpu) { return menu_sub(cpu) == 1; }, 0.3);
+    then_press_until(
+        r, "the cursor on item " + std::to_string(id), 20,
+        [id](mt_cpu *cpu) { return item_cursor(cpu) < bag_cell(cpu, id) ? RIGHT : LEFT; },
+        [id](mt_cpu *cpu) {
+            return bag_cell(cpu, id) >= 0 && item_cursor(cpu) == bag_cell(cpu, id);
+        });
+}
+
+// The shells taken to the trash: pick up (X), left to the trash, A: the game's popup 20.
+void then_shells_to_trash(Run &r) {
+    then_item_cell(r, k_shells);
+    then_press(r, X);
+    then_check(r, "picked up: the carry is on", [&r](mt_cpu *) { return r.focus.carrying(); });
+    then_press_until(
+        r, "the carry on the trash", 10, [](mt_cpu *) { return LEFT; },
+        [&r](mt_cpu *) {
+            const fe::FocusTarget *t = r.focus.carry_target();
+            return t != nullptr && t->action == "trash";
+        });
+    then_press(r, A);
+    then_wait_for(r, "the trash popup (20)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 20; });
+}
+
+void quick_slots_trash(Run &r, u64) {
+    using namespace quest_bot;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    g_play.anywhere = true;
+    then_load_slot0(r);
+    // Double Step onto quick slot 3: the skill tab, its row, X picks it up, the drop on slot 3.
+    auto k = std::make_shared<MenuPad>();
+    then(r, "the skill tab on Double Step's row", 30, [&r, k](mt_cpu *cpu, double el) {
+        if (!k->ready(r, el)) {
+            return false;
+        }
+        if (!at_skill_tab(r, cpu, el, *k)) {
+            return false;
+        }
+        const u32 m = data_mgr(cpu);
+        const i32 row = skill_row(cpu, hero(cpu), k_double_step);
+        const i32 cur = rdi(cpu, m + 0xD4) + rdi(cpu, rd(cpu, m + 0x10C) + 4);
+        if (cur == row) {
+            return true;
+        }
+        k->press(r, el, cur < row ? DOWN : UP);
+        return false;
+    });
+    then_press(r, X);
+    then_check(r, "Double Step picked up", [&r](mt_cpu *) { return r.focus.carrying(); });
+    then_drop_on_slot(r, 3);
+    then_check(r, "quick slot 3 holds Double Step", [&r](mt_cpu *cpu) {
+        std::printf("quick slots: 3 holds skill %d; %llu picks, %llu drops\n",
+                    quick_slot_skill(cpu, hero(cpu), 3),
+                    static_cast<unsigned long long>(r.focus.stats().picks),
+                    static_cast<unsigned long long>(r.focus.stats().drops));
+        return !r.focus.carrying() && quick_slot_skill(cpu, hero(cpu), 3) == k_double_step;
+    });
+    then_back_to_field(r, "back to the field");
+    // Used from the slot: LB, the skill's MP paid.
+    auto mp = std::make_shared<i32>(0);
+    then_do(r, "MP before", [mp](mt_cpu *cpu) { *mp = hero(cpu).mp; });
+    then_press(r, LB, 0.1, 1.0);
+    then_check(r, "LB used Double Step from quick slot 3: MP paid", [mp](mt_cpu *cpu) {
+        std::printf("Double Step from slot 3: MP %d -> %d\n", *mp, hero(cpu).mp);
+        return hero(cpu).mp < *mp;
+    });
+    // The trash, declined: B on popup 20, the shells stay.
+    auto shells = std::make_shared<i32>(0);
+    then_do(r, "the shells", [shells](mt_cpu *cpu) {
+        *shells = item_count(cpu, hero(cpu), k_shells);
+        check(*shells > 0, "the bag has Snail Shells");
+    });
+    then_shells_to_trash(r);
+    then_press(r, B);
+    then_wait_for(r, "popup 20 closed", 5, [](mt_cpu *cpu) { return popup_id(cpu) != 20; });
+    then_check(r, "declined: the shells stay",
+               [shells](mt_cpu *cpu) { return item_count(cpu, hero(cpu), k_shells) == *shells; });
+    then_back_to_field(r, "back to the field");
+    // Accepted: A on popup 20, the shells are gone.
+    then_shells_to_trash(r);
+    then_press(r, A);
+    then_wait_for(r, "accepted: the shells are gone", 5, [](mt_cpu *cpu) {
+        return popup_id(cpu) != 20 && item_count(cpu, hero(cpu), k_shells) == 0;
+    });
+    then_back_to_field(r, "back to the field");
+    then_finish(r);
+}
+void quick_slots_trash_checks(Run &, u64) {}
+
 constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
     {"regress_record", regress_record, regress_record_checks, 1, false, regress_record_setup},
@@ -9570,6 +12144,7 @@ constexpr Mode k_modes[] = {
     {"save_state_census", save_state_census, save_state_census_checks, 1, false,
      save_state_census_setup},
     {"quick_state", quick_state, quick_state_checks, 1, false, quick_state_setup},
+    {"practice_state", practice_state, practice_state_checks, 1},
     {"recovery_crash", recovery_crash, recovery_crash_checks, 1, false, recovery_crash_setup},
     {"recovery_resume", recovery_resume, recovery_resume_checks, 1, true, recovery_resume_setup},
     {"recovery_off", recovery_off, recovery_off_checks, 1, false, recovery_off_setup},
@@ -9601,6 +12176,7 @@ constexpr Mode k_modes[] = {
     {"autosave_map", autosave_map, autosave_map_checks, 1, false, autosave_map_setup},
     {"autosave_quit", autosave_quit, autosave_quit_checks, 1},
     {"autosave_exit", autosave_exit, autosave_exit_checks, 1},
+    {"autosave_death_exit", autosave_death_exit, autosave_death_exit_checks, 1},
     {"autosave_reload", autosave_reload, autosave_reload_checks, 1, true},
     {"popup_menu_tabs", popup_menu_tabs, popup_menu_tabs_checks, 1},
     {"popup_menu_down", popup_menu_down, popup_menu_down_checks, 1},
@@ -9622,6 +12198,8 @@ constexpr Mode k_modes[] = {
     {"ui_animations_fast", ui_animations_fast, ui_animations_checks, 1},
     {"ui_animations_instant", ui_animations_instant, ui_animations_checks, 1},
     {"chat_text", chat_text, chat_text_checks, 1},
+    {"speech_dialogue", speech_dialogue, speech_dialogue_checks, 1},
+    {"speech_notices", speech_notices, speech_notices_checks, 1},
     {"text_pack", text_pack_play, text_pack_checks, 1, false, text_pack_setup},
     {"skip_intros_watched", skip_intros_watched, skip_intros_checks, 1},
     {"skip_intros_skipped", skip_intros_skipped, skip_intros_checks, 1},
@@ -9650,6 +12228,22 @@ constexpr Mode k_modes[] = {
     {"jobs_3_4_bandit", jobs_3_4_bandit, jobs_checks, 1},
     {"skills_assassin", skills_assassin, skills_assassin_checks, 1},
     {"skills_bandit", skills_bandit, skills_bandit_checks, 1},
+    {"systems2_cash_tiles", systems2_cash_tiles, systems2_cash_checks, 1},
+    {"systems2_cash_restores", systems2_cash_restores, systems2_cash_checks, 1, false,
+     systems2_cash_restores_setup},
+    {"systems2_scrolls_success", systems2_scrolls_success, systems2_scrolls_checks, 1},
+    {"systems2_scrolls_failure", systems2_scrolls_failure, systems2_scrolls_checks, 1},
+    {"systems2_pigmy", systems2_pigmy, systems2_pigmy_checks, 1},
+    {"systems2_portal620", systems2_portal620, systems2_portal620_checks, 1},
+    {"korean_chapter_1_a", korean_chapter_1_a, korean_checks, 1, false, korean_setup},
+    {"korean_offer_2", korean_offer_2, korean_checks, 1, false, korean_setup},
+    {"korean_offer_3", korean_offer_3, korean_checks, 1, false, korean_setup},
+    {"korean_missing_key", korean_missing_key, korean_checks, 1, false, korean_setup},
+    {"slots_create", slots_create, slots_create_checks, 1, false, slots_setup},
+    {"slots_reload", slots_reload, slots_reload_checks, 1, true, slots_setup},
+    {"inventory_full", inventory_full, inventory_full_checks, 1},
+    {"level_cap", level_cap, level_cap_checks, 1},
+    {"quick_slots_trash", quick_slots_trash, quick_slots_trash_checks, 1},
 };
 
 int usage() {

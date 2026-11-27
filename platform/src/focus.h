@@ -104,6 +104,7 @@ struct FocusTarget {
     std::string action;               // the selector a tap sends ("" for a scroll view)
     std::string target;               // the class of its target
     std::string view_class;
+    std::string image; // a button's image by name (mt_uikit_control::image; #393's speech)
     float offset[2] = {0, 0}, max_offset[2] = {0, 0}, page[2] = {0, 0}; // scroll views
 
     bool focusable() const { return kind != Kind::kScroll; }

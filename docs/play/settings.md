@@ -59,7 +59,7 @@ Neither shows on a computer.
 
 ## Gameplay and assists
 
-- **Save on quit** (`autosave = on_quit`, part of Enhanced): saves wherever the game's own Save would when you quit or minimise.
+- **Save on quit** (`autosave = on_quit`, part of Enhanced): saves wherever the game's own Save would when you quit, minimise or pick the menu's exit to the main menu. Going to the main menu from the death popup never saves: the hero is dead there, and the game never lets a fallen hero save, so you go back to your last save (and skip the fall's penalty, as in the original).
 - **Crash recovery** (`crash_recovery = on`, part of Enhanced): keeps a recovery point of your game, so that after a crash the next start can put you back a few minutes before it. See [Saves](saves.md#after-a-crash-recovery-points).
 - **Cash shop for meso** (`cash_shop = meso`, an Assist, off in every preset): the original's cash shop needed real money and an online server. With this on, its items and revives cost in-game meso instead, at a price that grows with your level.
 - **Hide online buttons** (`hide_online_ui`) and **local Game Center** (`local_game_center`): hide the menu buttons whose web pages are gone, and turn Game Center's button into a leaderboard of your own save slots, with a few achievements.
@@ -112,6 +112,10 @@ The game itself never goes online. If you want to hear about new versions of the
 When it is on, the port asks github.com once a day which version is the latest. It downloads nothing and installs nothing. If a newer version is out, one line shows in the corner of the title screen and in **Port update** in the **Other** tab; choosing either opens the release page in your browser. Nothing appears during play.
 
 GitHub sees your IP address and the port's version, as it would for any visit to the releases page. The port sends nothing else about you, your device or your saves. It keeps the time of its last check in `update_check.txt`, next to `settings.ini`. On Linux the check needs the system's libcurl; without it there is simply no check.
+
+## Speedrun timer
+
+**Speedrun timer** and **Speedrun category** in the **Other** tab (`run_timer`, `run_category`) time a run from a new character with automatic splits. [Speedrun timer](speedrun.md) explains them.
 
 ## Recording runs
 

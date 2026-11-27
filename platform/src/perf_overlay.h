@@ -63,6 +63,10 @@ class PerfOverlay {
     // The same with several lines (the data folder's notice, #262, data_notice.h).
     static void draw_notice(SDL_Renderer *renderer, const std::vector<std::string> &lines,
                             const TextFrame &frame);
+    // The same box at another corner of the frame's area (the speedrun timer's, top right,
+    // #406, run_timer.h).
+    static void draw_lines(SDL_Renderer *renderer, const std::vector<std::string> &lines,
+                           const TextFrame &frame, TextCorner corner);
     // Where draw_notice puts one line, in drawable pixels (the update notice's click, #199).
     static Rect notice_rect(const std::string &text, const TextFrame &frame);
 

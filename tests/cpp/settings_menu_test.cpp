@@ -1765,6 +1765,7 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"speech", false, "no system voice open to homebrew (kCapSpeech, ADR 0174)"},
     {"speech_rate", false, "kCapSpeech"},
     {"speech_volume", false, "kCapSpeech"},
+    {"speech_notices", false, "kCapSpeech"},
     {"brightness", true, ""},
     {"contrast", true, ""},
     {"saturation", true, ""},
@@ -1784,6 +1785,8 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"stick_mode", true, ""},
     {"direction_priority", true, ""},
     {"update_check", false, "no HTTP fetcher on the console (update_fetch.cpp)"},
+    {"run_timer", true, ""},
+    {"run_category", true, ""},
     {"record_runs", true, "run files go in the data folder (#405)"},
 };
 constexpr SwitchDecision kSwitchActions[] = {

@@ -1,0 +1,93 @@
+{
+ "level": 30,
+ "branch": 2,
+ "job_tier": 2,
+ "hp": 520,
+ "mp": 520,
+ "meso": 20000,
+ "map": [
+  0,
+  0
+ ],
+ "position": [
+  -1,
+  -1
+ ],
+ "equipped": [
+  {
+   "id": 4,
+   "slots_left": 2,
+   "scrolls_used": 0
+  },
+  {
+   "id": 28,
+   "slots_left": 2,
+   "scrolls_used": 0
+  },
+  {
+   "id": 16,
+   "slots_left": 2,
+   "scrolls_used": 0
+  },
+  {
+   "id": 64,
+   "slots_left": 2,
+   "scrolls_used": 0
+  },
+  {
+   "id": 53,
+   "slots_left": 2,
+   "scrolls_used": 0
+  }
+ ],
+ "etc_inventory": [
+  [
+   19,
+   1
+  ],
+  [
+   20,
+   1
+  ],
+  [
+   21,
+   1
+  ],
+  [
+   22,
+   1
+  ],
+  [
+   23,
+   1
+  ],
+  [
+   133,
+   1
+  ],
+  [
+   134,
+   1
+  ],
+  [
+   135,
+   1
+  ],
+  [
+   136,
+   1
+  ],
+  [
+   137,
+   1
+  ]
+ ],
+ "chapter": 1,
+ "main": {
+  "7": 2,
+  "8": 2,
+  "9": 2,
+  "21": 2
+ },
+ "side": {}
+}

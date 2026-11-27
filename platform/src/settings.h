@@ -149,6 +149,10 @@
 //   # once a day, ask github.com whether a newer version of the port is out (never in
 //   # Original; it downloads nothing): on | off
 //   update_check = off
+//   # the speedrun timer over the picture (run_timer.h): on | off
+//   run_timer = off
+//   # the timer's category: any | chapter_1, or a file of your own in <data dir>/categories
+//   run_category = any
 //   # record every session, from the start to quit, as a run file in runs/ that plays back
 //   # exactly (MapleThief --play-run FILE): on | off
 //   record_runs = off
@@ -686,6 +690,8 @@ struct Settings {
     bool speech = false;                            // speech, --speech (on | off)
     std::uint32_t speech_rate = kSpeechRateDefault; // --speech-rate (50 to 200, percent)
     std::uint32_t speech_volume = kSpeechVolumeMax; // --speech-volume (0 to 100, percent)
+    // The notify lines (pick-ups, meso, EXP, the map's name) said too (#392, ADR 0191).
+    bool speech_notices = true; // speech_notices, --speech-notices (on | off)
     // The picture adjustments (#187): the present stage's colour step with the filter.
     std::uint32_t brightness = kPictureDefault; // --brightness (50 to 150, percent)
     std::uint32_t contrast = kPictureDefault;   // --contrast (50 to 150, percent)
@@ -718,6 +724,10 @@ struct Settings {
     // The opt-in update notice (#199, ADR 0137, update_check.h): off by default, in no preset,
     // and it never runs in the Original preset.
     bool update_check = false; // update_check, --update-check (on | off)
+    // The speedrun timer (#406, ADR 0156, run_timer.h): its overlay and run logs, and the
+    // category it times (a category file's name, without .mtcat). Outside the presets.
+    bool run_timer = false;           // run_timer, --run-timer (on | off)
+    std::string run_category = "any"; // run_category, --run-category (NAME)
     // Run recording (#405, ADR 0156, run_recorder.h): every session from the start to quit into
     // <data dir>/runs/, off by default and in no preset.
     bool record_runs = false; // record_runs, --record-runs (on | off)
@@ -968,6 +978,11 @@ inline constexpr const char *kFullscreenDisplayCurrent = "current";
 // (kCapPackFolders: the Switch; pack_folders.cpp's offer_pack_folders sets them at the start).
 // The menu then offers "" (none) and these; with none set it offers nothing, as before.
 void set_pack_choices(std::string_view key, std::vector<std::string> values);
+// run_category (#406, run_timer.h): the categories' names the settings menu offers (game.cpp
+// sets them from the shipped categories and the data folder's). Until then the menu offers the
+// shipped categories' names. A category's name is 1 to 32 of a-z, 0-9 and '_'.
+void set_run_category_choices(std::vector<std::string> names);
+inline constexpr std::size_t kMaxRunCategoryBytes = 32;
 
 // Every setting, in the order a new file lists them (after `preset`).
 std::span<const SettingInfo> settings_registry();

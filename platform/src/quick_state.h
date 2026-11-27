@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "maplethief/recomp/recomp.h"
+#include "port_text.h"
 
 namespace maplethief::frontend {
 
@@ -97,7 +98,17 @@ struct QuickResult {
     bool done = false;
     std::string notice;
     std::string log;
+    std::size_t bytes = 0; // the state's size, when done
 };
+
+// The save and the load of one state file, with every refusal and its reason (the player's words
+// in `notice`, English in `log`, which starts with `what`): `path_of` gives the file of the slot in
+// play (0-2; "" refuses). QuickStates and the practice states (#409, practice_state.h) share them.
+// `none`: the reason when there is no file.
+QuickResult save_state_to(const QuickOps &ops, const std::function<std::string(int)> &path_of,
+                          const std::string &what);
+QuickResult load_state_from(const QuickOps &ops, const std::function<std::string(int)> &path_of,
+                            const std::string &what, Txt none);
 
 class QuickStates {
   public:

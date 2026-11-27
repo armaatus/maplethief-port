@@ -63,6 +63,24 @@ typedef struct mt_cg_text_stats {
 /* The counters since the text scale was last set. */
 mt_cg_text_stats mt_cg_get_text_stats(void) MT_NOEXCEPT;
 
+/* --- What the game draws as text (#303: the Korean run's checks) ---------------------------
+ *
+ * Every -[NSString drawAtPoint:withFont:] into a bitmap context (TextCache_DrawText 0x9031 draws
+ * every name, line and number this way) is handed to the observer after it is drawn, with or
+ * without a text pack. A test reads from it whether a character had no glyph in either font (it
+ * would draw nothing where the device drew a box) and whether the text ran past its bitmap. */
+typedef struct mt_cg_drawn_text {
+    const char *utf8;  /* the text, UTF-8; valid during the call */
+    float right;       /* where the text ends: its x plus its width, in points */
+    float limit;       /* the bitmap's width in points (TextCache's textures: 512) */
+    uint32_t missing;  /* characters no font has a glyph for (U+FFFD, a failed decode, counted) */
+    uint32_t newlines; /* line breaks: such a text is drawn and measured as one line */
+} mt_cg_drawn_text;
+typedef void (*mt_cg_text_observer_fn)(void *user, const mt_cg_drawn_text *text);
+
+/* Installs the observer (NULL: none, the default). On the game's thread. */
+void mt_cg_set_text_observer(mt_cg_text_observer_fn fn, void *user) MT_NOEXCEPT;
+
 /* --- UIKit images by file name (#153, ADR 0081: texture packs' menu art) ------------------
  *
  * The shell's images (+[UIImage imageNamed:], +[UIImage imageWithContentsOfFile:]) never pass

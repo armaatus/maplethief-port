@@ -75,6 +75,7 @@
 #include "perf_overlay.h"
 #include "perf_session.h"
 #include "port_text.h"
+#include "practice_state.h"
 #include "present.h"
 #include "price_line.h"
 #include "prompts.h"
@@ -83,12 +84,15 @@
 #include "render_scale.h"
 #include "rumble.h"
 #include "run_recorder.h"
+#include "run_timer.h"
 #include "save_menu.h"
 #include "save_state_input.h"
 #include "save_tools.h"
 #include "scene_skip.h"
 #include "settings_menu.h"
 #include "speech.h"
+#include "speech_menus.h"
+#include "speech_text.h"
 #include "update_check.h"
 
 namespace maplethief::frontend {
@@ -399,6 +403,25 @@ constexpr double kAnimationSeconds = 1.0 / 60;
 // that keeps presenting without returning to the run loop ends the run without it after this.
 constexpr Uint64 kQuitGraceNs = 2000000000ull;
 
+// The speedrun timer's clocks (#406, run_timer.h): the host's monotonic clock and the game's
+// ticks; the local wall-clock time a run starts at.
+RunInstant run_clock_now() {
+    return RunInstant{static_cast<double>(SDL_GetTicksNS()) / 1e9, mt_input_get_stats().ticks};
+}
+
+std::string run_clock_stamp() {
+    const std::time_t now = std::time(nullptr);
+    std::tm tm{};
+#if defined(_WIN32)
+    localtime_s(&tm, &now);
+#else
+    localtime_r(&now, &tm);
+#endif
+    char b[32];
+    std::strftime(b, sizeof b, "%Y-%m-%d %H:%M:%S", &tm);
+    return b;
+}
+
 // The run's state, shared by the hooks (one thread).
 struct Game {
     const GameOptions *options = nullptr;
@@ -509,7 +532,9 @@ struct Game {
     ControlsCard card{&actions, &gamepads};          // the controls card (controls_card.h, #193)
     bool card_pending = false; // the preset picker's "Show controls": opens at a turn (#193)
     PadPointer pointer{&input, &actions}; // pad_pointer: the right stick's, touchpads (#185)
-    Speech speech; // text-to-speech (speech.h, #390): what #391-#393 feed; off by default
+    Speech speech;          // text-to-speech (speech.h, #390): what #391-#393 feed; off by default
+    SpeechText speech_text; // the dialogue and the scenes' speech boxes for it (#391)
+    SpeechMenus speech_menus; // the menus for it (#393)
     // The settings in effect (options->settings at the start), which the settings menu and the
     // fullscreen hotkeys change (#89, ADR 0076; #145): every setting is read from here.
     Settings settings;
@@ -563,6 +588,12 @@ struct Game {
     FrameStats stats;              // frame telemetry (frame_stats.h, ADR 0071)
     PerfCsv csv;                   // --perf-csv
     PerfOverlay perf;              // the frame-time overlay (perf_overlay.h)
+    // The speedrun timer (#406, run_timer.h): its run, the categories it can time and the one
+    // loaded (run_category as last applied; empty: none yet).
+    RunTimer run_timer{RunClock{run_clock_now, run_clock_stamp}};
+    std::vector<RunCategory> run_categories;
+    std::string run_category_loaded;
+    PracticeStates practice; // its practice states, with save_states (#409, practice_state.h)
     // --perf-session (#244, perf_session.h): a line per second; the scene and the screen as of
     // the last run-loop turn.
     PerfSession session;
@@ -976,6 +1007,7 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     if (!was_open && g.menu.is_open()) {
         g.menu.set_frame_cost(g.stats.recent()); // the game's last second, before the pause
     }
+    g.speech_menus.settings_turn(g.menu, g.speech, speech_clock()); // its row said (#393)
     if (is_screen_finger_down(e)) {
         g.touch_screen = true;
     }
@@ -1591,6 +1623,22 @@ void stop_speech(Game &g) {
                 static_cast<unsigned long long>(st.failed));
     }
     g.speech.set_backend(nullptr);
+}
+
+// The menus read aloud (#393, speech_menus.h): once per run-loop turn, after the focus; reads
+// the labels and the popup menu or the shop only while speech is on.
+void speak_menus(Game &g, mt_cpu *cpu) {
+    const double now = speech_clock();
+    if (!SpeechMenus::listening(g.speech)) {
+        g.speech_menus.shell_turn(g.focus, {}, g.speech, now);
+        g.speech_menus.spot_turn(MenuSpot{}, SpotText{}, g.speech, now);
+        return;
+    }
+    g.speech_menus.shell_turn(g.focus,
+                              g.focus.active() ? runtime_labels(cpu) : std::vector<ScreenLabel>{},
+                              g.speech, now);
+    const MenuSpot spot = read_menu_spot(cpu);
+    g.speech_menus.spot_turn(spot, spot_text(cpu, spot), g.speech, now);
 }
 
 // Text packs (#189, ADR 0108, maplethief/textpack.h): text_pack = DIR replaces the game's text
@@ -2248,6 +2296,11 @@ bool present(Game &g, mt_cpu *cpu, double now) {
             g.update_rect = PerfOverlay::notice_rect(line, text);
         }
     }
+    // The speedrun timer (#406, run_timer.h): top right, the window only, like the overlay.
+    if (g.settings.run_timer) {
+        PerfOverlay::draw_lines(g.renderer, g.run_timer.overlay_lines(), text,
+                                TextCorner::kTopRight);
+    }
     // The cash shop's price line (#156, price_line.h): the window only, like the overlay.
     if (mt_cash_shop_mode() == MT_CASH_SHOP_MESO) {
         draw_price_line(g.renderer, mt_cash_shop_view(), text, g.presenter.wide_rect());
@@ -2747,6 +2800,7 @@ void release_layers(Game &g, double t) {
     layers.assists = &g.assists;
     layers.scene_skip = &g.scene_skip;
     release_for_restore(layers, t);
+    g.speech_text.restart(); // a box the restore shows is said again (#391)
 }
 
 // save_states (#204, quick_state.h): a quick_save or quick_load pressed since the last turn, here
@@ -2754,6 +2808,82 @@ void release_layers(Game &g, double t) {
 // here. The notice says what happened. After a load, the frontend's own per-tick state follows
 // the restored game: the interpolated frames start over, and game_speed (the player's setting,
 // not the state's) is written again into the restored guest memory.
+// The speedrun timer's game-event listener (#406): every event, while run_timer is on.
+void run_timer_event(void *user, const mt_game_event *e) {
+    Game &g = *static_cast<Game *>(user);
+    if (g.settings.run_timer) {
+        g.run_timer.on_event(*e);
+    }
+}
+
+// The speedrun timer's finished and reset runs to <data dir>/runs/ (run_timer.h), each logged;
+// a new personal best becomes the one the timer compares with. A best segment that improved
+// (#409) writes runs/<category>.segments again.
+void write_run_records(Game &g) {
+    if (g.run_timer.take_segments_changed()) {
+        std::string why;
+        if (!write_run_segments(data_dir(), g.run_timer.segments(), &why)) {
+            SDL_Log("run: cannot write the best segments: %s", why.c_str());
+        }
+    }
+    for (RunRecord &r : g.run_timer.take_records()) {
+        std::string path, why;
+        bool best = false;
+        const std::optional<RunRecord> &old = g.run_timer.best();
+        if (!write_run(data_dir(), r, old ? &*old : nullptr, &path, &best, &why)) {
+            SDL_Log("run: cannot write the %s run: %s", r.category.c_str(), why.c_str());
+            continue;
+        }
+        SDL_Log("run: %s %s in %s (%llu ticks), %zu of %zu splits, %s%s: %s", r.category.c_str(),
+                r.finished ? "finished" : "reset", format_run_time(r.end.ms).c_str(),
+                static_cast<unsigned long long>(r.end.ticks), r.times.size(), r.splits.size(),
+                r.clean() ? "clean" : "assisted", best ? ", a new personal best" : "",
+                path.c_str());
+        if (best) {
+            g.run_timer.set_best(std::move(r));
+        }
+    }
+}
+
+// run_timer and run_category as in effect now (#406): another category (or the timer turned
+// off) ends a run in progress as reset; then the clean check of this turn.
+void follow_run_timer(Game &g) {
+    if (!g.settings.run_timer) {
+        if (g.run_timer.state() != RunTimer::State::kWaiting) {
+            g.run_timer.reset();
+        }
+    } else if (g.settings.run_category != g.run_category_loaded) {
+        g.run_category_loaded = g.settings.run_category;
+        const auto it =
+            std::find_if(g.run_categories.begin(), g.run_categories.end(),
+                         [&](const RunCategory &c) { return c.id == g.settings.run_category; });
+        if (it == g.run_categories.end()) {
+            SDL_Log("run: no category '%s' (shipped or in categories/): the timer waits",
+                    g.settings.run_category.c_str());
+            g.run_timer.set_category(RunCategory{}, std::nullopt);
+            g.practice.forget();
+        } else {
+            std::optional<RunRecord> best = load_run_best(data_dir(), it->id);
+            SDL_Log("run: the timer times %s (%zu splits)%s", it->title.c_str(), it->splits.size(),
+                    best ? (", the best " + format_run_time(best->end.ms)).c_str() : "");
+            g.run_timer.set_category(*it, std::move(best), load_run_segments(data_dir(), it->id));
+            g.practice.forget();
+        }
+    }
+    g.run_timer.turn();
+    write_run_records(g);
+}
+
+// After a save state was loaded (a quick-load's or a practice state's): the frontend's own per-tick
+// state follows the restored game: the interpolated frames start over, and game_speed (the
+// player's setting, not the state's) is written again into the restored guest memory.
+void after_state_load(Game &g, mt_cpu *cpu) {
+    g.interp.forget();
+    g.ff_presents.restart();
+    apply_game_speed(cpu, g.settings.game_speed);
+    g.game_speed = g.settings.game_speed;
+}
+
 bool run_quick_state(Game &g, mt_cpu *cpu, double now) {
     const QuickRequest r = g.quick.take(g.actions, g.settings.save_states);
     if (r == QuickRequest::kNone) {
@@ -2767,12 +2897,77 @@ bool run_quick_state(Game &g, mt_cpu *cpu, double now) {
     g.notice_until = SDL_GetTicksNS() + kStateNoticeNs;
     g.event_seen = true;
     if (res.done && r == QuickRequest::kLoad) {
-        g.interp.forget();
-        g.ff_presents.restart();
-        apply_game_speed(cpu, g.settings.game_speed);
-        g.game_speed = g.settings.game_speed;
+        after_state_load(g, cpu);
     }
     return true;
+}
+
+// The speedrun timer's practice states (#409, practice_state.h), after run_quick_state: a split
+// reached since the last turn arms a state, taken at this turn if it is safe (never in a
+// quick-save's or quick-load's turn); practice_pick and practice_load pressed since the last turn.
+// True if a state was saved or loaded.
+bool run_practice_state(Game &g, mt_cpu *cpu, double now, bool quick_ran) {
+    const PracticeRequest r = g.practice.take(g.actions, g.settings.save_states);
+    const std::optional<std::size_t> reached = g.run_timer.take_reached();
+    const RunCategory &c = g.run_timer.category();
+    const bool on = g.settings.save_states && g.settings.run_timer && !c.splits.empty();
+    if (!on) {
+        g.practice.forget();
+    } else if (reached) {
+        g.practice.reached(*reached, c.splits.size());
+    }
+    if (!on && r == PracticeRequest::kNone) {
+        return false;
+    }
+    const double t = now - g.first_turn;
+    const QuickOps ops =
+        game_quick_ops(cpu, [&g, t] { release_layers(g, t); }, rebase_guest_clock, &g);
+    const auto notice = [&g](const std::string &text) {
+        g.notice = text;
+        g.notice_until = SDL_GetTicksNS() + kStateNoticeNs;
+        g.event_seen = true;
+    };
+    bool ran = false;
+    if (on && !quick_ran && g.practice.armed()) {
+        const std::size_t split = *g.practice.armed();
+        const QuickResult res = g.practice.take_armed(ops, data_dir(), c.id);
+        if (res.done) {
+            notice(tr(Txt::practice_saved, {c.splits[split - 1].title}));
+            ran = true;
+        }
+    }
+    if (r == PracticeRequest::kNone) {
+        return ran;
+    }
+    if (!on) {
+        notice(tr(Txt::state_load_refused, {tr(Txt::practice_why_no_timer)}));
+        SDL_Log("practice: refused: the speedrun timer is off or has no category");
+        return ran;
+    }
+    std::optional<std::size_t> split = g.run_timer.picked();
+    if (r == PracticeRequest::kPick || !split) {
+        split =
+            g.practice.pick(split, c.splits.size(), ops, data_dir(), c.id, practice_state_exists);
+        g.run_timer.set_picked(split);
+        if (!split) {
+            notice(tr(Txt::practice_none));
+            SDL_Log("practice: no practice state of %s for this character", c.id.c_str());
+            return ran;
+        }
+        if (r == PracticeRequest::kPick) {
+            notice(tr(Txt::practice_picked, {c.splits[*split - 1].title}));
+            return ran;
+        }
+    }
+    const QuickResult res = g.practice.load(ops, data_dir(), c.id, *split);
+    notice(res.notice);
+    if (res.done) {
+        after_state_load(g, cpu);
+        g.run_timer.start_practice(*split);
+        write_run_records(g); // a run in progress ended as reset
+        ran = true;
+    }
+    return ran;
 }
 
 // crash_recovery (#335, recovery.h): a recovery point at the first safe turn after a map load,
@@ -2932,7 +3127,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // save_states (#204): a quick-save or quick-load asked for, at this safe turn; then
     // crash_recovery's point (#335).
     const bool quick_ran = run_quick_state(g, cpu, now);
-    run_recovery(g, cpu, now, quick_ran);
+    const bool practice_ran = run_practice_state(g, cpu, now, quick_ran); // #409
+    run_recovery(g, cpu, now, quick_ran || practice_ran);
     // stick_mode and direction_priority (#138, ADR 0128), as in effect now; the clock a menu's
     // diagonal is timed by.
     g.actions.set_clock([](void *) { return mt_runtape_host_time(); }, nullptr);
@@ -2955,10 +3151,13 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // UIKit animations' speed (ui_animations), as in effect now.
     g.assists.turn(cpu, g.settings, g.actions, now - g.first_turn);
     g.scene_skip.turn(cpu, g.settings, now - g.first_turn); // skip_intros (#174)
+    follow_run_timer(g);                                    // run_timer (#406)
     follow_ui_animations(g);
     g.hints.turn(cpu, g.focus, mt_input_panel(), g.settings.button_prompts,
                  g.settings.focus_highlight); // prompts and markers (#146), as in effect now
     g.rumble.turn(); // what the game's vibration and events asked for since the last turn
+    g.speech_text.turn(g.speech, g.settings, speech_clock()); // dialogue said (#391)
+    speak_menus(g, cpu); // the focused control, the popup menu's and the shop's row (#393)
     g.speech.turn(speech_clock()); // the next queued utterance, once the last is done (#390)
     g.game_options.turn(now);      // the settings menu's "Game options" (#89): one step a turn
     g.file_dialogs.poll();         // a file dialog answered after the menu closed (#192)
@@ -3193,7 +3392,7 @@ void start_menu(Game &g, const GameOptions &options) {
     }
     // Text-to-speech (#390, ADR 0174): the rows say "not available" where no system voice loaded
     // (Linux without libspeechd). The Switch's menu has no speech rows (kCapSpeech).
-    for (const char *key : {"speech", "speech_rate", "speech_volume"}) {
+    for (const char *key : {"speech", "speech_rate", "speech_volume", "speech_notices"}) {
         g.menu.set_setting_unavailable(key, [&g] {
             return g.speech.available() ? std::string() : std::string(tr(Txt::speech_unavailable));
         });
@@ -3684,10 +3883,29 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
 
     int status = kExitOk;
     g.rumble.install();
+    // The speedrun timer (#406): the categories (shipped and the data folder's), the settings it
+    // checks, and its listener beside rumble's hook.
+    {
+        std::vector<std::string> problems;
+        g.run_categories = load_run_categories(data_dir(), &problems);
+        for (const std::string &p : problems) {
+            SDL_Log("run: category %s", p.c_str());
+        }
+        std::vector<std::string> names;
+        for (const RunCategory &c : g.run_categories) {
+            names.push_back(c.id);
+        }
+        set_run_category_choices(std::move(names));
+        g.run_timer.attach(&g.settings);
+        if (mt_game_events_add_listener(run_timer_event, &g) != 0) {
+            SDL_Log("run: no room for the timer's game-event listener: it never starts");
+        }
+    }
     // Guest function hooks (maplethief/hooks.h, #143): registered for the whole run, each on or
     // off as its setting says. fix_original_bugs (#155, docs/re/original-bugs.md): the portal
     // items' exit(1) and Play before the engine's main menu (#122).
     mt_hooks_install_original_bug_fixes(options.settings.fix_original_bugs ? 1 : 0);
+    mt_cf_set_missing_key_fallback(options.settings.fix_original_bugs ? 1 : 0); // bug 15
     // The port's keys reach the popup menu's quest tab, which the device's never did (#167):
     // OK there opens a quest's page the engine then cannot paint. Fixed in every mode.
     mt_hooks_install_quest_page_fix(1);
@@ -3963,6 +4181,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         g.audio_start_ns != 0 ? static_cast<double>(SDL_GetTicksNS() - g.audio_start_ns) / 1e9 : 0;
     audio.close();
     g.rumble.uninstall();
+    // A run in progress ends as reset with the game (#406).
+    mt_game_events_remove_listener(run_timer_event, &g);
+    g.run_timer.reset();
+    write_run_records(g);
     detach_script_pad(g);
     g.rumble.stop();
     g.game_center.install(false); // its hook points at `g`
