@@ -11836,6 +11836,495 @@ void compendium_npcs(Run &r, u64) {
 }
 void compendium_npcs_checks(Run &, u64) {}
 
+// --- chapter 2's crafts, trades and shops (#299, docs/testing/chapter-2-quests.md) ------------
+
+// One trade (side 78) at `npc` through its lists `choices`: 50 of item `cost` for 3 of item
+// `result`, checked in the bag and in the quest manager before and after.
+void then_trade(Run &r, const std::string &name, int area, int map, const std::string &npc,
+                std::vector<int> choices, i32 cost, i32 result) {
+    auto before = std::make_shared<Counts>();
+    const std::vector<i32> items = {cost, result};
+    then_do(r, name + ": before", [before, items](mt_cpu *cpu) {
+        *before = counts(cpu, items, {});
+        std::printf("before%s\n", counts_text(*before).c_str());
+    });
+    quest_bot::then_talk_to(
+        r, name, area, map, npc, std::move(choices), [before, result](mt_cpu *cpu) {
+            return item_count(cpu, hero(cpu), result) >= before->items[result] + 3;
+        });
+    then_do(r, name + ": after", [before, items, cost, result, name](mt_cpu *cpu) {
+        Counts now = counts(cpu, items, {});
+        const i32 state = quest_state(cpu, hero(cpu), 1, 78);
+        check(now.items[cost] == before->items[cost] - 50 &&
+                  now.items[result] == before->items[result] + 3 && now.meso == before->meso &&
+                  state == 2,
+              name + " (side 78:" + std::to_string(state) + "): 50 of item " +
+                  std::to_string(cost) + " for 3 of item " + std::to_string(result) + "; before" +
+                  counts_text(*before) + "; after" + counts_text(now));
+    });
+}
+
+// Part crafts (#299, synthetic: tests/starts/raise/chapter_2_crafts.json over starts.chapter_2,
+// the materials and meso every recipe and trade needs). Every trade of chapter 2 once: Ericsson
+// (4.0, list 5, then 1-4) and the pig (1.0, lists 1-3); then every recipe of chapter 2's smith
+// (0.0) once, his kind (1 hat, 2 overall, 3 dagger, 4 glove, 5 shoes, 6 earrings) then the row,
+// each against the knowledge base's recipe (then_craft). Chapter 1's own Craft and Trade (#161)
+// are these: in chapter 1 neither opens (they need main 40).
+void chapter_2_crafts(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_check(r, "chapter 2 on 4.1", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return h.chapter == 2 && h.on(4, 1);
+    });
+    then_bag(r, "the crafts' start");
+    then_trade(r, "Ericsson: trade 1, 50 of item 54 for 3 of item 94", 4, 0, "Ericsson", {5, 1}, 54,
+               94);
+    then_trade(r, "Ericsson: trade 2, 50 of item 50 for 3 of item 100", 4, 0, "Ericsson", {5, 2},
+               50, 100);
+    then_trade(r, "Ericsson: trade 3, 50 of item 66 for 3 of item 95", 4, 0, "Ericsson", {5, 3}, 66,
+               95);
+    then_trade(r, "Ericsson: trade 4, 50 of item 68 for 3 of item 101", 4, 0, "Ericsson", {5, 4},
+               68, 101);
+    then_talk_to(r, "Pirate_Orbis (4.1): to 2.0 (list 1)", 4, 1, "Pirate_Orbis", 1,
+                 [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    then_trade(r, "pig: trade 1, 50 of item 103 for 3 of item 98", 1, 0, "pig", {1}, 103, 98);
+    then_trade(r, "pig: trade 2, 50 of item 42 for 3 of item 93", 1, 0, "pig", {2}, 42, 93);
+    then_trade(r, "pig: trade 3, 50 of item 112 for 3 of item 99", 1, 0, "pig", {3}, 112, 99);
+    // The smith's rows in each kind are its recipes by result id (the knowledge base's order).
+    const std::vector<std::tuple<const char *, i32, int, int>> recipes = {
+        {"hat 3", 3, 1, 1},        {"hat 5", 5, 1, 2},        {"hat 7", 7, 1, 3},
+        {"overall 15", 15, 2, 1},  {"overall 17", 17, 2, 2},  {"overall 19", 19, 2, 3},
+        {"dagger 27", 27, 3, 1},   {"dagger 29", 29, 3, 2},   {"dagger 31", 31, 3, 3},
+        {"glove 39", 39, 4, 1},    {"glove 41", 41, 4, 2},    {"glove 43", 43, 4, 3},
+        {"shoes 51", 51, 5, 1},    {"shoes 52", 52, 5, 2},    {"shoes 55", 55, 5, 3},
+        {"earrings 63", 63, 6, 1}, {"earrings 65", 65, 6, 2}, {"earrings 67", 67, 6, 3}};
+    auto made = std::make_shared<int>(0);
+    for (const auto &[name, item, kind, row] : recipes) {
+        then_craft(r, std::string("smith: ") + name, item, {kind, row});
+        then_do(r, std::string("smith: ") + name + ": side 77", [made](mt_cpu *cpu) {
+            ++*made;
+            check(quest_state(cpu, hero(cpu), 1, 77) == 2,
+                  "the Craft is side 77, state " +
+                      std::to_string(quest_state(cpu, hero(cpu), 1, 77)));
+        });
+    }
+    then_do(r, "every recipe of chapter 2", [made](mt_cpu *) {
+        int kb = 0;
+        for (const world_map::Recipe &c : world_map::recipes()) {
+            kb += c.chapter == 2 ? 1 : 0;
+        }
+        check(*made == kb && kb == 18, "crafted " + std::to_string(*made) +
+                                           " recipes; the knowledge base has " +
+                                           std::to_string(kb) + " in chapter 2");
+    });
+    then_bag(r, "the crafts' end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_2_crafts_checks(Run &, u64) {}
+
+// The row of `id` in the shop's Sell tab: the hero's equipment (hero +0xD4) in an equipment
+// shop, the other items (+0xD8) otherwise, up to the first empty entry (ADR 0102); -1 if absent.
+i32 sell_tab_row(mt_cpu *cpu, const Shop &sh, i32 id) {
+    const Hero h = hero(cpu);
+    const u32 list = h.addr != 0 ? rd(cpu, h.addr + (sh.kind == 0 ? 0xD4 : 0xD8)) : 0;
+    for (u32 i = 0; list != 0 && i < 48; i++) {
+        const u32 it = rd(cpu, list + 4 * i);
+        if (it == 0) {
+            break;
+        }
+        if (rdi(cpu, it + 0x90) == id) {
+            return static_cast<i32>(i);
+        }
+    }
+    return -1;
+}
+
+// Buys one of `id` (with `equip` a piece of equipment) at the shop NPC `npc` of (area, map), then
+// sells one back on its Sell tab, by the pad alone: up opens the shop; on Buy, down to the row,
+// A, A through the popups; right to Sell, down to the row, A (popup 6, how many: 1), A, A; B
+// closes it. The bag and the meso are checked after each: the buy costs the shop's price (the
+// knowledge base's), the sale brings meso in and takes one away.
+void then_shop_use(Run &r, const std::string &name, int area, int map, const std::string &npc,
+                   i32 id, bool equip) {
+    struct S {
+        quest_bot::Nav nav;
+        double pressed = -10;
+        i32 count = -1, meso = -1, price = -1;
+        bool bought = false, sold = false, closing = false;
+    };
+    auto s = std::make_shared<S>();
+    const quest_bot::Goal g = quest_bot::at_object(area, map, npc, 6);
+    const auto owned = [equip, id](mt_cpu *cpu) {
+        return equip ? quest_bot::equip_owned(cpu, hero(cpu), id) : item_count(cpu, hero(cpu), id);
+    };
+    const std::string what = std::string(equip ? "equipment " : "item ") + std::to_string(id);
+    then(r, "shop: " + name + ": buy and sell one " + what, 300,
+         [&r, s, g, id, equip, owned, name, what, area, map, npc](mt_cpu *cpu, double el) {
+             const Hero h = hero(cpu);
+             const auto press = [&](SDL_GamepadButton b) {
+                 if (el - s->pressed >= 0.5) {
+                     s->pressed = el;
+                 }
+                 hold(r, b, el - s->pressed < 0.1);
+             };
+             if (s->count < 0) {
+                 s->count = owned(cpu);
+                 s->meso = h.meso;
+                 for (const world_map::Shop &w : world_map::shops()) {
+                     if (w.chapter == h.chapter && w.area == area && w.map == map && w.npc == npc &&
+                         w.item == id && w.table == (equip ? 0 : 1)) {
+                         s->price = w.price;
+                     }
+                 }
+                 std::printf("shop: %s: before: %d of %s, meso %d, price %d\n", name.c_str(),
+                             s->count, what.c_str(), s->meso, s->price);
+             }
+             if (game_mode(cpu) == 2) {
+                 hold(r, UP, false);
+                 if (!quest_bot::in_shop(cpu)) { // a popup: how many, buy? / sell?, done
+                     press(A);
+                     return false;
+                 }
+                 const Shop sh = shop(cpu);
+                 if (!s->bought && owned(cpu) == s->count + 1) {
+                     s->bought = true;
+                     check(h.meso == s->meso - s->price,
+                           name + ": bought one " + what + " for " + std::to_string(s->price) +
+                               " meso: " + std::to_string(s->count) + " -> " +
+                               std::to_string(owned(cpu)) + ", meso " + std::to_string(s->meso) +
+                               " -> " + std::to_string(h.meso));
+                     s->meso = h.meso;
+                 }
+                 if (s->bought && !s->sold && owned(cpu) == s->count) {
+                     s->sold = true;
+                     check(h.meso > s->meso,
+                           name + ": sold one " + what +
+                               " on the Sell tab: " + std::to_string(s->count + 1) + " -> " +
+                               std::to_string(owned(cpu)) + ", meso " + std::to_string(s->meso) +
+                               " -> " + std::to_string(h.meso) + " (+" +
+                               std::to_string(h.meso - s->meso) + ")");
+                 }
+                 if (s->sold || s->closing) {
+                     press(B);
+                     return false;
+                 }
+                 const i32 tab = s->bought ? 1 : 0;
+                 i32 row = -1;
+                 if (tab == 0) {
+                     for (i32 i = 0; i < sh.rows; i++) {
+                         row = shop_row(cpu, sh, i).id == id ? i : row;
+                     }
+                 } else if (sh.tab == 1) {
+                     row = sell_tab_row(cpu, sh, id);
+                 }
+                 if (sh.tab != tab) {
+                     press(tab == 1 ? RIGHT : LEFT);
+                 } else if (row < 0 || (sh.kind == 0) != equip) {
+                     check(false, name + ": no row of " + what + " on the " +
+                                      (tab == 0 ? "Buy" : "Sell") + " tab");
+                     s->closing = true;
+                 } else if (sh.selected != row) {
+                     press(sh.selected < row ? DOWN : UP);
+                 } else {
+                     press(A);
+                 }
+                 return false;
+             }
+             if (quest_bot::interrupted(r, cpu, el)) {
+                 return false;
+             }
+             if (s->sold || s->closing) {
+                 release_all(r);
+                 return true;
+             }
+             if (!quest_bot::drive(r, cpu, el, s->nav, g)) {
+                 return false;
+             }
+             press(UP);
+             return false;
+         });
+    then_check(r, name + ": bought and sold one " + what,
+               [s](mt_cpu *) { return s->bought && s->sold; });
+}
+
+// Part shops (#299, from part E's save in area 9): the shops of 9.0 and 4.0 by the pad, each of
+// its two shops opened, one item bought and one sold (then_shop_use), then the save.
+void chapter_2_shops(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_check(r, "chapter 2", [](mt_cpu *cpu) { return hero(cpu).chapter == 2; });
+    then_shop_use(r, "Etc90 (9.0)", 9, 0, "Etc90", 5, false);
+    then_shop_use(r, "Equip90 (9.0)", 9, 0, "Equip90", 54, true);
+    then_shop_use(r, "Etc40 (4.0)", 4, 0, "Etc40", 5, false);
+    then_shop_use(r, "Equip40 (4.0)", 4, 0, "Equip40", 53, true);
+    then_bag(r, "the shops' end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_2_shops_checks(Run &, u64) {}
+
+// Part shop_6 (#299, from part F's save: chapter 3 on 6.0): the town of 6.0's two shops by the
+// pad, as part shops does for 9.0 and 4.0.
+void chapter_2_shop_6(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_check(r, "chapter 3 on 6.0", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return h.chapter == 3 && h.on(6, 0);
+    });
+    then_shop_use(r, "Etc60 (6.0)", 6, 0, "Etc60", 5, false);
+    then_shop_use(r, "Equip60 (6.0)", 6, 0, "Equip60", 6, true);
+    then_bag(r, "the shops' end");
+    then_finish(r);
+}
+void chapter_2_shop_6_checks(Run &, u64) {}
+
+// --- chapter 2's side quests (#299, docs/testing/chapter-2-quests.md) --------------------------
+//
+// From part E's save (main 8 active, the hero in area 9), in parts by area. Each NPC's list
+// value for a quest is the row the knowledge base's dialogue gives it: Skadru (9.0) 6 = 1, 29 =
+// 2, 30 = 3; the SnowQueen (9.0) 5 = 1, 34 = 2; Jade (9.0) 31 = 1, 32 = 2, 38 = 3; Wilson (4.2) 22
+// = 2, 11 and 12 = 3, 12 = 4, 28 = 5, 33 = 6; Barun (5.1) 10 = 3, 13 = 4, 25 = 5; Humanoid2 (4.1)
+// 18 = 1, 23 = 3, 7 = 4; Heracle (4.0) 3 = 3, 9 = 4, 26 = 5, 27 = 6; Ericsson (4.0) 4 = 2, 19 =
+// 3; Elma (4.0) and the Miner on 9.10 (Miner2) have no list.
+
+// Every predicate of `all` holds.
+Pred all_of(std::vector<Pred> all) {
+    return [all](mt_cpu *cpu) {
+        return std::all_of(all.begin(), all.end(), [cpu](const Pred &p) { return p(cpu); });
+    };
+}
+Pred side_defeated(i32 n, i32 mob, i32 count) {
+    return [n, mob, count](mt_cpu *cpu) { return quest_bot::defeats(cpu, 1, n, mob) >= count; };
+}
+// The side quests' items: then_sell keeps them.
+const std::vector<i32> k_chapter_2_side_items = {105, 120, 114, 87, 111, 8,  35, 40, 44,
+                                                 50,  51,  52,  53, 55,  56, 57, 60, 61,
+                                                 62,  63,  64,  65, 67,  68, 71, 72, 115};
+
+// The common start of a side part: the SP, the bag's materials sold and the potions stocked at
+// the shop of `area` (4 or 9).
+void chapter_2_side_start(Run &r, const std::string &part, int area) {
+    using namespace quest_bot;
+    from_save(r);
+    then_check(r, "chapter 2", [](mt_cpu *cpu) { return hero(cpu).chapter == 2; });
+    then_spend_sp(r, part, k_chapter_2_build);
+    const std::string shop = area == 9 ? "Etc90" : "Etc40";
+    then_sell(r, "materials (" + shop + ")", area, 4, k_chapter_2_side_items);
+    then_stock(r, "item 4 (" + shop + ")", area, 4, 200, 500, 600);
+    then_stock(r, "item 7 (" + shop + ")", area, 7, 80, 500, 600);
+    then_bag(r, part + "'s start");
+}
+void chapter_2_side_end(Run &r, const std::string &part) {
+    then_do(r, part + "'s hero", [part](mt_cpu *cpu) {
+        std::printf("%s: %s\n", part.c_str(), hero_text(cpu, hero(cpu)).c_str());
+    });
+    then_bag(r, part + "'s end");
+    then_save(r);
+    then_finish(r);
+}
+
+// Part sides_a (#299): area 9. Jade gives side 31 (her letter, item 114, for Wilson); Skadru
+// side 6 (25 of item 64 from mob 34 on 9.1); the SnowQueen side 5 (item 72, later) and, once 6 is
+// done, side 34 (30 of item 71 from mob 35 on 9.3).
+void chapter_2_sides_a(Run &r, u64) {
+    using namespace quest_bot;
+    chapter_2_side_start(r, "sides_a", 9);
+    const FarmStyle fight = chapter_2_fight();
+    then_talk_to(r, "Jade: side 31 given, item 114", 9, 0, "Jade", 1,
+                 all_of({quest_is(1, 31, 1), has_item(114, 1)}));
+    then_talk_to(r, "Skadru: side 6 given", 9, 0, "Skadru", 1, quest_is(1, 6, 1));
+    then_talk_to(r, "SnowQueen: side 5 given", 9, 0, "SnowQueen", 1, quest_is(1, 5, 1));
+    then_farm(r, "25 of item 64 from mob 34 on 9.1 (side 6)", 9, 1, {34}, ready(1, 6), 3600, fight);
+    then_talk_to(r, "Skadru: side 6 done", 9, 0, "Skadru", 1, quest_is(1, 6, 2));
+    then_talk_to(r, "SnowQueen: side 34 given", 9, 0, "SnowQueen", 2, quest_is(1, 34, 1));
+    then_farm(r, "30 of item 71 from mob 35 on 9.3 (side 34)", 9, 3, {35}, ready(1, 34), 3600,
+              fight);
+    then_talk_to(r, "SnowQueen: side 34 done", 9, 0, "SnowQueen", 2, quest_is(1, 34, 2));
+    then_quests_are(r, "part sides_a's quests", {{1, 5, 1}, {1, 6, 2}, {1, 31, 1}, {1, 34, 2}});
+    chapter_2_side_end(r, "sides_a");
+}
+void chapter_2_sides_a_checks(Run &, u64) {}
+
+// Part sides_b (#299): back through area 5 to area 4. Barun (5.1) side 25 (30 of item 63 from
+// mob 25 on 5.3); Wilson (4.2) side 33 (Jade's letter) and 22 (item 111, the reward of 23);
+// Humanoid2 (4.1) 18 and 23; Heracle (4.0) 3 (30 each of mobs 38 and 39) and 9 (done once
+// Barun's 13 is); Elma's 20 (given in part A: 40 of item 55 from mob 40) and 21 (10 of item 8
+// and 30 of item 56); Ericsson's 4 (25 of item 53 from mob 21) and 19 (50 of mob 22). Farms on
+// 4.2, 4.3, 4.9 and 4.10.
+void chapter_2_sides_b(Run &r, u64) {
+    using namespace quest_bot;
+    chapter_2_side_start(r, "sides_b", 9);
+    const FarmStyle fight = chapter_2_fight();
+    then_talk_to(r, "Barun: side 25 given", 5, 1, "Barun", 5, quest_is(1, 25, 1), 900);
+    then_farm(r, "30 of item 63 from mob 25 on 5.3 (side 25)", 5, 3, {25}, ready(1, 25), 3600,
+              fight);
+    then_talk_to(r, "Barun: side 25 done", 5, 1, "Barun", 5, quest_is(1, 25, 2));
+    then_talk_to(r, "Wilson: Jade's letter, side 33 done", 4, 2, "Wilson", 6, quest_is(1, 33, 2),
+                 900);
+    then_talk_to(r, "Wilson: side 22 given", 4, 2, "Wilson", 2, quest_is(1, 22, 1));
+    then_talk_to(r, "Humanoid2: side 18 given", 4, 1, "Humanoid2", 1, quest_is(1, 18, 1));
+    then_talk_to(r, "Humanoid2: side 23 given", 4, 1, "Humanoid2", 3, quest_is(1, 23, 1));
+    then_talk_to(r, "Heracle: side 3 given", 4, 0, "Heracle", 3, quest_is(1, 3, 1));
+    then_talk_to(r, "Heracle: side 9 given", 4, 0, "Heracle", 4, quest_is(1, 9, 1));
+    then_talk_to(r, "Ericsson: side 4 given", 4, 0, "Ericsson", 2, quest_is(1, 4, 1));
+    then_check(r, "Elma's side 20 active (since part A)", quest_is(1, 20, 1));
+    then_farm(r, "40 of item 55 (mob 40) and 25 of item 53 (mob 21) on 4.2 (sides 20, 4)", 4, 2,
+              {40, 21}, all_of({ready(1, 20), ready(1, 4)}), 3600, fight);
+    then_talk_to(r, "Elma: side 20 done", 4, 0, "Elma", -1, quest_is(1, 20, 2));
+    then_talk_to(r, "Elma: side 21 given", 4, 0, "Elma", -1, quest_is(1, 21, 1));
+    then_talk_to(r, "Ericsson: side 4 done", 4, 0, "Ericsson", 2, quest_is(1, 4, 2));
+    then_talk_to(r, "Ericsson: side 19 given", 4, 0, "Ericsson", 3, quest_is(1, 19, 1));
+    then_farm(r, "50 of mob 22 and mob 38 on 4.3 (sides 19, 3)", 4, 3, {22, 38}, ready(1, 19), 3600,
+              fight);
+    then_farm(r, "mobs 38 and 39, item 56 on 4.9 (sides 3, 21)", 4, 9, {38, 39},
+              all_of({ready(1, 3), has_item(56, 30)}), 3600, fight);
+    then_farm(r, "30 of item 57 from mob 26 on 4.10 (side 23)", 4, 10, {26}, ready(1, 23), 3600,
+              fight);
+    then_talk_to(r, "Heracle: side 3 done", 4, 0, "Heracle", 3, quest_is(1, 3, 2));
+    then_talk_to(r, "Ericsson: side 19 done", 4, 0, "Ericsson", 3, quest_is(1, 19, 2));
+    then_talk_to(r, "Humanoid2: side 23 done, item 111", 4, 1, "Humanoid2", 3,
+                 all_of({quest_is(1, 23, 2), has_item(111, 1)}));
+    then_talk_to(r, "Wilson: side 22 done (item 111)", 4, 2, "Wilson", 2, quest_is(1, 22, 2));
+    then_talk_to(r, "Wilson: side 11 given", 4, 2, "Wilson", 3, quest_is(1, 11, 1));
+    then_quests_are(r, "part sides_b's quests",
+                    {{1, 3, 2},
+                     {1, 4, 2},
+                     {1, 9, 1},
+                     {1, 11, 1},
+                     {1, 18, 1},
+                     {1, 19, 2},
+                     {1, 20, 2},
+                     {1, 21, 1},
+                     {1, 22, 2},
+                     {1, 23, 2},
+                     {1, 25, 2},
+                     {1, 33, 2}});
+    chapter_2_side_end(r, "sides_b");
+}
+void chapter_2_sides_b_checks(Run &, u64) {}
+
+// Part sides_c (#299): Heracle's 26 wants 20 each of chapter 1's caps (items 35, 40 and 44:
+// mobs 6, 10 and 13 on 0.1, 1.1 and 3.1), so Pirate_Orbis takes the hero to Victoria Island and
+// back. Then the pixies of 4.12-4.15: Heracle's 27 (20 each of mobs 24, 30 and 36), Barun's 10
+// (30 of item 50 from mob 24) and 13 (30 of item 52 from mob 36), Humanoid2's 18 (30 of item 51
+// from mob 30) and, after it, 7; Heracle ends 9 once 13 is done.
+void chapter_2_sides_c(Run &r, u64) {
+    using namespace quest_bot;
+    chapter_2_side_start(r, "sides_c", 4);
+    const FarmStyle fight = chapter_2_fight();
+    then_talk_to(r, "Heracle: side 26 given", 4, 0, "Heracle", 5, quest_is(1, 26, 1));
+    then_talk_to(r, "Pirate_Orbis (4.1): to 2.0 (list 1)", 4, 1, "Pirate_Orbis", 1,
+                 [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    FarmStyle low = fight;
+    low.restock = {};
+    then_farm(r, "20 of item 35 from mob 6 on 0.1 (side 26)", 0, 1, {6}, has_item(35, 20), 1800,
+              low);
+    then_farm(r, "20 of item 40 from mob 10 on 1.1 (side 26)", 1, 1, {10}, has_item(40, 20), 1800,
+              low);
+    then_farm(r, "20 of item 44 from mob 13 on 3.1 (side 26)", 3, 1, {13}, ready(1, 26), 1800, low);
+    then_talk_to(
+        r, "Pirate (2.0): back to 4.1", 2, 0, "Pirate", -1,
+        [](mt_cpu *cpu) { return hero(cpu).on(4, 1); }, 900);
+    then_talk_to(r, "Heracle: side 26 done", 4, 0, "Heracle", 5, quest_is(1, 26, 2));
+    then_talk_to(r, "Heracle: side 27 given", 4, 0, "Heracle", 6, quest_is(1, 27, 1));
+    then_talk_to(r, "Barun: side 10 given", 5, 1, "Barun", 3, quest_is(1, 10, 1));
+    then_farm(r, "mobs 24 and 30 on 4.12 (sides 10, 27, 18)", 4, 12, {24, 30},
+              all_of({ready(1, 10), side_defeated(27, 24, 20), side_defeated(27, 30, 20)}), 3600,
+              fight);
+    then_talk_to(r, "Barun: side 10 done", 5, 1, "Barun", 3, quest_is(1, 10, 2));
+    then_talk_to(r, "Barun: side 13 given", 5, 1, "Barun", 4, quest_is(1, 13, 1));
+    then_farm(r, "mobs 36 and 30 on 4.14 (sides 13, 27, 18)", 4, 14, {36, 30},
+              all_of({ready(1, 13), ready(1, 27), ready(1, 18)}), 3600, fight);
+    then_talk_to(r, "Barun: side 13 done", 5, 1, "Barun", 4, quest_is(1, 13, 2));
+    then_talk_to(r, "Heracle: side 27 done", 4, 0, "Heracle", 6, quest_is(1, 27, 2));
+    then_talk_to(r, "Heracle: side 9 done", 4, 0, "Heracle", 4, quest_is(1, 9, 2));
+    then_talk_to(r, "Humanoid2: side 18 done", 4, 1, "Humanoid2", 1, quest_is(1, 18, 2));
+    then_talk_to(r, "Humanoid2: side 7 given", 4, 1, "Humanoid2", 4, quest_is(1, 7, 1));
+    then_quests_are(
+        r, "part sides_c's quests",
+        {{1, 7, 1}, {1, 9, 2}, {1, 10, 2}, {1, 13, 2}, {1, 18, 2}, {1, 26, 2}, {1, 27, 2}});
+    chapter_2_side_end(r, "sides_c");
+}
+void chapter_2_sides_c_checks(Run &, u64) {}
+
+// Part sides_d (#299): Wilson's robot line in area 5: 11 (30 of item 60 from mob 18 on 5.0),
+// 12 (30 of item 61 from mob 19) and 28 (30 of item 62 from mob 20 on 5.2), each back at Wilson.
+void chapter_2_sides_d(Run &r, u64) {
+    using namespace quest_bot;
+    chapter_2_side_start(r, "sides_d", 4);
+    const FarmStyle fight = chapter_2_fight();
+    then_farm(r, "30 of item 60 from mob 18 on 5.0 (side 11)", 5, 0, {18}, ready(1, 11), 3600,
+              fight);
+    then_talk_to(r, "Wilson: side 11 done", 4, 2, "Wilson", 3, quest_is(1, 11, 2), 900);
+    then_talk_to(r, "Wilson: side 12 given", 4, 2, "Wilson", 3, quest_is(1, 12, 1));
+    then_farm(r, "30 of item 61 from mob 19 on 5.0 (side 12)", 5, 0, {19}, ready(1, 12), 3600,
+              fight);
+    then_talk_to(r, "Wilson: side 12 done", 4, 2, "Wilson", 4, quest_is(1, 12, 2), 900);
+    then_talk_to(r, "Wilson: side 28 given", 4, 2, "Wilson", 5, quest_is(1, 28, 1));
+    then_farm(r, "30 of item 62 from mob 20 on 5.2 (side 28)", 5, 2, {20}, ready(1, 28), 3600,
+              fight);
+    then_talk_to(r, "Wilson: side 28 done", 4, 2, "Wilson", 5, quest_is(1, 28, 2), 900);
+    then_quests_are(r, "part sides_d's quests", {{1, 11, 2}, {1, 12, 2}, {1, 28, 2}});
+    chapter_2_side_end(r, "sides_d");
+}
+void chapter_2_sides_d_checks(Run &, u64) {}
+
+// Part sides_e (#299): area 9 again. Jade ends 31 (33 is done) and gives 32 (30 of item 115 from
+// mob 52 on 9.4); Skadru 29 (25 of item 67 from mob 47 on 9.6) and 30 (30 of item 68 from mob 48
+// on 9.7, which also drops Elma's item 8); Humanoid2's 7 (30 of item 65 from mob 41 on 9.2).
+void chapter_2_sides_e(Run &r, u64) {
+    using namespace quest_bot;
+    chapter_2_side_start(r, "sides_e", 4);
+    const FarmStyle fight = chapter_2_fight();
+    then_talk_to(r, "Jade: side 31 done", 9, 0, "Jade", 1, quest_is(1, 31, 2), 900);
+    then_talk_to(r, "Jade: side 32 given", 9, 0, "Jade", 2, quest_is(1, 32, 1));
+    then_talk_to(r, "Skadru: side 29 given", 9, 0, "Skadru", 2, quest_is(1, 29, 1));
+    then_farm(r, "30 of item 65 from mob 41 on 9.2 (side 7)", 9, 2, {41}, ready(1, 7), 3600, fight);
+    then_farm(r, "30 of item 115 from mob 52 on 9.4 (side 32)", 9, 4, {52}, ready(1, 32), 3600,
+              fight);
+    then_farm(r, "25 of item 67 from mob 47 on 9.6 (side 29)", 9, 6, {47}, ready(1, 29), 3600,
+              fight);
+    then_talk_to(r, "Skadru: side 29 done", 9, 0, "Skadru", 2, quest_is(1, 29, 2), 900);
+    then_talk_to(r, "Skadru: side 30 given", 9, 0, "Skadru", 3, quest_is(1, 30, 1));
+    then_farm(r, "30 of item 68 and 10 of item 8 from mob 48 on 9.7 (sides 30, 21)", 9, 7, {48},
+              all_of({ready(1, 30), has_item(8, 10)}), 3600, fight);
+    then_talk_to(r, "Skadru: side 30 done", 9, 0, "Skadru", 3, quest_is(1, 30, 2), 900);
+    then_talk_to(r, "Jade: side 32 done", 9, 0, "Jade", 2, quest_is(1, 32, 2));
+    then_quests_are(r, "part sides_e's quests",
+                    {{1, 29, 2}, {1, 30, 2}, {1, 31, 2}, {1, 32, 2}, {1, 7, 1}});
+    chapter_2_side_end(r, "sides_e");
+}
+void chapter_2_sides_e_checks(Run &, u64) {}
+
+// Part sides_f (#299): the miner. Jade's 38 gives the supplies (item 87); 9.7's portal to 9.9
+// opens while 38 is active; the climb through 9.9 to 9.10, where the Miner (Miner2) ends 39;
+// Jade ends 38. Then the SnowQueen's 5: item 72 from mob 44 (level 108) in area 10 (9.7's
+// other portal); and back in area 4, Elma ends 21 and Humanoid2 7.
+void chapter_2_sides_f(Run &r, u64) {
+    using namespace quest_bot;
+    chapter_2_side_start(r, "sides_f", 9);
+    const FarmStyle fight = chapter_2_fight();
+    then_talk_to(r, "Jade: side 38 given, item 87", 9, 0, "Jade", 3,
+                 all_of({quest_is(1, 38, 1), has_item(87, 1)}));
+    then_go(r, "the climb: 9.7 to 9.9 to 9.10", at_object(9, 10, "Miner2", 6), 1800);
+    then_run_event(r, "9.7's portal to 9.9 (side 38 active)", MT_GAME_EVENT_MAP_CHANGE, 9, {9});
+    then_run_event(r, "9.9's top to 9.10", MT_GAME_EVENT_MAP_CHANGE, 9, {10});
+    then_talk_to(r, "Miner2 (9.10): side 39 done (item 87)", 9, 10, "Miner2", -1,
+                 quest_is(1, 39, 2));
+    then_talk_to(r, "Jade: side 38 done", 9, 0, "Jade", 3, quest_is(1, 38, 2), 1200);
+    then_farm(r, "item 72 from mob 44 on 10.1 (side 5)", 10, 1, {44}, ready(1, 5), 3600, fight);
+    then_talk_to(r, "SnowQueen: side 5 done", 9, 0, "SnowQueen", 1, quest_is(1, 5, 2), 1200);
+    then_talk_to(r, "Elma: side 21 done", 4, 0, "Elma", -1, quest_is(1, 21, 2), 1200);
+    then_talk_to(r, "Humanoid2: side 7 done", 4, 1, "Humanoid2", 4, quest_is(1, 7, 2));
+    then_quests_are(r, "part sides_f's quests",
+                    {{1, 5, 2}, {1, 7, 2}, {1, 21, 2}, {1, 38, 2}, {1, 39, 2}});
+    chapter_2_side_end(r, "sides_f");
+}
+void chapter_2_sides_f_checks(Run &, u64) {}
+
 // --- map pages in the running port (#221, docs/compendium/kb.md) --------------------------------
 //
 // map_page: the compendium's map pages say where each portal leads, and when (the Connections
@@ -12867,6 +13356,15 @@ constexpr Mode k_modes[] = {
     {"chapter_2_d", chapter_2_d, chapter_2_d_checks, 1},
     {"chapter_2_e", chapter_2_e, chapter_2_e_checks, 1},
     {"chapter_2_f", chapter_2_f, chapter_2_f_checks, 1},
+    {"chapter_2_sides_a", chapter_2_sides_a, chapter_2_sides_a_checks, 1},
+    {"chapter_2_sides_b", chapter_2_sides_b, chapter_2_sides_b_checks, 1},
+    {"chapter_2_sides_c", chapter_2_sides_c, chapter_2_sides_c_checks, 1},
+    {"chapter_2_sides_d", chapter_2_sides_d, chapter_2_sides_d_checks, 1},
+    {"chapter_2_sides_e", chapter_2_sides_e, chapter_2_sides_e_checks, 1},
+    {"chapter_2_sides_f", chapter_2_sides_f, chapter_2_sides_f_checks, 1},
+    {"chapter_2_crafts", chapter_2_crafts, chapter_2_crafts_checks, 1},
+    {"chapter_2_shops", chapter_2_shops, chapter_2_shops_checks, 1},
+    {"chapter_2_shop_6", chapter_2_shop_6, chapter_2_shop_6_checks, 1},
     {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},
     {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
     {"confirm_guard", confirm_guard, confirm_guard_checks, 1},

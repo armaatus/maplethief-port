@@ -1837,6 +1837,47 @@ foreach(part IN LISTS _chapter_2_parts)
     set(_previous_fixture play_chapter_2_${part})
     set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_2_${part}")
 endforeach()
+
+# Chapter 2's side quests, crafts, trades and shops (#299, docs/testing/chapter-2-quests.md).
+# The side-quest parts branch off part e's save (chapter 2 still open), each from the save of the
+# one before; the shops of 9.0 and 4.0 go on from the last of them. The crafts start from
+# starts.chapter_2 raised with every recipe's and trade's materials and meso
+# (tests/starts/raise/chapter_2_crafts.json: synthetic), and 6.0's shops from part f's save
+# (chapter 3 on 6.0).
+function(_chapter_2_part name test fixture_required from_dir)
+    add_test(NAME ${test} COMMAND play_real_test chapter_2_${name}
+                                  "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_2_${name}")
+    set_tests_properties(
+        ${test}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+                   FIXTURES_REQUIRED ${fixture_required} FIXTURES_SETUP play_chapter_2_${name}
+                   ENVIRONMENT
+                   "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${from_dir}")
+endfunction()
+set(_chapter_2_side_parts sides_a sides_b sides_c sides_d sides_e sides_f)
+set(_previous_fixture play_chapter_2_e)
+set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_2_e")
+foreach(part IN LISTS _chapter_2_side_parts)
+    _chapter_2_part(${part} play.chapter_2_${part} ${_previous_fixture} "${_previous_dir}")
+    set(_previous_fixture play_chapter_2_${part})
+    set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_2_${part}")
+endforeach()
+_chapter_2_part(shops play.chapter_2_shops ${_previous_fixture} "${_previous_dir}")
+_chapter_2_part(shop_6 play.chapter_2_shop_6 play_chapter_2_f
+                "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_2_f")
+add_test(NAME starts.chapter_2_crafts
+         COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                 "${PROJECT_SOURCE_DIR}/tests/starts/raise/chapter_2_crafts.json"
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2_crafts/data/saves" --base
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2" --app
+                 "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+set_tests_properties(
+    starts.chapter_2_crafts
+    PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_REQUIRED
+               start_chapter_2 FIXTURES_SETUP start_chapter_2_crafts ENVIRONMENT
+               "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+_chapter_2_part(crafts play.chapter_2_crafts_synthetic start_chapter_2_crafts
+                "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2_crafts")
 # The popup menu's skill, quest and option tabs by the d-pad (#164, prompts.h): from part c's
 # save, each list shows and the port's frame sits on its cursor, in each tab's window shot; A
 # opens each quest's page and B closes it (#167, the quest page fix).
