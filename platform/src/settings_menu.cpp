@@ -107,6 +107,31 @@ constexpr MenuActionInfo kActions[] = {
      .label = "Port update",
      .help = "No newer version of the port is known",
      .needs = kCapUpdateFetch},
+    // The pack tools (#371, ADR 0205, pack_tools.h): they write in the pack folders the
+    // packs screen lists, and check packs as the game reads them.
+    {.key = "dump_textures",
+     .group = SettingGroup::kOther,
+     .label = "Dump textures",
+     .help = "Writes every picture the game draws from now on to texture-dumps/dump, to make a "
+             "texture pack from (change maps to catch them all)",
+     .button = "Start"},
+    {.key = "build_texture_pack",
+     .group = SettingGroup::kOther,
+     .label = "Make texture pack",
+     .help = "The dump's pictures twice as large (Scale2x) in texture-packs/dump-2x; then "
+             "choose it as the texture pack",
+     .button = "Make"},
+    {.key = "export_text",
+     .group = SettingGroup::kOther,
+     .label = "Export text",
+     .help = "The game's and the port's text in text-packs/text-<language>, to translate",
+     .button = "Export"},
+    {.key = "check_packs",
+     .group = SettingGroup::kOther,
+     .label = "Check packs",
+     .help = "Every pack set or in the pack folders, as the game reads it: what it uses, what "
+             "it rejects and why",
+     .button = "Check..."},
     // Quit (#179): at the bottom of every tab; game.cpp's handler sends SDL_EVENT_QUIT.
     {.key = "quit",
      .group = SettingGroup::kOther,

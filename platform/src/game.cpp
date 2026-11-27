@@ -73,6 +73,7 @@
 #include "minimap.h"
 #include "pacing.h"
 #include "pack_folders.h"
+#include "pack_tools.h"
 #include "packs.h"
 #include "pad_pointer.h"
 #include "perf_overlay.h"
@@ -443,6 +444,7 @@ struct Game {
     bool track_lit = true;
     std::vector<std::uint8_t> gpu_px, gpu_gl; // GPU presentation's downloads
 
+    std::string bundle;          // the game's MapleThief.app (the pack tools read it, #371)
     bool quit = false;           // the window closed or the user quit
     bool host_ended = false;     // the turn hook ended the run
     bool failed = false;         // a check failed or presentation broke
@@ -1566,7 +1568,7 @@ void start_texture_packs(const GameOptions &o) {
 
 void stop_texture_packs(const GameOptions &o) {
     const mt_texpack_stats s = mt_texpack_get_stats();
-    if (!o.dump_textures.empty()) {
+    if (!o.dump_textures.empty() || mt_texpack_dump_is_open() != 0) { // the flag or the menu
         SDL_Log("texpack: dump: %llu textures and %llu UIKit images written, %llu not written",
                 static_cast<unsigned long long>(s.dumped),
                 static_cast<unsigned long long>(s.dumped_ui),
@@ -3391,6 +3393,14 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     return 0;
 }
 
+// The folder whose texture-packs/, audio-packs/ and text-packs/ the packs screen lists and the
+// pack tools write to (#370, #371): <base>, or, where there is none (iOS), the folder that holds
+// game/.
+std::string packs_base() {
+    const DataLocation &loc = data_location();
+    return !loc.base.empty() ? loc.base : loc.bundle_parent();
+}
+
 // The settings menu (#89, ADR 0076): over the live settings, applying a change at once where
 // live_settings.h can, its action rows wired to the frontend; never in a scripted run (F1 then
 // opens the remap overlay, as before #89).
@@ -3459,7 +3469,7 @@ void start_menu(Game &g, const GameOptions &options) {
     }
     // The packs screen (#370, packs.h): the texture, audio and text pack rows open it, on every
     // platform, at their kind; its changes are the menu's, saved with them.
-    const auto packs = std::make_shared<PacksScreen>(data_location().base, MT_VERSION);
+    const auto packs = std::make_shared<PacksScreen>(packs_base(), MT_VERSION);
     for (const PackKind kind : kPackKinds) {
         g.menu.set_setting_opener(pack_kind_key(kind), [&g, packs, kind] {
             packs->scan(g.settings);
@@ -3529,6 +3539,34 @@ void start_menu(Game &g, const GameOptions &options) {
     // The local achievements (#154): the summary, then at each choice the next one.
     g.menu.set_action("achievements", [&g, shown = std::size_t{0}]() mutable {
         return achievements_status(achievement_rows(), shown++, g.game_center.enabled());
+    });
+    // The pack tools (#371, ADR 0205, pack_tools.h): beside game/, in the pack folders. The dump
+    // starts and stops here (the game is paused: no upload meets a half-made hook).
+    g.menu.set_action("dump_textures", [] {
+        return dump_textures_action(pack_tool_places(packs_base(), Language::kEn).dump);
+    });
+    g.menu.set_action_view("dump_textures", [] {
+        const bool on = dumping_textures();
+        const MenuActionInfo *a = find_menu_action("dump_textures");
+        return SettingsMenu::ActionView{on ? tr(Txt::packs_dump_button_stop)
+                                           : tr(Txt::packs_dump_button_start),
+                                        tr_key("action.dump_textures.help", a->help)};
+    });
+    g.menu.set_action("build_texture_pack", [] {
+        const PackToolPlaces p = pack_tool_places(packs_base(), Language::kEn);
+        return build_texture_pack_action(p.dump, p.built_pack);
+    });
+    g.menu.set_action("export_text", [&g] {
+        return export_text_action(g.bundle, g.settings.language,
+                                  pack_tool_places(packs_base(), g.settings.language).text_export);
+    });
+    g.menu.set_action("check_packs", [&g] {
+        MenuList list = check_packs_list(g.settings, packs_base(), g.bundle);
+        if (list.rows.empty()) {
+            return std::string(tr(Txt::packs_none_to_check));
+        }
+        g.menu.open_list(std::move(list));
+        return std::string();
     });
     // The touch key pad's editor (#159): it opens at this turn if the game shows its pad (the
     // menu closes for it), else once it does.
@@ -3902,6 +3940,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.rumble.configure(set.rumble, set.rumble_strength);
     // Frame telemetry (#137, ADR 0071): the overlay.
     g.perf = PerfOverlay(set.perf_overlay, perf_overlay_allowed(options));
+    g.bundle = bundle;
     start_menu(g, options);
     const double refresh_hz = display_refresh_hz(window);
     SDL_Log("perf: display %.2f Hz, vsync %s; the frame-time overlay is %s (F3%s)%s%s", refresh_hz,

@@ -34,6 +34,7 @@
 //              [--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3]
 //              [--hold-fast-forward T,S]... [--restore-backup T,N]...
 //              [--autosave off|on_quit] [--import-ipa FILE]
+//              [--check-pack DIR] [--build-texture-pack DUMP PACK] [--export-text DIR]
 //              [--print-data-dir] [--data-location game|user]
 //              [--switch-data-location game|user]
 //              [--migrate-from DIR [--force]]
@@ -265,6 +266,13 @@
 //                     passes, copy them into Documents/ after backing up what they replace
 //   --check-saves ZIP|DIR   each file's verdict ("theif0: ok", "config: bad_config: ...")
 //   --list-backups    every backup folder, newest first
+// The pack tools (#371, ADR 0205, pack_tools.h) run alone too, print the report and exit (status
+// 3 when the game would reject a file or refuse the pack, or the tool failed); --bundle names
+// the game's folder (else it is found as for the game):
+//   --check-pack DIR [--pack-kind texture|audio|text]  the pack as the game reads it
+//   --build-texture-pack DUMP PACK [--pack-scale K] [--pack-scaler scale|nearest] [--pack-no-ui]
+//                     a texture pack from a --dump-textures folder, K (default 2) times larger
+//   --export-text DIR [--language en|ko]  the game's and the port's text, to translate
 // The IPA import (#182, ADR 0100, ipa_import.h) runs alone too, without a window:
 //   --import-ipa FILE check FILE (your own MapleThief-1.5.ipa: its size and SHA-256) and
 //                     extract its Payload/MapleThief.app into the bundle folder (<game
@@ -346,6 +354,8 @@
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/runtime.h"
+#include "maplethief/texpack.h"
+#include "pack_tools.h"
 #include "player_log.h"
 #include "present.h"
 #include "preset_picker.h"
@@ -421,7 +431,15 @@ struct Options {
     SaveAction save_action = SaveAction::kNone;
     std::string save_action_path; // --export-saves, --import-saves, --check-saves
     std::string import_ipa;       // --import-ipa FILE (#182): import it and exit
-    bool print_data_dir = false;  // --print-data-dir (#261): print the data folder and exit
+    // The pack tools (#371, ADR 0205, pack_tools.h): one of them runs, prints and exits.
+    enum class PackTool { kNone, kCheck, kBuild, kExport };
+    PackTool pack_tool = PackTool::kNone;
+    std::string pack_path, pack_out; // --check-pack DIR, --build-texture-pack DUMP PACK, ...
+    std::string pack_kind;           // --pack-kind texture|audio|text ("": told from the folder)
+    unsigned pack_scale = 2;         // --pack-scale K
+    int pack_scaler = MT_TEXPACK_SCALER_SCALE; // --pack-scaler scale|nearest
+    bool pack_ui = true;                       // --pack-no-ui: false
+    bool print_data_dir = false; // --print-data-dir (#261): print the data folder and exit
     std::optional<DataPlace> data_location;        // --data-location game|user (ADR 0127)
     std::optional<DataPlace> switch_data_location; // --switch-data-location game|user (#263)
     std::string migrate_from;                      // --migrate-from DIR (#262): copy it in and exit
@@ -615,6 +633,8 @@ void print_usage() {
             "[--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3] "
             "[--hold-fast-forward T,S]... [--restore-backup T,N]... "
             "[--autosave off|on_quit] [--import-ipa FILE] [--print-data-dir] "
+            "[--check-pack DIR [--pack-kind KIND]] [--build-texture-pack DUMP PACK "
+            "[--pack-scale K] [--pack-scaler scale|nearest] [--pack-no-ui]] [--export-text DIR] "
             "[--data-location game|user] [--switch-data-location game|user] "
             "[--migrate-from DIR [--force]] [--safe-start] [--force-crash host|trap] "
             "[--force-hang] [--hang-seconds S]");
@@ -748,6 +768,46 @@ bool parse_options(int argc, char **argv, Options &options) {
                 SDL_Log("%s needs a path", std::string(arg).c_str());
                 return false;
             }
+        } else if ((arg == "--check-pack" || arg == "--export-text") && has_value) {
+            if (options.pack_tool != Options::PackTool::kNone) {
+                SDL_Log("only one of --check-pack, --build-texture-pack and --export-text");
+                return false;
+            }
+            options.pack_tool =
+                arg == "--check-pack" ? Options::PackTool::kCheck : Options::PackTool::kExport;
+            options.pack_path = argv[++i];
+        } else if (arg == "--build-texture-pack" && i + 2 < argc) {
+            if (options.pack_tool != Options::PackTool::kNone) {
+                SDL_Log("only one of --check-pack, --build-texture-pack and --export-text");
+                return false;
+            }
+            options.pack_tool = Options::PackTool::kBuild;
+            options.pack_path = argv[++i];
+            options.pack_out = argv[++i];
+        } else if (arg == "--pack-kind" && has_value) {
+            options.pack_kind = argv[++i];
+            if (options.pack_kind != "texture" && options.pack_kind != "audio" &&
+                options.pack_kind != "text") {
+                SDL_Log("--pack-kind needs texture, audio or text");
+                return false;
+            }
+        } else if (arg == "--pack-scale" && has_value) {
+            const std::string v = argv[++i];
+            if (v.size() != 1 || v[0] < '1' || v[0] > '8') {
+                SDL_Log("--pack-scale needs 1 to 8");
+                return false;
+            }
+            options.pack_scale = static_cast<unsigned>(v[0] - '0');
+        } else if (arg == "--pack-scaler" && has_value) {
+            const std::string v = argv[++i];
+            if (v != "scale" && v != "nearest") {
+                SDL_Log("--pack-scaler needs scale or nearest");
+                return false;
+            }
+            options.pack_scaler =
+                v == "scale" ? MT_TEXPACK_SCALER_SCALE : MT_TEXPACK_SCALER_NEAREST;
+        } else if (arg == "--pack-no-ui") {
+            options.pack_ui = false;
         } else if (arg == "--import-ipa" && has_value) {
             options.import_ipa = argv[++i];
         } else if (arg == "--print-data-dir") {
@@ -1340,6 +1400,72 @@ int run_import_ipa(const std::string &path) {
     return r.ok() ? kExitOk : kExitCheckMismatch;
 }
 
+// --check-pack, --build-texture-pack, --export-text (#371, ADR 0205, pack_tools.h): the pack
+// tools without a window; the report to stdout. Status 0, or 3 when the check found a file the
+// game rejects (or refuses the pack), the build skipped or failed a file, or the export failed.
+int run_pack_tool(const Options &options, const GameProgram &program) {
+    // The game's bundle for the sizes of its images, its sounds and its text: --bundle, else
+    // where the game would find it.
+    const std::string bundle =
+        find_bundle(bundle_search(options.game.bundle_dir, program.dev_bundle_dir)).dir;
+    Settings settings;
+    for (const auto &[key, value] : options.setting_flags) {
+        std::string why;
+        apply_setting(&settings, key, value, &why);
+    }
+    int status = kExitOk;
+    std::string text;
+    switch (options.pack_tool) {
+    case Options::PackTool::kCheck: {
+        const PackToolResult r = check_pack(options.pack_path, bundle, options.pack_kind.c_str());
+        text = pack_tool_text(options.pack_path, r);
+        if (bundle.empty()) {
+            text = "note: the game's folder not found: ui/ images and sounds not compared with "
+                   "the game's\n" +
+                   text;
+        }
+        status = r.report.opens != 0 && r.report.rejected == 0 ? kExitOk : kExitCheckMismatch;
+        break;
+    }
+    case Options::PackTool::kBuild: {
+        const PackToolResult r =
+            build_texture_pack(options.pack_path, options.pack_out, options.pack_scale,
+                               options.pack_scaler, options.pack_ui);
+        for (const PackToolLine &l : r.lines) {
+            text += std::string(l.level == MT_PACKCHECK_REJECTED  ? "error: "
+                                : l.level == MT_PACKCHECK_IGNORED ? "skipped: "
+                                                                  : "note: ") +
+                    l.text + "\n";
+        }
+        if (r.count >= 0) {
+            text += options.pack_out + ": " + std::to_string(r.count) + " pictures at " +
+                    std::to_string(options.pack_scale) +
+                    "x. Made from the game's art: keep this folder to yourself.\n";
+        }
+        status = r.count >= 0 && r.report.rejected == 0 ? kExitOk : kExitCheckMismatch;
+        break;
+    }
+    case Options::PackTool::kExport: {
+        const PackToolResult r = export_text(bundle, settings.language, options.pack_path);
+        for (const PackToolLine &l : r.lines) {
+            text += std::string(l.level == MT_PACKCHECK_REJECTED ? "error: " : "note: ") + l.text +
+                    "\n";
+        }
+        if (r.count >= 0) {
+            text += options.pack_path + ": " + std::to_string(r.count) +
+                    " entries to translate. Your own copy's text: keep this folder to yourself.\n";
+        }
+        status = r.count >= 0 ? kExitOk : kExitCheckMismatch;
+        break;
+    }
+    case Options::PackTool::kNone:
+        break;
+    }
+    std::fputs(text.c_str(), stdout);
+    std::fflush(stdout);
+    return status;
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -1443,6 +1569,17 @@ int main(int argc, char *argv[]) {
         }
         prepare_data_folder();
         return run_import_ipa(options.import_ipa);
+    }
+    if (options.pack_tool != Options::PackTool::kNone) {
+        if (options.smoke_frames != 0 || options.gfx_prototype || options.audio_test_tone ||
+            options.save_action != Options::SaveAction::kNone || !options.import_ipa.empty()) {
+            SDL_Log("--check-pack, --build-texture-pack and --export-text run alone (with "
+                    "--bundle, --language or --pack-* options)");
+            print_usage();
+            return kExitUsage;
+        }
+        prepare_data_folder();
+        return run_pack_tool(options, generated_program());
     }
     const GameProgram program = generated_program();
     const bool game = options.smoke_frames == 0 && !options.gfx_prototype &&

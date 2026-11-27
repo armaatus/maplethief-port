@@ -33,7 +33,9 @@
 #include "maplethief/hle/abi.h"
 #include "maplethief/hooks.h"
 #include "maplethief/memory.h"
+#include "maplethief/packcheck.h"
 #include "maplethief/textpack.h"
+#include "textpack/packcheck_internal.h"
 #include "textpack/strings_file.h"
 #include "textpack/textpack_internal.h"
 
@@ -521,3 +523,147 @@ extern "C" const char *mt_textpack_manifest(const char *key) noexcept {
 }
 
 extern "C" mt_textpack_stats mt_textpack_get_stats(void) noexcept { return g_stats; }
+
+namespace {
+
+mt_packcheck_english_fn g_port_fn = nullptr;
+void *g_port_user = nullptr;
+
+// The places "{N}" (one or two digits) of a text, as port_text.cpp fills them.
+std::set<int> places(const std::string &s) {
+    std::set<int> out;
+    for (std::size_t i = 0; i + 2 < s.size(); ++i) {
+        if (s[i] != '{' || s[i + 1] < '0' || s[i + 1] > '9') {
+            continue;
+        }
+        const bool two = s[i + 2] >= '0' && s[i + 2] <= '9';
+        const std::size_t close = i + (two ? 3 : 2);
+        if (close < s.size() && s[close] == '}') {
+            out.insert(two ? (s[i + 1] - '0') * 10 + (s[i + 2] - '0') : s[i + 1] - '0');
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+extern "C" void mt_packcheck_set_port_text(mt_packcheck_english_fn fn, void *user) noexcept {
+    g_port_fn = fn;
+    g_port_user = user;
+}
+
+extern "C" mt_packcheck_report mt_textpack_check(const char *dir, mt_packcheck_fn fn,
+                                                 void *user) noexcept {
+    mt_packcheck::Reporter r(fn, user, "text");
+    try {
+        const std::string d = dir != nullptr ? dir : "";
+        const fs::path root = host_path(d);
+        std::error_code ec;
+        if (d.empty() || !fs::is_directory(root, ec)) {
+            r.refused(d + ": is no folder");
+            return r.report;
+        }
+        // The files by role, as mt_textpack_open finds them.
+        std::map<std::string, fs::path> found;
+        for (fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+            const std::string shown = utf8_of(it->path().filename());
+            const std::string name = lower(shown);
+            const char *role = nullptr;
+            for (const auto &f : k_files) {
+                role = name == f[0] ? f[1] : role;
+            }
+            std::error_code fe;
+            const fs::file_status status = it->symlink_status(fe);
+            if (role == nullptr) {
+                if (name.size() > 8 && name.compare(name.size() - 8, 8, ".strings") == 0) {
+                    r.ignored(shown + ": not a text pack file (Scripts, ScriptExtra, Tables, "
+                                      "Port): ignored");
+                }
+            } else if (fs::is_symlink(status)) {
+                r.ignored(shown + ": a symbolic link, never followed: ignored");
+            } else if (!fe && fs::is_regular_file(status)) {
+                found[role] = it->path();
+            }
+        }
+        std::map<std::string, std::string> manifest;
+        const bool has_pack = found.count("pack") != 0;
+        if (has_pack) {
+            mt_packcheck::check_manifest(root, "text", r, &manifest);
+            if (found.count("textpack") != 0) {
+                r.ignored("textpack.strings: pack.strings is the manifest: ignored");
+            }
+        } else if (found.count("textpack") == 0) {
+            r.refused("no pack.strings or textpack.strings (the manifest): the pack is refused");
+        } else {
+            r.note("textpack.strings: the older manifest; pack.strings (ADR 0149) also gives an id "
+                   "and the content");
+        }
+        for (const auto &f : k_files) {
+            const auto it = found.find(f[1]);
+            const std::string table = f[1];
+            if (it == found.end() || table == "pack" || (has_pack && table == "textpack")) {
+                continue;
+            }
+            const std::string shown = utf8_of(it->second.filename());
+            std::vector<std::uint8_t> bytes;
+            std::string why;
+            StringsFile file;
+            if (!read_file(it->second, &bytes, &why) ||
+                !parse_strings(bytes.data(), bytes.size(), &file, &why)) {
+                if (table == "textpack") {
+                    r.refused(shown + ": " + why + ": the pack is refused");
+                } else {
+                    r.rejected(shown + ": " + why + ": refused, the game's text kept");
+                }
+                continue;
+            }
+            if (file.duplicates != 0) {
+                r.note(shown + ": " + std::to_string(file.duplicates) +
+                       " keys given more than once: the last value of each kept");
+            }
+            if (table == "textpack") {
+                const std::string bad = check_manifest(file.entries);
+                if (!bad.empty()) {
+                    r.refused(shown + ": " + bad + ": the pack is refused");
+                }
+                continue;
+            }
+            u32 good = static_cast<u32>(file.entries.size());
+            if (table == "Tables") {
+                for (const auto &[key, value] : file.entries) {
+                    const TextColumn *column = nullptr;
+                    u32 row = 0;
+                    std::string bad;
+                    if (!parse_field_key(key, &column, &row, &bad)) {
+                        --good;
+                        r.ignored(shown + " \"" + key + "\": " + bad + ": ignored");
+                    } else if (value.size() > column->width) {
+                        r.note(shown + " \"" + key + "\": " + std::to_string(value.size()) +
+                               " bytes, its field holds " + std::to_string(column->width) +
+                               ": cut to \"" + utf8_cut(value, column->width) + "\"");
+                    }
+                }
+            } else if (table == "Port" && g_port_fn != nullptr) {
+                for (const auto &[key, value] : file.entries) {
+                    const char *english = g_port_fn(g_port_user, key.c_str());
+                    if (english == nullptr) {
+                        --good;
+                        r.ignored(shown + " \"" + key + "\": the port has no such text: ignored");
+                    } else if (places(value) != places(english)) {
+                        --good;
+                        r.ignored(shown + " \"" + key +
+                                  "\": its places ({0}, {1}, ...) are not the English's: the "
+                                  "English kept");
+                    }
+                }
+            }
+            r.report.good += good;
+        }
+        if (r.report.opens != 0) {
+            r.note(std::to_string(r.report.good) + " entries usable");
+        }
+    } catch (const std::exception &) {
+        r.refused(std::string(dir != nullptr ? dir : "") + ": cannot be read");
+    }
+    return r.report;
+}

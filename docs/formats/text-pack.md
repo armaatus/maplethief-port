@@ -4,20 +4,21 @@ A text pack replaces the game's text and the port's own with a translation in UT
 
 - **Loaded by**: `mt_textpack_open` (`runtime/include/maplethief/textpack.h`, `runtime/src/textpack/`), from `text_pack = DIR` or `--text-pack DIR`, before the boot.
 - **Parsers**: `runtime/src/textpack/strings_file.cpp` (C++) and `tools/mtport/textpack.py` (Python, the same rules and reasons; `export`, `check`).
-- **Validation**: synthetic files in CI (`tests/cpp/textpack_test.cpp`, `tests/test_textpack.py`); locally, the export of the player's copy opens whole (`test_export_of_the_real_bundle`) and `play.text_pack` plays with a pack made at run time.
+- **Tools in the game** ([#371](https://github.com/armaatus/maplethief-port/issues/371), [ADR 0205](../adr/0205-pack-tools-in-the-game.md)): `mt_textpack_export` and `mt_textpack_check` (`maplethief/packcheck.h`), as `MapleThief --export-text DIR` and `--check-pack DIR` and the settings menu's Export text and Check packs; the frontend adds `Port.strings` and checks its keys against the port's own text.
+- **Validation**: synthetic files in CI (`tests/cpp/textpack_test.cpp`, `tests/cpp/packcheck_test.cpp`, `tests/test_textpack.py`); locally, the export of the player's copy opens whole (`test_export_of_the_real_bundle`) and `play.text_pack` plays with a pack made at run time.
 
 ## The folder
 
 | File (any case) | Required | Keys | Replaces |
 |---|---|---|---|
-| `textpack.strings` | yes, unless `pack.strings` | `format`, `name`, `language`; `version`, `game_version`, `author` optional | nothing: the manifest |
-| `pack.strings` | no | ADR 0149's manifest for every pack kind (`kind = "text"`, `id`, `name`, `language`, ...; `runtime/include/maplethief/pack_manifest.h`); when present it is the manifest and `textpack.strings` is ignored | nothing: the manifest |
+| `pack.strings` | this or `textpack.strings` | ADR 0149's manifest for every pack kind: `format`, `kind` (`text`), `id`, `name`, `language`; `version`, `author`, `description`, `game_version`, `port_min`, `content`, `license` optional (`runtime/include/maplethief/pack_manifest.h`); when present it is the manifest and `textpack.strings` is ignored, logged | nothing: the manifest |
+| `textpack.strings` | without `pack.strings` | `format`, `name`, `language`; `version`, `game_version`, `author` optional (packs made before ADR 0149) | nothing: the manifest |
 | `Scripts.strings` | no | the game's `Scripts` keys, `<Prefix>.<function>.<n>` | dialogue and quest text |
 | `ScriptExtra.strings` | no | the game's `ScriptExtra` keys, `<Class>.<member>.<n>` | the C++ code's sentences |
 | `Tables.strings` | no | `<table>.<row>.<column>` | names and descriptions in the data tables |
 | `Port.strings` | no | the port's text ids, `setting.<key>.label` / `.help` / `.help_pad`, `action.<key>.label` / `.help` / `.help_pad` / `.button` / `.confirm` | the port's menus |
 
-Other files are ignored (`check` names a `.strings` file it doesn't know). Without the manifest, or with a manifest that is refused, there is no pack. The manifest: `format` must be `"1"`; `name` must not be empty; `language` is a BCP 47 tag (`de`, `pt-BR`: 2 or 3 letters, then `-` and up to 8 letters or digits per part).
+Other files are ignored (`check` names a `.strings` file it doesn't know). Without the manifest, or with a manifest that is refused, there is no pack. The manifest: `format` must be `"1"`; `name` must not be empty; `language` is a BCP 47 tag (`de`, `pt-BR`: 2 or 3 letters, then `-` and up to 8 letters or digits per part). `pack.strings` also needs `kind = "text"` and an `id`, and is held to ADR 0149's lengths, `game_version` and `port_min` (`runtime/src/textpack/pack_manifest.cpp`). Both exports write `pack.strings`.
 
 `Tables.strings`' row is the record's index in the file (0 first, not its id column). The columns and their room in bytes of UTF-8 (a full field needs no NUL: the game's accessor `0x37999` ends its copy):
 
@@ -74,10 +75,12 @@ A file that breaks a rule is refused whole; the runtime logs `textpack: DIR/FILE
 
 ## Example
 
-`textpack.strings`:
+`pack.strings`:
 
 ```
 "format" = "1";
+"kind" = "text";
+"id" = "maplethief-de";
 "name" = "MapleThief auf Deutsch";
 "language" = "de";
 "version" = "0.1";

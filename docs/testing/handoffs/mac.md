@@ -201,7 +201,7 @@ From closed [#151](https://github.com/armaatus/maplethief-port/issues/151) (PR #
 
 ## #153: Texture packs
 
-From closed [#153](https://github.com/armaatus/maplethief-port/issues/153) (PR #178's hand-offs). A pack replacing every upload is tested; the try is the player's path in [Settings, Texture packs](../../play/settings.md#texture-packs). Dumps and packs are the game's art: keep them in your home folder, never in the repository or a post.
+From closed [#153](https://github.com/armaatus/maplethief-port/issues/153) (PR #178's hand-offs). A pack replacing every upload is tested; the try is the player's path in [Making packs, Texture packs](../../play/packs.md#texture-packs). Dumps and packs are the game's art: keep them in your home folder, never in the repository or a post.
 
 1. `$G --dump-textures ~/mt-dump`, play the tutorial and Henesys, quit.
 2. `PYTHONPATH=tools python3 -m mtport.texpack build ~/mt-dump ~/mt-pack --scale 2`.
