@@ -7,9 +7,10 @@ tables:
 
 * **links**: every portal warp, per chapter: the source map and portal number, the target map,
   and the warp's conditions as a gate (``warp.conditions``: a list of alternatives, each a list
-  of terms that hold together). A term on a quest's state (``getQuestState``) is one the bot
-  can test in guest memory; any other term (``checkRequire``, the level) is unknown to it, and
-  an alternative with an unknown term counts as shut.
+  of terms that hold together). A term on a quest's state (``getQuestState``) or on whether an
+  active quest's requirements are met (``checkRequire``: 1 met, 0 not) is one the bot can test
+  in guest memory; any other term (the level) is unknown to it, and an alternative with an
+  unknown term counts as shut.
 * **shops**: every shop an NPC opens (``npc.opens_shop``), per chapter: the map, the NPC's
   object (its script's base name, as the ``.obj`` names it), the shop number and each item it
   sells with its price.
@@ -28,8 +29,9 @@ by spaces, ``#`` lines are comments::
 
 No alternative means the link is always open. An alternative is terms joined by ``&``: a quest
 term is ``q<kind>.<number><op><value>`` (``q0.9==2``: main quest 9 is done; ``op`` one of
-``== != < <= > >=``), an unknown term is ``?``. ``table`` is 0 for equipment and 1 for the other
-items (the save's ``item_table``).
+``== != < <= > >=``), a requirement term is ``r<kind>.<number><op><value>`` (``r1.37==0``: side
+quest 37's requirements are not met yet), an unknown term is ``?``. ``table`` is 0 for
+equipment and 1 for the other items (the save's ``item_table``).
 
     python3 -m mtport.botworld --app work/ipa/Payload/MapleThief.app --out FILE [--if-stale]
     python3 -m mtport.botworld --kb build/compendium/kb --out FILE
@@ -44,7 +46,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Container, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -62,16 +64,18 @@ class BotWorldError(Exception):
 
 @dataclass(frozen=True)
 class Term:
-    """``getQuestState(kind, number) <op> value``; ``quest`` None is a term the bot can't test."""
+    """``getQuestState(kind, number) <op> value``, or with ``require`` ``checkRequire(kind,
+    number) <op> value``; ``quest`` None is a term the bot can't test."""
 
     quest: tuple[int, int] | None
     op: str = "=="
     value: int = 0
+    require: bool = False
 
     def text(self) -> str:
         if self.quest is None:
             return "?"
-        return f"q{self.quest[0]}.{self.quest[1]}{self.op}{self.value}"
+        return f"{'r' if self.require else 'q'}{self.quest[0]}.{self.quest[1]}{self.op}{self.value}"
 
 
 UNKNOWN = Term(None)
@@ -161,10 +165,14 @@ def item_ref(item_id: str) -> tuple[int, int]:
 
 
 def term(cond: Mapping[str, Any]) -> Term:
-    quest = cond.get("quest")
-    if cond.get("native") != "getQuestState" or quest is None or cond.get("op") not in OPS:
+    native, quest, args = cond.get("native"), cond.get("quest"), cond.get("args")
+    if cond.get("op") not in OPS:
         return UNKNOWN
-    return Term((int(quest[0]), int(quest[1])), cond["op"], int(cond["value"]))
+    if native == "getQuestState" and quest is not None:
+        return Term((int(quest[0]), int(quest[1])), cond["op"], int(cond["value"]))
+    if native == "checkRequire" and isinstance(args, list) and len(args) == 2:
+        return Term((int(args[0]), int(args[1])), cond["op"], int(cond["value"]), require=True)
+    return UNKNOWN
 
 
 def gate(conditions: Sequence[Sequence[Mapping[str, Any]]]) -> tuple[tuple[Term, ...], ...]:
@@ -303,13 +311,13 @@ def generate(entities: Entities) -> str:
 def _parse_term(text: str) -> Term:
     if text == "?":
         return UNKNOWN
-    if not text.startswith("q"):
+    if text[:1] not in ("q", "r"):
         raise BotWorldError(f"term {text!r}")
     for op in OPS:
         left, sep, right = text[1:].partition(op)
         if sep:
             kind, _, number = left.partition(".")
-            return Term((int(kind), int(number)), op, int(right))
+            return Term((int(kind), int(number)), op, int(right), require=text[0] == "r")
     raise BotWorldError(f"term {text!r}: no operator")
 
 
@@ -348,15 +356,20 @@ def parse(text: str) -> Tables:
     return t
 
 
-def open_now(link: Link, quest_state: Mapping[tuple[int, int], int]) -> bool:
-    """Whether the bot may take ``link`` with these quest states (missing: 0, not started)."""
+def open_now(
+    link: Link,
+    quest_state: Mapping[tuple[int, int], int],
+    met: Container[tuple[int, int]] = (),
+) -> bool:
+    """Whether the bot may take ``link`` with these quest states (missing: 0, not started) and
+    the active quests whose requirements are ``met``."""
     if not link.gate:
         return True
 
     def holds(t: Term) -> bool:
         if t.quest is None:
             return False
-        v = quest_state.get(t.quest, 0)
+        v = int(t.quest in met) if t.require else quest_state.get(t.quest, 0)
         return {
             "==": v == t.value,
             "!=": v != t.value,

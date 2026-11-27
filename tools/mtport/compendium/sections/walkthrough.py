@@ -49,7 +49,6 @@ REPO = "https://github.com/armaatus/maplethief-port/blob/main/docs/"
 SCRIPT_VM = REPO + "re/script-vm.md#natives"
 SCENES_DOC = REPO + "re/qol.md#which-steps-change-state"
 MECHANICS_DOC = REPO + "re/mechanics.md#drops"
-YETI_ISSUE = "https://github.com/armaatus/maplethief-port/issues/218"
 REVIEW_ISSUE = "https://github.com/armaatus/maplethief-port/issues/228"
 
 # The scenes the last boss's defeat runs (CMob::Die 0x73349 sets the queued scene to 1 for
@@ -1185,10 +1184,10 @@ def boss_block(ctx: Context, mid: str) -> str:
     evs = mons.boss_events(ctx, mon)
     if evs and not any(ev.get("used") for ev in evs):
         out += _p(
-            "No map object runs this boss's fight script in version 1.5, so how the fight"
-            " starts has not been confirmed in play"
-            f' (<a href="{YETI_ISSUE}">issue 218</a>, a playthrough check). The quest still asks'
-            " for the kill."
+            "No map object runs this boss's fight script in version 1.5, so the fight starts"
+            " with no scene and no message: the boss is one of the map's own monsters, there"
+            " from the moment the hero arrives (confirmed in play, <code>play.chapter_2_f_synthetic"
+            "</code>). The quest still asks for the kill."
         )
     elif evs:
         out += _p(

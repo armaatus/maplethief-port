@@ -2339,7 +2339,9 @@ void chapter_1_d(Run &r, u64) {
     then_gear(r, "the Triple-Tipped Zamadar (level 20)", 0, 26, 1);
     then_farm(r, "30 Leaves from the Dark Stumps on 1.2 (Missing Master)", 1, 2, {9}, ready(0, 10),
               2400, fight);
-    then_farm(r, "7,800 meso on 1.2", 1, 2, {9}, meso_at_least(7800), 3600, fight);
+    // The meso this starts with follows the earlier parts' moves: 5,350 took 3,114 game-s, 804
+    // more than 3,600 (#298's bot changes).
+    then_farm(r, "7,800 meso on 1.2", 1, 2, {9}, meso_at_least(7800), 5400, fight);
     then_spend_sp(r, "Perion", build);
     then_gear(r, "the Red Pao (level 20)", 1, 14, 2, 300);
     then_gear(r, "the Red Loose Cap (level 20)", 1, 2, 0, 300);
@@ -2952,6 +2954,354 @@ void chapter_1_m(Run &r, u64) {
     then_finish(r);
 }
 void chapter_1_m_checks(Run &, u64) {}
+
+// --- chapter 2 (#298, docs/testing/chapter-2-quests.md) --------------------------------------
+
+Pred job_at(i32 branch, i32 tier); // below, with the job advancements
+
+// Part A (#298): from the start of chapter 2 (tests/starts/chapter_2.json, part L's save) on
+// 4.1. Heracle (4.0) rewards main 40 (chapter 1's last, carried over) and gives main 0 (20 of mob
+// 40 on 4.2), ends it and gives main 1; the Fairy (4.0) ends 1 and gives main 2 (40 of item 58,
+// from mob 38). The level-35 hero of chapter 1 kills about four of the level-56 mob 40 a minute
+// and falls every few minutes (its HP potion, item 3, heals 50 HP, and area 4 sells none); part B
+// goes on at level 60 (chapter-2-quests.md).
+void chapter_2_a(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
+    then_check(r, "chapter 2 on 4.1", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return h.chapter == 2 && h.on(4, 1);
+    });
+    then_spend_sp(r, "skills 3 and 4", build);
+    then_bag(r, "part A's start");
+    then_talk_to(r, "Heracle: main 40 rewarded, main 0 given", 4, 0, "Heracle", -1,
+                 main_quests(40, 0));
+    then_farm(r, "20 of mob 40 on 4.2 (main 0)", 4, 2, {40}, ready(0, 0), 3600, fight);
+    then_talk_to(r, "Heracle: main 0 done, main 1 given", 4, 0, "Heracle", -1, main_quests(0, 1));
+    then_talk_to(r, "Fairy: main 1 done, main 2 given", 4, 0, "Fairy", -1, main_quests(1, 2));
+    then_quests_are(r, "part A's main quests", {{0, 40, 2}, {0, 0, 2}, {0, 1, 2}, {0, 2, 1}});
+    then_do(r, "part A's hero",
+            [](mt_cpu *cpu) { std::printf("part A: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_bag(r, "part A's end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_2_a_checks(Run &, u64) {}
+
+// The fighting style of chapter 2 from part B: skill 16 on LB while MP lasts, HP potion item 4
+// on Y and MP potion item 7 on B, restocked at the area's shop (Etc40 on 4.0, Etc90 on 9.0).
+quest_bot::FarmStyle chapter_2_fight() {
+    quest_bot::FarmStyle fight;
+    fight.skill = quest_bot::LB;
+    fight.min_mp = 40;
+    fight.mp_pct = 30;
+    fight.hp_pct = 45;
+    fight.restock = {quest_bot::Restock{4, 150, 500, 30, 2000},
+                     quest_bot::Restock{7, 60, 500, 8, 2000}};
+    return fight;
+}
+// Branch 2's skills in chapter 2 by id: chapter 1's (3, 4, 15), then 16 and, from the 3rd job,
+// 21 (attack and accuracy up, for mob 68) and 20, then 17, 18 and 22.
+const std::vector<std::pair<i32, i32>> k_chapter_2_build = {
+    {3, 15}, {4, 20}, {15, 15}, {16, 15}, {21, 10}, {20, 15}, {17, 15}, {18, 15}, {22, 10}};
+// Before the 3rd job only up to 16: the rest of the SP waits for 21.
+const std::vector<std::pair<i32, i32>> k_chapter_2_before_job(k_chapter_2_build.begin(),
+                                                              k_chapter_2_build.begin() + 4);
+
+// Part B (#298, synthetic: tests/starts/raise/chapter_2_b.json over part A's save): the hero at
+// level 60 (the game's level-up rules: 2 SP a level, HP and MP full) with items 4 and 7 on Y and
+// B. The SP on skill 16 (LB) and the masteries; Pirate_Orbis (4.1, list 1) to 2.0, the Darklord
+// (0.0) gives the 3rd job, checked in guest memory and in theif0; the Pirate (2.0) back to 4.1;
+// then main 2 (40 of item 58 from mob 38 on 4.3) at the Fairy, who gives 3.
+void chapter_2_b(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_2_fight();
+    then_check(r, "level 60, items 4 and 7 on Y and B", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return h.level == 60 && quick_slot_item(cpu, h, 1) == 4 && quick_slot_item(cpu, h, 2) == 7;
+    });
+    then_spend_sp(r, "level 60", k_chapter_2_before_job);
+    then_quick_slot(r, "skill 16 on LB (quick slot 3)", 16, 3);
+    then_stock(r, "item 4 (Etc40)", 4, 4, 150, 500, 600);
+    then_stock(r, "item 7 (Etc40)", 4, 7, 60, 500, 600);
+    then_talk_to(r, "Pirate_Orbis (4.1): to 2.0 (list 1)", 4, 1, "Pirate_Orbis", 1,
+                 [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    then_talk_to(r, "Darklord (0.0): the 3rd job advancement (level 60)", 0, 0, "Darklord", -1,
+                 job_at(2, 3), 600);
+    then_run_event(r, "the 3rd job (branch 2, tier 3)", MT_GAME_EVENT_JOB_ADVANCE, 2, {3});
+    then_save(r);
+    then_job_is(r, 2, 3);
+    then_spend_sp(r, "the 3rd job", k_chapter_2_build);
+    then_talk_to(r, "Pirate (2.0): back to 4.1", 2, 0, "Pirate", -1,
+                 [](mt_cpu *cpu) { return hero(cpu).on(4, 1); });
+    then_farm(r, "40 of item 58 from mob 38 on 4.3 (main 2)", 4, 3, {38}, ready(0, 2), 3600, fight);
+    then_talk_to(r, "Fairy: main 2 done, main 3 given", 4, 0, "Fairy", -1, main_quests(2, 3));
+    then_quests_are(r, "part B's main quests", {{0, 2, 2}, {0, 3, 1}});
+    then_do(r, "part B's hero",
+            [](mt_cpu *cpu) { std::printf("part B: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_bag(r, "part B's end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_2_b_checks(Run &, u64) {}
+
+// Part C (#298): the way to main 3's item (105, the reward of side 37). Ericsson (4.0) gives
+// side 0 (with main 3 active); Wilson (4.2) ends it (list 0) and gives side 1 (list 1: 50 of mob 51
+// on 4.11), ends it and gives side 37 (list 7). portal4111 (4.11) opens while 37 is active and its
+// kill not yet made, and leads to 4.17, whose map script (WolfMap) starts the first boss of
+// chapter 2: mob 66, 23,000 HP. Wilson ends 37 with item 105; the Fairy ends main 3 and gives 4,
+// Heracle ends 4 and gives 5.
+void chapter_2_c(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_2_fight();
+    then_spend_sp(r, "part C", k_chapter_2_build);
+    then_stock(r, "item 4 (Etc40)", 4, 4, 200, 500, 600);
+    then_stock(r, "item 7 (Etc40)", 4, 7, 80, 500, 600);
+    then_talk_to(r, "Ericsson: side 0 given", 4, 0, "Ericsson", 1, quest_is(1, 0, 1));
+    then_talk_to(r, "Wilson: side 0 done", 4, 2, "Wilson", 0, quest_is(1, 0, 2));
+    then_talk_to(r, "Wilson: side 1 given", 4, 2, "Wilson", 1, quest_is(1, 1, 1));
+    then_farm(r, "50 of mob 51 on 4.11 (side 1)", 4, 11, {51}, ready(1, 1), 3600, fight);
+    then_talk_to(r, "Wilson: side 1 done", 4, 2, "Wilson", 1, quest_is(1, 1, 2));
+    then_talk_to(r, "Wilson: side 37 given", 4, 2, "Wilson", 7, quest_is(1, 37, 1));
+    then_stock(r, "item 4 for the boss (Etc40)", 4, 4, 300, 500, 900);
+    then_stock(r, "item 7 for the boss (Etc40)", 4, 7, 100, 500, 600);
+    FarmStyle boss = fight;
+    boss.restock = {};
+    boss.hp_pct = 55;
+    boss.land_first = true;
+    then_farm(r, "mob 66 on 4.17 (side 37)", 4, 17, {66}, ready(1, 37), 3600, boss);
+    then_run_event(r, "portal4111 to the boss's map 4.17", MT_GAME_EVENT_MAP_CHANGE, 4, {17});
+    then_run_event(r, "mob 66 killed", MT_GAME_EVENT_BOSS_KILLED, 66);
+    // Chapter 1's drops and 4.11's fill the bag's other-item slots: no room for item 105.
+    then_sell(r, "materials (Etc40)", 4, 4, {105, 120});
+    then_talk_to(r, "Wilson: side 37 done, item 105", 4, 2, "Wilson", 7, quest_is(1, 37, 2));
+    then_check(r, "item 105 (side 37's reward) in the bag", has_item(105, 1));
+    then_talk_to(r, "Fairy: main 3 done (item 105), main 4 given", 4, 0, "Fairy", -1,
+                 main_quests(3, 4));
+    then_talk_to(r, "Heracle: main 4 done, main 5 given", 4, 0, "Heracle", -1, main_quests(4, 5));
+    then_quests_are(r, "part C's quests",
+                    {{0, 3, 2}, {0, 4, 2}, {0, 5, 1}, {1, 0, 2}, {1, 1, 2}, {1, 37, 2}});
+    then_do(r, "part C's hero",
+            [](mt_cpu *cpu) { std::printf("part C: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_bag(r, "part C's end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_2_c_checks(Run &, u64) {}
+
+// Part D (#298): main 5 (item 120): Pirate_Orbis (list 1) to 2.0, then 1.0, whose chapter-2
+// map script (PerionMap) plays scene 20 on the first visit with 5 active, ends 5 and gives main 6.
+// The Pirate (2.0) back to 4.1. In area 5 Barun (5.1) gives side 2 (list 1: 20 each of mobs 18,
+// 19 and 20 on 5.0-5.3) once 6 is active; its end opens chapter 2's portal531 (5.3) to 9.1.
+// Alchester (9.0) ends 6 and gives main 7 (list 1).
+void chapter_2_d(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_2_fight();
+    then_spend_sp(r, "part D", k_chapter_2_build);
+    then_check(r, "item 120 in the bag", has_item(120, 1));
+    then_talk_to(r, "Pirate_Orbis (4.1): to 2.0 (list 1)", 4, 1, "Pirate_Orbis", 1,
+                 [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    then_go(r, "1.0", {1, 0, 376, 399, 30}, 600);
+    then_wait_for(r, "chapter 2's PerionMap (1.0, scene 20): main 5 done, main 6 given", 120,
+                  main_quests(5, 6), 0.5);
+    then_talk_to(r, "Pirate (2.0): back to 4.1", 2, 0, "Pirate", -1,
+                 [](mt_cpu *cpu) { return hero(cpu).on(4, 1); });
+    then_talk_to(r, "Barun: side 2 given", 5, 1, "Barun", 1, quest_is(1, 2, 1));
+    then_farm(
+        r, "20 of mob 18 on 5.0 (side 2)", 5, 0, {18, 19},
+        [](mt_cpu *cpu) { return quest_bot::defeats(cpu, 1, 2, 18) >= 20; }, 3600, fight);
+    then_farm(
+        r, "20 of mob 20 on 5.2 (side 2)", 5, 2, {19, 20},
+        [](mt_cpu *cpu) { return quest_bot::defeats(cpu, 1, 2, 20) >= 20; }, 3600, fight);
+    then_farm(r, "20 of mob 19 on 5.3 (side 2)", 5, 3, {19, 20}, ready(1, 2), 3600, fight);
+    then_talk_to(r, "Barun: side 2 done", 5, 1, "Barun", 1, quest_is(1, 2, 2));
+    then_talk_to(r, "Alchester (9.0): main 6 done, main 7 given", 9, 0, "Alchester", 1,
+                 main_quests(6, 7), 900);
+    then_run_event(r, "chapter 2's portal531 (5.3) to 9.1", MT_GAME_EVENT_MAP_CHANGE, 9, {1});
+    then_quests_are(r, "part D's quests", {{0, 5, 2}, {0, 6, 2}, {0, 7, 1}, {1, 2, 2}});
+    then_do(r, "part D's hero",
+            [](mt_cpu *cpu) { std::printf("part D: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_bag(r, "part D's end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_2_d_checks(Run &, u64) {}
+
+// Part E (#298): area 9 (the ground is ice, the hero slides). Main 7 (25 of mob 41 on 9.2) at
+// Alchester (list 2), who gives main 71 and ends it (list 3) once Skadru's side 35 (list 4: 3 of
+// item 69 from mob 34 on 9.1) and the SnowQueen's side 36 (list 3: 30 of item 63 from mob 25 on
+// 9.1) are done; then main 72 (30 of item 66 from mob 45 on 9.3) and, at its end (list 4), main
+// 8.
+void chapter_2_e(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_2_fight();
+    then_spend_sp(r, "part E", k_chapter_2_build);
+    // The bag's other-item slots are full of chapter 1's and 2's drops: no room for item 69.
+    then_sell(r, "materials (Etc90)", 9, 4, {55, 63, 66, 69});
+    then_stock(r, "item 4 (Etc90)", 9, 4, 200, 500, 600);
+    then_stock(r, "item 7 (Etc90)", 9, 7, 80, 500, 600);
+    then_farm(r, "25 of mob 41 on 9.2 (main 7)", 9, 2, {41}, ready(0, 7), 3600, fight);
+    then_talk_to(r, "Alchester: main 7 done, main 71 given", 9, 0, "Alchester", 2,
+                 main_quests(7, 71));
+    then_talk_to(r, "Skadru: side 35 given", 9, 0, "Skadru", 4, quest_is(1, 35, 1));
+    then_farm(r, "3 of item 69 from mob 34 on 9.1 (side 35)", 9, 1, {34}, ready(1, 35), 3600,
+              fight);
+    then_talk_to(r, "Skadru: side 35 done", 9, 0, "Skadru", 4, quest_is(1, 35, 2));
+    then_talk_to(r, "SnowQueen: side 36 given", 9, 0, "SnowQueen", 3, quest_is(1, 36, 1));
+    then_farm(r, "30 of item 63 from mob 25 on 9.1 (side 36)", 9, 1, {25}, ready(1, 36), 3600,
+              fight);
+    then_talk_to(r, "SnowQueen: side 36 done", 9, 0, "SnowQueen", 3, quest_is(1, 36, 2));
+    then_talk_to(r, "Alchester: main 71 done, main 72 given", 9, 0, "Alchester", 3,
+                 main_quests(71, 72));
+    then_farm(r, "30 of item 66 from mob 45 on 9.3 (main 72)", 9, 3, {45, 41}, ready(0, 72), 3600,
+              fight);
+    then_talk_to(r, "Alchester: main 72 done, main 8 given", 9, 0, "Alchester", 4,
+                 main_quests(72, 8));
+    then_quests_are(r, "part E's quests",
+                    {{0, 7, 2}, {0, 71, 2}, {0, 72, 2}, {0, 8, 1}, {1, 35, 2}, {1, 36, 2}});
+    then_do(r, "part E's hero",
+            [](mt_cpu *cpu) { std::printf("part E: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_bag(r, "part E's end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_2_e_checks(Run &, u64) {}
+
+// Part F (#298, synthetic: tests/starts/raise/chapter_2_f.json over part E's save): the second
+// boss and the end of chapter 2. Chapter 2's portal942 (9.4) leads to 9.5 while main 8 is active
+// and its kill not yet made. 9.5 has no map script: no map object names YetiMap.out (the
+// knowledge base lists it unused), so no boss scene starts the fight; the boss (mob 68, 32,000
+// HP) is one of the map's own spawns, there from the start (docs/re/boss-fights.md). Its death
+// plays end scene 8 (CMob::Die 0x73349). Alchester ends 8 (list 5) and gives main 9, which has no
+// reward call: Pirate_Orbis (4.1) ends the chapter (list 2, with 9 active): clearAll, then
+// chapter 3 on 6.0.
+void chapter_2_f(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_2_fight();
+    then_spend_sp(r, "part F", k_chapter_2_build);
+    then_stock(r, "item 4 for the boss (Etc90)", 9, 4, 300, 500, 900);
+    then_stock(r, "item 7 for the boss (Etc90)", 9, 7, 100, 500, 600);
+    // Mob 68 is level 121 and hits for about 470 a second: with the hero's dagger 28 (attack
+    // 25-30) the first try took 1,200 of its 32,000 HP before the hero fell. A player would buy
+    // Equip90's level-60 dagger 34 (77,700 meso there) and cast skill 21 (attack and accuracy
+    // up) for the fight. Even so the level-62 hero fell 46 times in an hour (at best 6,400 HP a
+    // try; the boss heals when the map reloads), so part F is synthetic: it starts at level 70
+    // (tests/starts/raise/chapter_2_f.json over part E's save).
+    then_gear(r, "dagger 34 (Equip90)", 9, 34, 1, 2000);
+    then_quick_slot(r, "skill 21 on RB (quick slot 4)", 21, 4);
+    FarmStyle boss = fight;
+    boss.restock = {};
+    boss.hp_pct = 55;
+    boss.land_first = true;
+    boss.buff = RB;
+    boss.buff_mp = 400;
+    // How mob 68's fight starts (docs/re/boss-fights.md): 9.5 has no map script (YetiMap.out
+    // is never named), so no boss message and no boss scene; mob 68 is the map's own spawn and is
+    // there from the first tick. 4.17's WolfMap, by contrast, plays the boss scene (panel 3).
+    auto nav = std::make_shared<Nav>();
+    auto since = std::make_shared<double>(-1);
+    auto scene = std::make_shared<bool>(false);
+    then_go(r, "portal942 (9.4)", at_object(9, 4, "portal942", 10), 600);
+    then_heal(r, "full HP before 9.5", 95);
+    then(r, "enter 9.5: mob 68 there, no boss scene", 600,
+         [&r, nav, since, scene](mt_cpu *cpu, double el) {
+             const Hero h = hero(cpu);
+             if (!h.on(9, 5)) {
+                 if (!interrupted(r, cpu, el)) {
+                     drive(r, cpu, el, *nav, Goal{9, 5, 0, 0, 10});
+                 }
+                 return false;
+             }
+             if (*since < 0) {
+                 *since = el;
+                 release_all(r);
+             }
+             *scene = *scene || game_mode(cpu) == 9 || mt_input_panel() == 3;
+             if (el - *since < 3) {
+                 return false;
+             }
+             bool yeti = false;
+             for (const Mob &m : mobs(cpu)) {
+                 yeti = yeti || m.id == 68;
+             }
+             check(yeti && !*scene, std::string("9.5 after 3 s: mob 68 ") +
+                                        (yeti ? "there" : "missing") + ", boss scene " +
+                                        (*scene ? "played" : "none"));
+             return true;
+         });
+    then_farm(r, "mob 68 on 9.5 (main 8)", 9, 5, {68}, ready(0, 8), 3600, boss);
+    // Original bug 19 (docs/re/original-bugs.md): land_first only stops attacks from starting,
+    // and mob 68 hits about every 1.5 s, so a blow already under way can still kill it while the
+    // hero is knocked back; the end scene (game mode 9) then takes no key. When A has not moved
+    // it on for 5 s with CHero +0x119 still set, the run clears that byte, as #420's fix (on in
+    // Enhanced) will, and says so; the scene and the rest are the game's own.
+    auto locked = std::make_shared<double>(-1);
+    then(r, "mob 68's end scene", 120, [&r, locked](mt_cpu *cpu, double el) {
+        const Hero h = hero(cpu);
+        if (game_mode(cpu) != 9 || !h.knocked) {
+            *locked = -1;
+            return !interrupted(r, cpu, el);
+        }
+        interrupted(r, cpu, el);
+        if (*locked < 0) {
+            *locked = el;
+        } else if (el - *locked >= 5) {
+            std::printf("original bug 19: the end scene took no key for 5 s with the hero knocked "
+                        "back; the run clears CHero +0x119 (#420)\n");
+            cpu->mem[h.addr + 0x119] = 0;
+            *locked = -1;
+        }
+        return false;
+    });
+    then_run_event(r, "portal942 to 9.5", MT_GAME_EVENT_MAP_CHANGE, 9, {5});
+    then_run_event(r, "mob 68 killed", MT_GAME_EVENT_BOSS_KILLED, 68);
+    then_talk_to(r, "Alchester: main 8 done, main 9 given", 9, 0, "Alchester", 5, main_quests(8, 9),
+                 900);
+    then_quests_are(r, "chapter 2 before the trip", {{0, 8, 2}, {0, 9, 1}});
+    then_bag(r, "before the trip");
+    then_talk_to(
+        r, "Pirate_Orbis (4.1): the end of chapter 2 (list 2)", 4, 1, "Pirate_Orbis", 2,
+        [](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            return h.chapter == 3 && h.on(6, 0);
+        },
+        900);
+    then_run_event(r, "chapter 2 ends", MT_GAME_EVENT_CHAPTER_END, 2);
+    then_run_event(r, "the trip to 6.0", MT_GAME_EVENT_MAP_CHANGE, 6, {0});
+    then_do(r, "chapter 3 on 6.0 in guest memory", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::string q;
+        for (const u32 n : {0u, 5u, 8u, 9u, 71u, 72u}) {
+            q += " main " + std::to_string(n) + ":" + std::to_string(quest_state(cpu, h, 0, n));
+        }
+        check(h.chapter == 3 && h.on(6, 0),
+              "chapter " + std::to_string(h.chapter) + " in the quest manager, map " +
+                  std::to_string(h.area) + "." + std::to_string(h.map) +
+                  " (want 3, 6.0); after clearAll:" + q);
+    });
+    then_save(r);
+    then_do(r, "chapter 3 on 6.0 in the save", [&r](mt_cpu *) {
+        const std::vector<std::uint8_t> theif = read_save(r, "theif0");
+        const std::vector<std::uint8_t> quest = read_save(r, "quest0");
+        const int area = theif.size() > 0x41D ? theif[0x41C] : -1;
+        const int map = theif.size() > 0x41D ? theif[0x41D] : -1;
+        const int chapter = quest.empty() ? -1 : quest[0];
+        check(chapter == 3 && area == 6 && map == 0,
+              "the save: chapter " + std::to_string(chapter) + " in quest0, map " +
+                  std::to_string(area) + "." + std::to_string(map) + " in theif0 (want 3, 6.0)");
+    });
+    then_do(r, "part F's hero",
+            [](mt_cpu *cpu) { std::printf("part F: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_finish(r);
+}
+void chapter_2_f_checks(Run &, u64) {}
 
 // --- the settings menu's Game options and Import saves (#89, ADR 0076) ---------------------------
 //
@@ -12511,6 +12861,12 @@ constexpr Mode k_modes[] = {
     {"chapter_1_k", chapter_1_k, chapter_1_k_checks, 1},
     {"chapter_1_l", chapter_1_l, chapter_1_l_checks, 1},
     {"chapter_1_m", chapter_1_m, chapter_1_m_checks, 1},
+    {"chapter_2_a", chapter_2_a, chapter_2_a_checks, 1},
+    {"chapter_2_b", chapter_2_b, chapter_2_b_checks, 1},
+    {"chapter_2_c", chapter_2_c, chapter_2_c_checks, 1},
+    {"chapter_2_d", chapter_2_d, chapter_2_d_checks, 1},
+    {"chapter_2_e", chapter_2_e, chapter_2_e_checks, 1},
+    {"chapter_2_f", chapter_2_f, chapter_2_f_checks, 1},
     {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},
     {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
     {"confirm_guard", confirm_guard, confirm_guard_checks, 1},

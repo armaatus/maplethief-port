@@ -41,7 +41,7 @@ its test's name.**
 
 | Description | Equals | Test |
 | --- | --- | --- |
-| `tests/starts/chapter_2.json`: the start of chapter 2, a level-34 Bandit on 4.1 with main 40 active | part L's save (`play.chapter_1_l`) | `tests/test_savedata_build_real.py` (local; skipped without the bundle or the chain's output, which `MT_CHAIN_OUTPUT` can name) |
+| `tests/starts/chapter_2.json`: the start of chapter 2, a level-35 Bandit on 4.1 with main 40 active | part L's save (`play.chapter_1_l`) | `tests/test_savedata_build_real.py` (local; skipped without the bundle or the chain's output, which `MT_CHAIN_OUTPUT` can name) |
 
 CTest builds it as `starts.chapter_2` for `play.compendium_npcs` ([compendium-port-check.md](compendium-port-check.md)), which is not synthetic for that reason.
 
@@ -59,6 +59,26 @@ running port (#221): `play.map_page_<start>_<kind>_synthetic` takes one portal a
 `tests/test_compendium_world_port.py` compares where the game put the hero with that page's
 Connections row. The 2.0 and 2.4 starts come twice, with the chapter-1 gate's quest done
 (`_open`) and not (`_shut`); `map_page_9_3_top.json` stands the hero beside 9.3's hidden portal.
+
+## Raised starts: a chained save with a few fields changed
+
+A chain can skip what play would take game-hours for, such as levels, without leaving the chain:
+`build --base DIR` lays the description over the `describe` of the pair in `DIR` (a play test's
+output directory, its `data/saves` or `data/Documents`), so everything the description leaves
+out is the save of the part before. A raised `level` levels the hero up by the game's rules
+(`CHero::LevelUp`): the skill points of each level gained (none to level 9, 1 to 29, 2 from 30),
+EXP 0, and HP and MP the sums of `hero.dat`'s gains (needs `--app`).
+
+```sh
+PYTHONPATH=tools python3 -m mtport.savedata build tests/starts/raise/chapter_2_b.json \
+    OUT_DIR/data/saves --base build/test-output/mac-debug/play_chapter_2_a \
+    --app work/ipa/Payload/MapleThief.app
+```
+
+The overlays live in `tests/starts/raise/` (they hold only the changed keys, so they are not
+whole descriptions). A raised start equals no chained state, so the part that loads it is
+synthetic: CTest names it `play.chapter_2_<part>_synthetic` and builds its start in
+`starts.chapter_2_<part>` ([chapter-2-quests.md](chapter-2-quests.md)).
 
 ## The bot's world
 

@@ -766,8 +766,9 @@ def fight_section(ctx: Context, e: Entity) -> str:
             parts.append(
                 _p(
                     f"Its entrance would be {_scene(sc['in'])}, which ends by setting the bosses"
-                    " to attack. With no script to start it, how the fight plays out on the map"
-                    " has not been confirmed in play."
+                    " to attack. With no script to start it, the scene never plays: the boss is"
+                    " on the map and fighting from the hero's first moment there (confirmed in"
+                    " play, <code>play.chapter_2_f_synthetic</code>)."
                 )
             )
     lo, hi = contact_damage(lv, 0)

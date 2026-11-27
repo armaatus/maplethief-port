@@ -30,11 +30,14 @@ Command line::
     python3 -m mtport.savedata dump FILE...           # print each file as JSON
     python3 -m mtport.savedata new-character OUT_DIR --hp N --mp N [--slot S]
     python3 -m mtport.savedata build DESCRIPTION OUT_DIR [--slot S] [--app APP] [--language L]
+                                     [--base DIR]
     python3 -m mtport.savedata describe THEIF QUEST [--app APP] [--language L]
     python3 -m mtport.savedata names [OUT]            # work/re/names/save.json
 
 ``build`` writes the pair a JSON description names (docs/formats/save.md, "Building a save"),
-after the port's own save checks pass; ``describe`` prints the description of a pair.
+after the port's own save checks pass; ``describe`` prints the description of a pair. With
+``--base`` the description is laid over the description of the pair in DIR (a raised level
+levels the hero up by the game's rules, :func:`level_up`).
 """
 
 from __future__ import annotations
@@ -989,6 +992,53 @@ def describe(
     return out
 
 
+def skill_points(level: int) -> int:
+    """The skill points ``CHero::LevelUp`` gives for reaching ``level`` (mechanics.md, "EXP and
+    level-up"): none for 2 to 9, 1 for 10 to 29, 2 from 30."""
+    return 0 if level < 10 else (1 if level < 30 else 2)
+
+
+def level_up(desc: Mapping[str, Any], level: int, gains: Sequence[tuple[int, int]]) -> dict:
+    """``desc`` with the hero levelled up to ``level`` as ``CHero::LevelUp`` does, one level at
+    a time: the skill points of each new level, EXP 0, HP and MP filled to the table maxima (the
+    sums of ``hero.dat``'s ``hp_gain`` and ``mp_gain`` over levels 1 to ``level``; ``gains[i]``
+    is level i + 1's pair). Masteries and equipment add to the maxima when the game loads it."""
+    old = int(desc.get("level", 1))
+    if not old < level <= len(gains):
+        raise SaveDataError(f"level up: {old} to {level} (hero.dat has {len(gains)} levels)")
+    out = dict(desc)
+    out["level"] = level
+    out["exp"] = 0
+    out["sp"] = int(desc.get("sp", 0)) + sum(skill_points(n) for n in range(old + 1, level + 1))
+    out["hp"] = sum(hp for hp, _ in gains[:level])
+    out["mp"] = sum(mp for _, mp in gains[:level])
+    return out
+
+
+def over_base(
+    base: Mapping[str, Any], overlay: Mapping[str, Any], gains: Sequence[tuple[int, int]]
+) -> dict:
+    """``overlay``'s keys laid over ``base`` (a :func:`describe` of an existing pair). A level
+    above the base's levels the hero up (:func:`level_up`) before the overlay's other keys, so
+    an overlay may still set EXP, SP, HP or MP itself."""
+    out = dict(base)
+    if "level" in overlay and int(overlay["level"]) != int(base.get("level", 1)):
+        out = level_up(out, int(overlay["level"]), gains)
+    out.update({k: v for k, v in overlay.items() if k != "level"})
+    return out
+
+
+def find_pair(directory: Path, slot: int = 0) -> tuple[Path, Path]:
+    """``theif<slot>`` and ``quest<slot>`` in ``directory``: a play test's output directory
+    (``data/saves`` or ``data/Documents``) or the directory holding them."""
+    for d in (directory / "data" / "saves", directory / "data" / "Documents", directory):
+        if (d / f"theif{slot}").is_file() and (d / f"quest{slot}").is_file():
+            return d / f"theif{slot}", d / f"quest{slot}"
+    raise SaveDataError(
+        f"{directory}: no theif{slot} + quest{slot} (nor in data/saves, data/Documents)"
+    )
+
+
 # The byte ranges the game never writes (heap garbage in a saved file): left out of a comparison.
 CHARACTER_UNWRITTEN = ((0x009, 0x00D), (GAP_315[0], GAP_315[0] + GAP_315[1]))
 QUEST_UNWRITTEN = ((QUEST_TAIL, QUEST_SIZE),)
@@ -1049,6 +1099,14 @@ def build_files(
     files = {f"theif{slot}": encode_character(character), f"quest{slot}": encode_quest(quest)}
     check_built(files)
     return files
+
+
+def hero_gains(app: Path) -> list[tuple[int, int]]:
+    """hero.dat's (hp_gain, mp_gain) per level, level 1 first."""
+    from mtport import datatables as dt
+
+    rows = dt.load_dir(app / "English" / "data")["hero"].records
+    return [(int(r.hp_gain), int(r.mp_gain)) for r in rows]
 
 
 def bundle_inputs(app: Path, language: str = "en") -> tuple[list[Any], dict[str, str]]:
@@ -1136,6 +1194,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     bld.add_argument("description", type=Path)
     bld.add_argument("out_dir", type=Path)
     bld.add_argument("--slot", type=int, default=0, choices=range(SLOTS))
+    bld.add_argument(
+        "--base",
+        type=Path,
+        help="lay the description over the pair in this directory (needs --app for a level)",
+    )
     desc = sub.add_parser("describe", help="print the JSON description of a theif + quest pair")
     desc.add_argument("theif", type=Path)
     desc.add_argument("quest", type=Path)
@@ -1171,6 +1234,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise SaveDataError(f"{args.description}: {e}") from e
             if not isinstance(description, dict):
                 raise SaveDataError(f"{args.description}: not a JSON object")
+            if args.base is not None:
+                theif, quest = find_pair(args.base, args.slot)
+                base = describe(
+                    parse_character(theif.read_bytes()),
+                    parse_quest(quest.read_bytes()),
+                    skills,
+                    strings,
+                )
+                gains = hero_gains(args.app) if args.app else []
+                description = over_base(base, description, gains)
             files = build_files(description, args.slot, skills, strings)
             args.out_dir.mkdir(parents=True, exist_ok=True)
             for name, data in files.items():

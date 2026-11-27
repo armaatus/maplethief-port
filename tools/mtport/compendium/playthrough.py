@@ -18,7 +18,8 @@ filled in locally and never committed):
   Original + controller, Enhanced), a controller-first section and the Switch row.
 
 :data:`RUNS` is ours: the ``play.*`` CTests that play an entity, from
-docs/testing/chapter-1-quests.md. #295's run coverage report can extend it.
+docs/testing/chapter-1-quests.md and chapter-2-quests.md. #295's run coverage report can extend
+it.
 
 CLI::
 
@@ -46,8 +47,10 @@ DEFAULT_OUT = _REPO / "build" / "checklists"
 NONE_YET = "none yet"
 
 # The CTests that play an entity to the end and check it in guest memory
-# (docs/testing/chapter-1-quests.md). Keys are "kind:id"; a climb's id is its area.
+# (docs/testing/chapter-1-quests.md, chapter-2-quests.md). Keys are "kind:id"; a climb's id is
+# its area.
 _CH1 = "play.chapter_1_"
+_CH2 = "play.chapter_2_"
 RUNS: dict[str, str] = {
     **{f"quest:0-main-{n}": _CH1 + "a" for n in range(7)},
     "event:common-portal281-chapter_end": _CH1 + "a",
@@ -78,6 +81,22 @@ RUNS: dict[str, str] = {
     "quest:1-main-20": _CH1 + "l",
     "quest:1-sub-11": _CH1 + "l",
     "event:chapter1-Pirate-chapter_end": _CH1 + "l",
+    "quest:2-main-0": _CH2 + "a",
+    "quest:2-main-1": _CH2 + "a",
+    "quest:2-main-2": _CH2 + "b_synthetic",  # from a raised save (levels 34-60)
+    **{f"quest:2-main-{n}": _CH2 + "c" for n in (3, 4)},
+    **{f"quest:2-sub-{n}": _CH2 + "c" for n in (0, 1, 37)},
+    "event:chapter2-WolfMap-boss": _CH2 + "c",
+    "monster:66": _CH2 + "c",
+    **{f"quest:2-main-{n}": _CH2 + "d" for n in (5, 6)},
+    "quest:2-sub-2": _CH2 + "d",
+    "event:chapter2-PerionMap-scene-20": _CH2 + "d",
+    **{f"quest:2-main-{n}": _CH2 + "e" for n in (7, 71, 72)},
+    **{f"quest:2-sub-{n}": _CH2 + "e" for n in (35, 36)},
+    "quest:2-main-8": _CH2 + "f_synthetic",  # from a raised save (levels 62-70)
+    "quest:2-main-9": _CH2 + "f_synthetic",
+    "monster:68": _CH2 + "f_synthetic",
+    "event:chapter2-Pirate_Orbis-chapter_end": _CH2 + "f_synthetic",
     # From built start states (#302, docs/testing/skills-and-jobs.md).
     "job_advancement:1-2-1": "play.jobs_1_2_assassin_synthetic",
     "job_advancement:2-2-1": "play.jobs_2_2_assassin_synthetic",
