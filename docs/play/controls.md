@@ -55,7 +55,7 @@ On menus a yellow frame shows which button is selected: move it with the d-pad a
 
 The full list, by button: [gamepad defaults](../controls/keypad.md#gamepad-xbox-names-sdl3-names).
 
-The controller rumbles when you're hit and when you level up. Turn it off or make it weaker in the settings menu (Controls), or with `rumble = off` / `rumble_strength = 50` in [settings.ini](settings.md#the-settings-file).
+The controller rumbles where the phone vibrated (the game's own vibration option) and, with the Enhanced preset, on every hit and when you level up. Pick which in the settings menu (Controls → What rumbles), turn it off or make it weaker there, or use `rumble_events = game` / `rumble = off` / `rumble_strength = 50` in [settings.ini](settings.md#the-settings-file).
 
 ## Port shortcuts
 

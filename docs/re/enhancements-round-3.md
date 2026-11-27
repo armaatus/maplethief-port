@@ -50,7 +50,7 @@ Where it goes: inside the box's top edge on a translucent strip, so the corner l
 
 **Call** (delegated by Joris, 2026-11-13; to veto on #399's PR): `rumble_events = game | all`. `game` keeps only the game's vibration; `all` is today's behaviour. Original and Original + controller `game`, Enhanced `all`. The default without a settings file stays `all`, so a run without one behaves as today (ADR 0084 already lets the defaults differ from a preset). Two values rather than ADR 0070's sketched "game + level-up": the hit rumble that ignores the game's option is the port's addition as much as the level-up, and Enhanced keeps both.
 
-**Verdict: go** (#399, S). It closes a promise a settings row makes today.
+**Verdict: go** (#399, S). It closes a promise a settings row makes today. Built in #399 ([ADR 0053](../adr/0053-observed-functions-game-events-and-rumble.md)'s #399 addendum).
 
 ## The cash buttons
 

@@ -124,7 +124,8 @@ What goes in the presets:
   | Audio | `mute_unfocused` | on | on | on |
   | Audio | `gapless_music` | off | off | on |
   | Controls | `hide_keypad` | never | auto | auto |
-  | Controls | `rumble` | on | on | on (Original and Original + controller: the game's vibration only, once #72's follow-up splits it) |
+  | Controls | `rumble` | on | on | on (Original and Original + controller: the game's vibration only, through `rumble_events`, #399) |
+  | Controls | `rumble_events` (#399; after `rumble_strength`) | game | game | all |
   | Video | `perf_overlay` (#137, ADR 0071) | off | off | off |
   | Assists | `cash_shop` (#156, ADR 0072; after `perf_overlay`) | off | off | off |
   | Video | `pacing` (#80, ADR 0075; after `cash_shop`) | display | display | display |
@@ -169,7 +170,7 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Controls | `focus_highlight` / `button_prompts` | on / off | on / on | on / on | #146 |
 | Controls | `menu_repeat` / `confirm_guard` | off / off | on / on | on / on | #147 |
 | Gameplay | `crash_recovery` (after `autosave`; the Switch: off in every column, a platform row; [ADR 0151](0151-crash-recovery-points.md)) | off | off | on | #335 |
-| Controls | `rumble` splits by event (`rumble_events`) | game | game | game + level-up | #72 |
+| Controls | `rumble` splits by event (`rumble_events`; built: game / game / all, see #399's addendum) | game | game | game + level-up | #72, #399 |
 | Controls | `dead_zone` / `trigger_threshold` | – (0.30 / 0.5) | – | – | #67 |
 | Controls | `keypad_layout` | original | original | custom (the player's layout itself: –) | #159 |
 | Controls | bindings, glyph style | – (bindings.ini) | – | – | #70 |
@@ -331,3 +332,7 @@ Two more Switch rows, from [ADR 0145](0145-switch-performance-session-and-defaul
 ## Addendum: #389's key (2026-11-27)
 
 #389 added `restored_content` (off / off / off, Gameplay, `--restored-content on|off`, game-only, `Applies::kNextStart`), right after `fix_original_bugs` in the registry and in a new file. It makes content the game ships but never reaches reachable ([original-bugs.md → Unreachable content](../re/original-bugs.md#unreachable-content)); per [ADR 0069](0069-guest-function-hooks.md)'s #379 addendum that is never a bug fix, so unlike `fix_original_bugs` it is off in the Enhanced column too, and applying any preset turns a player's `on` off. The Original preset never changes. Its default is every column's value, so both pinned lists are unchanged. `presets: restored_content is off in every column; Enhanced never turns it on (#389)` pins it.
+
+## Addendum: #399's key (2026-11-27)
+
+#399 built the planned `rumble_events` as `game | all` (Controls, right after `rumble_strength`, `--rumble-events game|all`, `Applies::kAtOnce`: `Rumble::configure` takes it live). `game` passes only the game's own vibration; `all` adds the hit and the level-up the port observes ([ADR 0053](0053-observed-functions-game-events-and-rumble.md)'s #399 addendum). Columns: Original `game`, Original + controller `game`, Enhanced `all`. Two values rather than the planned "game + level-up": the hit rumble that ignores the game's vibration option is the port's addition as much as the level-up ([re/enhancements-round-3.md](../re/enhancements-round-3.md#rumble-per-event); decided under the delegation of 2026-11-13). The default without a settings file stays `all`, today's behaviour, so the defaults now differ from the Original column in `hide_keypad` and `rumble_events`, and from the Original + controller column in `rumble_events` too. Both pinned lists (`presets: no settings file is today's defaults`) gain it; `presets: rumble_events is the game's vibration in both Originals, all in Enhanced and without a file (#399)` pins the columns and the default.
