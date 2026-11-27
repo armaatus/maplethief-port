@@ -55,6 +55,8 @@ def test_compendium_and_docs_only_skip_the_build():
             "tests/test_handoff_checklists.py",
             ".github/ISSUE_TEMPLATE/bug.yml",
             "tests/test_issue_templates.py",
+            ".github/pull_request_template.md",
+            "tests/test_pr_template.py",
             "tests/fixtures/compendium/kb/monster.json",
             "scripts/compendium",
             "scripts/local-ci",
