@@ -852,6 +852,93 @@ inline void then_stock(Run &r, std::string what, int area, i32 id, i32 want, i32
     });
 }
 
+// Sells the materials (other items of type 5, item +0x8C) outside `keep` at the shop of `area`
+// that sells item `shop_item`: the bag's 48 other-item slots fill up with chapter 1's and 2's
+// drops (part E's 9.1 farm picked up nothing more). The Sell tab (right from Buy) lists the other
+// items (hero +0xD8) up to the first empty entry (ADR 0102). A on a row opens popup 6, how many:
+// 1 at first, and left from 1 goes round to the whole stack; A sells, then popup 111.
+struct Sell {
+    Nav nav;
+    double pressed = -10;
+    bool closing = false;
+    i32 popup = -2;
+    bool whole = false;
+};
+inline i32 sell_row(mt_cpu *cpu, const std::vector<i32> &keep, i32 &id) {
+    const Hero h = hero(cpu);
+    const u32 items = h.addr != 0 ? rd(cpu, h.addr + 0xD8) : 0;
+    for (u32 i = 0; items != 0 && i < 48; i++) {
+        const u32 it = rd(cpu, items + 4 * i);
+        if (it == 0) {
+            break;
+        }
+        id = rdi(cpu, it + 0x90);
+        if (rdi(cpu, it + 0x8C) == 5 && std::find(keep.begin(), keep.end(), id) == keep.end()) {
+            return static_cast<i32>(i);
+        }
+    }
+    return -1;
+}
+inline void then_sell(Run &r, std::string what, int area, i32 shop_item, std::vector<i32> keep,
+                      double timeout = 600) {
+    auto s = std::make_shared<Sell>();
+    const Goal g = shop_goal(area, shop_item);
+    then(r, "sell: " + what, timeout, [&r, s, g, keep](mt_cpu *cpu, double el) {
+        const Hero h = hero(cpu);
+        const auto press = [&](SDL_GamepadButton b) {
+            if (el - s->pressed >= 0.5) {
+                s->pressed = el;
+            }
+            hold(r, b, el - s->pressed < 0.1);
+        };
+        i32 id = -1;
+        const i32 row = sell_row(cpu, keep, id);
+        if (game_mode(cpu) == 2) {
+            hold(r, UP, false);
+            if (popup_id(cpu) != s->popup) {
+                s->popup = popup_id(cpu);
+                if (s->popup == 6) {
+                    std::printf("sell: item %d (%d in the bag), meso %d\n", id,
+                                item_count(cpu, h, id), h.meso);
+                }
+            }
+            if (in_shop(cpu)) {
+                const Shop sh = shop(cpu);
+                if (s->closing || row < 0) {
+                    s->closing = true;
+                    press(B);
+                } else if (sh.tab != 1) {
+                    press(RIGHT);
+                } else if (sh.selected != row) {
+                    press(sh.selected < row ? DOWN : UP);
+                } else {
+                    press(A);
+                }
+            } else if (popup_id(cpu) == 6 && !s->whole) {
+                s->whole = el - s->pressed >= 0.5;
+                press(LEFT);
+            } else {
+                s->whole = s->whole && popup_id(cpu) == 6;
+                press(A);
+            }
+            return false;
+        }
+        if (interrupted(r, cpu, el)) {
+            return false;
+        }
+        if (row < 0 || s->closing) {
+            release_all(r);
+            std::printf("sell done: meso %d\n", h.meso);
+            return true;
+        }
+        if (!drive(r, cpu, el, s->nav, g)) {
+            return false;
+        }
+        press(UP);
+        return false;
+    });
+}
+
 // --- equipment ---------------------------------------------------------------------------------
 
 // The item_equip id worn in slot `slot` (0 hat, 1 weapon, 2 overall, 3 earrings, 4 shoes;

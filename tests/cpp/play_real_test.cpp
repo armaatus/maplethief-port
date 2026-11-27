@@ -3008,6 +3008,8 @@ void chapter_2_e(Run &r, u64) {
     from_save(r);
     const FarmStyle fight = chapter_2_fight();
     then_spend_sp(r, "part E", k_chapter_2_build);
+    // The bag's other-item slots are full of chapter 1's and 2's drops: no room for item 69.
+    then_sell(r, "materials (Etc90)", 9, 4, {55, 63, 66, 69});
     then_stock(r, "item 4 (Etc90)", 9, 4, 200, 500, 600);
     then_stock(r, "item 7 (Etc90)", 9, 7, 80, 500, 600);
     then_farm(r, "25 of mob 41 on 9.2 (main 7)", 9, 2, {41}, ready(0, 7), 3600, fight);
