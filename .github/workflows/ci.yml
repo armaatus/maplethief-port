@@ -286,6 +286,19 @@ jobs:
         shell: pwsh
         run: ./scripts/test.ps1
 
+      # The Windows runner has no GPU; its only DXGI adapter is Direct3D's WARP (the Microsoft
+      # Basic Render Driver), which SDL GPU's D3D12 backend takes as adapter 0. A try (#364, ADR
+      # 0202): the gpu tests on it, after scripts/test.ps1 skipped them. It never fails the job;
+      # its log names the device ("gfx_gpu: device name") and each case's result.
+      - name: Try - gpu tests on D3D12's WARP adapter (Windows debug, never fails the job)
+        if: matrix.config == 'debug' && runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: ctest --preset $env:PRESET -L gpu -R '^gfx_gpu\.' -V
+        env:
+          MAPLETHIEF_GPU_TESTS: "1"
+          PRESET: ${{ runner.arch == 'ARM64' && 'win-arm64-debug' || 'win-debug' }}
+
       - name: Release build, C/C++ tests and package
         if: matrix.config == 'release'
         # pwsh on every OS: the default shell differs per OS (bash vs pwsh), and bash on
