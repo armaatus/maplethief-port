@@ -688,9 +688,11 @@ inline bool live_object(const mt_cpu *cpu, const std::string &name, int &x, int 
 // A through the pages; on a list of rows it picks the row whose value is `choose` (any row
 // when -1), with up / down, and A. Accept / Refuse: A (Accept). With a list of choices, the
 // n-th list of one chat takes the n-th (the last for the lists after it): an NPC whose list
-// leads to another (the chapter-2 smith: the kind, then the item).
+// leads to another (the chapter-2 smith: the kind, then the item). With `min_talks`, `done` counts
+// only after that many chats (a talk that changes nothing the predicate could see).
 inline void then_talk_to(Run &r, std::string what, int area, int map, const std::string &npc,
-                         std::vector<int> choices, Pred done, double timeout = 300) {
+                         std::vector<int> choices, Pred done, double timeout = 300,
+                         int min_talks = 0) {
     struct S {
         Nav nav;
         double chat = -1, field = -1, pressed = -10;
@@ -702,7 +704,8 @@ inline void then_talk_to(Run &r, std::string what, int area, int map, const std:
     if (choices.empty()) {
         choices.push_back(-1);
     }
-    then(r, "talk: " + what, timeout, [&r, s, g, npc, choices, done](mt_cpu *cpu, double el) {
+    then(r, "talk: " + what, timeout,
+         [&r, s, g, npc, choices, done, min_talks](mt_cpu *cpu, double el) {
         if (chatting(cpu)) {
             hold(r, UP, false);
             hold(r, LEFT, false);
@@ -758,7 +761,7 @@ inline void then_talk_to(Run &r, std::string what, int area, int map, const std:
         if (s->field < 0) {
             s->field = el;
         }
-        if (el - s->field >= 0.5 && done(cpu)) {
+        if (el - s->field >= 0.5 && s->talks >= min_talks && done(cpu)) {
             release_all(r);
             std::printf("talk done after %d talk(s): %s\n", s->talks, where(cpu).c_str());
             return true;
