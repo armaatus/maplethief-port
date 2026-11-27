@@ -242,6 +242,10 @@ typedef struct mt_uikit_control {
     float offset[2];
     float max_offset[2];
     float page[2];
+    /* Buttons: the name +[UIImage imageNamed:] was given for the image of its normal state
+     * ("AlertYesButton.png"), "" if it has none or it was made otherwise. The shell's buttons
+     * are images without a title; the speech names them by it (#393). */
+    char image[MT_UIKIT_CONTROL_NAME_MAX];
 } mt_uikit_control;
 
 /* Writes up to `max` of the reachable controls and scroll views into `out`, in tree order (the
@@ -251,6 +255,25 @@ typedef struct mt_uikit_control {
  * window, have some part on the screen, and a touch can reach it there (it is not covered).
  * Model values: a view sliding in counts at its destination. */
 uint32_t mt_uikit_controls(mt_cpu *cpu, mt_uikit_control *out, uint32_t max) MT_NOEXCEPT;
+
+/* --- labels (#393) ---------------------------------------------------------------------------- */
+
+#define MT_UIKIT_LABEL_TEXT_MAX 256
+
+/* A UILabel the player can see, for the speech: its text as UTF-8 (cut at a character's end to
+ * fit MT_UIKIT_LABEL_TEXT_MAX with its NUL). */
+typedef struct mt_uikit_label {
+    uint32_t object; /* the view */
+    uint32_t order;  /* its place in the view tree, back to front, as mt_uikit_control's */
+    float rect[4];   /* its bounds on the landscape screen, clipped to the screen */
+    char text[MT_UIKIT_LABEL_TEXT_MAX];
+} mt_uikit_label;
+
+/* Writes up to `max` of the visible labels with text into `out`, in tree order, and returns how
+ * many there are. A label counts if it and every superview are visible (not hidden, alpha 0.01
+ * or more), lie in a window and have some part on the screen; unlike a control, it need not take
+ * touches. Model values, as mt_uikit_controls. Reads only. */
+uint32_t mt_uikit_labels(mt_cpu *cpu, mt_uikit_label *out, uint32_t max) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

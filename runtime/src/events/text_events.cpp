@@ -11,7 +11,9 @@
 // message into +0x08 / +0x0C (CMPopup::Layout 0xE8B5).
 #include "maplethief/text_events.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -204,30 +206,38 @@ Speaker hero(mt_cpu *cpu, const char *key) {
     return Speaker{MT_TEXT_SPEAKER_HERO, -1, localized(cpu, "ScriptExtra", key)};
 }
 
-// The NPC's name in the NPC table (0x3990C finds the row, 0x37998 copies the field).
-Speaker npc(mt_cpu *cpu, i32 id) {
-    Speaker s{MT_TEXT_SPEAKER_NPC, id, {}};
-    const u32 table = rdptr(cpu, MT_TEXT_NPC_TABLE);
-    if (table == 0 || !readable(cpu, table, k_table_rows) || id < 0 || id > 0xFF) {
-        return s;
+// Field (offset, width) of the row whose key (column 0, a byte) is `id` in the data table whose
+// bytes the global `global` points to (0x3990C finds the row, 0x37998 copies the field), as
+// UTF-8; false without the table, the row or room for the field.
+bool table_field(mt_cpu *cpu, u32 global, i32 id, u32 offset, u32 width, std::string *out) {
+    const u32 table = rdptr(cpu, global);
+    if (table == 0 || !readable(cpu, table, k_table_rows) || id < 0 || id > 0xFF || width == 0) {
+        return false;
     }
     const u32 rows = cpu->mem[table + 2] | (cpu->mem[table + 3] << 8);
     const u32 stride = cpu->mem[table + 4] | (cpu->mem[table + 5] << 8);
-    if (stride <= k_npc_name + k_npc_name_width - 1) {
-        return s;
+    if (stride < offset + width) {
+        return false;
     }
     for (u32 r = 0; r < rows; r++) {
         const u32 row = table + k_table_rows + stride * r;
-        if (!readable(cpu, row, k_npc_name + k_npc_name_width)) {
-            break;
+        if (!readable(cpu, row, offset + width)) {
+            return false;
         }
         if (cpu->mem[row] == static_cast<u32>(id)) {
-            std::string name;
-            rd_cstr(cpu, row + k_npc_name, k_npc_name_width, &name);
-            s.name = table_text(name);
-            break;
+            std::string bytes;
+            rd_cstr(cpu, row + offset, width, &bytes);
+            *out = table_text(bytes);
+            return true;
         }
     }
+    return false;
+}
+
+// The NPC's name in the NPC table.
+Speaker npc(mt_cpu *cpu, i32 id) {
+    Speaker s{MT_TEXT_SPEAKER_NPC, id, {}};
+    table_field(cpu, MT_TEXT_NPC_TABLE, id, k_npc_name, k_npc_name_width, &s.name);
     return s;
 }
 
@@ -576,5 +586,25 @@ void mt_text_events_install(int enabled) noexcept {
 void mt_text_events_reset(void) noexcept { g_box = SceneBox{}; }
 
 mt_text_events_stats mt_text_events_get_stats(void) noexcept { return g_stats; }
+
+uint32_t mt_text_table_field(mt_cpu *cpu, uint32_t table, int32_t id, uint32_t offset,
+                             uint32_t width, char *out, uint32_t size) noexcept {
+    std::string text;
+    if (cpu == nullptr || !table_field(cpu, table, id, offset, width, &text)) {
+        if (out != nullptr && size > 0) {
+            out[0] = 0;
+        }
+        return 0;
+    }
+    if (out != nullptr && size > 0) {
+        std::size_t n = std::min<std::size_t>(text.size(), size - 1);
+        while (n > 0 && n < text.size() && (static_cast<unsigned char>(text[n]) & 0xC0) == 0x80) {
+            n--; // cut before a character's lead byte, not inside it
+        }
+        std::memcpy(out, text.data(), n);
+        out[n] = 0;
+    }
+    return static_cast<uint32_t>(text.size()) + 1;
+}
 
 void mt_text_events_reset_stats(void) noexcept { g_stats = mt_text_events_stats{}; }

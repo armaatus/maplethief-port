@@ -116,6 +116,7 @@ void runtime_targets(void *, mt_cpu *cpu, std::vector<FocusTarget> *out) {
         t.action = m.action;
         t.target = m.target;
         t.view_class = m.view_class;
+        t.image = m.image;
         for (int k = 0; k < 2; k++) {
             t.offset[k] = m.offset[k];
             t.max_offset[k] = m.max_offset[k];

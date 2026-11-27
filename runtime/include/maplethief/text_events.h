@@ -108,6 +108,15 @@ typedef struct mt_text_events_stats {
 mt_text_events_stats mt_text_events_get_stats(void) MT_NOEXCEPT;
 void mt_text_events_reset_stats(void) MT_NOEXCEPT;
 
+/* A text field of a data table (docs/formats/data-tables.md) as UTF-8, for the speech of the
+ * menus (#393): in the table whose bytes the global `table` points to (MT_TEXT_*_TABLE), the
+ * row whose key (column 0, a byte) is `id`, the field at byte `offset`, `width` bytes (to its
+ * first NUL). English is ASCII; Korean CP949 is converted. Written into `out` (`size` bytes,
+ * cut at a character's end, NUL-terminated). Returns the text's length + 1 (0: no table, no
+ * such row or the field out of the row). Reads only. */
+uint32_t mt_text_table_field(mt_cpu *cpu, uint32_t table, int32_t id, uint32_t offset,
+                             uint32_t width, char *out, uint32_t size) MT_NOEXCEPT;
+
 /* The guest facts (docs/re/speech.md). */
 #define MT_TEXT_FN_CHAT_FIRST_PAGE 0x34CD1u /* = MT_HOOK_FN_CHAT_BOX_FIRST_PAGE */
 #define MT_TEXT_FN_CHAT_NEXT_PAGE 0x34A05u  /* = MT_HOOK_FN_CHAT_BOX_NEXT_PAGE */
@@ -118,6 +127,9 @@ void mt_text_events_reset_stats(void) MT_NOEXCEPT;
 #define MT_TEXT_POPUP 0x11A96Cu             /* the CMPopup (pointer) */
 #define MT_TEXT_POPUP_ID 0x108C64u          /* the open popup's id, -1 none */
 #define MT_TEXT_POPUP_DEATH 0x68            /* the death popup's id */
+#define MT_TEXT_EQUIP_TABLE 0x11A9ACu       /* item_equip.dat's bytes: name (1, 32) */
+#define MT_TEXT_ETC_TABLE 0x11A9B0u   /* item_etc.dat's: name (1, 64), description (90, 128) */
+#define MT_TEXT_SKILL_TABLE 0x11A9F8u /* skill.dat's: name (1, 16), description (41, 128) */
 
 MT_EXTERN_C_END
 
