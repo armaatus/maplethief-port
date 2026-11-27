@@ -3,6 +3,12 @@
 // lines, set the page (+0x10) and its kind (+0x0C), and wrap the CMsg's text with Text_Wrap
 // 0x22EC5 into +0x18 / +0x1C; CChatBox::paint 0x32BBD names the speaker; CStateGame::Paint
 // 0x87501 hands CChatBox::drawChatBox 0x35189 the scene box's speaker (+0x4B4) and its two lines.
+// #392: CNotifyTextList::Add 0x78339 (list, text, colour) adds nothing while the list's most
+// entries (+0x0C) is below 1, else appends a CNotifyText (0x7798D) of the text; Popup_Open 0x3EAA1
+// (mgr, id, text, kind) closes the last popup, copies the message into the CMPopup at *0x11A96C
+// (+0x04: the preset at 0x108C70 + id * 0x200 when id < 100 and it is set, else the text), sets
+// the kind (+0x10) and its two button labels (+0x70, +0x74; CMPopup::SetKind 0xE799) and wraps the
+// message into +0x08 / +0x0C (CMPopup::Layout 0xE8B5).
 #include "maplethief/text_events.h"
 
 #include <cstdint>
@@ -53,6 +59,14 @@ constexpr u32 k_mob_name = 0x9C;
 constexpr u32 k_table_rows = 0x06;
 constexpr u32 k_npc_name = 1;
 constexpr u32 k_npc_name_width = 0x20;
+// CStateGame's notify lists (docs/re/hud-extras.md): +0x4C under the compass, +0x50 and +0x54
+// (the map's name) at the top centre.
+constexpr u32 k_state_notify[] = {0x4C, 0x50, 0x54};
+constexpr u32 k_notify_most = 0x0C; // CNotifyTextList: the most entries; 0 adds nothing
+// The CMPopup (docs/re/speech.md#popups).
+constexpr u32 k_popup_lines = 0x08; // the message's wrapped lines (new[] of new[] strings)
+constexpr u32 k_popup_line_count = 0x0C;
+constexpr u32 k_popup_kind = 0x10;
 // SkyCanvas::Instance and its current state (docs/re/program-flow.md).
 constexpr u32 k_canvas_global = 0x11A950u;
 constexpr u32 k_canvas_state = 0x0C;
@@ -281,9 +295,11 @@ void emit(u32 kind, const Speaker &who, i32 index, i32 count, i32 value, const s
     e.speaker = who.name.c_str();
     e.text = text.c_str();
     mt_tracef("text", "%s: speaker %u %d (%zu bytes), %d of %d, value %d, %zu bytes",
-              kind == MT_TEXT_EVENT_PAGE     ? "page"
-              : kind == MT_TEXT_EVENT_ANSWER ? "answer"
-                                             : "scene box",
+              kind == MT_TEXT_EVENT_PAGE        ? "page"
+              : kind == MT_TEXT_EVENT_ANSWER    ? "answer"
+              : kind == MT_TEXT_EVENT_SCENE_BOX ? "scene box"
+              : kind == MT_TEXT_EVENT_NOTICE    ? "notice"
+                                                : "popup",
               static_cast<unsigned>(who.kind), who.id, who.name.size(), index, count, value,
               text.size());
     for (const Listener &l : g_listeners) {
@@ -432,6 +448,89 @@ int paint_wrap(mt_cpu *cpu, const mt_hook_call *call) {
     return MT_HOOK_HANDLED;
 }
 
+// --- notify lines and popups (#392) --------------------------------------------------------
+
+// Which of the current CStateGame's lists `list` is (0 to 2), -1 if none.
+i32 notify_list(const mt_cpu *cpu, u32 list) {
+    const u32 state = current_state(cpu);
+    for (i32 i = 0; state != 0 && i < 3; i++) {
+        if (rdptr(cpu, state + k_state_notify[i]) == list) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// A C string in the caller's frame on the guest stack (from sp up, in the stacks' area), which
+// readable() does not cover: the hero's lines are formatted into a stack buffer. The read stops
+// at the NUL, inside the frame.
+bool stack_cstr(const mt_cpu *cpu, u32 at, std::size_t max, std::string *out) {
+    const u32 sp = cpu->r[13];
+    if (at < sp || at < MT_GUEST_STACK_AREA || at >= MT_GUEST_STACK_AREA_END ||
+        sp < MT_GUEST_STACK_AREA || static_cast<std::uint64_t>(at) + max > cpu->mem_size) {
+        return false;
+    }
+    out->clear();
+    for (u32 a = at; a < MT_GUEST_STACK_AREA_END && out->size() < max; a++) {
+        const char c = static_cast<char>(cpu->mem[a]);
+        if (c == 0) {
+            return true;
+        }
+        out->push_back(c);
+    }
+    return false;
+}
+
+int notify_wrap(mt_cpu *cpu, const mt_hook_call *call) {
+    const u32 list = cpu->r[0], at = cpu->r[1], colour = cpu->r[2];
+    // The caller's text (its stack buffer or a localized string), read before Add runs.
+    std::string text;
+    i32 most = 0;
+    const bool ok =
+        rd32(cpu, list + k_notify_most, &most) &&
+        (rd_cstr(cpu, at, k_max_line * 2, &text) || stack_cstr(cpu, at, k_max_line * 2, &text));
+    call->original(cpu);
+    g_stats.entries++;
+    if (!ok) {
+        g_stats.ignored++;
+        return MT_HOOK_HANDLED;
+    }
+    const std::string line = joined({table_text(text)});
+    if (most < 1 || line.empty()) {
+        return MT_HOOK_HANDLED; // Add added nothing, or a line with nothing to say
+    }
+    g_stats.notices++;
+    emit(MT_TEXT_EVENT_NOTICE, Speaker{}, static_cast<i32>(colour & 0xFFFFFFu), 0,
+         notify_list(cpu, list), line);
+    return MT_HOOK_HANDLED;
+}
+
+// The popup Popup_Open just set.
+void popup(mt_cpu *cpu) {
+    const u32 box = rdptr(cpu, MT_TEXT_POPUP);
+    i32 id = 0, kind = 0, lines = 0;
+    std::vector<std::string> text;
+    if (box == 0 || !rd32(cpu, MT_TEXT_POPUP_ID, &id) || !rd32(cpu, box + k_popup_kind, &kind) ||
+        !rd32(cpu, box + k_popup_line_count, &lines) || lines < 0 || lines > k_max_lines) {
+        g_stats.ignored++;
+        return;
+    }
+    const u32 array = rdptr(cpu, box + k_popup_lines);
+    if ((lines > 0 && array == 0) || !strings_at(cpu, array, lines, &text)) {
+        g_stats.ignored++;
+        return;
+    }
+    g_stats.popups++;
+    emit(MT_TEXT_EVENT_POPUP, Speaker{}, id, 0, kind, joined(text));
+}
+
+int popup_wrap(mt_cpu *cpu, const mt_hook_call *call) {
+    call->original(cpu);
+    g_stats.entries++;
+    popup(cpu);
+    return MT_HOOK_HANDLED;
+}
+
 } // namespace
 
 int mt_text_events_add_listener(mt_text_event_fn fn, void *user) noexcept {
@@ -467,6 +566,8 @@ void mt_text_events_install(int enabled) noexcept {
     mt_hook_wrap(MT_HOOK_FN_CHAT_BOX_FIRST_PAGE, page_wrap, nullptr, enabled);
     mt_hook_wrap(MT_HOOK_FN_CHAT_BOX_NEXT_PAGE, page_wrap, nullptr, enabled);
     mt_hook_wrap(MT_HOOK_FN_STATE_GAME_PAINT, paint_wrap, nullptr, enabled);
+    mt_hook_wrap(MT_HOOK_FN_NOTIFY_TEXT_ADD, notify_wrap, nullptr, enabled);
+    mt_hook_wrap(MT_HOOK_FN_POPUP_OPEN, popup_wrap, nullptr, enabled);
     if (enabled == 0) {
         g_box = SceneBox{};
     }

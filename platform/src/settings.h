@@ -687,6 +687,8 @@ struct Settings {
     bool speech = false;                            // speech, --speech (on | off)
     std::uint32_t speech_rate = kSpeechRateDefault; // --speech-rate (50 to 200, percent)
     std::uint32_t speech_volume = kSpeechVolumeMax; // --speech-volume (0 to 100, percent)
+    // The notify lines (pick-ups, meso, EXP, the map's name) said too (#392, ADR 0191).
+    bool speech_notices = true; // speech_notices, --speech-notices (on | off)
     // The picture adjustments (#187): the present stage's colour step with the filter.
     std::uint32_t brightness = kPictureDefault; // --brightness (50 to 150, percent)
     std::uint32_t contrast = kPictureDefault;   // --contrast (50 to 150, percent)

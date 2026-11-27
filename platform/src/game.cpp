@@ -3296,7 +3296,7 @@ void start_menu(Game &g, const GameOptions &options) {
     }
     // Text-to-speech (#390, ADR 0174): the rows say "not available" where no system voice loaded
     // (Linux without libspeechd). The Switch's menu has no speech rows (kCapSpeech).
-    for (const char *key : {"speech", "speech_rate", "speech_volume"}) {
+    for (const char *key : {"speech", "speech_rate", "speech_volume", "speech_notices"}) {
         g.menu.set_setting_unavailable(key, [&g] {
             return g.speech.available() ? std::string() : std::string(tr(Txt::speech_unavailable));
         });

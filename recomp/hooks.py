@@ -98,6 +98,11 @@ HOOKED: dict[int, Hooked] = {
         "(data manager, hero): the second of the game's save pair (after SaveSaveData 0x38711); "
         "the wrapper runs it, then backs up each slot whose files changed (#148, ADR 0078)",
     ),
+    0x3EAA1: Hooked(
+        "Popup_Open",
+        "(mgr, id, text, kind): the engine's popup; the text events (#392) read its message, "
+        "kind and button labels (CMPopup at *0x11A96C) after it for the speech",
+    ),
     0x46DB9: Hooked(
         "Shop_OnKey",
         "(shop, key, game): the NPC shop's keys (game mode 2); up and down move the list's "
@@ -178,6 +183,11 @@ HOOKED: dict[int, Hooked] = {
         "(object, left, top, right, bottom at sp): whether the object's box (0x6CE5D) meets the "
         "rect; CDropItems::Update 0x5BC75 asks it for the hero and each lying drop (the call at "
         "0x5BCEE); auto_loot (#175) widens the drop's rect for that call only",
+    ),
+    0x78339: Hooked(
+        "CNotifyTextList::Add",
+        "(list, text, colour): a notify line (pick-ups, meso, EXP, the map's name); the text "
+        "events (#392) read the text for the speech",
     ),
     0x83C71: Hooked(
         "CStateGame::PaintExitToMenu",

@@ -1765,6 +1765,7 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"speech", false, "no system voice open to homebrew (kCapSpeech, ADR 0174)"},
     {"speech_rate", false, "kCapSpeech"},
     {"speech_volume", false, "kCapSpeech"},
+    {"speech_notices", false, "kCapSpeech"},
     {"brightness", true, ""},
     {"contrast", true, ""},
     {"saturation", true, ""},

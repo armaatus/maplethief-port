@@ -97,6 +97,7 @@ const Expected kExpected[] = {
     {"speech", {nullptr, nullptr, nullptr}},
     {"speech_rate", {nullptr, nullptr, nullptr}},
     {"speech_volume", {nullptr, nullptr, nullptr}},
+    {"speech_notices", {nullptr, nullptr, nullptr}},
     {"brightness", {nullptr, nullptr, nullptr}},
     {"contrast", {nullptr, nullptr, nullptr}},
     {"saturation", {nullptr, nullptr, nullptr}},
