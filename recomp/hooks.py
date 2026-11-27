@@ -211,6 +211,12 @@ HOOKED: dict[int, Hooked] = {
         "screen_shake below 100 (#158, ADR 0093) it sees the game's amplitude and a new one it "
         "sets is scaled for the rest of the frame",
     ),
+    0x853E5: Hooked(
+        "CStateGame::StartScene",
+        "(this, scene): builds scene `scene`'s command list and sets game mode 9; a boss killed "
+        "while the hero is knocked back (CHero +0x119) leaves the scene's keys dropped, so the "
+        "hook clears the knock-back first (fix_original_bugs, #420, docs/re/original-bugs.md 19)",
+    ),
     0x87501: Hooked(
         "CStateGame::Paint",
         "(this): the field's frame; a scene's camera shake (+0x47E on, amplitude +0x488) is "

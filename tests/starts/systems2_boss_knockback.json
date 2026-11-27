@@ -1,0 +1,15 @@
+{
+ "level": 70,
+ "branch": 2,
+ "job_tier": 2,
+ "hp": 3000,
+ "mp": 1670,
+ "meso": 20000,
+ "map": [9, 5],
+ "position": [-1, -1],
+ "equipped": [null, {"id": 28, "slots_left": 5, "attack": 25}, null, null, null],
+ "etc_inventory": [[11, 200], [3, 50]],
+ "chapter": 2,
+ "main": {"8": 1},
+ "side": {}
+}

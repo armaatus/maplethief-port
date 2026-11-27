@@ -110,6 +110,9 @@ MT_EXTERN_C_BEGIN
 #define MT_HOOK_FN_CHANGE_MAP 0x81369u
 /* CStateGame::PaintExitToMenu (this): the scene runner, from CStateGame::Paint */
 #define MT_HOOK_FN_SCENE_RUNNER 0x83C71u
+/* CStateGame::StartScene (this, scene): a scene's start, game mode 9 (#420: the hero's knock-back
+ * is cleared first under fix_original_bugs) */
+#define MT_HOOK_FN_START_SCENE 0x853E5u
 #define MT_HOOK_FN_STATE_GAME_PAINT 0x87501u /* CStateGame::Paint (this): the field's frame */
 /* CStateGame::OnKeyPressed (this, key): the field's keys and popups; #336 checks the autosave's
  * guards on the death popup's exit to the main menu (popup 0x6D) */
@@ -213,9 +216,18 @@ void mt_hooks_install_quest_page_fix(int enabled) MT_NOEXCEPT;
  * original alone. Registers it, `enabled` or not (the original). */
 void mt_hooks_install_portal620_fix(int enabled) MT_NOEXCEPT;
 
+/* CStateGame::StartScene 0x853E5 (#420, docs/re/original-bugs.md 19): CStateGame::OnKeyPressed
+ * 0x8D4C9 drops every key while the hero's knock-back byte CHero +0x119 is set, and only
+ * CHero::vf2 0x66189 clears it (with +0x108, which CHero::TakeDamage 0x65B55 sets with it) when
+ * the hero lands, from the field update that game mode 9 does not run. A boss killed by a blow
+ * landed while the hero was knocked back so starts its end scene with every key dropped. The
+ * hook clears both bytes of the hero (CStateGame +0x30) and runs the original. Registers it,
+ * `enabled` or not (the original). */
+void mt_hooks_install_scene_knockback_fix(int enabled) MT_NOEXCEPT;
+
 /* Every fix of an original bug (docs/re/original-bugs.md, #155), the setting fix_original_bugs
- * (on in the Enhanced preset): the portal items, the early Play guard and portal620, each
- * registered `enabled` or not. */
+ * (on in the Enhanced preset): the portal items, the early Play guard, portal620 and the
+ * scene knock-back fix, each registered `enabled` or not. */
 void mt_hooks_install_original_bug_fixes(int enabled) MT_NOEXCEPT;
 
 /* A scene's camera shake (#158, docs/re/screen-shake.md). The scene runner

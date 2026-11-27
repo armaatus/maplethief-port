@@ -1,7 +1,7 @@
 # Systems sweep 2
 
 The cash shop's tiles, the four restores, the Reverse, the ten upgrade scrolls, the Pigmy dialog
-and `portal620`, played from built start states ([start-states.md](start-states.md),
+`portal620` and a boss killed with the hero knocked back, played from built start states ([start-states.md](start-states.md),
 [#304](https://github.com/armaatus/maplethief-port/issues/304)). The tests are `play_real_test`
 modes; CTest builds each start (`starts.<name>`, from `tests/starts/<name>.json`) and runs the
 mode on it (`play.<mode>_synthetic`, `real_assets`). Every run also passes the common checks of
@@ -19,6 +19,8 @@ ctest --preset mac-debug -R "play\.systems2_"
 | `play.systems2_scrolls_failure_synthetic` | `systems2_scrolls_failure`: the same items with 5 successes; each scroll twice | The five type-3 scrolls fail (0 %): a slot used, no stats; the five type-8 ones still succeed. Then with no slot left scrolls 19 and 133 are refused with popup `0x67`, nothing used; a scroll's sub-list has two rows, so no quick slot can hold it |
 | `play.systems2_pigmy_synthetic` | `systems2_pigmy`: level-30 Rogue with a Pink Pigmy Egg | No map places the Pigmy NPCs, so the run calls `CStateGame::SetPigmeState` itself. State 1, row 1 (hatch) leads to 6, whose Accept closes as Refuse (the box's row is still 1; [original-bugs.md](../re/original-bugs.md#unreachable-content)): no connect. From state 7: 0xF, one connect refused by the network stub, no frame, 0x11, closed. The egg stays |
 | `play.systems2_portal620_synthetic` | `systems2_portal620`: level-60 Bandit of chapter 2 on map 6.2 | Up at `portal620` leads to 6.1 with the hero still at its 6.2 coordinates, (41, 751), not at `portal611` ([original bug 14](../re/original-bugs.md#14-commonportal620-warps-to-a-portal-that-does-not-exist)); alive in the field |
+| `play.systems2_boss_knockback_synthetic` | `systems2_boss_knockback`: level-70 Bandit of chapter 2 on map 9.5 (mob 68's map) | Mob 68 held at 1 HP and killed by the bot; once its end scene is queued (game mode 10) the run sets `CHero +0x119` and `+0x108`. With `fix_original_bugs` off, after 60 s of A every 0.6 s still game mode 9 with `+0x119` set ([original bug 19](../re/original-bugs.md#19-a-boss-killed-while-the-hero-is-knocked-back-locks-its-end-scene)) |
+| `play.systems2_boss_knockback_fixed_synthetic` | `systems2_boss_knockback` | The same with `fix_original_bugs` on ([#420](https://github.com/armaatus/maplethief-port/issues/420)): the scene starts with `+0x119` clear and A plays it through to the field (3.4 s) |
 
 `input.menu_shops_save_auto_potion` runs `input.menu_shops_save` with `auto_potion = 50`: the
 stall [qol.md](../re/qol.md) recorded on 2026-11-02 no longer happens.

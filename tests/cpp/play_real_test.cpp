@@ -12748,6 +12748,98 @@ void systems2_portal620(Run &r, u64) { portal620_run(r, false); }
 void systems2_portal620_fixed(Run &r, u64) { portal620_run(r, true); }
 void systems2_portal620_checks(Run &, u64) {}
 
+// --- a boss killed while the hero is knocked back (original bug 19, #420) ---------------------
+//
+// systems2_boss_knockback: a level-70 Bandit of chapter 2 on 9.5, mob 68's map (no map script,
+// the boss there from the first tick). The run keeps mob 68 at 1 HP and the bot kills it; when
+// CMob::Die 0x73349 has queued the end scene (game mode 10), before CStateGame::Paint starts it
+// (StartScene 0x853E5), the run sets the hero's knock-back bytes CHero +0x119 and +0x108, as a
+// blow that landed mid knock-back leaves them. Then A every 0.6 s. With fix_original_bugs off the
+// scene's box takes no key: still game mode 9, +0x119 still set, after 60 s of keys
+// (docs/re/original-bugs.md, bug 19). systems2_boss_knockback_fixed: the same with it on: the
+// hook on StartScene clears both bytes and the scene plays through to the field.
+struct BossKnockRun {
+    bool forced = false;
+    double scene_at = -1;
+};
+std::shared_ptr<BossKnockRun> g_boss_knock;
+
+void boss_knockback_run(Run &r, bool fixed) {
+    using namespace quest_bot;
+    r.settings.fix_original_bugs = fixed;
+    g_boss_knock = std::make_shared<BossKnockRun>();
+    from_save(r);
+    then_wait_field(r);
+    // One hit kills it: its HP held at 1 while the field runs (the scene queued, nothing more).
+    // Each turn, after the run's own monitor.
+    auto monitor_turn = r.on_turn;
+    r.on_turn = [monitor_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        if (game_mode(cpu) == 0) {
+            for (const Mob &m : mobs(cpu)) {
+                if (m.id == 68 && m.hp > 1) {
+                    std::uint32_t one = 1;
+                    std::memcpy(cpu->mem + m.addr + 0x88, &one, 4);
+                }
+            }
+        }
+        if (game_mode(cpu) == 10 && !g_boss_knock->forced) {
+            const Hero h = hero(cpu);
+            cpu->mem[h.addr + 0x119] = 1;
+            cpu->mem[h.addr + 0x108] = 1;
+            g_boss_knock->forced = true;
+            std::printf("boss knock-back: the end scene queued; CHero +0x119 and +0x108 set\n");
+        }
+    };
+    FarmStyle boss;
+    boss.restock = {};
+    then_farm(
+        r, "mob 68 on 9.5 (held at 1 HP)", 9, 5, {68},
+        [](mt_cpu *cpu) { return game_mode(cpu) == 9 || game_mode(cpu) == 10; }, 300, boss);
+    then(r, "the end scene starts", 10,
+         [](mt_cpu *cpu, double) { return game_mode(cpu) == 9 && g_boss_knock->forced; });
+    if (fixed) {
+        then(r, "A through the end scene to the field", 600, [&r](mt_cpu *cpu, double el) {
+            if (g_boss_knock->scene_at < 0) {
+                g_boss_knock->scene_at = el;
+                check(!hero(cpu).knocked, "bug 19 fixed: the scene starts with CHero +0x119 clear");
+            }
+            hold(r, A, std::fmod(el, 0.6) < 0.1);
+            if (field(cpu)) {
+                hold(r, A, false);
+                std::printf("boss knock-back (fix_original_bugs on): the end scene played through "
+                            "in %.1f s; now %s\n",
+                            el, where(cpu).c_str());
+                return true;
+            }
+            return false;
+        });
+    } else {
+        then(r, "A for 60 s in the end scene", 70, [&r](mt_cpu *cpu, double el) {
+            hold(r, A, std::fmod(el, 0.6) < 0.1);
+            if (game_mode(cpu) != 9 || !hero(cpu).knocked) {
+                hold(r, A, false);
+                check(false, "original bug 19: the end scene left game mode 9 with the hero "
+                             "knocked back (" +
+                                 where(cpu) + ")");
+                return true;
+            }
+            if (el < 60) {
+                return false;
+            }
+            hold(r, A, false);
+            std::printf("boss knock-back (fix_original_bugs off): after 60 s of A still %s\n",
+                        where(cpu).c_str());
+            check(true, "original bug 19: game mode 9 and CHero +0x119 set after 60 s of keys");
+            return true;
+        });
+    }
+    then_finish(r);
+}
+void systems2_boss_knockback(Run &r, u64) { boss_knockback_run(r, false); }
+void systems2_boss_knockback_fixed(Run &r, u64) { boss_knockback_run(r, true); }
+void systems2_boss_knockback_checks(Run &, u64) {}
+
 // --- the compendium's NPCs, shops and recipes in the port (#220) ---------------------------------
 //
 // compendium_npcs: from the start of chapter 2 (tests/starts/chapter_2.json, equal to part L's
@@ -14622,6 +14714,9 @@ constexpr Mode k_modes[] = {
     {"systems2_pigmy", systems2_pigmy, systems2_pigmy_checks, 1},
     {"systems2_portal620", systems2_portal620, systems2_portal620_checks, 1},
     {"systems2_portal620_fixed", systems2_portal620_fixed, systems2_portal620_checks, 1},
+    {"systems2_boss_knockback", systems2_boss_knockback, systems2_boss_knockback_checks, 1},
+    {"systems2_boss_knockback_fixed", systems2_boss_knockback_fixed, systems2_boss_knockback_checks,
+     1},
     {"compendium_npcs", compendium_npcs, compendium_npcs_checks, 1},
     {"map_page", map_page, map_page_checks, 1, false, map_page_setup},
     {"korean_chapter_1_a", korean_chapter_1_a, korean_checks, 1, false, korean_setup},
