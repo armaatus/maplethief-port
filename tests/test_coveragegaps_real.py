@@ -38,7 +38,7 @@ def test_the_doc_is_current(program) -> None:
 def test_every_function_has_a_reason_a_test_or_a_follow_up(program) -> None:
     """#305's bar, as narrowed on the issue: every unexecuted game function is dead (with
     evidence) or difftested; the unreachable and missed ones name their follow-up (#432,
-    #433). Every rule still matches a function, so none is stale."""
+    #433, then #435). Every rule still matches a function, so none is stale."""
     text = (REPO / DOC).read_text(encoding="utf-8")
     _, gaps = cg.document(program, cg.executed_from_doc(program, text))
     follow_ups = (f"; follow-up #{cg.HOST_TESTS}", f"; follow-up #{cg.RUN_STEPS}")

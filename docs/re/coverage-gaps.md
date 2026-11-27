@@ -4,11 +4,11 @@
 
 Every game function that no automated run has entered, with a reason or a test ([#305](https://github.com/armaatus/maplethief-port/issues/305)). The runs are the whole real-asset test suite under the run coverage ([testing/run-coverage.md](../testing/run-coverage.md), ADR 0160). Chartboost's functions are left out: they never run by design ([libraries.md](libraries.md)).
 
-- **Game functions: 1,980; executed by a run: 1,603; not executed: 377.**
-- `dead`: 202. No live code reaches them: every reference to them (call, address taken, selector load, vtable, script native) comes from dead code, or there is none.
-- `difftest`: 81. Live, and the differential test (ADR 0017) runs them on 1,000 random inputs each against Unicorn with zero mismatches.
+- **Game functions: 1,980; executed by a run: 1,645; not executed: 335.**
+- `dead`: 215. No live code reaches them: every reference to them (call, address taken, selector load, vtable, script native) comes from dead code, or there is none.
+- `difftest`: 62. Live, and the differential test (ADR 0017) runs them on 1,000 random inputs each against Unicorn with zero mismatches.
 - `unreachable`: 0. Live, but only from a state no run can produce; the evidence says which. The host-driven test `play.host_events` enters such functions ([#432](https://github.com/armaatus/maplethief-port/issues/432), ADR 0242).
-- `missed`: 94. Live and reachable by play; no run enters them yet. Run steps for them: [#433](https://github.com/armaatus/maplethief-port/issues/433).
+- `missed`: 58. Live and reachable by play; no run enters them yet. Run steps for them: [#435](https://github.com/armaatus/maplethief-port/issues/435).
 - A `dead` row with a reason in words comes from a rule: the port or the shipped data never takes the path.
 
 How a function is classed is in the module docstring of `tools/mtport/coveragegaps.py`. Names come from the binary's symbols, the ObjC and C++ metadata and the committed names files ([function-names.md](function-names.md)).
@@ -42,7 +42,7 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0x32ED` | `-[EAGLView LCDheight]` | `app-objc` | dead | no code loads selector `LCDheight`, and no framework or nib sends it |
 | `0x3311` | `-[EAGLView LCDwidth]` | `app-objc` | dead | no code loads selector `LCDwidth`, and no framework or nib sends it |
 | `0x3895` | `-[EAGLView didReceiveMemoryWarning]` | `app-objc` | dead | `EAGLView` is a `UIView`: UIKit sends `didReceiveMemoryWarning` to view controllers only, and the one load of the selector is the method's own send to `super`, which `UIView` does not implement (#432) |
-| `0x3B61` | `-[EAGLView enalbeHelpScrollKey]` | `app-objc` | missed | selector `enalbeHelpScrollKey` loaded by live `Shell_EnalbeHelpScrollKey`; follow-up #433 |
+| `0x3B61` | `-[EAGLView enalbeHelpScrollKey]` | `app-objc` | missed | selector `enalbeHelpScrollKey` loaded by live `Shell_EnalbeHelpScrollKey`; follow-up #435 |
 | `0x3BC5` | `-[EAGLView disableCashShopKey]` | `app-objc` | dead | selector `disableCashShopKey` loaded only by dead `-[EAGLView disableCashShopKey]` |
 | `0x3C91` | `-[EAGLView disableMapKey]` | `app-objc` | dead | selector `disableMapKey` loaded only by dead `-[EAGLView disableMapKey]` |
 | `0x3E29` | `-[EAGLView disableMarketKey]` | `app-objc` | dead | selector `disableMarketKey` loaded only by dead `-[EAGLView disableMarketKey]` |
@@ -66,24 +66,24 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0x6351` | `FUN_00006350` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x6379` | `FUN_00006378` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x65F5` | `Device_GetModel` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x6655` | `Shell_EnalbeHelpScrollKey` | `engine` | missed | called by live `PopupMenu_OptionTabOnKey`; follow-up #433 |
-| `0xAABD` | `IStateAdaptor::PopState` | `engine` | missed | virtual, in the live vtable of `IStateAdaptor`; follow-up #433 |
-| `0xAB31` | `IStateAdaptor::PopAndRestart` | `engine` | missed | virtual, in the live vtable of `IStateAdaptor`; follow-up #433 |
-| `0xABE9` | `IStateAdaptor::PopAllStates` | `engine` | missed | virtual, in the live vtable of `IStateAdaptor`; follow-up #433 |
+| `0x6655` | `Shell_EnalbeHelpScrollKey` | `engine` | missed | called by live `PopupMenu_OptionTabOnKey`; follow-up #435 |
+| `0xAABD` | `IStateAdaptor::PopState` | `engine` | dead | a state's virtual that no code calls through its slot: the state stack is never pushed or popped, and no caller sends the pointer event (re/program-flow.md, re/cpp-classes.md) |
+| `0xAB31` | `IStateAdaptor::PopAndRestart` | `engine` | dead | a state's virtual that no code calls through its slot: the state stack is never pushed or popped, and no caller sends the pointer event (re/program-flow.md, re/cpp-classes.md) |
+| `0xABE9` | `IStateAdaptor::PopAllStates` | `engine` | dead | a state's virtual that no code calls through its slot: the state stack is never pushed or popped, and no caller sends the pointer event (re/program-flow.md, re/cpp-classes.md) |
 | `0xAD41` | `IStateAdaptor::SetParent` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xAD65` | `IStateAdaptor::GetRootState` | `engine` | missed | virtual, in the live vtable of `IStateAdaptor`; follow-up #433 |
+| `0xAD65` | `IStateAdaptor::GetRootState` | `engine` | dead | a state's virtual that no code calls through its slot: the state stack is never pushed or popped, and no caller sends the pointer event (re/program-flow.md, re/cpp-classes.md) |
 | `0xADC1` | `IStateAdaptor::OnPointerEvent` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xAF81` | `IStateAdaptor::PushState` | `engine` | missed | virtual, in the live vtable of `IStateAdaptor`; follow-up #433 |
+| `0xAF81` | `IStateAdaptor::PushState` | `engine` | dead | a state's virtual that no code calls through its slot: the state stack is never pushed or popped, and no caller sends the pointer event (re/program-flow.md, re/cpp-classes.md) |
 | `0xB0F5` | `IStateAdaptor::vf12` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xB10D` | `IStateAdaptor::Resume` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xB11D` | `IStateAdaptor::vf8` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xB141` | `IStateAdaptor::vf23` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB1C1` | `FUN_0000b1c0` | `engine` | missed | called by live `IStateAdaptor::IStateAdaptor`; follow-up #433 |
-| `0xB6E9` | `SaveFile_ThiefSlotExists` | `engine` | missed | called by live `FUN_00046a28`; follow-up #433 |
-| `0xF34D` | `FUN_0000f34c` | `engine` | missed | called by live `CStateGame::SetPigmeState`; follow-up #433 |
-| `0x12591` | `FUN_00012590` | `engine` | missed | called by live `CStateTitle::Paint`; follow-up #433 |
-| `0x1267D` | `FUN_0001267c` | `engine` | missed | called by live `CStateTitle::LoadSettings`; follow-up #433 |
-| `0x1D309` | `CMSoundPlayer::VibratePreview` | `engine` | missed | called by live `FUN_00046a28`; follow-up #433 |
+| `0xB1C1` | `FUN_0000b1c0` | `engine` | missed | called by live `IStateAdaptor::IStateAdaptor`; follow-up #435 |
+| `0xB6E9` | `SaveFile_ThiefSlotExists` | `engine` | missed | called by live `FUN_00046a28`; follow-up #435 |
+| `0xF34D` | `FUN_0000f34c` | `engine` | missed | called by live `CStateGame::SetPigmeState`; follow-up #435 |
+| `0x12591` | `FUN_00012590` | `engine` | missed | called by live `CStateTitle::Paint`; follow-up #435 |
+| `0x1267D` | `FUN_0001267c` | `engine` | missed | called by live `CStateTitle::LoadSettings`; follow-up #435 |
+| `0x1D309` | `CMSoundPlayer::VibratePreview` | `engine` | missed | called by live `FUN_00046a28`; follow-up #435 |
 | `0x1D5F5` | `alBufferDataStaticProc` | `lib:apple-openal-support` | dead | reached only from `SoundPlayer_LoadEffects`'s branch for id 0, a music id, so it cannot run (re/audio.md) |
 | `0x21F21` | `FUN_00021f20` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x21F39` | `FUN_00021f38` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
@@ -93,40 +93,36 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0x23749` | `FUN_00023748` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x23791` | `FUN_00023790` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x23819` | `FUN_00023818` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x24109` | `FUN_00024108` | `engine` | missed | called by live `FUN_0003a898`; follow-up #433 |
-| `0x24151` | `FUN_00024150` | `engine` | missed | called by live `FUN_0003a898`; follow-up #433 |
-| `0x24171` | `FUN_00024170` | `engine` | missed | called by live `DrawImageAnchored`; follow-up #433 |
-| `0x24DA9` | `FUN_00024da8` | `engine` | missed | called by live `CDataMgr::drawConfig`, `HUD_Paint`, `CStateGame::Paint`; follow-up #433 |
+| `0x24109` | `FUN_00024108` | `engine` | missed | called by live `FUN_0003a898`; follow-up #435 |
+| `0x24151` | `FUN_00024150` | `engine` | missed | called by live `FUN_0003a898`; follow-up #435 |
+| `0x24171` | `FUN_00024170` | `engine` | missed | called by live `DrawImageAnchored`; follow-up #435 |
+| `0x24DA9` | `FUN_00024da8` | `engine` | missed | called by live `CDataMgr::drawConfig`, `HUD_Paint`, `CStateGame::Paint`; follow-up #435 |
 | `0x25721` | `SkyCanvas::KeyEvent4` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x25771` | `FUN_00025770` | `engine` | missed | called by live `CStateMainMenu::OnKeyPressed`; follow-up #433 |
-| `0x25889` | `SkyCanvas::RepaintRect` | `engine` | missed | called by live `SkyCanvas::Tick`; follow-up #433 |
-| `0x2E5E1` | `CAniManager::makeAniYetiIn` | `engine` | missed | called by live `CStateGame::StartScene`; follow-up #433 |
-| `0x36D89` | `CDataMgr::CountCoupons` | `engine` | missed | called by live `CStateGame::OnKeyPressed`, `CStateMainMenu::OnKeyPressed`; follow-up #433 |
-| `0x36F75` | `FUN_00036f74` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x38171` | `CDataMgr::SaveCupon` | `engine` | missed | called by live `CStateGame::resultMonCa`, `CStateMainMenu::OnKeyPressed`; follow-up #433 |
-| `0x39F29` | `FUN_00039f28` | `engine` | missed | called by live `CStateMainMenu::OnKeyPressed`; follow-up #433 |
-| `0x468F1` | `FUN_000468f0` | `engine` | missed | called by live `Game_ExitToMainMenu`; follow-up #433 |
+| `0x25771` | `FUN_00025770` | `engine` | missed | called by live `CStateMainMenu::OnKeyPressed`; follow-up #435 |
+| `0x25889` | `SkyCanvas::RepaintRect` | `engine` | missed | called by live `SkyCanvas::Tick`; follow-up #435 |
+| `0x2E5E1` | `CAniManager::makeAniYetiIn` | `engine` | missed | called by live `CStateGame::StartScene`; follow-up #435 |
+| `0x36D89` | `CDataMgr::CountCoupons` | `engine` | missed | called by live `CStateGame::OnKeyPressed`, `CStateMainMenu::OnKeyPressed`; follow-up #435 |
+| `0x38171` | `CDataMgr::SaveCupon` | `engine` | missed | called by live `CStateGame::resultMonCa`, `CStateMainMenu::OnKeyPressed`; follow-up #435 |
+| `0x39F29` | `FUN_00039f28` | `engine` | missed | called by live `CStateMainMenu::OnKeyPressed`; follow-up #435 |
+| `0x468F1` | `FUN_000468f0` | `engine` | missed | called by live `Game_ExitToMainMenu`; follow-up #435 |
 | `0x469C9` | `FUN_000469c8` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x46A29` | `FUN_00046a28` | `engine` | missed | called by live `PopupMenu_OptionTabOnKey`, `Game_ExitToMainMenu`, `CStateMainMenu::OnKeyPressed`; follow-up #433 |
-| `0x48BD5` | `Map_OnKeySub1` | `engine` | missed | called by live `CStateGame::OnKeyPressed`; follow-up #433 |
-| `0x4AB01` | `Shop_PaintItemDetail` | `engine` | missed | called by live `Shop_Paint`; follow-up #433 |
-| `0x4D315` | `CDataMgr::drawConfig` | `engine` | missed | called by live `PopupMenu_PaintOptionTab`; follow-up #433 |
-| `0x50131` | `PopupMenu_OptionTabOnKey` | `engine` | missed | called by live `CDataMgr::Update`; follow-up #433 |
-| `0x5220D` | `FUN_0005220c` | `engine` | missed | called by live `CDataMgr::Update`; follow-up #433 |
-| `0x524C1` | `FUN_000524c0` | `engine` | missed | called by live `CDataMgr::Update`; follow-up #433 |
-| `0x59119` | `Map_PaintSub1` | `engine` | missed | called by live `CStateGame::Paint`; follow-up #433 |
-| `0x5D819` | `FUN_0005d818` | `engine` | missed | called by live `FUN_0005e388`; follow-up #433 |
+| `0x46A29` | `FUN_00046a28` | `engine` | missed | called by live `PopupMenu_OptionTabOnKey`, `Game_ExitToMainMenu`, `CStateMainMenu::OnKeyPressed`; follow-up #435 |
+| `0x4D315` | `CDataMgr::drawConfig` | `engine` | missed | called by live `PopupMenu_PaintOptionTab`; follow-up #435 |
+| `0x50131` | `PopupMenu_OptionTabOnKey` | `engine` | missed | called by live `CDataMgr::Update`; follow-up #435 |
+| `0x5220D` | `FUN_0005220c` | `engine` | missed | called by live `CDataMgr::Update`; follow-up #435 |
+| `0x524C1` | `FUN_000524c0` | `engine` | missed | called by live `CDataMgr::Update`; follow-up #435 |
+| `0x5D819` | `FUN_0005d818` | `engine` | missed | called by live `FUN_0005e388`; follow-up #435 |
 | `0x5F511` | `FUN_0005f510` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x5F5A9` | `FUN_0005f5a8` | `engine` | missed | called by live `CQuestList::ClearAll`; follow-up #433 |
+| `0x5F5A9` | `FUN_0005f5a8` | `engine` | missed | called by live `CQuestList::ClearAll`; follow-up #435 |
 | `0x5F7F5` | `FUN_0005f7f4` | `engine` | dead | called only by dead `ScriptNative_getEquipState` |
 | `0x5FA95` | `CHero::ClearShortcut` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x61329` | `CHero::StopForMenu` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x6224D` | `FUN_0006224c` | `engine` | missed | called by live `FUN_00064748`; follow-up #433 |
+| `0x6224D` | `FUN_0006224c` | `engine` | missed | called by live `FUN_00064748`; follow-up #435 |
 | `0x671BD` | `CHero::ReviveAtPortal0` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x75961` | `FUN_00075960` | `engine` | missed | called by live `FUN_00075a74`; follow-up #433 |
-| `0x75A75` | `FUN_00075a74` | `engine` | missed | called by live `CMob::Flush`, `MonCa_StartRound`; follow-up #433 |
-| `0x785BD` | `CNotifyTextList::SetMaxLines` | `engine` | missed | called by live `CDataMgr::ApplyInfoLines`; follow-up #433 |
-| `0x78A65` | `FUN_00078a64` | `engine` | missed | called by live `Popup_Paint`; follow-up #433 |
+| `0x75961` | `FUN_00075960` | `engine` | missed | called by live `FUN_00075a74`; follow-up #435 |
+| `0x75A75` | `FUN_00075a74` | `engine` | missed | called by live `CMob::Flush`, `MonCa_StartRound`; follow-up #435 |
+| `0x785BD` | `CNotifyTextList::SetMaxLines` | `engine` | missed | called by live `CDataMgr::ApplyInfoLines`; follow-up #435 |
+| `0x78A65` | `FUN_00078a64` | `engine` | missed | called by live `Popup_Paint`; follow-up #435 |
 | `0x7A015` | `FUN_0007a014` | `engine` | dead | called only by dead `FUN_0007a044`, `ScriptNative_setCurrent` |
 | `0x7A045` | `FUN_0007a044` | `engine` | dead | called only by dead `ScriptNative_getMainQuest` |
 | `0x7A071` | `FUN_0007a070` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
@@ -141,30 +137,30 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0x94371` | `CStateMainMenu::OnPointerEvent` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x97E65` | `CStateTitle::OnKeyPressed` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x97E79` | `FUN_00097e78` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x97E81` | `CStateTitle::OnPointerEvent` | `engine` | missed | virtual, in the live vtable of `CStateTitle`; follow-up #433 |
-| `0x98005` | `FUN_00098004` | `engine` | missed | called by live `CStateTitle::Paint`; follow-up #433 |
+| `0x97E81` | `CStateTitle::OnPointerEvent` | `engine` | dead | a state's virtual that no code calls through its slot: the state stack is never pushed or popped, and no caller sends the pointer event (re/program-flow.md, re/cpp-classes.md) |
+| `0x98005` | `FUN_00098004` | `engine` | missed | called by live `CStateTitle::Paint`; follow-up #435 |
 | `0x99161` | `Lua::error` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x99235` | `Lua::pushIndexed` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x9930D` | `Lua::storeIndexed0` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x9941D` | `ScriptNative_println` | `engine` | dead | native `println`, which no shipped script calls |
 | `0x99425` | `ScriptNative_print` | `engine` | dead | native `print`, which no shipped script calls |
 | `0x9942D` | `ScriptNative_clearQuest` | `engine` | dead | native `clearQuest`, which no shipped script calls |
-| `0x99485` | `ScriptNative_removeItem` | `engine` | missed | native `removeItem`, called by shipped scripts; follow-up #433 |
+| `0x99485` | `ScriptNative_removeItem` | `engine` | missed | native `removeItem`, called by shipped scripts; follow-up #435 |
 | `0x99545` | `ScriptNative_initMonCa` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x99699` | `ScriptNative_setCurrent` | `engine` | dead | native `setCurrent`, which no shipped script calls |
 | `0x997A9` | `ScriptNative_getMeso` | `engine` | dead | native `getMeso`, which no shipped script calls |
 | `0x99A75` | `ScriptNative_regMsgRequire` | `engine` | dead | native `regMsgRequire`, which no shipped script calls |
 | `0x99BF9` | `ScriptNative_regRequireQuest` | `engine` | dead | native `regRequireQuest`, which no shipped script calls |
-| `0x9A1D5` | `Lua::numberToString` | `engine` | missed | called by live `Lua::toStringCheck`; follow-up #433 |
-| `0x9A349` | `Lua::toStringCheck` | `engine` | missed | called by live `Lua::comparison`; follow-up #433 |
-| `0x9A4C5` | `Lua::stringToNumber` | `engine` | missed | called by live `Lua::toNumberCheck`; follow-up #433 |
-| `0x9A569` | `Lua::growStack` | `engine` | missed | called by live `ScriptNative_isInvenAvailable`, `ScriptNative_getQuestTitle`, `ScriptNative_getItem` and 14 more; follow-up #433 |
-| `0x9A795` | `ScriptNative_getQuestTitle` | `engine` | missed | native `getQuestTitle`, called by shipped scripts; follow-up #433 |
+| `0x9A1D5` | `Lua::numberToString` | `engine` | missed | called by live `Lua::toStringCheck`; follow-up #435 |
+| `0x9A349` | `Lua::toStringCheck` | `engine` | missed | called by live `Lua::comparison`; follow-up #435 |
+| `0x9A4C5` | `Lua::stringToNumber` | `engine` | missed | called by live `Lua::toNumberCheck`; follow-up #435 |
+| `0x9A569` | `Lua::growStack` | `engine` | missed | called by live `ScriptNative_isInvenAvailable`, `ScriptNative_getQuestTitle`, `ScriptNative_getItem` and 14 more; follow-up #435 |
+| `0x9A795` | `ScriptNative_getQuestTitle` | `engine` | missed | native `getQuestTitle`, called by shipped scripts; follow-up #435 |
 | `0x9A975` | `ScriptNative_getMainQuest` | `engine` | dead | native `getMainQuest`, which no shipped script calls |
 | `0x9A9D1` | `ScriptNative_getEquipState` | `engine` | dead | native `getEquipState`, which no shipped script calls |
-| `0x9AF7D` | `ScriptNative_checkItemCount` | `engine` | missed | native `checkItemCount`, called by shipped scripts; follow-up #433 |
-| `0x9B621` | `Lua::pushStringOrNil` | `engine` | missed | called by live `Lua::comparison`; follow-up #433 |
-| `0x9B8AD` | `Lua::setLine` | `engine` | missed | called by live `Lua::execute`; follow-up #433 |
+| `0x9AF7D` | `ScriptNative_checkItemCount` | `engine` | missed | native `checkItemCount`, called by shipped scripts; follow-up #435 |
+| `0x9B621` | `Lua::pushStringOrNil` | `engine` | missed | called by live `Lua::comparison`; follow-up #435 |
+| `0x9B8AD` | `Lua::setLine` | `engine` | missed | called by live `Lua::execute`; follow-up #435 |
 | `0x9EDF1` | `TFunc::jumpBack` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x9FB45` | `-[MoviePlayerController initWithMovieFile:]` | `app-objc` | dead | no code loads selector `initWithMovieFile:`, and no framework or nib sends it |
 | `0x9FCE9` | `MoviePlayerController_CGRectMake` | `app-objc` | dead | called only by dead `-[MoviePlayerController initWithMovieFile:]` |
@@ -175,13 +171,13 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0x9FF5D` | `-[MoviePlayerController setM_moviePlayer:]` | `app-objc` | dead | no code loads selector `setM_moviePlayer:`, and no framework or nib sends it |
 | `0x9FF91` | `-[MovieOverlayView dealloc]` | `app-objc` | dead | the movie player classes: nothing creates them (ANALYSIS.md) |
 | `0x9FFC5` | `-[MovieOverlayView touchesBegan:withEvent:]` | `app-objc` | dead | the movie player classes: nothing creates them (ANALYSIS.md) |
-| `0xA0D41` | `FUN_000a0d40` | `engine` | missed | called by live `TouchWidget_PaintCells`; follow-up #433 |
+| `0xA0D41` | `FUN_000a0d40` | `engine` | missed | called by live `TouchWidget_PaintCells`; follow-up #435 |
 | `0xA26E1` | `-[ChooseCharacterView setOnAlertWindow:]` | `app-objc` | dead | no code loads selector `setOnAlertWindow:`, and no framework or nib sends it |
 | `0xA29F1` | `-[ChooseCharacterView animateStatus:]` | `app-objc` | dead | no code loads selector `animateStatus:`, and no framework or nib sends it |
-| `0xA3AA9` | `-[ChooseCharacterView newCharacterThree:]` | `app-objc` | missed | selector `newCharacterThree:` loaded by live `-[ChooseCharacterView drawRect:]`; follow-up #433 |
-| `0xA3B45` | `-[ChooseCharacterView newCharacterTwo:]` | `app-objc` | missed | selector `newCharacterTwo:` loaded by live `-[ChooseCharacterView drawRect:]`; follow-up #433 |
-| `0xA3BE1` | `-[ChooseCharacterView newCharacterOne:]` | `app-objc` | missed | selector `newCharacterOne:` loaded by live `-[ChooseCharacterView drawRect:]`; follow-up #433 |
-| `0xA4045` | `-[ChooseCharacterView cancelNewAlert:]` | `app-objc` | missed | selector `cancelNewAlert:` loaded by live `-[ChooseCharacterView clickNew:]`; follow-up #433 |
+| `0xA3AA9` | `-[ChooseCharacterView newCharacterThree:]` | `app-objc` | missed | selector `newCharacterThree:` loaded by live `-[ChooseCharacterView drawRect:]`; follow-up #435 |
+| `0xA3B45` | `-[ChooseCharacterView newCharacterTwo:]` | `app-objc` | missed | selector `newCharacterTwo:` loaded by live `-[ChooseCharacterView drawRect:]`; follow-up #435 |
+| `0xA3BE1` | `-[ChooseCharacterView newCharacterOne:]` | `app-objc` | missed | selector `newCharacterOne:` loaded by live `-[ChooseCharacterView drawRect:]`; follow-up #435 |
+| `0xA4045` | `-[ChooseCharacterView cancelNewAlert:]` | `app-objc` | missed | selector `cancelNewAlert:` loaded by live `-[ChooseCharacterView clickNew:]`; follow-up #435 |
 | `0xA40B5` | `-[ChooseCharacterView okAlert:]` | `app-objc` | dead | no code loads selector `okAlert:`, and no framework or nib sends it |
 | `0xA7C31` | `-[MainMenuView setMaple:]` | `app-objc` | dead | no code loads selector `setMaple:`, and no framework or nib sends it |
 | `0xA7C65` | `-[MainMenuView maple]` | `app-objc` | dead | no code loads selector `maple`, and no framework or nib sends it |
@@ -206,7 +202,7 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xA7FD5` | `-[MainMenuView moregame]` | `app-objc` | dead | no code loads selector `moregame`, and no framework or nib sends it |
 | `0xA7FF9` | `-[MainMenuView setGamecenter:]` | `app-objc` | dead | no code loads selector `setGamecenter:`, and no framework or nib sends it |
 | `0xA802D` | `-[MainMenuView gamecenter]` | `app-objc` | dead | no code loads selector `gamecenter`, and no framework or nib sends it |
-| `0xA8699` | `-[MainMenuView clickAboutBuild:]` | `app-objc` | missed | selector `clickAboutBuild:` loaded by live `-[MainMenuView clickAbout:]`; follow-up #433 |
+| `0xA8699` | `-[MainMenuView clickAboutBuild:]` | `app-objc` | missed | selector `clickAboutBuild:` loaded by live `-[MainMenuView clickAbout:]`; follow-up #435 |
 | `0xAAA85` | `-[MainMenuView closePlay:]` | `app-objc` | dead | no code loads selector `closePlay:`, and no framework or nib sends it |
 | `0xAACC5` | `-[MainMenuView animationCompanyLogo:]` | `app-objc` | dead | selector `animationCompanyLogo:` loaded only by dead `-[MainMenuView redraw:]` |
 | `0xAADA9` | `-[MainMenuView animationMaple:]` | `app-objc` | dead | selector `animationMaple:` loaded only by dead `-[MainMenuView redraw:]` |
@@ -217,34 +213,17 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xAB42D` | `-[MainMenuView moveBuilding:]` | `app-objc` | dead | selector `moveBuilding:` loaded only by dead `-[MainMenuView redraw:]` |
 | `0xABA11` | `-[MainMenuView redraw:]` | `app-objc` | dead | no code loads selector `redraw:`, and no framework or nib sends it |
 | `0xABC05` | `-[MainMenuView removeSubviews]` | `app-objc` | dead | no code loads selector `removeSubviews`, and no framework or nib sends it |
-| `0xAE199` | `-[MapKeyPadView setTouchPoint:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xAE1F5` | `-[MapKeyPadView addButtonWithImageName:selectedImageName:withFrame:withEdgeInsets:actionForTouchDown:actionForTouchUpInside:]` | `app-objc` | missed | selector `addButtonWithImageName:selectedImageName:withFrame:withEdgeInsets:actionForTouchDown:actionForTouchUpInside:` loaded by live `-[ChooseCharacterView clickDelete:]`, `-[ChooseCharacterView clickNew:]`, `-[ChooseCharacterView clickStart:]` and 12 more; follow-up #433 |
-| `0xAE409` | `-[MapKeyPadView touchesEnded:withEvent:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
+| `0xAE1F5` | `-[MapKeyPadView addButtonWithImageName:selectedImageName:withFrame:withEdgeInsets:actionForTouchDown:actionForTouchUpInside:]` | `app-objc` | missed | selector `addButtonWithImageName:selectedImageName:withFrame:withEdgeInsets:actionForTouchDown:actionForTouchUpInside:` loaded by live `-[ChooseCharacterView clickDelete:]`, `-[ChooseCharacterView clickNew:]`, `-[ChooseCharacterView clickStart:]` and 12 more; follow-up #435 |
 | `0xAE44D` | `-[MapKeyPadView touchesCancelled:withEvent:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xAE491` | `-[MapKeyPadView touchesMoved:withEvent:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xAE4D5` | `-[MapKeyPadView touchesBegan:withEvent:]` | `app-objc` | missed | selector `touchesBegan:withEvent:`: a UIKit or Foundation callback; follow-up #433 |
-| `0xAE6FD` | `MapKeyPadView_CGPointMake` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xAE785` | `-[MarketKeyPadView setScrollTrackingPoint:]` | `app-objc` | dead | no code loads selector `setScrollTrackingPoint:`, and no framework or nib sends it |
 | `0xAE83D` | `-[MarketKeyPadView setCurrentTrackingPoint:]` | `app-objc` | dead | no code loads selector `setCurrentTrackingPoint:`, and no framework or nib sends it |
 | `0xAE899` | `-[MarketKeyPadView setIsScroll:]` | `app-objc` | dead | no code loads selector `setIsScroll:`, and no framework or nib sends it |
-| `0xAE8DD` | `-[MarketKeyPadView setForceScrollValue:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xAE93D` | `-[MarketKeyPadView setIsTab:]` | `app-objc` | dead | no code loads selector `setIsTab:`, and no framework or nib sends it |
-| `0xAE9C5` | `-[MarketKeyPadView setDetailPopup:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xAEA09` | `-[MarketKeyPadView setChargeButton:]` | `app-objc` | dead | no code loads selector `setChargeButton:`, and no framework or nib sends it |
-| `0xAEC75` | `-[MarketKeyPadView touchesEnded:withEvent:]` | `app-objc` | missed | selector `touchesEnded:withEvent:`: a UIKit or Foundation callback; follow-up #433 |
 | `0xAEEB1` | `-[MarketKeyPadView touchesCancelled:withEvent:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xAEEC1` | `-[MarketKeyPadView touchesMoved:withEvent:]` | `app-objc` | missed | selector `touchesMoved:withEvent:`: a UIKit or Foundation callback; follow-up #433 |
-| `0xAF09D` | `-[MarketKeyPadView touchesBegan:withEvent:]` | `app-objc` | missed | selector `touchesBegan:withEvent:`: a UIKit or Foundation callback; follow-up #433 |
-| `0xAF2E5` | `-[MarketKeyPadView releaseChargeButton:]` | `app-objc` | missed | selector `releaseChargeButton:` loaded by live `-[MarketKeyPadView initWithFrame:]`; follow-up #433 |
+| `0xAF2E5` | `-[MarketKeyPadView releaseChargeButton:]` | `app-objc` | missed | selector `releaseChargeButton:` loaded by live `-[MarketKeyPadView initWithFrame:]`; follow-up #435 |
 | `0xAF34D` | `-[MarketKeyPadView pressChargeButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xAF359` | `-[MarketKeyPadView releaseBuyTabButton:]` | `app-objc` | missed | selector `releaseBuyTabButton:` loaded by live `-[MarketKeyPadView initWithFrame:]`; follow-up #433 |
-| `0xAF3D5` | `-[MarketKeyPadView pressBuyTabButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xAF3E1` | `-[MarketKeyPadView releaseSellButton:]` | `app-objc` | missed | selector `releaseSellButton:` loaded by live `-[MarketKeyPadView initWithFrame:]`; follow-up #433 |
-| `0xAF449` | `-[MarketKeyPadView pressSellButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xAF455` | `-[MarketKeyPadView releaseSellTabButton:]` | `app-objc` | missed | selector `releaseSellTabButton:` loaded by live `-[MarketKeyPadView initWithFrame:]`; follow-up #433 |
-| `0xAF4D1` | `-[MarketKeyPadView pressSellTabButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xAF4DD` | `-[MarketKeyPadView releaseBuyButton:]` | `app-objc` | missed | selector `releaseBuyButton:` loaded by live `-[MarketKeyPadView initWithFrame:]`; follow-up #433 |
-| `0xAF545` | `-[MarketKeyPadView pressBuyButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xAFF89` | `-[NpcKeyPadView setAcceptRefuseView:]` | `app-objc` | dead | no code loads selector `setAcceptRefuseView:`, and no framework or nib sends it |
 | `0xAFFE1` | `-[NpcKeyPadView setAcceptButton:]` | `app-objc` | dead | no code loads selector `setAcceptButton:`, and no framework or nib sends it |
 | `0xB0015` | `-[NpcKeyPadView acceptButton]` | `app-objc` | dead | no code loads selector `acceptButton`, and no framework or nib sends it |
@@ -260,34 +239,16 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xB02A1` | `-[NpcKeyPadView setQuestButton6:]` | `app-objc` | dead | no code loads selector `setQuestButton6:`, and no framework or nib sends it |
 | `0xB06B9` | `-[NpcKeyPadView releaseQuest1Button:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xB06DD` | `-[NpcKeyPadView pressQuest1Button:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB0775` | `-[NpcKeyPadView releaseRefuseButton:]` | `app-objc` | missed | selector `releaseRefuseButton:` loaded by live `-[NpcKeyPadView initWithFrame:]`; follow-up #433 |
-| `0xB07DD` | `-[NpcKeyPadView pressRefuseButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB07E9` | `-[NpcKeyPadView releaseAcceptButton:]` | `app-objc` | missed | selector `releaseAcceptButton:` loaded by live `-[NpcKeyPadView initWithFrame:]`; follow-up #433 |
-| `0xB0851` | `-[NpcKeyPadView pressAcceptButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xB180D` | `-[PopupKeyPadView setEmptyButton:]` | `app-objc` | dead | no code loads selector `setEmptyButton:`, and no framework or nib sends it |
 | `0xB1B39` | `-[PopupKeyPadView pressGradeRevivalButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB1B45` | `-[PopupKeyPadView releaseRevivalButton:]` | `app-objc` | missed | selector `releaseRevivalButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #433 |
+| `0xB1B45` | `-[PopupKeyPadView releaseRevivalButton:]` | `app-objc` | missed | selector `releaseRevivalButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #435 |
 | `0xB1BAD` | `-[PopupKeyPadView pressRevivalButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB1BB9` | `-[PopupKeyPadView releaseGoMainMenuButton:]` | `app-objc` | missed | selector `releaseGoMainMenuButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #433 |
+| `0xB1BB9` | `-[PopupKeyPadView releaseGoMainMenuButton:]` | `app-objc` | missed | selector `releaseGoMainMenuButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #435 |
 | `0xB1C21` | `-[PopupKeyPadView pressGoMainMenuButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB1C2D` | `-[PopupKeyPadView releaseReturnTownButton:]` | `app-objc` | missed | selector `releaseReturnTownButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #433 |
+| `0xB1C2D` | `-[PopupKeyPadView releaseReturnTownButton:]` | `app-objc` | missed | selector `releaseReturnTownButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #435 |
 | `0xB1C95` | `-[PopupKeyPadView pressReturnTownButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB1CA1` | `-[PopupKeyPadView releaseEmptyButton:]` | `app-objc` | missed | selector `releaseEmptyButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #433 |
+| `0xB1CA1` | `-[PopupKeyPadView releaseEmptyButton:]` | `app-objc` | missed | selector `releaseEmptyButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #435 |
 | `0xB1D09` | `-[PopupKeyPadView pressEmptyButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB1D15` | `-[PopupKeyPadView releaseNoButton:]` | `app-objc` | missed | selector `releaseNoButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #433 |
-| `0xB1D7D` | `-[PopupKeyPadView pressNoButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB1D89` | `-[PopupKeyPadView releaseYesButton:]` | `app-objc` | missed | selector `releaseYesButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #433 |
-| `0xB1DF1` | `-[PopupKeyPadView pressYesButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB1DFD` | `-[PopupKeyPadView releaseCancelButton:]` | `app-objc` | missed | selector `releaseCancelButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #433 |
-| `0xB1E65` | `-[PopupKeyPadView pressCancelButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB1E71` | `-[PopupKeyPadView releaseOk2Button:]` | `app-objc` | missed | selector `releaseOk2Button:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #433 |
-| `0xB1ED9` | `-[PopupKeyPadView pressOk2Button:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB1EE5` | `-[PopupKeyPadView releaseOkButton:]` | `app-objc` | missed | selector `releaseOkButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`, `-[TouchKeyPadView initKeyPadType3:]`, `-[TouchKeyPadView initWithFrame:]`; follow-up #433 |
-| `0xB1F4D` | `-[PopupKeyPadView pressOkButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB1F59` | `-[PopupKeyPadView releasePlusButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB1F65` | `-[PopupKeyPadView pressPlusButton:]` | `app-objc` | missed | selector `pressPlusButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #433 |
-| `0xB1FCD` | `-[PopupKeyPadView releaseMinusButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB1FD9` | `-[PopupKeyPadView pressMinusButton:]` | `app-objc` | missed | selector `pressMinusButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #433 |
 | `0xB4911` | `-[TouchKeyPadView setFirstPointType:]` | `app-objc` | dead | no code loads selector `setFirstPointType:`, and no framework or nib sends it |
 | `0xB4955` | `-[TouchKeyPadView setSecondPointType:]` | `app-objc` | dead | no code loads selector `setSecondPointType:`, and no framework or nib sends it |
 | `0xB4999` | `-[TouchKeyPadView setTouchKeyPadEnable:]` | `app-objc` | dead | no code loads selector `setTouchKeyPadEnable:`, and no framework or nib sends it |
@@ -315,26 +276,23 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xB5181` | `-[TouchKeyPadView releaseMeso22000Button:]` | `app-objc` | dead | no button of a `TouchKeyPadView` has this action: its add-button calls pass 8 others (re/objc-shell.md); the buttons that have it are `CashShopKeyPadView`'s and `PopupKeyPadView`'s, which target their own view (#432) |
 | `0xB519D` | `-[TouchKeyPadView releaseMeso10000Button:]` | `app-objc` | dead | no button of a `TouchKeyPadView` has this action: its add-button calls pass 8 others (re/objc-shell.md); the buttons that have it are `CashShopKeyPadView`'s and `PopupKeyPadView`'s, which target their own view (#432) |
 | `0xB51B9` | `-[TouchKeyPadView releaseMeso3000Button:]` | `app-objc` | dead | no button of a `TouchKeyPadView` has this action: its add-button calls pass 8 others (re/objc-shell.md); the buttons that have it are `CashShopKeyPadView`'s and `PopupKeyPadView`'s, which target their own view (#432) |
-| `0xB51D5` | `-[TouchKeyPadView releaseRevivalButton:]` | `app-objc` | missed | selector `releaseRevivalButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #433 |
+| `0xB51D5` | `-[TouchKeyPadView releaseRevivalButton:]` | `app-objc` | missed | selector `releaseRevivalButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #435 |
 | `0xB520D` | `-[TouchKeyPadView releaseUpButton:]` | `app-objc` | dead | no code loads selector `releaseUpButton:`, and no framework or nib sends it |
 | `0xB527D` | `-[TouchKeyPadView releasePoundButton:]` | `app-objc` | dead | no code loads selector `releasePoundButton:`, and no framework or nib sends it |
 | `0xB5299` | `-[TouchKeyPadView release0Button:]` | `app-objc` | dead | no code loads selector `release0Button:`, and no framework or nib sends it |
 | `0xB52B5` | `-[TouchKeyPadView release9Button:]` | `app-objc` | dead | selector `release9Button:` loaded only by dead `-[TouchKeyPadView pressJumpButton:]`, `-[TouchKeyPadView pressAttackButton:]` |
-| `0xB52D1` | `-[TouchKeyPadView release8Button:]` | `app-objc` | missed | selector `release8Button:` loaded by live `-[TouchKeyPadView setKeySequence:]`; follow-up #433 |
+| `0xB52D1` | `-[TouchKeyPadView release8Button:]` | `app-objc` | dead | sent only by `setKeySequence:`'s 9-key chord mode, which only ever gets −1 (controls/keypad.md) |
 | `0xB52ED` | `-[TouchKeyPadView release7Button:]` | `app-objc` | dead | selector `release7Button:` loaded only by dead `-[TouchKeyPadView pressJumpButton:]`, `-[TouchKeyPadView pressAttackButton:]` |
-| `0xB5309` | `-[TouchKeyPadView release6Button:]` | `app-objc` | missed | selector `release6Button:` loaded by live `-[TouchKeyPadView setKeySequence:]`; follow-up #433 |
-| `0xB5325` | `-[TouchKeyPadView release5Button:]` | `app-objc` | missed | selector `release5Button:` loaded by live `-[TouchKeyPadView setKeySequence:]`; follow-up #433 |
-| `0xB5341` | `-[TouchKeyPadView release4Button:]` | `app-objc` | missed | selector `release4Button:` loaded by live `-[TouchKeyPadView setKeySequence:]`; follow-up #433 |
+| `0xB5309` | `-[TouchKeyPadView release6Button:]` | `app-objc` | dead | sent only by `setKeySequence:`'s 9-key chord mode, which only ever gets −1 (controls/keypad.md) |
+| `0xB5325` | `-[TouchKeyPadView release5Button:]` | `app-objc` | dead | sent only by `setKeySequence:`'s 9-key chord mode, which only ever gets −1 (controls/keypad.md) |
+| `0xB5341` | `-[TouchKeyPadView release4Button:]` | `app-objc` | dead | sent only by `setKeySequence:`'s 9-key chord mode, which only ever gets −1 (controls/keypad.md) |
 | `0xB535D` | `-[TouchKeyPadView release3Button:]` | `app-objc` | dead | selector `release3Button:` loaded only by dead `-[TouchKeyPadView releaseJumpButton:]` |
 | `0xB5379` | `-[TouchKeyPadView release2Button:]` | `app-objc` | dead | selector `release2Button:` loaded only by dead `-[TouchKeyPadView releaseJumpButton:]` |
 | `0xB5395` | `-[TouchKeyPadView release1Button:]` | `app-objc` | dead | selector `release1Button:` loaded only by dead `-[TouchKeyPadView releaseJumpButton:]` |
-| `0xB54AD` | `-[TouchKeyPadView clickRevivalButton:]` | `app-objc` | missed | selector `clickRevivalButton:` loaded by live `-[PopupKeyPadView releaseRevivalButton:]`; follow-up #433 |
-| `0xB54E5` | `-[TouchKeyPadView clickUpButton:]` | `app-objc` | missed | selector `clickUpButton:` loaded by live `-[TouchKeyPadView touchesBegan:withEvent:]`; follow-up #433 |
+| `0xB54AD` | `-[TouchKeyPadView clickRevivalButton:]` | `app-objc` | missed | selector `clickRevivalButton:` loaded by live `-[PopupKeyPadView releaseRevivalButton:]`; follow-up #435 |
 | `0xB5571` | `-[TouchKeyPadView click0Button:]` | `app-objc` | dead | no code loads selector `click0Button:`, and no framework or nib sends it |
-| `0xB55A9` | `-[TouchKeyPadView click8Button:]` | `app-objc` | missed | selector `click8Button:` loaded by live `-[TouchKeyPadView setKeySequence:]`; follow-up #433 |
-| `0xB55E1` | `-[TouchKeyPadView click6Button:]` | `app-objc` | missed | selector `click6Button:` loaded by live `-[MarketKeyPadView releaseSellTabButton:]`, `-[PopupKeyPadView pressPlusButton:]`, `-[TouchKeyPadView setKeySequence:]`; follow-up #433 |
-| `0xB55FD` | `-[TouchKeyPadView click5Button:]` | `app-objc` | missed | selector `click5Button:` loaded by live `-[TouchKeyPadView setKeySequence:]`; follow-up #433 |
-| `0xB5619` | `-[TouchKeyPadView click4Button:]` | `app-objc` | missed | selector `click4Button:` loaded by live `-[MarketKeyPadView releaseBuyTabButton:]`, `-[PopupKeyPadView pressMinusButton:]`, `-[TouchKeyPadView setKeySequence:]`; follow-up #433 |
+| `0xB55A9` | `-[TouchKeyPadView click8Button:]` | `app-objc` | dead | sent only by `setKeySequence:`'s 9-key chord mode, which only ever gets −1 (controls/keypad.md) |
+| `0xB55FD` | `-[TouchKeyPadView click5Button:]` | `app-objc` | dead | sent only by `setKeySequence:`'s 9-key chord mode, which only ever gets −1 (controls/keypad.md) |
 | `0xB5635` | `-[TouchKeyPadView click3Button:]` | `app-objc` | dead | selector `click3Button:` loaded only by dead `-[TouchKeyPadView pressJumpButton:]` |
 | `0xB5651` | `-[TouchKeyPadView click2Button:]` | `app-objc` | dead | selector `click2Button:` loaded only by dead `-[TouchKeyPadView pressJumpButton:]` |
 | `0xB566D` | `-[TouchKeyPadView click1Button:]` | `app-objc` | dead | selector `click1Button:` loaded only by dead `-[TouchKeyPadView pressJumpButton:]` |
@@ -343,7 +301,7 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xB5A0D` | `-[TouchKeyPadView releaseAttackButton:]` | `app-objc` | dead | no code loads selector `releaseAttackButton:`, and no framework or nib sends it |
 | `0xB5B45` | `-[TouchKeyPadView pressAttackButton:]` | `app-objc` | dead | no code loads selector `pressAttackButton:`, and no framework or nib sends it |
 | `0xB6BA5` | `-[TouchKeyPadView touchesCancelled:withEvent:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB9CE1` | `-[TouchKeyPadView enableHelpScrollKey]` | `app-objc` | missed | selector `enableHelpScrollKey` loaded by live `-[EAGLView enalbeHelpScrollKey]`; follow-up #433 |
+| `0xB9CE1` | `-[TouchKeyPadView enableHelpScrollKey]` | `app-objc` | missed | selector `enableHelpScrollKey` loaded by live `-[EAGLView enalbeHelpScrollKey]`; follow-up #435 |
 | `0xB9D19` | `-[TouchKeyPadView disableCashShopKey]` | `app-objc` | dead | selector `disableCashShopKey` loaded only by dead `-[EAGLView disableCashShopKey]` |
 | `0xB9D75` | `-[TouchKeyPadView disableMapKey]` | `app-objc` | dead | selector `disableMapKey` loaded only by dead `-[EAGLView disableMapKey]` |
 | `0xB9E99` | `-[TouchKeyPadView disableMarketKey]` | `app-objc` | dead | selector `disableMarketKey` loaded only by dead `-[EAGLView disableMarketKey]` |
@@ -357,7 +315,7 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xBD219` | `-[EAGLViewController setCurrentLeaderBoard:]` | `app-objc` | dead | no code loads selector `setCurrentLeaderBoard:`, and no framework or nib sends it |
 | `0xBD24D` | `-[EAGLViewController currentLeaderBoard]` | `app-objc` | dead | no code loads selector `currentLeaderBoard`, and no framework or nib sends it |
 | `0xBD30D` | `-[EAGLViewController shouldAutorotateToInterfaceOrientation:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xBD331` | `-[EAGLViewController viewDidLoad]` | `app-objc` | missed | selector `viewDidLoad` loaded by live `-[EAGLViewController viewDidLoad]`; follow-up #433 |
+| `0xBD331` | `-[EAGLViewController viewDidLoad]` | `app-objc` | dead | the controller is given its view by `setView:`, so UIKit never loads one and never sends `viewDidLoad`; it only presents Game Center, which the port draws itself (re/program-flow.md, ADR 0084) |
 | `0xBE449` | `-[InAppPurchaseManager setStrPurchaseId:]` | `app-objc` | dead | no code loads selector `setStrPurchaseId:`, and no framework or nib sends it |
 | `0xBE47D` | `-[InAppPurchaseManager strPurchaseId]` | `app-objc` | dead | no code loads selector `strPurchaseId`, and no framework or nib sends it |
 | `0xBE4C9` | `-[InAppPurchaseManager delegate]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
@@ -389,6 +347,6 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xC091D` | `GameCenterManager_FindPlayerByid_block_invoke` | `app-objc` | dead | called only by dead `-[GameCenterManager FindPlayerByid:]` |
 | `0xC0A71` | `GameCenterManager_FindPlayerByid_block_copy` | `app-objc` | dead | its address is in data loaded only by dead `-[GameCenterManager FindPlayerByid:]` |
 | `0xC0AA9` | `GameCenterManager_FindPlayerByid_block_dispose` | `app-objc` | dead | its address is in data loaded only by dead `-[GameCenterManager FindPlayerByid:]` |
-| `0xC0D85` | `FUN_000c0d84` | `engine` | missed | called by live `FUN_000c0eb4`; follow-up #433 |
+| `0xC0D85` | `FUN_000c0d84` | `engine` | missed | called by live `FUN_000c0eb4`; follow-up #435 |
 | `0xC11D9` | `-[UIDevice(IdentifierAddition) uniqueDeviceIdentifier]` | `lib:uidevice-identifier` | dead | no code loads selector `uniqueDeviceIdentifier`, and no framework or nib sends it |
-| `0xC21D1` | `-[HelpScrollKeyPadView scrollViewDidScroll:]` | `app-objc` | missed | selector `scrollViewDidScroll:`: a delegate method; follow-up #433 |
+| `0xC21D1` | `-[HelpScrollKeyPadView scrollViewDidScroll:]` | `app-objc` | missed | selector `scrollViewDidScroll:`: a delegate method; follow-up #435 |

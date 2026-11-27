@@ -112,7 +112,7 @@ class Rule:
 
 
 HOST_TESTS = 432  # host-driven tests for the unreachable functions
-RUN_STEPS = 433  # run steps for the missed functions
+RUN_STEPS = 435  # run steps for the missed functions (#433, then #435)
 
 # Checked in order; the first match wins.
 RULES: tuple[Rule, ...] = (
@@ -134,6 +134,15 @@ RULES: tuple[Rule, ...] = (
     Rule(r"-\[InAppPurchaseManager restoreTransaction:\]", "dead", "a restored transaction "
          "(state 3) comes only after `restoreCompletedTransactions`, which the game never sends "
          "(re/cash-shop.md); the port's StoreKit, like Apple's, restores nothing unasked (#432)"),
+    Rule(r"IStateAdaptor::(PushState|PopState|PopAndRestart|PopAllStates|GetRootState)|"
+         r"CStateTitle::OnPointerEvent", "dead", "a state's virtual that no code calls through "
+         "its slot: the state stack is never pushed or popped, and no caller sends the pointer "
+         "event (re/program-flow.md, re/cpp-classes.md)"),
+    Rule(r"-\[EAGLViewController viewDidLoad\]", "dead", "the controller is given its view "
+         "by `setView:`, so UIKit never loads one and never sends `viewDidLoad`; it only "
+         "presents Game Center, which the port draws itself (re/program-flow.md, ADR 0084)"),
+    Rule(r"-\[TouchKeyPadView (release[4568]|click[58])Button:\]", "dead", "sent only by "
+         "`setKeySequence:`'s 9-key chord mode, which only ever gets −1 (controls/keypad.md)"),
     Rule(r".*", "missed", "", RUN_STEPS),
 )  # fmt: skip
 
@@ -532,6 +541,11 @@ def executed_from_doc(p: Program, text: str) -> set[int]:
     return {a for a in p.functions if a not in unrun}
 
 
+def added_to_doc(p: Program, text: str, executed: Iterable[int]) -> set[int]:
+    """The functions a doc counts as executed and those of a new run (``update``)."""
+    return executed_from_doc(p, text) | {a & ~1 for a in executed}
+
+
 def document(p: Program, executed: set[int]) -> tuple[str, list[Gap]]:
     """The doc for the functions ``executed`` (plain addresses), and its rows."""
     gaps = classify(p, executed)
@@ -567,7 +581,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         executed = {a & ~1 for a in cov.functions}
         out = args.out if args.command == "generate" else args.doc
         if args.command == "update":
-            executed |= executed_from_doc(p, out.read_text(encoding="utf-8"))
+            executed = added_to_doc(p, out.read_text(encoding="utf-8"), executed)
     else:
         out = args.doc
         executed = executed_from_doc(p, out.read_text(encoding="utf-8"))
