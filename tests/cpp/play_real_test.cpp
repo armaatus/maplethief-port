@@ -3016,11 +3016,11 @@ void chapter_2_e(Run &r, u64) {
     then_talk_to(r, "Alchester: main 7 done, main 71 given", 9, 0, "Alchester", 2,
                  main_quests(7, 71));
     then_talk_to(r, "Skadru: side 35 given", 9, 0, "Skadru", 4, quest_is(1, 35, 1));
-    then_farm(r, "3 of item 69 from mob 34 on 9.1 (side 35)", 9, 1, {34, 25}, ready(1, 35), 3600,
+    then_farm(r, "3 of item 69 from mob 34 on 9.1 (side 35)", 9, 1, {34}, ready(1, 35), 3600,
               fight);
     then_talk_to(r, "Skadru: side 35 done", 9, 0, "Skadru", 4, quest_is(1, 35, 2));
     then_talk_to(r, "SnowQueen: side 36 given", 9, 0, "SnowQueen", 3, quest_is(1, 36, 1));
-    then_farm(r, "30 of item 63 from mob 25 on 9.1 (side 36)", 9, 1, {25, 34}, ready(1, 36), 3600,
+    then_farm(r, "30 of item 63 from mob 25 on 9.1 (side 36)", 9, 1, {25}, ready(1, 36), 3600,
               fight);
     then_talk_to(r, "SnowQueen: side 36 done", 9, 0, "SnowQueen", 3, quest_is(1, 36, 2));
     then_talk_to(r, "Alchester: main 71 done, main 72 given", 9, 0, "Alchester", 3,
