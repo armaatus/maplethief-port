@@ -161,3 +161,17 @@ def test_the_real_builders():
         doc, {sc.BLOCK: sc.table(cmds)}, "python3 -m mtport.scenes generate", sc.DOC
     )
     assert rendered == doc, "docs/re/qol.md is stale: python3 -m mtport.scenes generate"
+
+
+@pytest.mark.real_assets
+def test_no_scene_exits_to_the_main_menu():
+    """A scene's exit to the main menu (#336, docs/re/autosave.md): the runner's command 28 goes
+    to the main menu when p1 = -1, which would leave without a save. No shipped scene uses it:
+    the two command-28 ends are the intro's warp to 2.8 and the Henesys ending's to 2.0, so the
+    autosave has nothing to cover there. Skipped without the slice."""
+    if not SLICE.exists():
+        pytest.skip("work/slices/MapleThief.armv7 absent (run scripts/bootstrap)")
+    pytest.importorskip("capstone")
+    ends = [(c.function, c.p1, c.p2) for c in sc.scan_slice(SLICE) if c.command == 28]
+    assert ends == [(0x26F89, 2, 0), (0x302F5, 2, 8)]
+    assert all(p1 is not None and p1 != -1 for _, p1, _ in ends)

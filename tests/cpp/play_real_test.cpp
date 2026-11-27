@@ -14,7 +14,8 @@
 //                                             play.cash_shop_meso, play.cash_shop_off, #156;
 //                                             confirm_guard: CTest play.confirm_guard, #147;
 //                                             autosave_*: CTests play.autosave_*, #150 (and
-//                                             autosave_exit, #179);
+//                                             autosave_exit, #179; autosave_death_exit,
+//                                             #336);
 //                                             widescreen_off, then widescreen_on with
 //                                             MT_WIDESCREEN_BASE: CTests play.widescreen_off,
 //                                             play.widescreen_on, #86; widescreen_pad_off,
@@ -1414,6 +1415,61 @@ void autosave_exit(Run &r, u64) {
     });
 }
 void autosave_exit_checks(Run &, u64) {}
+
+// autosave_death_exit (#336): from a save in Henesys, a fall (the game's CHero::TakeDamage), then
+// the death popup's B ("Go to main menu", popup 0x6D) and OK on its Yes: CStateGame::OnKeyPressed's
+// hook checks the guards before the game leaves for the main menu, which never saves, and the
+// dead hero refuses (the dying guard): slot 0 is unchanged. MT_AUTOSAVE_MODE=off: nothing is
+// checked.
+void fall(mt_cpu *cpu); // below, with the cash shop's runs
+
+void autosave_death_exit(Run &r, u64) {
+    const char *mode_env = std::getenv("MT_AUTOSAVE_MODE");
+    static fe::Autosave mode = fe::Autosave::kOnQuit;
+    mode = mode_env != nullptr && std::string(mode_env) == "off" ? fe::Autosave::kOff
+                                                                 : fe::Autosave::kOnQuit;
+    g_auto.saver.install_exit_to_menu(&mode, [&r] { return r.t; });
+    from_save(r);
+    auto before =
+        std::make_shared<std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>>>();
+    then_wait_for(r, "the hero stands", 10, settled, 0.5);
+    then_do(r, "the files before the fall", [&r, before](mt_cpu *cpu) {
+        *before = slot0_files(r);
+        fall(cpu);
+    });
+    then_wait_for(
+        r, "the death popup (0x68)", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+    then_press(r, B); // Go to main menu
+    then_wait_for(r, "\"Do you really want to go MainMenu?\" (popup 0x6D)", 5,
+                  [](mt_cpu *cpu) { return popup_id(cpu) == fe::kAutosaveDeathExitPopup; });
+    then_do(r, "the guards on popup 0x6D", [](mt_cpu *cpu) {
+        const fe::AutosaveCheck c = fe::check_autosave(cpu, fe::kAutosaveDeathExitPopup);
+        check(c.guard == fe::AutosaveGuard::kDying && hero(cpu).hp <= 0,
+              "with popup 0x6D let through, the dead hero refuses: " + c.describe());
+    });
+    then_wait_for(r, "Yes picked (the popup opens on it)", 3, exit_yes_picked);
+    then_press(r, A);
+    then_wait_for(r, "the main menu (the game left)", 20, [](mt_cpu *cpu) {
+        return fe::check_autosave(cpu).guard == fe::AutosaveGuard::kNotInGame;
+    });
+    then_do(r, "the death exit's check", [&r, before](mt_cpu *) {
+        const auto after = slot0_files(r);
+        const fe::Autosaver::Stats &st = g_auto.saver.stats();
+        if (mode == fe::Autosave::kOnQuit) {
+            check(st.saves == 0 && st.skips == 1 && st.last == fe::AutosaveGuard::kDying &&
+                      after == *before,
+                  "Yes on popup 0x6D checked the guards once and the dying guard refused: slot 0 "
+                  "unchanged, as the game");
+        } else {
+            check(st.saves + st.skips == 0 && after == *before,
+                  "with autosave = off the death popup's exit checks nothing and saves nothing");
+        }
+        release_all(r);
+        r.on_turn = nullptr;
+        r.done = true;
+    });
+}
+void autosave_death_exit_checks(Run &, u64) {}
 
 void autosave_reload(Run &r, u64) {
     for (const char *name : {"theif0", "quest0"}) {
@@ -9601,6 +9657,7 @@ constexpr Mode k_modes[] = {
     {"autosave_map", autosave_map, autosave_map_checks, 1, false, autosave_map_setup},
     {"autosave_quit", autosave_quit, autosave_quit_checks, 1},
     {"autosave_exit", autosave_exit, autosave_exit_checks, 1},
+    {"autosave_death_exit", autosave_death_exit, autosave_death_exit_checks, 1},
     {"autosave_reload", autosave_reload, autosave_reload_checks, 1, true},
     {"popup_menu_tabs", popup_menu_tabs, popup_menu_tabs_checks, 1},
     {"popup_menu_down", popup_menu_down, popup_menu_down_checks, 1},
