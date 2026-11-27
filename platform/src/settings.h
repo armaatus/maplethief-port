@@ -132,6 +132,9 @@
 //   minimap = off
 //   # the hero's EXP to the next level as a percentage beside the HUD's bar: on | off
 //   exp_percent = off
+//   # the keys the game is being given, lit while held, in a corner (for videos and
+//   # practice): on | off
+//   input_display = off
 //   # Assist: the auto-run key (R, the left stick's click) keeps the hero walking: on | off
 //   auto_run = off
 //   # Assist: a press starts these held actions and the next one stops them: off | walk
@@ -737,6 +740,8 @@ struct Settings {
     Minimap minimap = Minimap::kOff;
     // The hero's EXP as a percentage beside the HUD's bar (#191, ADR 0109, exp_percent.h).
     bool exp_percent = false; // exp_percent, --exp-percent (on | off)
+    // The input display (#404, ADR 0156, input_display.h): off by default, in no preset.
+    bool input_display = false; // input_display, --input-display (on | off)
     // Controller extras (#172, ADR 0094, assists.h): two Assists, the auto-run action latching
     // the walk (auto_run) and presses toggling held actions (hold_toggle).
     bool auto_run = false;                     // auto_run, --auto-run (on | off)

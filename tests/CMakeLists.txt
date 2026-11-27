@@ -362,6 +362,9 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # bar or over the picture, the dots, a golden image of a synthetic grid, off drawing nothing.
 # The EXP percentage (#191, ADR 0109, exp_percent_test.cpp): a synthetic hero and hero.dat read
 # back, hostile values refused, the text, the box at every scale, the pixels, the layer.
+# The input display (#404, ADR 0156, input_display_test.cpp): the action layer driven by keys and
+# a pad and the touch key pad's keys light the cells, the place in a border or over the picture,
+# goldens of the panel alone on a synthetic frame.
 # The key pad's button labels (ADR 0101, hud_labels_test.cpp): the keys' table, each key's
 # control per device and after a remap, the places in the original layout, widescreen's edges
 # and narrow and custom layouts, the glyph size, the fade, a golden image of a synthetic pad,
@@ -434,6 +437,7 @@ maplethief_add_cpp_test(
             cpp/scene_skip_test.cpp
             cpp/minimap_test.cpp
             cpp/exp_percent_test.cpp
+            cpp/input_display_test.cpp
             cpp/auto_run_test.cpp
             cpp/hud_labels_test.cpp
             cpp/list_keys_test.cpp

@@ -337,6 +337,15 @@ MT_TEXT(glyph_hold, "Hold {0}")
 // figure ("EXP 12.34%"), drawn in the HUD's EXP green.
 MT_TEXT(hud_exp, "EXP")
 
+// The input display's keys (input_display.cpp, #404, ADR 0156): short, in the 5x7 font, cut to
+// their cells.
+MT_TEXT(input_jump, "JUMP")
+MT_TEXT(input_attack, "ATK")
+MT_TEXT(input_ok, "OK")
+MT_TEXT(input_back, "BACK")
+MT_TEXT(input_menu, "MENU")
+MT_TEXT(input_map, "MAP")
+
 // The price line (price_line.cpp).
 MT_TEXT(price_shop, "Cash shop prices in meso (you have {0})")
 MT_TEXT(price_revive, "Revive prices in meso (you have {0})")

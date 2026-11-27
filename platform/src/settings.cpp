@@ -1190,6 +1190,19 @@ constexpr SettingInfo kRegistry[] = {
      .label = "EXP percentage",
      .help = "Your EXP to the next level, as \"EXP 42.17%\" beside the HUD's bar",
      .applies = Applies::kAtOnce},
+    // Video: the input display (#404, ADR 0156, input_display.h), read live by game.cpp; in no
+    // preset.
+    {.key = "input_display",
+     .group = SettingGroup::kVideo,
+     .comment = "# the keys the game is being given, lit while held, in a corner (for videos and\n"
+                "# practice): on | off",
+     .value = on_off<&Settings::input_display>(),
+     .flag = "--input-display",
+     .game_only = true,
+     .label = "Input display",
+     .help = "Shows the directions, jump, attack, the quick slots and the menu keys, lit while "
+             "held",
+     .applies = Applies::kAtOnce},
     // Controller extras (#172, ADR 0094, assists.h).
     {.key = "auto_run",
      .group = SettingGroup::kAssists,

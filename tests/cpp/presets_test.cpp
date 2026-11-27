@@ -111,6 +111,7 @@ const Expected kExpected[] = {
     {"skip_intros", {"off", "off", "off"}},
     {"minimap", {"off", "off", "off"}},
     {"exp_percent", {"off", "off", "on"}},
+    {"input_display", {nullptr, nullptr, nullptr}}, // #404: the input display, in no preset
     {"auto_run", {"off", "off", "off"}},
     {"hold_toggle", {"off", "off", "off"}},
     {"auto_loot", {"off", "off", "off"}},

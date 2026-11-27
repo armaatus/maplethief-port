@@ -65,6 +65,12 @@ constexpr u32 k_eagl_status = 92;
 // TouchKeyPadView's touchKeyPadEnable and isJoyPad.
 constexpr u32 k_pad_enable = 228;
 constexpr u32 k_pad_joypad = 96;
+// TouchKeyPadView's ten key BOOLs (objc.json), one byte each from onLeftKey: left, right, up,
+// down, jump, attack, short 1 to 4.
+constexpr u32 k_pad_keys = 104;
+constexpr u32 k_pad_key_actions[10] = {
+    MT_ACTION_LEFT,   MT_ACTION_RIGHT, MT_ACTION_UP,    MT_ACTION_DOWN,  MT_ACTION_JUMP,
+    MT_ACTION_ATTACK, MT_ACTION_SLOT1, MT_ACTION_SLOT2, MT_ACTION_SLOT3, MT_ACTION_SLOT4};
 // SkyCanvas's pending press and release; -1000 = none (program-flow.md, SkyCanvas::Tick).
 constexpr u32 k_canvas_press = 0xD8;
 constexpr u32 k_canvas_release = 0xE8;
@@ -98,6 +104,7 @@ struct State {
     i32 panel = -1;
     u32 pad = 0;
     bool live = false;
+    u32 pad_keys = 0; // the pad's key BOOLs as action bits (mt_input_pad_keys)
 
     u32 held[MT_ACTION_COUNT] = {};
     std::deque<Event> queue;
@@ -178,6 +185,17 @@ std::uint8_t rd8(const mt_cpu *cpu, u32 addr) {
 
 const char *name_of(u32 a) { return valid_action(a) ? k_actions[a].name : "?"; }
 
+// The live pad's key BOOLs as bits 1 << action (read only; 0 while the pad is off).
+u32 read_pad_keys(const mt_cpu *cpu) {
+    u32 bits = 0;
+    for (u32 i = 0; g.live && g.pad != 0 && i < 10; i++) {
+        if (rd8(cpu, g.pad + k_pad_keys + i) != 0) {
+            bits |= 1u << k_pad_key_actions[i];
+        }
+    }
+    return bits;
+}
+
 // The EAGLView in the windows (depth first), or 0. The game has exactly one.
 u32 find_eagl(mt_cpu *cpu) {
     const mt_ui::State &st = mt_ui::state(cpu);
@@ -231,6 +249,7 @@ void refresh(mt_cpu *cpu) {
         g.panel = -1;
         g.pad = 0;
         g.live = false;
+        g.pad_keys = 0;
         return;
     }
     g.panel = static_cast<i32>(rd32(cpu, g.eagl + k_eagl_status));
@@ -248,6 +267,7 @@ void refresh(mt_cpu *cpu) {
         rd8(cpu, g.pad + k_pad_joypad) != 0) {
         g.panel = 0;
     }
+    g.pad_keys = read_pad_keys(cpu);
 }
 
 void enqueue(u32 action, bool down) {
@@ -592,6 +612,8 @@ extern "C" int32_t mt_input_panel(void) noexcept { return g.panel; }
 
 extern "C" int mt_input_pad_live(void) noexcept { return g.live ? 1 : 0; }
 
+extern "C" uint32_t mt_input_pad_keys(void) noexcept { return g.pad_keys; }
+
 extern "C" std::uint32_t mt_input_pad_panel_view(std::int32_t index) noexcept {
     if (g.pad == 0 || index < 0 || mt_objc_current() == nullptr || mt_objc_current() != g.rt) {
         return 0;
@@ -728,6 +750,7 @@ extern "C" void mt_input_after_touches(mt_cpu *cpu) noexcept {
     if (!g.live || g.pad == 0) {
         return;
     }
+    g.pad_keys = read_pad_keys(cpu); // the fingers' keys before the re-assert below
     for (u32 a = 1; a < MT_ACTION_FIRST_PORT; a++) {
         const char *key = k_actions[a].pad_key;
         if (g.held[a] == 0 || g.route[a] != Route::pad || key == nullptr ||

@@ -37,6 +37,7 @@
 #include "hang_watchdog.h"
 #include "hud_labels.h"
 #include "input.h"
+#include "input_display.h"
 #include "ipa_import.h"
 #include "keyboard.h"
 #include "keypad_editor.h"
@@ -600,6 +601,7 @@ struct Game {
     MinimapLayer minimap;                    // the port's minimap (#176, minimap.h)
     float compass_dx = 0;        // the minimap's corner: the compass's host move now, screen points
     ExpPercentLayer exp_percent; // the EXP percentage beside the HUD's bar (#191, ADR 0109)
+    InputDisplayLayer input_display; // the keys the game is given (#404, input_display.h)
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
     std::size_t restore_index = 0; // the next --restore-backup (#192)
@@ -2360,6 +2362,13 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     if (g.settings.run_timer) {
         PerfOverlay::draw_lines(g.renderer, g.run_timer.overlay_lines(), text,
                                 TextCorner::kTopRight);
+    }
+    // The input display (#404, input_display.h): the window only, like the overlay; under the
+    // port's own overlays, which take the input.
+    if (g.settings.input_display && !overlay_open(g)) {
+        const Rect picture = g.presenter.wide_rect();
+        g.input_display.draw(g.renderer, input_display_place(picture, text.area, text.scale),
+                             input_display_lit_now());
     }
     // The cash shop's price line (#156, price_line.h): the window only, like the overlay.
     if (mt_cash_shop_mode() == MT_CASH_SHOP_MESO) {
@@ -4512,6 +4521,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.gear.stop();
     g.minimap.stop();
     g.exp_percent.stop();
+    g.input_display.stop();
     g.gpu.stop();
     g.hint_layer.stop();
     g.hud_labels.stop();
