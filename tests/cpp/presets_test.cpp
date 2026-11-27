@@ -120,7 +120,7 @@ const Expected kExpected[] = {
     {"run_timer", {nullptr, nullptr, nullptr}},    // #406: the speedrun timer, in no preset
     {"run_category", {nullptr, nullptr, nullptr}},
     {"record_runs", {nullptr, nullptr, nullptr}}, // #405: opt-in, in no preset
-    {"livesplit", {nullptr, nullptr, nullptr}}, // #407: the LiveSplit link, in no preset
+    {"livesplit", {nullptr, nullptr, nullptr}},   // #407: the LiveSplit link, in no preset
     {"livesplit_game_time", {nullptr, nullptr, nullptr}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
