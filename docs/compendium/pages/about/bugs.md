@@ -67,3 +67,7 @@ One line of dialogue, the first line of the Zenumist chief in chapter 3, is miss
 ## Bug 16: chapter 1's last main quest never completes
 
 {{quest:1-main-20}} stays in progress until the trip to chapter 2, which resets every quest, so it is the one main quest that is never shown as done. It has no rewards, so nothing is lost. **Kept:** the port does what the device does; a fix that completes it just before the trip is planned ([#388](https://github.com/armaatus/maplethief-port/issues/388)).
+
+## Bug 17: a boss's end scene that takes no key
+
+If the blow that defeats a boss lands while the hero is being knocked back by a hit, the scene that follows the boss's defeat never closes: the game ignores every key until the hero lands, and the hero does not land during a scene. The only way out is to quit and fight the boss again, since boss maps don't save. It can happen with every boss, {{monster:68}} included. **Kept:** the port does what the device does; a fix is planned ([#420](https://github.com/armaatus/maplethief-port/issues/420)).
