@@ -1856,6 +1856,86 @@ foreach(part IN LISTS _chapter_2_parts)
     set(_previous_fixture play_chapter_2_${part})
     set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_2_${part}")
 endforeach()
+# Chapter 3's main quests, the 4th job, the ending and the post-game (#300,
+# docs/testing/chapter-3-quests.md): the same chain from chapter 2's last save (part f's). A part
+# listed in _chapter_3_raised starts from the save before it with the level raised by the game's
+# level-up rules (tests/starts/raise/chapter_3_<part>.json over that save), and its test says
+# synthetic. Part e plays the last boss and the ending watched; e_skipped the same from the same
+# save with skip_intros on, and compares the state the ending left with e's (MT_SKIP_WATCHED). The
+# post-game: postgame_quit loads e's save, saves again, plays on and saves; postgame_relaunch, a
+# second process on the same data directory, checks the files and the hero and saves again;
+# postgame_reload, a third, loads that save and saves it again byte for byte.
+set(_chapter_3_parts a b c d e)
+set(_chapter_3_raised e)
+set(_chapter_3_env "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+foreach(part IN LISTS _chapter_3_parts)
+    set(_name play.chapter_3_${part})
+    if(part IN_LIST _chapter_3_raised)
+        add_test(NAME starts.chapter_3_${part}
+                 COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                         "${PROJECT_SOURCE_DIR}/tests/starts/raise/chapter_3_${part}.json"
+                         "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_3_${part}/data/saves" --base
+                         "${_previous_dir}" --app
+                         "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+        set_tests_properties(
+            starts.chapter_3_${part}
+            PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120
+                       FIXTURES_REQUIRED ${_previous_fixture} FIXTURES_SETUP
+                       start_chapter_3_${part} ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+        set(_previous_fixture start_chapter_3_${part})
+        set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_3_${part}")
+        set(_name ${_name}_synthetic)
+    endif()
+    if(part STREQUAL "e")
+        set(_before_e_fixture ${_previous_fixture})
+        set(_before_e_dir ${_previous_dir})
+    endif()
+    add_test(NAME ${_name} COMMAND play_real_test chapter_3_${part}
+                                   "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_${part}")
+    set_tests_properties(
+        ${_name}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+                   FIXTURES_REQUIRED ${_previous_fixture} FIXTURES_SETUP play_chapter_3_${part}
+                   ENVIRONMENT "${_chapter_3_env};MT_FROM_SAVE=${_previous_dir}")
+    set(_previous_fixture play_chapter_3_${part})
+    set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_${part}")
+    set(_chapter_3_e_name ${_name})
+endforeach()
+string(REPLACE "play.chapter_3_e" "play.chapter_3_e_skipped" _chapter_3_skipped_name
+               "${_chapter_3_e_name}")
+add_test(NAME ${_chapter_3_skipped_name}
+         COMMAND play_real_test chapter_3_e_skipped
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_e_skipped")
+set_tests_properties(
+    ${_chapter_3_skipped_name}
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED "${_before_e_fixture};play_chapter_3_e"
+               ENVIRONMENT
+               "${_chapter_3_env};MT_FROM_SAVE=${_before_e_dir};MT_SKIP_WATCHED=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_e")
+add_test(NAME play.chapter_3_postgame_quit
+         COMMAND play_real_test chapter_3_postgame_quit
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_postgame")
+add_test(NAME play.chapter_3_postgame_relaunch
+         COMMAND play_real_test chapter_3_postgame_relaunch
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_postgame")
+set_tests_properties(
+    play.chapter_3_postgame_quit
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_chapter_3_e FIXTURES_SETUP play_chapter_3_postgame
+               ENVIRONMENT
+               "${_chapter_3_env};MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_e")
+add_test(NAME play.chapter_3_postgame_reload
+         COMMAND play_real_test chapter_3_postgame_reload
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_postgame")
+set_tests_properties(
+    play.chapter_3_postgame_relaunch
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_chapter_3_postgame FIXTURES_SETUP
+               play_chapter_3_postgame_relaunch ENVIRONMENT "${_chapter_3_env}")
+set_tests_properties(
+    play.chapter_3_postgame_reload
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_chapter_3_postgame_relaunch ENVIRONMENT "${_chapter_3_env}")
 
 # Chapter 2's side quests, crafts, trades and shops (#299, docs/testing/chapter-2-quests.md).
 # The side-quest parts branch off part e's save (chapter 2 still open), each from the save of the

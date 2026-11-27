@@ -3456,6 +3456,631 @@ void chapter_2_f(Run &r, u64) {
 }
 void chapter_2_f_checks(Run &, u64) {}
 
+// --- chapter 3 (#300, docs/testing/chapter-3-quests.md) --------------------------------------
+
+// The fighting style of chapter 3: chapter 2's, restocked at Etc60 (6.0) and Etc90 (9.0).
+quest_bot::FarmStyle chapter_3_fight() { return chapter_2_fight(); }
+
+// A boss's end scene (game mode 9, CMob::Die 0x73349) through to the field, A tapped by
+// interrupted. Original bug 19 (docs/re/original-bugs.md): a boss killed while the hero is knocked
+// back leaves the scene's box deaf to every key; when A has not moved it on for 5 s with CHero
+// +0x119 still set, the run clears that byte (as #420's fix will) and says so. `left` says when
+// the scene is over (the map it ends on).
+void then_boss_end(Run &r, const std::string &what, Pred left, double timeout = 300) {
+    auto locked = std::make_shared<double>(-1);
+    then(r, what, timeout, [&r, locked, left](mt_cpu *cpu, double el) {
+        const Hero h = hero(cpu);
+        if (game_mode(cpu) != 9 || !h.knocked) {
+            *locked = -1;
+            const bool busy = quest_bot::interrupted(r, cpu, el);
+            return !busy && field(cpu) && left(cpu);
+        }
+        quest_bot::interrupted(r, cpu, el);
+        if (*locked < 0) {
+            *locked = el;
+        } else if (el - *locked >= 5) {
+            std::printf("original bug 19: the end scene took no key for 5 s with the hero knocked "
+                        "back; the run clears CHero +0x119 (#420)\n");
+            cpu->mem[h.addr + 0x119] = 0;
+            *locked = -1;
+        }
+        return false;
+    });
+}
+
+// Chapter 3's main quests 0-8, read.
+std::string chapter_3_mains(mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    std::string q;
+    for (u32 n = 0; n <= 8; n++) {
+        q += " main " + std::to_string(n) + ":" + std::to_string(quest_state(cpu, h, 0, n));
+    }
+    return q + " main 40:" + std::to_string(quest_state(cpu, h, 0, 40));
+}
+
+// Part A (#300): from chapter 2's end (play.chapter_2_f_synthetic's save, or
+// tests/starts/chapter_3.json) on 6.0. ZenumistChief (7.0, list 0) rewards main 40 (chapter 2's
+// last, carried over by the trip) and gives main 0, which needs item 117: BrokerHan (6.0, list 1)
+// gives side 0 and ends it for 10 of item 8 (Etc60 sells it) and 10,000 meso, with item 117.
+// ZenumistChief ends 0 (list 1) and gives main 1 (40 of mob 63 on 7.1), ends 1 (list 2) and gives
+// main 2.
+void chapter_3_a(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_3_fight();
+    then_check(r, "chapter 3 on 6.0", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return h.chapter == 3 && h.on(6, 0);
+    });
+    then_spend_sp(r, "part A", k_chapter_2_build);
+    then_bag(r, "part A's start");
+    then_sell(r, "materials (Etc60)", 6, 4, {});
+    then_stock(r, "item 4 (Etc60)", 6, 4, 200, 12000, 600);
+    then_stock(r, "item 7 (Etc60)", 6, 7, 80, 12000, 600);
+    then_talk_to(r, "ZenumistChief (7.0): main 40 rewarded, main 0 given", 7, 0, "ZenumistChief", 0,
+                 main_quests(40, 0));
+    then_talk_to(r, "BrokerHan (6.0): side 0 given", 6, 0, "BrokerHan", 1, quest_is(1, 0, 1));
+    then_stock(r, "10 of item 8 (Etc60, side 0)", 6, 8, 10, 10000, 600);
+    then_talk_to(r, "BrokerHan: side 0 done, item 117", 6, 0, "BrokerHan", 1, quest_is(1, 0, 2));
+    then_check(r, "item 117 (side 0's reward) in the bag", has_item(117, 1));
+    then_talk_to(r, "ZenumistChief: main 0 done, main 1 given", 7, 0, "ZenumistChief", 1,
+                 main_quests(0, 1));
+    then_farm(r, "40 of mob 63 on 7.1 (main 1)", 7, 1, {63}, ready(0, 1), 3600, fight);
+    then_talk_to(r, "ZenumistChief: main 1 done, main 2 given", 7, 0, "ZenumistChief", 2,
+                 main_quests(1, 2));
+    then_quests_are(r, "part A's quests", {{0, 40, 2}, {0, 0, 2}, {0, 1, 2}, {0, 2, 1}, {1, 0, 2}});
+    then_do(r, "part A's hero",
+            [](mt_cpu *cpu) { std::printf("part A: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_bag(r, "part A's end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_3_a_checks(Run &, u64) {}
+
+// Part B (#300): the way to main 3, which ZenumistChief gives (list 3) only once side 4 is done.
+// AlchadnoChief (8.0) gives side 58 (item 118, the Alcadno card) on a talk; BrokerHan (list 4)
+// gives side 15 while 58 is active (40 of mob 60 on 8.2) and ends it with item 118;
+// AlchadnoChief ends 58, then gives side 2 (list 2). Humanoid3 (8.4) plays the Magatia scenes
+// on the first talk while side 2 is active and side 4 not started (scene 16, then 17 on 8.6, 18
+// on 7.6, 19 on 8.4: each but the last ends with a map change, command 52); the next talk gives
+// side 4 and ends it.
+void chapter_3_b(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_3_fight();
+    then_spend_sp(r, "part B", k_chapter_2_build);
+    then_talk_to(r, "AlchadnoChief (8.0): side 58 given", 8, 0, "AlchadnoChief", -1,
+                 quest_is(1, 58, 1));
+    then_talk_to(r, "BrokerHan: side 15 given", 6, 0, "BrokerHan", 4, quest_is(1, 15, 1));
+    then_farm(r, "40 of mob 60 on 8.2 (side 15)", 8, 2, {60}, ready(1, 15), 3600, fight);
+    then_talk_to(r, "BrokerHan: side 15 done, item 118", 6, 0, "BrokerHan", 4, quest_is(1, 15, 2));
+    then_check(r, "item 118 (side 15's reward) in the bag", has_item(118, 1));
+    then_talk_to(r, "AlchadnoChief: side 58 done", 8, 0, "AlchadnoChief", -1, quest_is(1, 58, 2));
+    then_talk_to(r, "AlchadnoChief: side 2 given", 8, 0, "AlchadnoChief", 2, quest_is(1, 2, 1));
+    // The first talk plays the scenes (runAnimation(16)); the next starts side 4 and rewards it.
+    then_talk_to(r, "Humanoid3 (8.4): the Magatia scenes 16-19, then side 4 done", 8, 4,
+                 "Humanoid3", -1, quest_is(1, 4, 2), 1200);
+    then_talk_to(r, "ZenumistChief: main 2 done, main 3 given", 7, 0, "ZenumistChief", 3,
+                 main_quests(2, 3));
+    then_quests_are(r, "part B's quests",
+                    {{0, 2, 2}, {0, 3, 1}, {1, 58, 2}, {1, 15, 2}, {1, 2, 1}, {1, 4, 2}});
+    then_do(r, "part B's hero",
+            [](mt_cpu *cpu) { std::printf("part B: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_bag(r, "part B's end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_3_b_checks(Run &, u64) {}
+
+// Part C (#300): the first boss of chapter 3. portal on 7.1 to 7.4 opens while main 3 is active
+// and its kill not yet made; 7.4's map script (HomunMap) plays the entrance scene (9) and the
+// boss (mob 67, 48,000 HP) is the map's own spawn. Its death plays end scene 10. ZenumistChief
+// ends 3 (list 4) with item 126 and gives main 4; AlchadnoChief ends 4 and gives main 5 (list 0):
+// 30 of item 84 (mob 63, 7.1) and 25 of item 82 (mob 56, 7.2), ended at list 1, which gives main 6.
+void chapter_3_c(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_3_fight();
+    then_spend_sp(r, "part C", k_chapter_2_build);
+    then_stock(r, "item 4 for the boss (Etc60)", 6, 4, 300, 2000, 900);
+    then_stock(r, "item 7 for the boss (Etc60)", 6, 7, 100, 2000, 600);
+    then_quick_slot(r, "skill 21 on RB (quick slot 4)", 21, 4);
+    FarmStyle boss = fight;
+    boss.restock = {};
+    boss.hp_pct = 55;
+    boss.land_first = true;
+    boss.buff = RB;
+    boss.buff_mp = 400;
+    then_heal(r, "full HP before 7.4", 95);
+    then_farm(r, "mob 67 on 7.4 (main 3)", 7, 4, {67}, ready(0, 3), 3600, boss);
+    then_boss_end(r, "mob 67's end scene", [](mt_cpu *) { return true; });
+    then_run_event(r, "the way to the boss's map 7.4", MT_GAME_EVENT_MAP_CHANGE, 7, {4});
+    then_run_event(r, "mob 67 killed", MT_GAME_EVENT_BOSS_KILLED, 67);
+    then_talk_to(r, "ZenumistChief: main 3 done (item 126), main 4 given", 7, 0, "ZenumistChief", 4,
+                 main_quests(3, 4), 900);
+    then_check(r, "item 126 (main 3's reward) in the bag", has_item(126, 1));
+    then_talk_to(r, "AlchadnoChief: main 4 done, main 5 given", 8, 0, "AlchadnoChief", 0,
+                 main_quests(4, 5));
+    then_farm(
+        r, "30 of item 84 from mob 63 on 7.1 (main 5)", 7, 1, {63},
+        [](mt_cpu *cpu) { return item_count(cpu, hero(cpu), 84) >= 30; }, 3600, fight);
+    then_farm(r, "25 of item 82 from mob 56 on 7.2 (main 5)", 7, 2, {56}, ready(0, 5), 3600, fight);
+    then_talk_to(r, "AlchadnoChief: main 5 done, main 6 given", 8, 0, "AlchadnoChief", 1,
+                 main_quests(5, 6));
+    then_quests_are(r, "part C's quests", {{0, 3, 2}, {0, 4, 2}, {0, 5, 2}, {0, 6, 1}});
+    then_do(r, "part C's hero",
+            [](mt_cpu *cpu) { std::printf("part C: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_bag(r, "part C's end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_3_c_checks(Run &, u64) {}
+
+// Part D (#300): the 4th job and the way to the last boss. ZenumistChief (list 12) gives side 25
+// and item 119 (getItem) once the 3rd job is taken and main 0 and 2 are done; Pirate_Magatia
+// (6.0, list 1) to 4.1, Pirate_Orbis (4.1, list 1) to 2.0, and the Darklord (0.0) hands side 25 in
+// and gives the 4th advancement (getClassUpCount 3 -> 4), checked in guest memory and in theif0.
+// Then by the Pirate (2.0) to 4.1 and over area 5 to 9.0 (5.3's portal to 9.1 is open in chapter
+// 3): Alchester ends main 6 (list 0) and gives main 7 (mob 69 on 10.5). The part saves on 9.0.
+void chapter_3_d(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_spend_sp(r, "part D", k_chapter_2_build);
+    then_talk_to(r, "ZenumistChief: side 25 given, item 119", 7, 0, "ZenumistChief", 12,
+                 quest_is(1, 25, 1));
+    then_check(r, "item 119 (side 25's book) in the bag", has_item(119, 1));
+    then_talk_to(r, "Pirate_Magatia (6.0): to 4.1 (list 1)", 6, 0, "Pirate_Magatia", 1,
+                 [](mt_cpu *cpu) { return hero(cpu).on(4, 1); });
+    then_talk_to(r, "Pirate_Orbis (4.1): to 2.0 (list 1)", 4, 1, "Pirate_Orbis", 1,
+                 [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    then_talk_to(r, "Darklord (0.0): side 25 handed in, the 4th job advancement", 0, 0, "Darklord",
+                 -1, job_at(2, 4), 600);
+    then_run_event(r, "the 4th job (branch 2, tier 4)", MT_GAME_EVENT_JOB_ADVANCE, 2, {4});
+    then_save(r);
+    then_job_is(r, 2, 4);
+    then_quests_are(r, "side 25 handed in", {{1, 25, 2}});
+    then_spend_sp(r, "the 4th job", k_chapter_2_build);
+    then_talk_to(r, "Pirate (2.0): back to 4.1", 2, 0, "Pirate", -1,
+                 [](mt_cpu *cpu) { return hero(cpu).on(4, 1); });
+    then_talk_to(r, "Alchester (9.0): main 6 done, main 7 given", 9, 0, "Alchester", 0,
+                 main_quests(6, 7), 1200);
+    then_stock(r, "item 4 for the boss (Etc90)", 9, 4, 300, 2000, 900);
+    then_stock(r, "item 7 for the boss (Etc90)", 9, 7, 100, 2000, 600);
+    then_quests_are(r, "part D's quests", {{0, 6, 2}, {0, 7, 1}, {1, 25, 2}});
+    then_do(r, "part D's hero",
+            [](mt_cpu *cpu) { std::printf("part D: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_bag(r, "part D's end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_3_d_checks(Run &, u64) {}
+
+// --- the last boss and the ending (part E, watched and skipped) ---
+//
+// From part D's save (or its raise) on 9.0 with main 7 active: chapter 3's portal1031 (10.3) leads
+// to 10.5 while 7 is active; 10.5's map script (BalogMap) plays the entrance scene (14) while
+// 7's kill is missing. Mob 69 (80,000 HP) killed, CMob::Die starts end scene 1
+// (CAniManager::makeAniEndingZacum, 202 steps), whose command 52 loads 2.11 and scene 2
+// (makeAniEndingHenesis, 430 steps), which ends with command 28: a warp to 2.0, free play. Then
+// Alchester (9.0, list 1) ends main 7 and gives main 8, which no script ends.
+//   chapter_3_e          the scenes watched: A through the boxes, as a player taps them
+//   chapter_3_e_skipped  the same with skip_intros on (ADR 0096): no test input in the scenes
+// Each run writes the state the ending left (ending_state.txt); the skipped run compares its own
+// with the watched run's (MT_SKIP_WATCHED). The boss fight differs between the two (the skip
+// shortens the entrance scene, and the boss's attack cycle runs with the frames, qol.md), so only
+// what the ending sets is compared: the map, the chapter, the quests, and both scenes run to
+// their last step.
+struct Ending {
+    bool skip = false;
+    i32 last_mode = -1;
+    // Per scene map: the highest step seen in game mode 9 after the kill (10.5: scene 1, 2.11:
+    // scene 2) and the A presses the flow made there.
+    i32 step_1 = -1, step_2 = -1;
+    u64 presses = 0;
+    bool a_down = false;
+    std::vector<std::pair<std::string, std::string>> state;
+} g_ending;
+
+bool boss_69_dead() {
+    for (const mt_game_event &e : g_run_events) {
+        if (e.kind == MT_GAME_EVENT_BOSS_KILLED && e.value == 69) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void chapter_3_ending(Run &r, bool skip) {
+    using namespace quest_bot;
+    from_save(r);
+    r.settings_from_env = false; // watched and skipped compared here
+    r.settings.skip_intros = skip;
+    g_ending = Ending{};
+    g_ending.skip = skip;
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        if (!boss_69_dead()) {
+            return;
+        }
+        const fe::SceneView v = fe::read_scene_view(fe::guest_reader(cpu));
+        if (v.scene) {
+            const Hero h = hero(cpu);
+            i32 &step = h.on(2, 11) ? g_ending.step_2 : g_ending.step_1;
+            step = std::max(step, v.step);
+            const bool a = std::find(r.held.begin(), r.held.end(), A) != r.held.end();
+            g_ending.presses += a && !g_ending.a_down ? 1 : 0;
+            g_ending.a_down = a;
+        }
+    };
+    const FarmStyle fight = chapter_3_fight();
+    then_spend_sp(r, "part E", k_chapter_2_build);
+    then_quick_slot(r, "skill 21 on RB (quick slot 4)", 21, 4);
+    FarmStyle boss = fight;
+    boss.restock = {};
+    boss.hp_pct = 55;
+    boss.land_first = true;
+    boss.buff = RB;
+    boss.buff_mp = 400;
+    then_go(r, "portal1031 (10.3)", at_object(10, 3, "portal1031", 10), 1200);
+    then_heal(r, "full HP before 10.5", 95);
+    then_farm(r, "mob 69 on 10.5 (main 7)", 10, 5, {69}, ready(0, 7), 3600, boss);
+    // A watched scene is tapped through by interrupted (A every 0.8 s); a skipped one gets no
+    // input from the test: the skip taps the boxes.
+    auto locked = std::make_shared<double>(-1);
+    then(r, skip ? "the ending skipped: no input" : "the ending watched: A through its boxes", 900,
+         [&r, skip, locked](mt_cpu *cpu, double el) {
+             const Hero h = hero(cpu);
+             const i32 mode = game_mode(cpu);
+             if (mode == 9 && h.knocked) {
+                 if (*locked < 0) {
+                     *locked = el;
+                 } else if (el - *locked >= 5) {
+                     std::printf("original bug 19: the end scene took no key for 5 s with the hero "
+                                 "knocked back; the run clears CHero +0x119 (#420)\n");
+                     cpu->mem[h.addr + 0x119] = 0;
+                     *locked = -1;
+                 }
+             } else {
+                 *locked = -1;
+             }
+             if (skip && !field(cpu)) {
+                 release_all(r);
+                 return false;
+             }
+             if (quest_bot::interrupted(r, cpu, el)) {
+                 return false;
+             }
+             return h.on(2, 0) && field(cpu) && g_ending.step_2 >= 0;
+         });
+    then_do(r, "the state the ending left", [&r](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        auto &s = g_ending.state;
+        s.emplace_back("map", std::to_string(h.area) + "." + std::to_string(h.map));
+        s.emplace_back("chapter", std::to_string(h.chapter));
+        s.emplace_back("game_mode", std::to_string(game_mode(cpu)));
+        for (u32 sort = 0; sort < 2; sort++) {
+            std::string q;
+            for (u32 n = 0; n < 100; n++) {
+                if (const i32 v = quest_state(cpu, h, sort, n); v != 0) {
+                    q += std::to_string(n) + "=" + std::to_string(v) + " ";
+                }
+            }
+            s.emplace_back(sort == 0 ? "quests.main" : "quests.side", q);
+        }
+        s.emplace_back("scene_1_last_step", std::to_string(g_ending.step_1));
+        s.emplace_back("scene_2_last_step", std::to_string(g_ending.step_2));
+        std::printf("the ending %s: scene 1 to step %d, scene 2 to step %d, %llu test presses; "
+                    "the skip: %llu scenes, %llu taps; %s\n",
+                    g_ending.skip ? "skipped" : "watched", g_ending.step_1, g_ending.step_2,
+                    static_cast<unsigned long long>(g_ending.presses),
+                    static_cast<unsigned long long>(r.scene_skip.stats().scenes),
+                    static_cast<unsigned long long>(r.scene_skip.stats().taps),
+                    hero_text(cpu, h).c_str());
+    });
+    then_do(r, "the ending's state written", [&r](mt_cpu *) {
+        std::ofstream f(r.out / "ending_state.txt", std::ios::trunc);
+        for (const auto &[k, v] : g_ending.state) {
+            f << k << " = " << v << "\n";
+        }
+    });
+    then_run_event(r, "portal1031 to the boss's map 10.5", MT_GAME_EVENT_MAP_CHANGE, 10, {5});
+    then_run_event(r, "mob 69 killed", MT_GAME_EVENT_BOSS_KILLED, 69);
+    // The ending's two map loads (scene 1's command 52 to 2.11, scene 2's command 28 to 2.0) go
+    // through world +0x98/+0x9C and game mode 8, not CMapleWorld::changeMap, so no run event
+    // reports them (ADR 0156 observes changeMap only; #424). The maps are read instead: scene 2's
+    // steps were counted on 2.11 and the field after it is 2.0.
+    then_do(r, "the ending's maps: scene 2 on 2.11, then 2.0", [](mt_cpu *cpu) {
+        i32 n = 0;
+        for (const mt_game_event &e : g_run_events) {
+            n += e.kind == MT_GAME_EVENT_MAP_CHANGE && e.value == 2 ? 1 : 0;
+        }
+        std::printf("the ending's maps: %d run events for area 2 (none expected, #424)\n", n);
+        check(g_ending.step_2 >= 0 && hero(cpu).on(2, 0), "scene 2 ran on 2.11 (to step " +
+                                                              std::to_string(g_ending.step_2) +
+                                                              ") and the field after it is 2.0");
+    });
+    then_check(r, "free play after the ending: the field of 2.0", [](mt_cpu *cpu) {
+        return field(cpu) && hero(cpu).on(2, 0) && hero(cpu).chapter == 3;
+    });
+    then_talk_to(r, "Pirate (2.0): to 4.1", 2, 0, "Pirate", -1,
+                 [](mt_cpu *cpu) { return hero(cpu).on(4, 1); });
+    then_talk_to(r, "Alchester (9.0): main 7 done, main 8 given", 9, 0, "Alchester", 1,
+                 main_quests(7, 8), 1200);
+    then_do(r, "chapter 3's main quests after the ending", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        bool ok =
+            h.chapter == 3 && quest_state(cpu, h, 0, 8) == 1 && quest_state(cpu, h, 0, 40) == 2;
+        for (u32 n = 0; n <= 7; n++) {
+            ok = ok && quest_state(cpu, h, 0, n) == 2;
+        }
+        check(ok, "main 0-7 done, main 8 open, chapter 3:" + chapter_3_mains(cpu));
+    });
+    then_bag(r, "after the ending");
+    then_save(r);
+    then_do(r, "the post-game save: chapter 3 on 9.0, main 8 open", [&r](mt_cpu *) {
+        const std::vector<std::uint8_t> theif = read_save(r, "theif0");
+        const std::vector<std::uint8_t> quest = read_save(r, "quest0");
+        const int area = theif.size() > 0x41D ? theif[0x41C] : -1;
+        const int map = theif.size() > 0x41D ? theif[0x41D] : -1;
+        const int chapter = quest.empty() ? -1 : quest[0];
+        const int main8 = quest.size() > 9 ? quest[1 + 8] : -1;
+        check(chapter == 3 && area == 9 && map == 0 && main8 == 1,
+              "the save: chapter " + std::to_string(chapter) + ", main 8 " + std::to_string(main8) +
+                  " in quest0, map " + std::to_string(area) + "." + std::to_string(map) +
+                  " in theif0 (want 3, 1, 9.0)");
+    });
+    then_do(r, "part E's hero",
+            [](mt_cpu *cpu) { std::printf("part E: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_finish(r);
+}
+void chapter_3_e(Run &r, u64) { chapter_3_ending(r, false); }
+void chapter_3_e_skipped(Run &r, u64) { chapter_3_ending(r, true); }
+
+void chapter_3_e_checks(Run &r, u64) {
+    const Ending &e = g_ending;
+    // Scene 1 ends at step 202 (command 52), scene 2 at 430 (command 28): qol.md's table.
+    check(e.step_1 >= 202 && e.step_2 >= 430,
+          "both ending scenes ran to their last step: scene 1 to " + std::to_string(e.step_1) +
+              " (of 202), scene 2 to " + std::to_string(e.step_2) + " (of 430)");
+    if (!e.skip) {
+        check(e.presses > 0 && r.scene_skip.stats().scenes == 0, "watched: A tapped the boxes (" +
+                                                                     std::to_string(e.presses) +
+                                                                     " presses), no skip ran");
+        return;
+    }
+    // The skip ran on the entrance scene and on both ending scenes.
+    check(e.presses == 0 && r.scene_skip.stats().scenes >= 3,
+          "skipped: no test input in the ending, " + std::to_string(r.scene_skip.stats().scenes) +
+              " scenes skipped (entrance, two "
+              "ending scenes), " +
+              std::to_string(r.scene_skip.stats().taps) + " taps");
+    const char *watched = std::getenv("MT_SKIP_WATCHED");
+    if (watched == nullptr || *watched == 0) {
+        check(false, "MT_SKIP_WATCHED names the watched run's OUT_DIR");
+        return;
+    }
+    std::ifstream f(fs::path(watched) / "ending_state.txt");
+    std::map<std::string, std::string> want;
+    for (std::string line; std::getline(f, line);) {
+        const std::size_t eq = line.find(" = ");
+        if (eq != std::string::npos) {
+            want[line.substr(0, eq)] = line.substr(eq + 3);
+        }
+    }
+    check(!want.empty(), std::string("the watched run's ending state is in ") + watched);
+    std::size_t same = 0;
+    for (const auto &[key, v] : e.state) {
+        const auto it = want.find(key);
+        const std::string w = it != want.end() ? it->second : "(missing)";
+        if (w == v) {
+            same++;
+        } else {
+            check(false, key + ": watched '" + w + "', skipped '" + v + "'");
+        }
+    }
+    check(same == e.state.size() && same > 0,
+          "skipped = watched in " + std::to_string(same) + " of " + std::to_string(e.state.size()) +
+              " fields (map, chapter, quests, both scenes' last steps)");
+}
+
+// --- after the ending (part F, three processes) ---
+//
+//   chapter_3_postgame_quit      from part E's save (chapter 3 on 9.0, main 8 open): loaded and
+//                                saved again at once and the pair compared; then free play goes
+//                                on (a kill on 9.1), Save, the hero's state and the files
+//                                recorded, and the process ends
+//   chapter_3_postgame_relaunch  a fresh process on that data: the files are as saved, the load
+//                                gives the hero as recorded, Save again (compared), play goes on
+//   chapter_3_postgame_reload    a third process: it loads the relaunch's save and saves it again,
+//                                and the bytes are the same, every one the game writes
+// The game's load re-adds each saved stack of other items through the inventory, which tops up
+// the first stack of that id that is not full (docs/formats/save.md#etc-inventory-after-a-load):
+// a save with two partial stacks of one item comes back with the counts moved between them, the
+// ids and totals the same. A save made after a load holds no such pair, so it reloads byte for
+// byte (the reload process). The first two compares allow only that move and print it; the
+// never-written heap bytes (unwritten(), docs/formats/save.md) are left out and counted.
+constexpr std::size_t k_etc_at = 0x325, k_etc_slots = 48;
+
+std::string save_diff(const char *name, const std::vector<std::uint8_t> &a,
+                      const std::vector<std::uint8_t> &b, bool topped_up, int *heap,
+                      std::string *moved) {
+    std::string diff;
+    const bool theif = std::string(name) == "theif0";
+    const auto in_etc = [theif](std::size_t i) {
+        return theif && i >= k_etc_at && i < k_etc_at + 3 * k_etc_slots;
+    };
+    for (std::size_t i = 0; i < std::max(a.size(), b.size()); i++) {
+        const int x = i < a.size() ? a[i] : -1, y = i < b.size() ? b[i] : -1;
+        if (x == y || (topped_up && in_etc(i) && (i - k_etc_at) % 3 != 0)) {
+            continue;
+        }
+        if (unwritten(name, i)) {
+            ++*heap;
+            continue;
+        }
+        char buf[48];
+        std::snprintf(buf, sizeof buf, " +0x%03zX %d->%d", i, x, y);
+        diff += buf;
+    }
+    if (!topped_up || !theif || a.size() < k_etc_at + 3 * k_etc_slots || a.size() != b.size()) {
+        return diff;
+    }
+    // The other items' counts: each id's total the same, the stacks that moved printed.
+    std::map<int, int> total_a, total_b;
+    for (std::size_t s = 0; s < k_etc_slots; s++) {
+        const std::size_t o = k_etc_at + 3 * s;
+        const int id = a[o];
+        const int ca = static_cast<std::int16_t>(a[o + 1] | (a[o + 2] << 8));
+        const int cb = static_cast<std::int16_t>(b[o + 1] | (b[o + 2] << 8));
+        if (id == 0xFF) {
+            continue;
+        }
+        total_a[id] += ca;
+        total_b[id] += cb;
+        if (ca != cb) {
+            *moved += " slot " + std::to_string(s) + " item " + std::to_string(id) + " " +
+                      std::to_string(ca) + "->" + std::to_string(cb);
+        }
+    }
+    if (total_a != total_b) {
+        diff += " (the other items' totals differ)";
+    }
+    return diff;
+}
+
+void record_save(Run &r, mt_cpu *cpu, const std::string &prefix);
+
+// Save, then theif0 and quest0 compared with `dir`/`prefix`<name>: every byte the game writes,
+// or with `topped_up` the other items' counts as each id's total (the load's top-up, above). With
+// `next`, the hero's state and the pair are recorded as `next`<name> while "saved" shows.
+void then_save_same(Run &r, const std::string &what, const fs::path &dir, const std::string &prefix,
+                    bool topped_up, const std::string &next = "") {
+    then_save(r, [&r, what, dir, prefix, topped_up, next](mt_cpu *cpu) {
+        if (!next.empty()) {
+            record_save(r, cpu, next);
+        }
+        for (const char *name : {"theif0", "quest0"}) {
+            const std::vector<std::uint8_t> first = read_file(dir / (prefix + name));
+            const std::vector<std::uint8_t> again = read_save(r, name);
+            int heap = 0;
+            std::string moved;
+            const std::string diff = save_diff(name, first, again, topped_up, &heap, &moved);
+            check(!first.empty() && first.size() == again.size() && diff.empty(),
+                  what + ": " + name + " the same" +
+                      (topped_up ? " but for the load's top-up of item stacks" : " byte for byte") +
+                      " (" + std::to_string(again.size()) + " bytes; " + std::to_string(heap) +
+                      " never-written heap bytes differ" +
+                      (moved.empty() ? "" : "; moved:" + moved) + ")" + diff);
+        }
+    });
+}
+
+// Records the hero's state and the save pair as `prefix`theif0 / quest0 in OUT_DIR.
+void record_save(Run &r, mt_cpu *cpu, const std::string &prefix) {
+    write_state(r.out / k_state_file, saved_state(cpu));
+    for (const char *name : {"theif0", "quest0"}) {
+        std::error_code ec;
+        fs::copy_file(r.data / "saves" / name, r.out / (prefix + name),
+                      fs::copy_options::overwrite_existing, ec);
+        check(!ec, std::string("the save's ") + name + " is recorded as " + prefix + name);
+    }
+}
+
+void chapter_3_postgame_quit(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    // The pair as part E saved it, before this process writes anything.
+    then_do(r, "part E's save kept", [&r](mt_cpu *) {
+        for (const char *name : {"theif0", "quest0"}) {
+            std::error_code ec;
+            fs::copy_file(r.data / "saves" / name, r.out / (std::string("loaded_") + name),
+                          fs::copy_options::overwrite_existing, ec);
+            check(!ec, std::string("part E's ") + name + " is kept");
+        }
+    });
+    then_check(r, "the post-game save loaded: chapter 3 on 9.0, main 8 open", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return h.chapter == 3 && h.on(9, 0) && quest_state(cpu, h, 0, 8) == 1 &&
+               quest_state(cpu, h, 0, 7) == 2;
+    });
+    then_save_same(r, "part E's save loaded and saved again", r.out, "loaded_", true);
+    // Free play after the ending: a map, a kill, the quests as they were.
+    auto first = std::make_shared<std::int64_t>(-1);
+    then_farm(
+        r, "a kill on 9.1 after the ending", 9, 1, {34, 25},
+        [first](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            const std::int64_t exp = h.exp + std::int64_t{1000000000} * h.level;
+            *first = *first < 0 ? exp : *first;
+            return exp > *first;
+        },
+        1200, chapter_3_fight());
+    then_go(r, "back to 9.0", {9, 0, -1, -1, 30}, 600);
+    then_save(r, [&r](mt_cpu *cpu) {
+        record_save(r, cpu, "saved_");
+        const Hero h = hero(cpu);
+        check(h.chapter == 3 && h.on(9, 0) && quest_state(cpu, h, 0, 8) == 1,
+              "saved after the ending, chapter 3 on 9.0, main 8 open; " + hero_text(cpu, h));
+    });
+    then_finish(r);
+}
+void chapter_3_postgame_quit_checks(Run &, u64) {}
+
+// The relaunch and the reload: before the boot the files are what the process before saved
+// (`prefix`), the load gives the hero as recorded, and Save writes the same bytes (`topped_up`
+// as then_save_same), recorded as `next`.
+void postgame_load(Run &r, const std::string &prefix, const std::string &next, bool topped_up) {
+    using namespace quest_bot;
+    for (const char *name : {"theif0", "quest0"}) {
+        const std::vector<std::uint8_t> saved = read_file(r.out / (prefix + name));
+        check(!saved.empty() && read_save(r, name) == saved,
+              std::string("before the boot saves/") + name + " holds the bytes saved (" +
+                  std::to_string(saved.size()) + ")");
+    }
+    from_save(r);
+    then_do(r, "the hero after the load", [&r](mt_cpu *cpu) {
+        const auto want = read_state(r.out / k_state_file);
+        auto got = saved_state(cpu);
+        std::string diff;
+        for (const auto &[k, v] : want) {
+            const auto it = got.find(k);
+            const std::string g = it != got.end() ? it->second : "<none>";
+            const bool near = (k == "x" || k == "y") && it != got.end() &&
+                              std::abs(std::stoi(g) - std::stoi(v)) <= 2;
+            // The other items' stacks may be topped up by the load (above).
+            const bool stack = k.rfind("etc_", 0) == 0 && it != got.end() &&
+                               g.substr(0, g.find(' ')) == v.substr(0, v.find(' '));
+            if (g != v && !near && !stack) {
+                diff += "\n  " + k + ": saved " + v + ", loaded " + g;
+            }
+        }
+        check(!want.empty() && got.size() == want.size() && diff.empty(),
+              "a fresh process loads the post-game hero as saved: " + std::to_string(want.size()) +
+                  " facts (level " + got["level"] + ", chapter " + got["chapter"] + ", map " +
+                  got["map"] + ", main quests " + got["main_quests"].substr(0, 9) + ")" + diff);
+    });
+    then_save_same(r, "the load saved again", r.out, prefix, topped_up, next);
+}
+
+void chapter_3_postgame_relaunch(Run &r, u64) {
+    using namespace quest_bot;
+    postgame_load(r, "saved_", "again_", true);
+    then_go(r, "on to 9.1 after the relaunch", {9, 1, -1, -1, 30}, 600);
+    then_check(r, "free play goes on: chapter 3 on 9.1, main 8 still open", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return h.chapter == 3 && h.on(9, 1) && quest_state(cpu, h, 0, 8) == 1;
+    });
+    then_finish(r);
+}
+void chapter_3_postgame_relaunch_checks(Run &, u64) {}
+
+// The relaunch's save, made after a load, reloads byte for byte.
+void chapter_3_postgame_reload(Run &r, u64) {
+    postgame_load(r, "again_", "reloaded_", false);
+    then_finish(r);
+}
+void chapter_3_postgame_reload_checks(Run &, u64) {}
+
 // --- the settings menu's Game options and Import saves (#89, ADR 0076) ---------------------------
 //
 // From play.save_quit's save (MT_FROM_SAVE): on the main menu the key pad has no panel, so the
@@ -13844,6 +14469,17 @@ constexpr Mode k_modes[] = {
     {"chapter_2_climb", chapter_2_climb, chapter_2_climb_checks, 1},
     {"chapter_2_shops", chapter_2_shops, chapter_2_shops_checks, 1},
     {"chapter_2_shop_6", chapter_2_shop_6, chapter_2_shop_6_checks, 1},
+    {"chapter_3_a", chapter_3_a, chapter_3_a_checks, 1},
+    {"chapter_3_b", chapter_3_b, chapter_3_b_checks, 1},
+    {"chapter_3_c", chapter_3_c, chapter_3_c_checks, 1},
+    {"chapter_3_d", chapter_3_d, chapter_3_d_checks, 1},
+    {"chapter_3_e", chapter_3_e, chapter_3_e_checks, 1},
+    {"chapter_3_e_skipped", chapter_3_e_skipped, chapter_3_e_checks, 1},
+    {"chapter_3_postgame_quit", chapter_3_postgame_quit, chapter_3_postgame_quit_checks, 1},
+    {"chapter_3_postgame_relaunch", chapter_3_postgame_relaunch, chapter_3_postgame_relaunch_checks,
+     1, true},
+    {"chapter_3_postgame_reload", chapter_3_postgame_reload, chapter_3_postgame_reload_checks, 1,
+     true},
     {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},
     {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
     {"confirm_guard", confirm_guard, confirm_guard_checks, 1},

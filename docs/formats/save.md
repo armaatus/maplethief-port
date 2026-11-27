@@ -109,6 +109,10 @@ The five shortcut slots belong to five keypad keys: slot 0 is `'5'` (also the at
 
 These are the only kinds: `0x6398D` writes only 1 and 2, and `KeyAttack` handles only 0, 1 and 2. Assigning what a slot already holds clears it (`CHero::ClearShortcut` `0x5FA95`). The skill reset item (special item `0x81`, [mechanics](../re/mechanics.md#potions-scrolls-return-scrolls-and-special-items)) clears every kind 2 slot.
 
+### Etc inventory after a load
+
+A load does not put the other items back slot for slot: each saved stack is added to the inventory again, and the add tops up the first stack of the same id that is not full before it takes a new slot. So a save that holds two partial stacks of one item comes back with the count moved between them: ids in the same slots, each id's total the same. `play.chapter_3_postgame_quit` saw item 4 at 95 (slot 14) and 100 (slot 21) saved, 100 and 95 after the load; `play.chapter_3_postgame_relaunch` saw 99 and 95 become 100 and 94. A save made right after a load holds no such pair, so it loads and saves again byte for byte (`play.chapter_3_postgame_reload`, [testing/chapter-3-quests.md](../testing/chapter-3-quests.md#after-the-ending)). Observed in the port, which runs the game's own load (`0x677E9`) with no hook on it; the add itself was not traced.
+
 ### Hero flags
 
 `flags` is the low byte of the hero's state bits at `+0xC`. Monsters, NPCs and dropped items (`CMapleObject`) use the same bits.

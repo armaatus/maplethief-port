@@ -156,6 +156,14 @@ def _ctest_names() -> set[str]:
     assert parts2 and raised, "tests/CMakeLists.txt has no _chapter_2_parts / _chapter_2_raised"
     for p in parts2.group(1).split():
         names.add(f"play.chapter_2_{p}" + ("_synthetic" if p in raised.group(1).split() else ""))
+    parts3 = re.search(r"set\(_chapter_3_parts ([a-z ]+)\)", text)
+    raised3 = re.search(r"set\(_chapter_3_raised ?([a-z ]*)\)", text)
+    assert parts3 and raised3, "tests/CMakeLists.txt has no _chapter_3_parts / _chapter_3_raised"
+    for p in parts3.group(1).split():
+        tail = "_synthetic" if p in raised3.group(1).split() else ""
+        names.add(f"play.chapter_3_{p}{tail}")
+        if p == "e":
+            names.add(f"play.chapter_3_e_skipped{tail}")
     starts = re.search(r"set\(_from_starts([\w:\s]+)\)", text)
     assert starts, "tests/CMakeLists.txt has no _from_starts"
     names |= {f"play.{pair.split(':')[0]}_synthetic" for pair in starts.group(1).split()}

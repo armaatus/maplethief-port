@@ -18,8 +18,8 @@ filled in locally and never committed):
   Original + controller, Enhanced), a controller-first section and the Switch row.
 
 :data:`RUNS` is ours: the ``play.*`` CTests that play an entity, from
-docs/testing/chapter-1-quests.md and chapter-2-quests.md. #295's run coverage report can extend
-it.
+docs/testing/chapter-1-quests.md, chapter-2-quests.md and chapter-3-quests.md. #295's run
+coverage report can extend it.
 
 CLI::
 
@@ -47,10 +47,11 @@ DEFAULT_OUT = _REPO / "build" / "checklists"
 NONE_YET = "none yet"
 
 # The CTests that play an entity to the end and check it in guest memory
-# (docs/testing/chapter-1-quests.md, chapter-2-quests.md). Keys are "kind:id"; a climb's id is
-# its area.
+# (docs/testing/chapter-1-quests.md, chapter-2-quests.md, chapter-3-quests.md). Keys are
+# "kind:id"; a climb's id is its area.
 _CH1 = "play.chapter_1_"
 _CH2 = "play.chapter_2_"
+_CH3 = "play.chapter_3_"
 RUNS: dict[str, str] = {
     **{f"quest:0-main-{n}": _CH1 + "a" for n in range(7)},
     "event:common-portal281-chapter_end": _CH1 + "a",
@@ -97,6 +98,20 @@ RUNS: dict[str, str] = {
     "quest:2-main-9": _CH2 + "f_synthetic",
     "monster:68": _CH2 + "f_synthetic",
     "event:chapter2-Pirate_Orbis-chapter_end": _CH2 + "f_synthetic",
+    **{f"quest:3-main-{n}": _CH3 + "a" for n in (0, 1)},
+    "quest:3-sub-0": _CH3 + "a",
+    "quest:3-main-2": _CH3 + "b",
+    **{f"quest:3-sub-{n}": _CH3 + "b" for n in (4, 15, 58)},
+    "event:chapter3-Humanoid3-scene-16": _CH3 + "b",
+    **{f"quest:3-main-{n}": _CH3 + "c" for n in (3, 4, 5)},
+    "event:chapter3-HomunMap-boss": _CH3 + "c",
+    "monster:67": _CH3 + "c",
+    "quest:3-main-6": _CH3 + "d",
+    "quest:3-sub-25": _CH3 + "d",
+    "job_advancement:3-4-same": _CH3 + "d",
+    "quest:3-main-7": _CH3 + "e_synthetic",  # from a raised save (levels 72-99)
+    "event:chapter3-BalogMap-boss": _CH3 + "e_synthetic",
+    "monster:69": _CH3 + "e_synthetic",
     # From built start states (#302, docs/testing/skills-and-jobs.md).
     "job_advancement:1-2-1": "play.jobs_1_2_assassin_synthetic",
     "job_advancement:2-2-1": "play.jobs_2_2_assassin_synthetic",
@@ -106,8 +121,12 @@ RUNS: dict[str, str] = {
     "job_advancement:3-2-1": "play.jobs_3_2_assassin_synthetic",
     "job_advancement:3-2-2": "play.jobs_3_2_bandit_synthetic",
     "job_advancement:3-3-same": "play.jobs_3_4_assassin_synthetic",
-    "job_advancement:3-4-same": "play.jobs_3_4_assassin_synthetic",
 }
+
+# The ending's two scenes (watched; play.chapter_3_e_skipped_synthetic skips them) and the
+# post-game save, quit and relaunch (docs/testing/chapter-3-quests.md).
+FINAL_RUN = _CH3 + "e_synthetic"
+POST_GAME_RUN = "play.chapter_3_postgame_relaunch"
 
 # Save and load (docs/re/autosave.md), our words: (row, automated run).
 SAVE_ROWS: tuple[tuple[str, str], ...] = (
@@ -348,9 +367,12 @@ def build(ctx: Context) -> Checklist:
                 "",
                 f"final-scene-{number}",
                 f"Final scene {number} (`{builder}`), on to `{end_map}`",
+                FINAL_RUN,
             )
         )
-    endings.rows.append(Row("", "post-game", "After the ending: play on, save, quit and load"))
+    endings.rows.append(
+        Row("", "post-game", "After the ending: play on, save, quit and load", POST_GAME_RUN)
+    )
     endings.rows += post
     sections.append(endings)
 

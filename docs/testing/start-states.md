@@ -78,7 +78,10 @@ PYTHONPATH=tools python3 -m mtport.savedata build tests/starts/raise/chapter_2_b
 The overlays live in `tests/starts/raise/` (they hold only the changed keys, so they are not
 whole descriptions). A raised start equals no chained state, so the part that loads it is
 synthetic: CTest names it `play.chapter_2_<part>_synthetic` and builds its start in
-`starts.chapter_2_<part>` ([chapter-2-quests.md](chapter-2-quests.md)).
+`starts.chapter_2_<part>` ([chapter-2-quests.md](chapter-2-quests.md)). Chapter 3's chain does the
+same (`tests/starts/raise/chapter_3_e.json`: part D's hero raised from level 72 to 99 for the last
+boss, `play.chapter_3_e_synthetic`, [chapter-3-quests.md](chapter-3-quests.md)). `hero.dat` has
+100 levels; a raise past them is refused.
 
 ## The bot's world
 

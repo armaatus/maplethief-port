@@ -60,3 +60,20 @@ entrance scene. On the maps with a map script the script also runs again after t
 The end scene's box closes only through `CStateGame::OnKeyPressed` `0x8D4C9`, which drops every
 key while the hero is knocked back: a boss killed then locks the game in the scene
 ([original-bugs.md, 19](original-bugs.md#19-a-boss-killed-while-the-hero-is-knocked-back-locks-its-end-scene)).
+
+## Chapter 3's two bosses, played
+
+Played in the port ([#300](https://github.com/armaatus/maplethief-port/issues/300),
+[testing/chapter-3-quests.md](../testing/chapter-3-quests.md)):
+
+- **Mob 67 on 7.4** (`play.chapter_3_c`): the way in from 7.1 opens while main 3 is active and its
+  kill is missing; `HomunMap` plays the entrance scene (9) first. The played level-70 hero beat it
+  with no fall, and end scene 10 ran to the field.
+- **Mob 69 on 10.5** (`play.chapter_3_e_synthetic`, from a level-99 raise): chapter 3's
+  `portal1031` on 10.3 opens while main 7 is active; `BalogMap` plays the entrance scene (14).
+  The death plays end scene 1, the first of the two ending scenes: its last command (52) queues
+  scene 2 and loads its map 2.11, and scene 2 ends with command 28, a warp to 2.0, where free
+  play goes on in chapter 3. In the watched run the boss died with the hero knocked back, and
+  original bug 19 locked scene 1 until the run cleared the byte. Neither map load is a
+  `changeMap`, so neither raises a run event
+  ([#424](https://github.com/armaatus/maplethief-port/issues/424)).
