@@ -83,10 +83,25 @@ HOOKED: dict[int, Hooked] = {
         "(image, x, y): an image at its top-left corner; widescreen (#86, ADR 0090) stretches "
         "the field's backdrop (CStateGame +0x454, a fixed 480 x 320 image) to the view's width",
     ),
+    0x34A05: Hooked(
+        "CChatBox::NextPage",
+        "(box): the next NPC dialogue page, its lines wrapped whole (+0x18, count +0x1C); the "
+        "text events (#391, ADR 0187) read the page after it for the speech",
+    ),
+    0x34CD1: Hooked(
+        "CChatBox::FirstPage",
+        "(box): the first NPC dialogue page, as NextPage; the text events (#391, ADR 0187) "
+        "read it after it",
+    ),
     0x38F55: Hooked(
         "CDataMgr::SaveQuestData",
         "(data manager, hero): the second of the game's save pair (after SaveSaveData 0x38711); "
         "the wrapper runs it, then backs up each slot whose files changed (#148, ADR 0078)",
+    ),
+    0x3EAA1: Hooked(
+        "Popup_Open",
+        "(mgr, id, text, kind): the engine's popup; the text events (#392) read its message, "
+        "kind and button labels (CMPopup at *0x11A96C) after it for the speech",
     ),
     0x46DB9: Hooked(
         "Shop_OnKey",
@@ -168,6 +183,11 @@ HOOKED: dict[int, Hooked] = {
         "(object, left, top, right, bottom at sp): whether the object's box (0x6CE5D) meets the "
         "rect; CDropItems::Update 0x5BC75 asks it for the hero and each lying drop (the call at "
         "0x5BCEE); auto_loot (#175) widens the drop's rect for that call only",
+    ),
+    0x78339: Hooked(
+        "CNotifyTextList::Add",
+        "(list, text, colour): a notify line (pick-ups, meso, EXP, the map's name); the text "
+        "events (#392) read the text for the speech",
     ),
     0x83C71: Hooked(
         "CStateGame::PaintExitToMenu",

@@ -300,6 +300,33 @@ TEST_CASE("livesplit: without game time, only start, split and reset; a finished
     CHECK(server.received() == expected);
 }
 
+TEST_CASE("livesplit: a practice (#409) sends nothing; the run it ends is a reset") {
+    TestServer server;
+    FakeClock clock;
+    fe::LiveSplitLink link([](const std::string &) {}, [&] { return clock.at.seconds; });
+    fe::RunTimer timer(clock.clock());
+    timer.set_category(three_chapters(), std::nullopt);
+    timer.set_listener([&](fe::RunSignal s, const fe::RunTime &t) { link.on_signal(s, t); });
+    link.configure(fe::LiveSplitAddress{"localhost", server.port()}, false);
+    REQUIRE(pump_until(link, [&] { return server.accept_client() && link.connected(); }));
+    timer.on_event(event(MT_GAME_EVENT_NEW_CHARACTER, 0));
+    clock.at.ticks += 10;
+    timer.on_event(event(MT_GAME_EVENT_CHAPTER_END, 0));
+    REQUIRE(timer.start_practice(1)); // the run in progress ends as reset
+    CHECK(timer.practice());
+    clock.at.ticks += 10;
+    timer.on_event(event(MT_GAME_EVENT_CHAPTER_END, 1)); // a practice segment: no split
+    clock.at.ticks += 10;
+    timer.on_event(event(MT_GAME_EVENT_CHAPTER_END, 2));
+    timer.reset();
+    const std::string expected = "starttimer\nsplit\nreset\n";
+    REQUIRE(pump_until(link, [&] { return server.received().size() >= expected.size(); }));
+    for (int i = 0; i < 20; i++) {
+        link.pump();
+    }
+    CHECK(server.received() == expected);
+}
+
 TEST_CASE("livesplit: a refused connection never stalls a turn, logs once, and retries") {
     std::uint16_t closed_port = 0;
     {

@@ -2147,6 +2147,47 @@ void carry(Run &r, bool keys) {
     then_end(r, 1);
 }
 
+// The skill tab read aloud (#393, speech_menus.h): a built Rogue's save (the start
+// jobs_ch1_rogue_30, its fixture starts.jobs_ch1_rogue_30), the popup menu by the pad, right to
+// the skill tab, down its rows (each skill's name said once per move), A on a row (the game's
+// sub-list: its description said), B, B. The menus' speech is on whatever MT_SPEECH_MENUS says.
+void speech_skills(Run &r) {
+    if (!r.speech) {
+        r.speech = std::make_unique<SpeechProbe>();
+    }
+    attach_pad(r);
+    then_load_slot0(r);
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5, [](mt_cpu *cpu) { return game_mode(cpu) == 1; }, 0.3);
+    for (int i = 0; i < 3; i++) {
+        then_press(r, RIGHT);
+    }
+    then_wait_for(
+        r, "the skill tab's list", 5,
+        [](mt_cpu *cpu) {
+            return menu_sub(cpu) == 3 && !fe::popup_menu_list_hidden(cpu, 3) &&
+                   fe::read_menu_spot(cpu).kind == fe::MenuSpot::Kind::kSkill;
+        },
+        0.3);
+    for (int i = 0; i < 3; i++) {
+        then_press(r, DOWN);
+    }
+    then_press(r, A);
+    then_wait_for(r, "the row's sub-list", 5,
+                  [](mt_cpu *cpu) { return fe::read_menu_spot(cpu).detail; });
+    then_check(r, "the skill tab: four rows said once each, the sub-list's description said",
+               [&r](mt_cpu *) {
+                   const fe::SpeechMenus::Stats &s = r.speech->menus.stats();
+                   std::printf("skill tab: %llu rows said, %llu descriptions\n",
+                               static_cast<unsigned long long>(s.spots),
+                               static_cast<unsigned long long>(s.details));
+                   return s.spots >= 4 && s.details == 1 && r.speech->nameless == 0;
+               });
+    then_press(r, B);
+    then_press(r, B);
+    then_finish(r);
+}
+
 bool run_mode(Run &r, int argc, char **argv) {
     if (r.mode == "explore") {
         return explore(r, argc, argv);
@@ -2208,6 +2249,8 @@ bool run_mode(Run &r, int argc, char **argv) {
         chord_mash(r);
     } else if (r.mode == "chord_mixed") {
         chord_mixed(r);
+    } else if (r.mode == "speech_skills") {
+        speech_skills(r);
     } else {
         return false;
     }

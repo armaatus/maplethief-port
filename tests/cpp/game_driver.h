@@ -71,6 +71,8 @@
 #include "replay.h"
 #include "save_tools.h"
 #include "scene_skip.h"
+#include "speech.h"
+#include "speech_menus.h"
 #include "virtual_pad.h"
 
 namespace game_driver {
@@ -122,6 +124,39 @@ struct Task {
     double timeout;
     std::function<bool(mt_cpu *, double)> step;
 };
+
+// The menus' speech (#393, speech_menus.h) over a run, with MT_SPEECH_MENUS=1: the frontend's
+// SpeechMenus on the log backend after each turn's focus, as game.cpp's speak_menus. It counts
+// what it should have said (each change of the focused control while the focus is active, each
+// change of the popup menu's or the shop's row) against what was said, and the focused buttons
+// whose image has no name. Texts are hashed in its output, never printed.
+struct SpeechProbe {
+    fe::LogSpeechBackend *log = nullptr;
+    fe::Speech speech;
+    fe::SpeechMenus menus;
+    std::uint32_t control = 0;
+    std::string action;
+    fe::MenuSpot spot;
+    std::uint64_t moves = 0;          // focused control changes
+    std::uint64_t spot_moves = 0;     // row changes
+    std::uint64_t nameless = 0;       // rows whose table name was empty
+    std::vector<std::string> images;  // every focused control's table key, once each, in order
+    std::vector<std::string> unnamed; // of them, those without a name
+    SpeechProbe() {
+        auto backend = std::make_unique<fe::LogSpeechBackend>([](const std::string &) {});
+        log = backend.get();
+        speech.set_backend(std::move(backend));
+        speech.set_enabled(true);
+    }
+};
+
+inline std::uint32_t fnv1a(const std::string &s) {
+    std::uint32_t h = 2166136261u;
+    for (const unsigned char c : s) {
+        h = (h ^ c) * 16777619u;
+    }
+    return h;
+}
 
 struct Run {
     std::string mode;
@@ -188,6 +223,8 @@ struct Run {
     // With wide_keypad: the groups at the view's edges (widescreen_hud = edges), or at their 3:2
     // places (narrow).
     bool wide_anchored = true;
+    // MT_SPEECH_MENUS=1 (#393): the menus' speech over the run (speech_turn).
+    std::unique_ptr<SpeechProbe> speech;
     // The outcome of the run, for a flow's last checks (boot() fills them).
     std::uint32_t outcome = 0;
     mt_process_result result{};
@@ -195,6 +232,10 @@ struct Run {
     bool expect_trap = false;
 
     Run() {
+        if (const char *e = std::getenv("MT_SPEECH_MENUS");
+            e != nullptr && std::strcmp(e, "1") == 0) {
+            speech = std::make_unique<SpeechProbe>();
+        }
         focus.set_forward(fe::MenuInput::sink, &menu);
         menu.set_actions(&actions);
         gamepads.set_hold_gate(fe::PadPointer::hold_gate, &pointer);
@@ -241,6 +282,78 @@ inline void survey_shots(Run &r, mt_cpu *cpu);
 inline void window_shots(Run &r, mt_cpu *cpu);
 inline void window_summary(const Run &r);
 
+// The menus' speech for one turn (MT_SPEECH_MENUS=1, SpeechProbe).
+inline void speech_turn(Run &r, mt_cpu *cpu) {
+    if (!r.speech) {
+        return;
+    }
+    SpeechProbe &p = *r.speech;
+    const double now = r.t;
+    const fe::FocusTarget *t = r.focus.active() ? r.focus.focused() : nullptr;
+    if (t == nullptr) {
+        p.control = 0;
+        p.action.clear();
+    } else if (t->object != p.control || t->action != p.action) {
+        p.control = t->object;
+        p.action = t->action;
+        p.moves++;
+        const std::string key = fe::shell_button_lookup(*t);
+        if (std::find(p.images.begin(), p.images.end(), key) == p.images.end()) {
+            p.images.push_back(key);
+            if (fe::shell_button_name(*t) == nullptr) {
+                p.unnamed.push_back(key + " (-[" + t->target + " " + t->action + "], panel " +
+                                    std::to_string(mt_input_panel()) + ")");
+            }
+        }
+    }
+    const std::vector<fe::ScreenLabel> labels =
+        r.focus.active() ? fe::runtime_labels(cpu) : std::vector<fe::ScreenLabel>{};
+    p.menus.shell_turn(r.focus, labels, p.speech, now);
+    const fe::MenuSpot spot = fe::read_menu_spot(cpu);
+    const fe::SpotText text = fe::spot_text(cpu, spot);
+    if (spot.kind != fe::MenuSpot::Kind::kNone &&
+        (spot.kind != p.spot.kind || spot.row != p.spot.row || spot.id != p.spot.id)) {
+        p.spot_moves++;
+        p.nameless += text.name.empty() ? 1 : 0;
+        std::printf("speech: %s row %d id %d%s price %d name #%08X\n",
+                    fe::menu_spot_kind_name(spot.kind), spot.row, spot.id,
+                    spot.equip ? " (equip)" : "", spot.price, fnv1a(text.name));
+    }
+    p.spot = spot;
+    p.menus.spot_turn(spot, text, p.speech, now);
+}
+
+// The menus' speech over the run: what it said against what it should have (SpeechProbe).
+inline void speech_summary(Run &r) {
+    if (!r.speech) {
+        return;
+    }
+    const SpeechProbe &p = *r.speech;
+    const fe::SpeechMenus::Stats &s = p.menus.stats();
+    std::string images;
+    for (const std::string &i : p.images) {
+        images += " " + i;
+    }
+    std::printf(
+        "speech: %llu focus moves, %llu controls said, %llu unnamed, %llu titles; %llu "
+        "rows, %llu said, %llu descriptions; %zu utterances; images:%s\n",
+        static_cast<unsigned long long>(p.moves), static_cast<unsigned long long>(s.controls),
+        static_cast<unsigned long long>(s.unnamed), static_cast<unsigned long long>(s.titles),
+        static_cast<unsigned long long>(p.spot_moves), static_cast<unsigned long long>(s.spots),
+        static_cast<unsigned long long>(s.details), p.log->said().size(), images.c_str());
+    for (const std::string &i : p.unnamed) {
+        std::printf("speech: no name for the control %s\n", i.c_str());
+    }
+    check(p.unnamed.empty() && s.unnamed == 0,
+          "the speech names every focused button (" + std::to_string(p.images.size()) + " images)");
+    check(s.controls == p.moves, "the speech says the focused control once per move (" +
+                                     std::to_string(s.controls) + " of " + std::to_string(p.moves) +
+                                     ")");
+    check(p.nameless == 0 && s.spots == p.spot_moves,
+          "the speech says the list's row once per move, each with a name (" +
+              std::to_string(s.spots) + " of " + std::to_string(p.spot_moves) + ")");
+}
+
 inline void on_log(void *, const char *line) {
     std::fprintf(stderr, "%s\n", line);
     if (g_run != nullptr) {
@@ -286,6 +399,7 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     r.pointer.turn(now, r.focus.stats().uses);
     r.menu.turn(cpu, now);
     r.hints.turn(cpu, r.focus, mt_input_panel(), true, true);
+    speech_turn(r, cpu);
     while (r.next_step < r.steps.size() && r.t >= r.steps[r.next_step].at) {
         r.steps[r.next_step++].run(cpu);
         pump(r); // the pad's change reaches the action layer in this turn
@@ -294,6 +408,7 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     run_tasks(r, cpu);
     r.assists.turn(cpu, r.settings, r.actions, r.t);
     r.scene_skip.turn(cpu, r.settings, r.t);
+    mt_cf_set_missing_key_fallback(r.settings.fix_original_bugs ? 1 : 0); // as game.cpp
     mt_uikit_set_animation_scale(fe::ui_animation_scale(r.settings.ui_animations));
     std::int64_t frame = 0;
     std::memcpy(&frame, cpu->mem + k_last_frame, sizeof frame);
@@ -428,6 +543,14 @@ inline bool logged(const Run &r, std::size_t from, const std::string &needle) {
     return false;
 }
 
+inline int count_logged(const Run &r, std::size_t from, const std::string &needle) {
+    int n = 0;
+    for (std::size_t i = from; i < r.log.size(); i++) {
+        n += r.log[i].find(needle) != std::string::npos ? 1 : 0;
+    }
+    return n;
+}
+
 inline std::uintmax_t file_size(const Run &r, const char *name) {
     std::error_code ec;
     const std::uintmax_t n = fs::file_size(r.data / "saves" / name, ec);
@@ -532,6 +655,7 @@ inline void finish(Run &r, double t) {
             static_cast<unsigned long long>(s.forwarded));
         check(r.input.live() == 0, "no touch is left down");
         window_summary(r);
+        speech_summary(r);
         r.done = true;
     });
 }
@@ -969,7 +1093,8 @@ inline void then_new_game(Run &r) {
         r, "the focus on Play", 5, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
     then_press(r, A);
 }
-inline void then_load_slot0(Run &r) {
+// `ready` ends it (default: the field), for a save that opens a popup over the field at once.
+inline void then_load_slot0(Run &r, Pred ready = nullptr) {
     then_wait_for(
         r, "the focus on Play", 15, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
     then_press(r, A);
@@ -981,7 +1106,7 @@ inline void then_load_slot0(Run &r) {
     // load follow the game's random numbers, and so the run's clock.
     then_wait(r, 1.5);
     then_press(r, A);
-    then_wait_for(r, "the game", 30, field, 1.0);
+    then_wait_for(r, "the game", 30, ready != nullptr ? ready : Pred(field), 1.0);
 }
 
 inline void then_finish(Run &r) {
@@ -989,6 +1114,7 @@ inline void then_finish(Run &r) {
         release_all(r);
         check(r.input.live() == 0, "no touch is left down");
         window_summary(r);
+        speech_summary(r);
         r.done = true;
     });
 }

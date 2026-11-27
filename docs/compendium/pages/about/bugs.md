@@ -67,3 +67,11 @@ One line of dialogue, the first line of the Zenumist chief in chapter 3, is miss
 ## Bug 16: chapter 1's last main quest never completes
 
 {{quest:1-main-20}} stays in progress until the trip to chapter 2, which resets every quest, so it is the one main quest that is never shown as done. It has no rewards, so nothing is lost. **Kept:** the port does what the device does; a fix that completes it just before the trip is planned ([#388](https://github.com/armaatus/maplethief-port/issues/388)).
+
+## Bug 17: a cash shop restore granted twice
+
+When a cash shop purchase was interrupted after the game stored its receipt, the next press of the Cash button restores it. With one receipt waiting, the game sends it to the server twice and grants the item twice: one {{item:etc:129}} restore gave two. On the device this needed Nexon's server, which may have refused the second copy; in the port only a session closed in the middle of a meso purchase leaves such a receipt. **Kept:** the grant is the game's, and any fix belongs to the port's offline receipt server.
+
+## Bug 18: a restored EXP pack gives no EXP
+
+A purchase from an earlier session that the store delivers at launch is restored in the field. For an EXP Explosion pack the game says the restoration is complete and drops the receipt, but adds no EXP, then opens the cash shop. The pack is lost. **Kept:** it needs an interrupted purchase and a server, as bug 17 does.

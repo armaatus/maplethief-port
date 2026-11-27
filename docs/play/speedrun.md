@@ -61,7 +61,7 @@ A split is `chapter_end N` (0 is the tutorial), `job_advance BRANCH TIER`, `boss
 
 ## A clean run
 
-A run is **clean** when every Assist stays at its normal value from the start to the last split: the cash shop, game speed, fast-forward, turbo attack, auto-run, hold toggle, auto-potion, auto-loot, save states, and any Assist added later. The timer checks them all the time. If one is turned on during the run, even for a moment and then off again, the run is *assisted* for good, and the overlay and the run's log say which one. Save states are an Assist, so a practice run with them is never clean.
+A run is **clean** when every Assist stays at its normal value from the start to the last split: the cash shop, game speed, fast-forward, turbo attack, auto-run, hold toggle, auto-potion, auto-loot, save states, and any Assist added later. The timer checks them all the time. If one is turned on during the run, even for a moment and then off again, the run is *assisted* for good, and the overlay and the run's log say which one. Save states are an Assist, so a practice run with them is never clean ([practice from a split](#practice-from-a-split)).
 
 Everything else in the settings (the picture, sound, controls, the minimap, the language) is free: it doesn't change the game.
 
@@ -80,6 +80,32 @@ Every finished or reset run is written to the `runs` folder of your data folder,
 
 Your **personal best** of a category is your fastest finished run that is clean and inside the category. It is kept as `runs/any.best` (the same text as a log). To start over, delete that file.
 
+## Practice from a split
+
+With **Save states** (`save_states = on`, an Assist) and the timer both on, the port keeps a save state after each split of your category, so you can practise one segment again and again without playing the run before it ([ADR 0189](../adr/0189-practice-states-per-split-and-segment-times.md)).
+
+- **Keeping the states.** At the first moment after a split where a state can be taken (in the field, nothing open, every key let go: the same rule as F5), the port saves one, and a short notice says so. There is one state per category, character slot and split, in `states/<category>/slot<N>-split<M>.state` of your data folder. A newer one of the same split replaces the old one. The last split gets none: nothing follows it.
+- **F7** (`practice_pick`) picks the next split that has a state for the character you play; the overlay shows *practice from: ...*. **F8** (`practice_load`) loads it (with none picked, it picks the first one). A pad has no button for them by default: bind them in the remap overlay or `bindings.ini`.
+- F8 is refused for the same reasons as F9, with the same notice ("Not loaded: not in a menu"), and also when that split has no state yet.
+
+After a load the timer is in **practice**. A run in progress ends as *reset*. The timer then times the segment from the load to the next split, then the next segment, and so on to the last split:
+
+```
+Any% practice  0:42.1
+loaded: Chapter 1 boss (2/6)
+next: Chapter 1's end (3/6)
+best segment 0:39.8
+last segment 0:41.0 (+0:01.2)
+sum of best 1:58:03.4
+practice, never a run
+```
+
+A practice is never a run: it writes no run log and makes no personal best. Starting a new character starts a real run again.
+
+### Best segments and the sum of best
+
+A **segment** is the time from one split to the next (from the start, for the first). The port keeps the **best segment** of each split, from your runs and your practice alike, in `runs/<category>.segments`. A segment counts only when no Assist other than save states was on during it, and the run variables stayed inside the category. The **sum of best** adds up every split's best segment once each has one. It shows what a run could be at best, not a run you made.
+
 ## LiveSplit
 
 On a computer (macOS, Windows, Linux) the timer can drive [LiveSplit](https://livesplit.org/), so you keep your own layout and splits there. The port sends LiveSplit its start, each split and each reset; LiveSplit does the timing and the comparisons.
@@ -88,7 +114,7 @@ On a computer (macOS, Windows, Linux) the timer can drive [LiveSplit](https://li
 2. In the port, turn on **Speedrun timer** and set `livesplit = localhost` in `settings.ini` (or `localhost:PORT` for another port), or start it with `--run-timer on --livesplit localhost`. The **LiveSplit server** row in the **Other** tab shows the value.
 3. Give LiveSplit as many splits as your category has, in the same order (Any% has six, Chapter 1 three).
 
-The link is off by default. It connects to LiveSplit's own server only: `localhost`, or an IP address (another computer on your network, as `192.168.1.20:16834` or `[fe80::1]:16834`), never a name to look up. If LiveSplit isn't there, the game plays on as usual, the log says so once and the port tries again every few seconds without a word. A run that starts before LiveSplit connects is not in LiveSplit.
+The link is off by default. It connects to LiveSplit's own server only: `localhost`, or an IP address (another computer on your network, as `192.168.1.20:16834` or `[fe80::1]:16834`), never a name to look up. If LiveSplit isn't there, the game plays on as usual, the log says so once and the port tries again every few seconds without a word. A run that starts before LiveSplit connects is not in LiveSplit. A practice ([Practice from a split](#practice-from-a-split)) is never a run, so LiveSplit hears nothing of it; loading a practice state during a run resets LiveSplit's.
 
 **Game time.** With **LiveSplit game time** on (`livesplit_game_time = on`, the default), LiveSplit's game time is the game's own ticks, 50 ms each: compare against *Game Time* in LiveSplit to rank by it. The port pauses LiveSplit's own game time and sets it on every tick. Turn it off to keep LiveSplit's game time as LiveSplit runs it.
 
@@ -96,5 +122,5 @@ No LiveSplit auto-splitter script is needed or offered: such scripts read the ga
 
 ## Not yet
 
-- Replays that can be checked ([#405](https://github.com/armaatus/maplethief-port/issues/405), [#408](https://github.com/armaatus/maplethief-port/issues/408)) and practice from a split ([#409](https://github.com/armaatus/maplethief-port/issues/409)) are planned.
+- Replays that can be checked ([#405](https://github.com/armaatus/maplethief-port/issues/405), [#408](https://github.com/armaatus/maplethief-port/issues/408)) are planned.
 - No full Any% run has been timed in the port yet: the last boss has not been reached in the port's own tests.

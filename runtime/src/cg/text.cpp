@@ -32,6 +32,7 @@
 #include "cf/cf_objects.h"
 #include "cg/cg_objects.h"
 #include "cg/cg_snapshot.h"
+#include "maplethief/cg.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
 #include "maplethief/textpack.h"
@@ -236,6 +237,28 @@ std::u16string text_of(mt_cpu *cpu, u32 str) {
     return out;
 }
 
+// The draw observer (mt_cg_set_text_observer).
+mt_cg_text_observer_fn g_text_observer = nullptr;
+void *g_text_observer_user = nullptr;
+
+// Tells the observer about a text drawn at x `at_x`, `w` points wide, into a bitmap `limit`
+// points wide.
+void observe_text(const std::u16string &text, double at_x, float w, double limit) {
+    const std::string utf8 = mt_cf::to_utf8(text);
+    mt_cg_drawn_text t{};
+    t.utf8 = utf8.c_str();
+    t.right = static_cast<float>(at_x) + w;
+    t.limit = static_cast<float>(limit);
+    for (const int cp : code_points(text)) {
+        if (cp == '\n') {
+            t.newlines++;
+        } else if (!is_control(cp) && (cp == 0xFFFD || !font_has_glyph(cp))) {
+            t.missing++;
+        }
+    }
+    g_text_observer(g_text_observer_user, &t);
+}
+
 void return_size(mt_cpu *cpu, u32 result, float w, float h) {
     const float size[2] = {w, h};
     mt_ret_struct(cpu, result, size, sizeof size);
@@ -269,6 +292,9 @@ void string_draw_at_point(mt_cpu *cpu) {
             mt_textpack::note_drawn(utf8);
             mt_textpack::note_overflow(utf8, static_cast<float>(at.x) + w,
                                        static_cast<float>(s.width / ds));
+        }
+        if (ds > 0 && g_text_observer != nullptr) {
+            observe_text(text, at.x, w, s.width / ds);
         }
     } else {
         log_once(cpu, "NSString.drawAtPoint.context",
@@ -422,3 +448,8 @@ extern const mt_snap::StateOps k_snap_font;
 const mt_snap::StateOps k_snap_font = {&k_font_state, "UIFont", save_font, load_font, nullptr};
 
 } // namespace mt_cg
+
+extern "C" void mt_cg_set_text_observer(mt_cg_text_observer_fn fn, void *user) noexcept {
+    mt_cg::g_text_observer = fn;
+    mt_cg::g_text_observer_user = user;
+}

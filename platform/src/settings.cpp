@@ -1027,6 +1027,17 @@ constexpr SettingInfo kRegistry[] = {
      .help = "How loud the voice speaks, in percent",
      .applies = Applies::kAtOnce,
      .needs = kCapSpeech},
+    // #392 (ADR 0191, speech_text.h): the notify lines too, queued behind dialogue and popups.
+    {.key = "speech_notices",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# with speech on, also read the notify lines (pick-ups, meso, EXP): on | off",
+     .value = on_off<&Settings::speech_notices>(),
+     .flag = "--speech-notices",
+     .game_only = true,
+     .label = "Speak notices",
+     .help = "With speech on, also reads the pick-up, meso and EXP lines and the map's name",
+     .applies = Applies::kAtOnce,
+     .needs = kCapSpeech},
     // Video: the picture adjustments (#187, ADR 0093's addendum, color_filter.h), the colour
     // step with the colour-blind filter. The player's screen: no preset changes them.
     {.key = "brightness",

@@ -92,6 +92,7 @@ add_library(
     src/file_dialog.cpp
     src/save_menu.cpp
     src/save_state_input.cpp
+    src/practice_state.cpp
     src/quick_state.cpp
     src/recovery.cpp
     src/save_tools.cpp
@@ -102,6 +103,8 @@ add_library(
     src/settings.cpp
     src/settings_menu.cpp
     src/speech.cpp
+    src/speech_menus.cpp
+    src/speech_text.cpp
     src/start_question.cpp
     src/switch_pads.cpp
     src/pack_folders.cpp

@@ -386,6 +386,10 @@ u32 uiimage_cgimage(mt_cpu *cpu, u32 uiimage);
 // What the compositor draws for a UIImage (not retained): the image hook's replacement for its
 // bundle file (maplethief/cg.h, #153), else its CGImage; 0 if `uiimage` is no UIImage.
 u32 uiimage_display_cgimage(mt_cpu *cpu, u32 uiimage);
+// The name +[UIImage imageNamed:] was given for `uiimage` ("AlertYesButton.png"; its cache
+// holds each image for the process), or "" for an image made otherwise (#393: the speech's
+// names of the shell's image buttons).
+std::string uiimage_name(mt_cpu *cpu, u32 uiimage);
 // A new autoreleased UIImage over `cgimage` (retained by the UIImage), or 0.
 u32 uiimage_create(mt_cpu *cpu, u32 cgimage);
 // -[UIImage size] in points (pixels / scale), or false if `uiimage` is no UIImage.
