@@ -16,7 +16,7 @@ You play it with **your own copy** of the game. This repository contains none of
 
 ## Reporting a bug
 
-The game writes a log to `data/logs/` next to it (settings menu → Saves → **Open logs folder**) and a report to `data/crashes/` after a crash; a dialog names the file. Attach the newest log and the crash report to a [bug report](https://github.com/armaatus/maplethief-port/issues/new?template=bug.yml). Paths in the log have your folders replaced by `<data>`, `<game folder>` and `~`. After a crash the next start offers default settings without changing your settings file.
+The game writes a log to `data/logs/` next to it (settings menu → Saves → **Open logs folder**) and a report to `data/crashes/` after a crash; a dialog names the file. If the game freezes for 15 seconds, it writes a hang report there too and asks whether to keep waiting or quit. Attach the newest log and the crash or hang report to a [bug report](https://github.com/armaatus/maplethief-port/issues/new?template=bug.yml). Paths in the log have your folders replaced by `<data>`, `<game folder>` and `~`. After a crash the next start offers default settings without changing your settings file.
 
 ## Help build it
 
