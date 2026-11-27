@@ -4,10 +4,10 @@
 
 Every game function that no automated run has entered, with a reason or a test ([#305](https://github.com/armaatus/maplethief-port/issues/305)). The runs are the whole real-asset test suite under the run coverage ([testing/run-coverage.md](../testing/run-coverage.md), ADR 0160). Chartboost's functions are left out: they never run by design ([libraries.md](libraries.md)).
 
-- **Game functions: 1,980; executed by a run: 1,490; not executed: 490.**
-- `dead`: 191. No live code reaches them: every reference to them (call, address taken, selector load, vtable, script native) comes from dead code, or there is none.
+- **Game functions: 1,980; executed by a run: 1,603; not executed: 377.**
+- `dead`: 202. No live code reaches them: every reference to them (call, address taken, selector load, vtable, script native) comes from dead code, or there is none.
 - `difftest`: 81. Live, and the differential test (ADR 0017) runs them on 1,000 random inputs each against Unicorn with zero mismatches.
-- `unreachable`: 124. Live, but only from a state no run can produce; the evidence says which. Host-driven tests for them: [#432](https://github.com/armaatus/maplethief-port/issues/432).
+- `unreachable`: 0. Live, but only from a state no run can produce; the evidence says which. The host-driven test `play.host_events` enters such functions ([#432](https://github.com/armaatus/maplethief-port/issues/432), ADR 0242).
 - `missed`: 94. Live and reachable by play; no run enters them yet. Run steps for them: [#433](https://github.com/armaatus/maplethief-port/issues/433).
 - A `dead` row with a reason in words comes from a rule: the port or the shipped data never takes the path.
 
@@ -19,10 +19,8 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0x28AD` | `-[MapleThiefAppDelegate window]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x28D1` | `-[MapleThiefAppDelegate setGlView:]` | `app-objc` | dead | no code loads selector `setGlView:`, and no framework or nib sends it |
 | `0x2905` | `-[MapleThiefAppDelegate glView]` | `app-objc` | dead | no code loads selector `glView`, and no framework or nib sends it |
-| `0x2929` | `-[MapleThiefAppDelegate dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x29A5` | `-[MapleThiefAppDelegate application:didFailToRegisterForRemoteNotificationsWithError:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x29B5` | `-[MapleThiefAppDelegate application:didReceiveRemoteNotification:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x29C5` | `-[MapleThiefAppDelegate application:didRegisterForRemoteNotificationsWithDeviceToken:]` | `app-objc` | unreachable | a push-notification token, which the runtime never delivers; follow-up #432 |
 | `0x2D79` | `-[EAGLView setTouchKeyPadView:]` | `app-objc` | dead | no code loads selector `setTouchKeyPadView:`, and no framework or nib sends it |
 | `0x2DD1` | `-[EAGLView setMoviePlayer:]` | `app-objc` | dead | no code loads selector `setMoviePlayer:`, and no framework or nib sends it |
 | `0x2E05` | `-[EAGLView moviePlayer]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
@@ -43,8 +41,7 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0x32D9` | `-[EAGLView getInstance]` | `app-objc` | dead | no code loads selector `getInstance`, and no framework or nib sends it |
 | `0x32ED` | `-[EAGLView LCDheight]` | `app-objc` | dead | no code loads selector `LCDheight`, and no framework or nib sends it |
 | `0x3311` | `-[EAGLView LCDwidth]` | `app-objc` | dead | no code loads selector `LCDwidth`, and no framework or nib sends it |
-| `0x3895` | `-[EAGLView didReceiveMemoryWarning]` | `app-objc` | unreachable | a memory warning, which no run sends; follow-up #432 |
-| `0x38ED` | `-[EAGLView dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
+| `0x3895` | `-[EAGLView didReceiveMemoryWarning]` | `app-objc` | dead | `EAGLView` is a `UIView`: UIKit sends `didReceiveMemoryWarning` to view controllers only, and the one load of the selector is the method's own send to `super`, which `UIView` does not implement (#432) |
 | `0x3B61` | `-[EAGLView enalbeHelpScrollKey]` | `app-objc` | missed | selector `enalbeHelpScrollKey` loaded by live `Shell_EnalbeHelpScrollKey`; follow-up #433 |
 | `0x3BC5` | `-[EAGLView disableCashShopKey]` | `app-objc` | dead | selector `disableCashShopKey` loaded only by dead `-[EAGLView disableCashShopKey]` |
 | `0x3C91` | `-[EAGLView disableMapKey]` | `app-objc` | dead | selector `disableMapKey` loaded only by dead `-[EAGLView disableMapKey]` |
@@ -77,49 +74,19 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xAD65` | `IStateAdaptor::GetRootState` | `engine` | missed | virtual, in the live vtable of `IStateAdaptor`; follow-up #433 |
 | `0xADC1` | `IStateAdaptor::OnPointerEvent` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xAF81` | `IStateAdaptor::PushState` | `engine` | missed | virtual, in the live vtable of `IStateAdaptor`; follow-up #433 |
-| `0xB015` | `IStateAdaptor::~IStateAdaptor_deleting@thunk-4` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0xB031` | `IStateAdaptor::~IStateAdaptor_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0xB069` | `IStateAdaptor::~IStateAdaptor` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0xB0A1` | `IStateAdaptor::~IStateAdaptor@thunk-4` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xB0F5` | `IStateAdaptor::vf12` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xB10D` | `IStateAdaptor::Resume` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xB11D` | `IStateAdaptor::vf8` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xB141` | `IStateAdaptor::vf23` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB169` | `IState::~IState` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0xB195` | `IState::~IState_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xB1C1` | `FUN_0000b1c0` | `engine` | missed | called by live `IStateAdaptor::IStateAdaptor`; follow-up #433 |
-| `0xB221` | `UtilAdaptor::~UtilAdaptor` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0xB255` | `UtilAdaptor::~UtilAdaptor_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xB6E9` | `SaveFile_ThiefSlotExists` | `engine` | missed | called by live `FUN_00046a28`; follow-up #433 |
-| `0xC75D` | `CMMapTileSet::~CMMapTileSet` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0xCBD5` | `CMMap::~CMMap` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0xEAD1` | `CMPopup::~CMPopup_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0xED69` | `CMPopup::~CMPopup` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0xF001` | `FUN_0000f000` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xF34D` | `FUN_0000f34c` | `engine` | missed | called by live `CStateGame::SetPigmeState`; follow-up #433 |
 | `0x12591` | `FUN_00012590` | `engine` | missed | called by live `CStateTitle::Paint`; follow-up #433 |
 | `0x1267D` | `FUN_0001267c` | `engine` | missed | called by live `CStateTitle::LoadSettings`; follow-up #433 |
-| `0x19689` | `CMResMgr::~CMResMgr` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x1BB31` | `CMScrollBar::~CMScrollBar` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x1C6B5` | `CMSocket::~CMSocket_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x1C7B5` | `CMSocket::~CMSocket` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x1CBDD` | `SoundPlayer_InterruptionListener` | `engine` | unreachable | an audio-session interruption (a call, an alarm), which no run sends; follow-up #432 |
 | `0x1D309` | `CMSoundPlayer::VibratePreview` | `engine` | missed | called by live `FUN_00046a28`; follow-up #433 |
 | `0x1D5F5` | `alBufferDataStaticProc` | `lib:apple-openal-support` | dead | reached only from `SoundPlayer_LoadEffects`'s branch for id 0, a music id, so it cannot run (re/audio.md) |
-| `0x1DB19` | `CMSoundPlayer::~CMSoundPlayer` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x1DDD9` | `CMSoundPlayer::~CMSoundPlayer_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x1E1DD` | `SoundPlayer_ShutdownOpenAL` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x1E259` | `SoundPlayer_EndInterruption` | `engine` | unreachable | an audio-session interruption (a call, an alarm), which no run sends; follow-up #432 |
-| `0x1E315` | `SoundPlayer_BeginInterruption` | `engine` | unreachable | an audio-session interruption (a call, an alarm), which no run sends; follow-up #432 |
-| `0x1E6E1` | `CMLayer::~CMLayer` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x1F58D` | `CMFrame::~CMFrame` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x1FB89` | `CMAction::~CMAction` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x20C2D` | `CMSprite::~CMSprite` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x216D1` | `CMSpriteImage::~CMSpriteImage` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x21F21` | `FUN_00021f20` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x21F39` | `FUN_00021f38` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x2210D` | `CMTimer::~CMTimer_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x22139` | `CMTimer::~CMTimer` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x223C9` | `FUN_000223c8` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x22415` | `FUN_00022414` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x2245D` | `FUN_0002245c` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
@@ -130,22 +97,10 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0x24151` | `FUN_00024150` | `engine` | missed | called by live `FUN_0003a898`; follow-up #433 |
 | `0x24171` | `FUN_00024170` | `engine` | missed | called by live `DrawImageAnchored`; follow-up #433 |
 | `0x24DA9` | `FUN_00024da8` | `engine` | missed | called by live `CDataMgr::drawConfig`, `HUD_Paint`, `CStateGame::Paint`; follow-up #433 |
-| `0x24E05` | `CMUtil::~CMUtil_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x24E39` | `CMUtil::~CMUtil` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x25721` | `SkyCanvas::KeyEvent4` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x25771` | `FUN_00025770` | `engine` | missed | called by live `CStateMainMenu::OnKeyPressed`; follow-up #433 |
 | `0x25889` | `SkyCanvas::RepaintRect` | `engine` | missed | called by live `SkyCanvas::Tick`; follow-up #433 |
-| `0x264D1` | `SkyCanvas::~SkyCanvas_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x264FD` | `SkyCanvas::~SkyCanvas` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x26785` | `Build::~Build` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x267B1` | `Build::~Build_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x26DA9` | `CAniManager::~CAniManager` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x2E5E1` | `CAniManager::makeAniYetiIn` | `engine` | missed | called by live `CStateGame::StartScene`; follow-up #433 |
-| `0x31C19` | `CSelItem::~CSelItem` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x31CD9` | `CMsg::~CMsg` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x361E5` | `CChatBox::~CChatBox` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x367F1` | `CFloating::~CFloating` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x36CA1` | `CDamageFloatings::~CDamageFloatings` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x36D89` | `CDataMgr::CountCoupons` | `engine` | missed | called by live `CStateGame::OnKeyPressed`, `CStateMainMenu::OnKeyPressed`; follow-up #433 |
 | `0x36F75` | `FUN_00036f74` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x38171` | `CDataMgr::SaveCupon` | `engine` | missed | called by live `CStateGame::resultMonCa`, `CStateMainMenu::OnKeyPressed`; follow-up #433 |
@@ -154,26 +109,13 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0x469C9` | `FUN_000469c8` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x46A29` | `FUN_00046a28` | `engine` | missed | called by live `PopupMenu_OptionTabOnKey`, `Game_ExitToMainMenu`, `CStateMainMenu::OnKeyPressed`; follow-up #433 |
 | `0x48BD5` | `Map_OnKeySub1` | `engine` | missed | called by live `CStateGame::OnKeyPressed`; follow-up #433 |
-| `0x491E1` | `CDataMgr::DeleteCoupon` | `engine` | unreachable | needs a coupon in the save, and nothing in 1.5 adds one (formats/save.md); follow-up #432 |
 | `0x4AB01` | `Shop_PaintItemDetail` | `engine` | missed | called by live `Shop_Paint`; follow-up #433 |
 | `0x4D315` | `CDataMgr::drawConfig` | `engine` | missed | called by live `PopupMenu_PaintOptionTab`; follow-up #433 |
 | `0x50131` | `PopupMenu_OptionTabOnKey` | `engine` | missed | called by live `CDataMgr::Update`; follow-up #433 |
 | `0x5220D` | `FUN_0005220c` | `engine` | missed | called by live `CDataMgr::Update`; follow-up #433 |
 | `0x524C1` | `FUN_000524c0` | `engine` | missed | called by live `CDataMgr::Update`; follow-up #433 |
 | `0x59119` | `Map_PaintSub1` | `engine` | missed | called by live `CStateGame::Paint`; follow-up #433 |
-| `0x5AD61` | `CDataMgr::~CDataMgr_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x5ADCD` | `CDataMgr::~CDataMgr` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x5CCA1` | `CDropItems::~CDropItems` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x5CFDD` | `CFloatingEff::~CFloatingEff` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x5D249` | `CFloatingBGAlgorithm::~CFloatingBGAlgorithm` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x5D275` | `CFloatingBGAlgorithm::~CFloatingBGAlgorithm_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x5D2A1` | `CFloatingBGFlowerAlgorithm::~CFloatingBGFlowerAlgorithm` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x5D819` | `FUN_0005d818` | `engine` | missed | called by live `FUN_0005e388`; follow-up #433 |
-| `0x5DA39` | `CFloatingBGImage::~CFloatingBGImage` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x5DD51` | `CFloatingBG::~CFloatingBG_deleting@thunk-36` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x5E06D` | `CFloatingBG::~CFloatingBG` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x5E36D` | `CFloatingBG::~CFloatingBG@thunk-36` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x5ED7D` | `CEffectFloatings::~CEffectFloatings` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x5F511` | `FUN_0005f510` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x5F5A9` | `FUN_0005f5a8` | `engine` | missed | called by live `CQuestList::ClearAll`; follow-up #433 |
 | `0x5F7F5` | `FUN_0005f7f4` | `engine` | dead | called only by dead `ScriptNative_getEquipState` |
@@ -181,33 +123,14 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0x61329` | `CHero::StopForMenu` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x6224D` | `FUN_0006224c` | `engine` | missed | called by live `FUN_00064748`; follow-up #433 |
 | `0x671BD` | `CHero::ReviveAtPortal0` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x68575` | `CHero::~CHero` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x69EED` | `CItem::~CItem` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x6B4BD` | `CLoaderThread::~CLoaderThread` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x6C5DD` | `CMapArms::~CMapArms` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x6DB59` | `CMapleObject::~CMapleObject_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x6DB8D` | `CMapleObject::~CMapleObject` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x6DEA1` | `CMapleWorld::~CMapleWorld` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x6ED15` | `CMobArms::~CMobArms` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x742E9` | `CMob::~CMob` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x75961` | `FUN_00075960` | `engine` | missed | called by live `FUN_00075a74`; follow-up #433 |
 | `0x75A75` | `FUN_00075a74` | `engine` | missed | called by live `CMob::Flush`, `MonCa_StartRound`; follow-up #433 |
-| `0x77421` | `CMobs::~CMobs` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x7789D` | `CNotifyText::~CNotifyText` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x785BD` | `CNotifyTextList::SetMaxLines` | `engine` | missed | called by live `CDataMgr::ApplyInfoLines`; follow-up #433 |
-| `0x78741` | `CNotifyTextList::~CNotifyTextList` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x78A65` | `FUN_00078a64` | `engine` | missed | called by live `Popup_Paint`; follow-up #433 |
-| `0x79949` | `CPopup::~CPopup` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x7997D` | `CPopup::~CPopup_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x79A21` | `CRequire::~CRequire` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x79B99` | `CReward::~CReward` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x7A015` | `FUN_0007a014` | `engine` | dead | called only by dead `FUN_0007a044`, `ScriptNative_setCurrent` |
 | `0x7A045` | `FUN_0007a044` | `engine` | dead | called only by dead `ScriptNative_getMainQuest` |
 | `0x7A071` | `FUN_0007a070` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x7A5DD` | `CQuest::~CQuest` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x7AB81` | `CQuestList::~CQuestList` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x7CE5D` | `FUN_0007ce5c` | `engine` | dead | called only by dead `ScriptNative_regMsgRequire` |
-| `0x80315` | `CSkill::~CSkill` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x80795` | `CStateGame::Resume` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x8079D` | `CStateGame::OnPointerEvent` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x819E5` | `CStateGame::resultMonCa` | `engine` | dead | Monster Carnival: started only by `initMonCa` in `Spiegelman1`–`3`, scripts no map names (ANALYSIS.md, unused scripts) |
@@ -215,21 +138,11 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0x8201D` | `MonCa_EndRound` | `engine` | dead | Monster Carnival: started only by `initMonCa` in `Spiegelman1`–`3`, scripts no map names (ANALYSIS.md, unused scripts) |
 | `0x8217D` | `MonCa_StartRound` | `engine` | dead | Monster Carnival: started only by `initMonCa` in `Spiegelman1`–`3`, scripts no map names (ANALYSIS.md, unused scripts) |
 | `0x82271` | `CStateGame::StartMonsterCarnival` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x92FF9` | `CStateGame::~CStateGame_deleting@thunk-4` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x93869` | `CStateGame::~CStateGame` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x940BD` | `CStateGame::~CStateGame@thunk-4` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x94371` | `CStateMainMenu::OnPointerEvent` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x97455` | `CStateMainMenu::~CStateMainMenu_deleting@thunk-4` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x97809` | `CStateMainMenu::~CStateMainMenu` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x97BA1` | `CStateMainMenu::~CStateMainMenu@thunk-4` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x97E65` | `CStateTitle::OnKeyPressed` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x97E79` | `FUN_00097e78` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x97E81` | `CStateTitle::OnPointerEvent` | `engine` | missed | virtual, in the live vtable of `CStateTitle`; follow-up #433 |
 | `0x98005` | `FUN_00098004` | `engine` | missed | called by live `CStateTitle::Paint`; follow-up #433 |
-| `0x987AD` | `CStateTitle::~CStateTitle_deleting@thunk-4` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x98809` | `CStateTitle::~CStateTitle` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x98849` | `CStateTitle::~CStateTitle@thunk-4` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x99069` | `DataReader::~DataReader` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x99161` | `Lua::error` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x99235` | `Lua::pushIndexed` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0x9930D` | `Lua::storeIndexed0` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
@@ -252,13 +165,7 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0x9AF7D` | `ScriptNative_checkItemCount` | `engine` | missed | native `checkItemCount`, called by shipped scripts; follow-up #433 |
 | `0x9B621` | `Lua::pushStringOrNil` | `engine` | missed | called by live `Lua::comparison`; follow-up #433 |
 | `0x9B8AD` | `Lua::setLine` | `engine` | missed | called by live `Lua::execute`; follow-up #433 |
-| `0x9D415` | `Lua::~Lua` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x9D7A1` | `Stringtable::~Stringtable` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x9E0B1` | `Symbol::~Symbol` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x9E79D` | `Table::~Table` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x9EDF1` | `TFunc::jumpBack` | `engine` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0x9F07D` | `TFunc::~TFunc` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0x9F97D` | `Undump::~Undump` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0x9FB45` | `-[MoviePlayerController initWithMovieFile:]` | `app-objc` | dead | no code loads selector `initWithMovieFile:`, and no framework or nib sends it |
 | `0x9FCE9` | `MoviePlayerController_CGRectMake` | `app-objc` | dead | called only by dead `-[MoviePlayerController initWithMovieFile:]` |
 | `0x9FD49` | `-[MoviePlayerController viewDidLoad]` | `app-objc` | dead | the movie player classes: nothing creates them (ANALYSIS.md) |
@@ -308,7 +215,6 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xAB165` | `-[MainMenuView movePanelMenu:]` | `app-objc` | dead | selector `movePanelMenu:` loaded only by dead `-[MainMenuView redraw:]` |
 | `0xAB2CD` | `-[MainMenuView moveDetail:]` | `app-objc` | dead | selector `moveDetail:` loaded only by dead `-[MainMenuView redraw:]` |
 | `0xAB42D` | `-[MainMenuView moveBuilding:]` | `app-objc` | dead | selector `moveBuilding:` loaded only by dead `-[MainMenuView redraw:]` |
-| `0xAB7A1` | `-[MainMenuView dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xABA11` | `-[MainMenuView redraw:]` | `app-objc` | dead | no code loads selector `redraw:`, and no framework or nib sends it |
 | `0xABC05` | `-[MainMenuView removeSubviews]` | `app-objc` | dead | no code loads selector `removeSubviews`, and no framework or nib sends it |
 | `0xAE199` | `-[MapKeyPadView setTouchPoint:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
@@ -317,7 +223,6 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xAE44D` | `-[MapKeyPadView touchesCancelled:withEvent:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xAE491` | `-[MapKeyPadView touchesMoved:withEvent:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xAE4D5` | `-[MapKeyPadView touchesBegan:withEvent:]` | `app-objc` | missed | selector `touchesBegan:withEvent:`: a UIKit or Foundation callback; follow-up #433 |
-| `0xAE5D1` | `-[MapKeyPadView dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xAE6FD` | `MapKeyPadView_CGPointMake` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xAE785` | `-[MarketKeyPadView setScrollTrackingPoint:]` | `app-objc` | dead | no code loads selector `setScrollTrackingPoint:`, and no framework or nib sends it |
 | `0xAE83D` | `-[MarketKeyPadView setCurrentTrackingPoint:]` | `app-objc` | dead | no code loads selector `setCurrentTrackingPoint:`, and no framework or nib sends it |
@@ -330,7 +235,6 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xAEEB1` | `-[MarketKeyPadView touchesCancelled:withEvent:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xAEEC1` | `-[MarketKeyPadView touchesMoved:withEvent:]` | `app-objc` | missed | selector `touchesMoved:withEvent:`: a UIKit or Foundation callback; follow-up #433 |
 | `0xAF09D` | `-[MarketKeyPadView touchesBegan:withEvent:]` | `app-objc` | missed | selector `touchesBegan:withEvent:`: a UIKit or Foundation callback; follow-up #433 |
-| `0xAF28D` | `-[MarketKeyPadView dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xAF2E5` | `-[MarketKeyPadView releaseChargeButton:]` | `app-objc` | missed | selector `releaseChargeButton:` loaded by live `-[MarketKeyPadView initWithFrame:]`; follow-up #433 |
 | `0xAF34D` | `-[MarketKeyPadView pressChargeButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xAF359` | `-[MarketKeyPadView releaseBuyTabButton:]` | `app-objc` | missed | selector `releaseBuyTabButton:` loaded by live `-[MarketKeyPadView initWithFrame:]`; follow-up #433 |
@@ -360,10 +264,7 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xB07DD` | `-[NpcKeyPadView pressRefuseButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xB07E9` | `-[NpcKeyPadView releaseAcceptButton:]` | `app-objc` | missed | selector `releaseAcceptButton:` loaded by live `-[NpcKeyPadView initWithFrame:]`; follow-up #433 |
 | `0xB0851` | `-[NpcKeyPadView pressAcceptButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xB0A41` | `-[NpcKeyPadView dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xB180D` | `-[PopupKeyPadView setEmptyButton:]` | `app-objc` | dead | no code loads selector `setEmptyButton:`, and no framework or nib sends it |
-| `0xB1A79` | `-[PopupKeyPadView dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0xB1AD1` | `-[PopupKeyPadView releaseGradeRevivalButton:]` | `app-objc` | unreachable | the cash shop's purchases: they need the App Store; follow-up #432 |
 | `0xB1B39` | `-[PopupKeyPadView pressGradeRevivalButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xB1B45` | `-[PopupKeyPadView releaseRevivalButton:]` | `app-objc` | missed | selector `releaseRevivalButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #433 |
 | `0xB1BAD` | `-[PopupKeyPadView pressRevivalButton:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
@@ -405,15 +306,15 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xB4D4D` | `-[TouchKeyPadView invenEnable]` | `app-objc` | dead | no code loads selector `invenEnable`, and no framework or nib sends it |
 | `0xB4D91` | `-[TouchKeyPadView alertEnable]` | `app-objc` | dead | no code loads selector `alertEnable`, and no framework or nib sends it |
 | `0xB50CD` | `-[TouchKeyPadView sampleButtonClicked:]` | `app-objc` | dead | no code loads selector `sampleButtonClicked:`, and no framework or nib sends it |
-| `0xB50D9` | `-[TouchKeyPadView releaseGradeRevivalButton:]` | `app-objc` | unreachable | the cash shop's purchases: they need the App Store; follow-up #432 |
-| `0xB50F5` | `-[TouchKeyPadView releaseExp80Button:]` | `app-objc` | unreachable | the cash shop's purchases: they need the App Store; follow-up #432 |
-| `0xB5111` | `-[TouchKeyPadView releaseExp40Button:]` | `app-objc` | unreachable | the cash shop's purchases: they need the App Store; follow-up #432 |
-| `0xB512D` | `-[TouchKeyPadView releaseMeso300000Button:]` | `app-objc` | unreachable | the cash shop's purchases: they need the App Store; follow-up #432 |
-| `0xB5149` | `-[TouchKeyPadView releaseMeso120000Button:]` | `app-objc` | unreachable | the cash shop's purchases: they need the App Store; follow-up #432 |
-| `0xB5165` | `-[TouchKeyPadView releaseMeso50000Button:]` | `app-objc` | unreachable | the cash shop's purchases: they need the App Store; follow-up #432 |
-| `0xB5181` | `-[TouchKeyPadView releaseMeso22000Button:]` | `app-objc` | unreachable | the cash shop's purchases: they need the App Store; follow-up #432 |
-| `0xB519D` | `-[TouchKeyPadView releaseMeso10000Button:]` | `app-objc` | unreachable | the cash shop's purchases: they need the App Store; follow-up #432 |
-| `0xB51B9` | `-[TouchKeyPadView releaseMeso3000Button:]` | `app-objc` | unreachable | the cash shop's purchases: they need the App Store; follow-up #432 |
+| `0xB50D9` | `-[TouchKeyPadView releaseGradeRevivalButton:]` | `app-objc` | dead | no button of a `TouchKeyPadView` has this action: its add-button calls pass 8 others (re/objc-shell.md); the buttons that have it are `CashShopKeyPadView`'s and `PopupKeyPadView`'s, which target their own view (#432) |
+| `0xB50F5` | `-[TouchKeyPadView releaseExp80Button:]` | `app-objc` | dead | no button of a `TouchKeyPadView` has this action: its add-button calls pass 8 others (re/objc-shell.md); the buttons that have it are `CashShopKeyPadView`'s and `PopupKeyPadView`'s, which target their own view (#432) |
+| `0xB5111` | `-[TouchKeyPadView releaseExp40Button:]` | `app-objc` | dead | no button of a `TouchKeyPadView` has this action: its add-button calls pass 8 others (re/objc-shell.md); the buttons that have it are `CashShopKeyPadView`'s and `PopupKeyPadView`'s, which target their own view (#432) |
+| `0xB512D` | `-[TouchKeyPadView releaseMeso300000Button:]` | `app-objc` | dead | no button of a `TouchKeyPadView` has this action: its add-button calls pass 8 others (re/objc-shell.md); the buttons that have it are `CashShopKeyPadView`'s and `PopupKeyPadView`'s, which target their own view (#432) |
+| `0xB5149` | `-[TouchKeyPadView releaseMeso120000Button:]` | `app-objc` | dead | no button of a `TouchKeyPadView` has this action: its add-button calls pass 8 others (re/objc-shell.md); the buttons that have it are `CashShopKeyPadView`'s and `PopupKeyPadView`'s, which target their own view (#432) |
+| `0xB5165` | `-[TouchKeyPadView releaseMeso50000Button:]` | `app-objc` | dead | no button of a `TouchKeyPadView` has this action: its add-button calls pass 8 others (re/objc-shell.md); the buttons that have it are `CashShopKeyPadView`'s and `PopupKeyPadView`'s, which target their own view (#432) |
+| `0xB5181` | `-[TouchKeyPadView releaseMeso22000Button:]` | `app-objc` | dead | no button of a `TouchKeyPadView` has this action: its add-button calls pass 8 others (re/objc-shell.md); the buttons that have it are `CashShopKeyPadView`'s and `PopupKeyPadView`'s, which target their own view (#432) |
+| `0xB519D` | `-[TouchKeyPadView releaseMeso10000Button:]` | `app-objc` | dead | no button of a `TouchKeyPadView` has this action: its add-button calls pass 8 others (re/objc-shell.md); the buttons that have it are `CashShopKeyPadView`'s and `PopupKeyPadView`'s, which target their own view (#432) |
+| `0xB51B9` | `-[TouchKeyPadView releaseMeso3000Button:]` | `app-objc` | dead | no button of a `TouchKeyPadView` has this action: its add-button calls pass 8 others (re/objc-shell.md); the buttons that have it are `CashShopKeyPadView`'s and `PopupKeyPadView`'s, which target their own view (#432) |
 | `0xB51D5` | `-[TouchKeyPadView releaseRevivalButton:]` | `app-objc` | missed | selector `releaseRevivalButton:` loaded by live `-[PopupKeyPadView initWithFrame:]`; follow-up #433 |
 | `0xB520D` | `-[TouchKeyPadView releaseUpButton:]` | `app-objc` | dead | no code loads selector `releaseUpButton:`, and no framework or nib sends it |
 | `0xB527D` | `-[TouchKeyPadView releasePoundButton:]` | `app-objc` | dead | no code loads selector `releasePoundButton:`, and no framework or nib sends it |
@@ -427,7 +328,6 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xB535D` | `-[TouchKeyPadView release3Button:]` | `app-objc` | dead | selector `release3Button:` loaded only by dead `-[TouchKeyPadView releaseJumpButton:]` |
 | `0xB5379` | `-[TouchKeyPadView release2Button:]` | `app-objc` | dead | selector `release2Button:` loaded only by dead `-[TouchKeyPadView releaseJumpButton:]` |
 | `0xB5395` | `-[TouchKeyPadView release1Button:]` | `app-objc` | dead | selector `release1Button:` loaded only by dead `-[TouchKeyPadView releaseJumpButton:]` |
-| `0xB53B1` | `-[TouchKeyPadView clickGradeRevivalButton:]` | `app-objc` | unreachable | the cash shop's purchases: they need the App Store; follow-up #432 |
 | `0xB54AD` | `-[TouchKeyPadView clickRevivalButton:]` | `app-objc` | missed | selector `clickRevivalButton:` loaded by live `-[PopupKeyPadView releaseRevivalButton:]`; follow-up #433 |
 | `0xB54E5` | `-[TouchKeyPadView clickUpButton:]` | `app-objc` | missed | selector `clickUpButton:` loaded by live `-[TouchKeyPadView touchesBegan:withEvent:]`; follow-up #433 |
 | `0xB5571` | `-[TouchKeyPadView click0Button:]` | `app-objc` | dead | no code loads selector `click0Button:`, and no framework or nib sends it |
@@ -454,24 +354,17 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xBA019` | `-[TouchKeyPadView disableMinimapKey]` | `app-objc` | dead | selector `disableMinimapKey` loaded only by dead `-[EAGLView disableMinimapKey]` |
 | `0xBA03D` | `-[TouchKeyPadView enableMinimapKey]` | `app-objc` | dead | selector `enableMinimapKey` loaded only by dead `-[EAGLView enableMinimapKey]` |
 | `0xBA2AD` | `-[TouchKeyPadView initKeyPadType5:]` | `app-objc` | dead | no code loads selector `initKeyPadType5:`, and no framework or nib sends it |
-| `0xBBE4D` | `-[TouchKeyPadView dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xBD219` | `-[EAGLViewController setCurrentLeaderBoard:]` | `app-objc` | dead | no code loads selector `setCurrentLeaderBoard:`, and no framework or nib sends it |
 | `0xBD24D` | `-[EAGLViewController currentLeaderBoard]` | `app-objc` | dead | no code loads selector `currentLeaderBoard`, and no framework or nib sends it |
-| `0xBD271` | `-[EAGLViewController dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0xBD2A5` | `-[EAGLViewController viewDidUnload]` | `app-objc` | unreachable | a memory warning, which no run sends; follow-up #432 |
-| `0xBD2D9` | `-[EAGLViewController didReceiveMemoryWarning]` | `app-objc` | unreachable | a memory warning, which no run sends; follow-up #432 |
 | `0xBD30D` | `-[EAGLViewController shouldAutorotateToInterfaceOrientation:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xBD331` | `-[EAGLViewController viewDidLoad]` | `app-objc` | missed | selector `viewDidLoad` loaded by live `-[EAGLViewController viewDidLoad]`; follow-up #433 |
-| `0xBE265` | `-[CashShopKeyPadView dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xBE449` | `-[InAppPurchaseManager setStrPurchaseId:]` | `app-objc` | dead | no code loads selector `setStrPurchaseId:`, and no framework or nib sends it |
 | `0xBE47D` | `-[InAppPurchaseManager strPurchaseId]` | `app-objc` | dead | no code loads selector `strPurchaseId`, and no framework or nib sends it |
 | `0xBE4C9` | `-[InAppPurchaseManager delegate]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
-| `0xBE4ED` | `-[InAppPurchaseManager dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0xBF07D` | `-[InAppPurchaseManager restoreTransaction:]` | `app-objc` | unreachable | the cash shop's purchases: they need the App Store; follow-up #432 |
+| `0xBF07D` | `-[InAppPurchaseManager restoreTransaction:]` | `app-objc` | dead | a restored transaction (state 3) comes only after `restoreCompletedTransactions`, which the game never sends (re/cash-shop.md); the port's StoreKit, like Apple's, restores nothing unasked (#432) |
 | `0xBF241` | `-[InAppPurchaseManager getPurchasedReceiptLength]` | `app-objc` | dead | no code loads selector `getPurchasedReceiptLength`, and no framework or nib sends it |
 | `0xBF355` | `-[InAppPurchaseManager isPresentNonFinishedTransaction]` | `app-objc` | dead | no code loads selector `isPresentNonFinishedTransaction`, and no framework or nib sends it |
 | `0xBF561` | `-[InAppPurchaseManager makePurchase:]` | `app-objc` | dead | no code loads selector `makePurchase:`, and no framework or nib sends it |
-| `0xBF895` | `-[GameCenterManager setMyAttainedAchievement:]` | `app-objc` | unreachable | Game Center, which the runtime does not provide; follow-up #432 |
 | `0xBF8CD` | `-[GameCenterManager MyAttainedAchievement]` | `app-objc` | dead | selector `MyAttainedAchievement` loaded only by dead `-[GameCenterManager SubmitAchievement:PercentComplete:]` |
 | `0xBF919` | `-[GameCenterManager delegate]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
 | `0xBF93D` | `-[GameCenterManager alertView:didDismissWithButtonIndex:]` | `app-objc` | difftest | passes 1,000 inputs (ADR 0017) |
@@ -481,7 +374,6 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xBFAB5` | `-[GameCenterManager ResetAchievements]` | `app-objc` | dead | no code loads selector `ResetAchievements`, and no framework or nib sends it |
 | `0xBFB51` | `-[GameCenterManager SubmitAchievement:PercentComplete:]` | `app-objc` | dead | selector `SubmitAchievement:PercentComplete:` loaded only by dead `GameCenterManager_SubmitAchievement_load_block_invoke` |
 | `0xBFF41` | `-[GameCenterManager ReloadHighScoreByCategory:]` | `app-objc` | dead | no code loads selector `ReloadHighScoreByCategory:`, and no framework or nib sends it |
-| `0xC02F9` | `-[GameCenterManager dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xC04D5` | `GameCenterManager_ReloadHighScoreByCategory_block_invoke` | `app-objc` | dead | called only by dead `-[GameCenterManager ReloadHighScoreByCategory:]` |
 | `0xC0519` | `GameCenterManager_ReloadHighScoreByCategory_block_copy` | `app-objc` | dead | its address is in data loaded only by dead `-[GameCenterManager ReloadHighScoreByCategory:]` |
 | `0xC0551` | `GameCenterManager_ReloadHighScoreByCategory_block_dispose` | `app-objc` | dead | its address is in data loaded only by dead `-[GameCenterManager ReloadHighScoreByCategory:]` |
@@ -497,11 +389,6 @@ How a function is classed is in the module docstring of `tools/mtport/coveragega
 | `0xC091D` | `GameCenterManager_FindPlayerByid_block_invoke` | `app-objc` | dead | called only by dead `-[GameCenterManager FindPlayerByid:]` |
 | `0xC0A71` | `GameCenterManager_FindPlayerByid_block_copy` | `app-objc` | dead | its address is in data loaded only by dead `-[GameCenterManager FindPlayerByid:]` |
 | `0xC0AA9` | `GameCenterManager_FindPlayerByid_block_dispose` | `app-objc` | dead | its address is in data loaded only by dead `-[GameCenterManager FindPlayerByid:]` |
-| `0xC0B41` | `SVectorClass::~SVectorClass` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
-| `0xC0B6D` | `SVectorClass::~SVectorClass_deleting` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xC0D85` | `FUN_000c0d84` | `engine` | missed | called by live `FUN_000c0eb4`; follow-up #433 |
-| `0xC0F31` | `FUN_000c0f30` | `engine` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xC11D9` | `-[UIDevice(IdentifierAddition) uniqueDeviceIdentifier]` | `lib:uidevice-identifier` | dead | no code loads selector `uniqueDeviceIdentifier`, and no framework or nib sends it |
-| `0xC1411` | `-[TermsView dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
 | `0xC21D1` | `-[HelpScrollKeyPadView scrollViewDidScroll:]` | `app-objc` | missed | selector `scrollViewDidScroll:`: a delegate method; follow-up #433 |
-| `0xC23C1` | `-[HelpScrollKeyPadView dealloc]` | `app-objc` | unreachable | teardown: no run frees the object (the game keeps it until the process ends, and iOS ends it without unwinding); follow-up #432 |
