@@ -124,6 +124,7 @@ constexpr KindName kKinds[] = {
     {MT_GAME_EVENT_JOB_ADVANCE, "job_advance", 2},
     {MT_GAME_EVENT_BOSS_KILLED, "boss_killed", 1},
     {MT_GAME_EVENT_MAP_CHANGE, "map_change", 2},
+    {MT_GAME_EVENT_LOAD_CHARACTER, "load_character", 1}, // a start line's only (#408)
 };
 
 const KindName *find_kind(std::string_view name) {
@@ -135,11 +136,15 @@ const KindName *find_kind(std::string_view name) {
     return nullptr;
 }
 
-// A split's event from its words after `split` ("chapter_end", "1"); false with `why`.
-bool parse_split_event(const std::vector<std::string_view> &w, RunSplit *out, std::string *why) {
+// A split's event from its words after `split` ("chapter_end", "1"); false with `why`. A start
+// line's (`start`) may also be load_character SLOT.
+bool parse_split_event(const std::vector<std::string_view> &w, RunSplit *out, std::string *why,
+                       bool start = false) {
     const KindName *k = w.empty() ? nullptr : find_kind(w[0]);
-    if (k == nullptr) {
-        *why = "a split's event is chapter_end, job_advance, boss_killed or map_change";
+    if (k == nullptr || (k->kind == MT_GAME_EVENT_LOAD_CHARACTER && !start)) {
+        *why = start ? "a start's event is load_character, chapter_end, job_advance, boss_killed "
+                       "or map_change"
+                     : "a split's event is chapter_end, job_advance, boss_killed or map_change";
         return false;
     }
     out->kind = k->kind;
@@ -176,11 +181,23 @@ const SettingInfo *run_variable_row(std::string_view key) {
     return nullptr;
 }
 
-// A run variable's neutral value: its Original column.
+// A setting's neutral value: its Original column.
 std::string original_value(const SettingInfo &row) {
     const char *column = preset_column(row, Preset::kOriginal);
     return column != nullptr ? column : setting_text(Settings{}, row);
 }
+
+// A run variable's neutral value, as run_variable_text writes it.
+std::string variable_original(const SettingInfo &row) {
+    Settings s;
+    if (!row.value.parse(row.value, original_value(row), &s)) {
+        return original_value(row);
+    }
+    return run_variable_text(s, row);
+}
+
+// texture_pack's off or on in an allow line.
+bool is_texture_pack(std::string_view key) { return key == "texture_pack"; }
 
 std::string join(const std::vector<std::string> &v, std::string_view sep) {
     std::string out;
@@ -287,6 +304,13 @@ constexpr std::string_view kPracticeAssist = "save_states";
 
 // --- Categories ---------------------------------------------------------------------------------
 
+std::string run_variable_text(const Settings &s, const SettingInfo &row) {
+    if (is_texture_pack(row.key)) {
+        return s.texture_pack.empty() ? "off" : "on";
+    }
+    return setting_text(s, row);
+}
+
 bool RunSplit::matches(const mt_game_event &e) const {
     if (e.kind != static_cast<std::uint32_t>(kind) || e.value != a) {
         return false;
@@ -323,7 +347,7 @@ std::vector<std::string> RunCategory::allowed(std::string_view key) const {
         }
     }
     const SettingInfo *row = run_variable_row(key);
-    return row != nullptr ? std::vector<std::string>{original_value(*row)}
+    return row != nullptr ? std::vector<std::string>{variable_original(*row)}
                           : std::vector<std::string>{};
 }
 
@@ -375,7 +399,8 @@ std::optional<RunCategory> parse_run_category(std::string_view id, std::string_v
             const SettingInfo *row = left.size() == 2 ? run_variable_row(left[1]) : nullptr;
             if (row == nullptr) {
                 problems->push_back(line_problem(n, "allow names a run variable: "
-                                                    "fix_original_bugs or skip_intros"));
+                                                    "fix_original_bugs, skip_intros, widescreen "
+                                                    "or texture_pack"));
                 continue;
             }
             const auto same = [&](const RunVariableRule &r) { return r.key == left[1]; };
@@ -386,6 +411,18 @@ std::optional<RunCategory> parse_run_category(std::string_view id, std::string_v
             RunVariableRule rule{std::string(left[1]), {}};
             bool ok = true;
             for (const std::string &v : split_list(right)) {
+                if (is_texture_pack(rule.key)) {
+                    if (v != "off" && v != "on") {
+                        problems->push_back(line_problem(n, "texture_pack: '" + printable(v) +
+                                                                "' is not off or on"));
+                        ok = false;
+                        break;
+                    }
+                    if (std::find(rule.values.begin(), rule.values.end(), v) == rule.values.end()) {
+                        rule.values.push_back(v);
+                    }
+                    continue;
+                }
                 Settings s;
                 if (!row->value.parse(row->value, v, &s)) {
                     problems->push_back(line_problem(n, rule.key + ": '" + printable(v) +
@@ -400,6 +437,18 @@ std::optional<RunCategory> parse_run_category(std::string_view id, std::string_v
             }
             if (ok) {
                 c.allow.push_back(std::move(rule));
+            }
+        } else if (left[0] == "start") {
+            RunSplit start;
+            std::string why;
+            if (left.size() != 1) {
+                problems->push_back(line_problem(n, "start takes nothing before '='"));
+            } else if (c.start.has_value()) {
+                problems->push_back(line_problem(n, "a second start"));
+            } else if (!parse_split_event(words(right), &start, &why, true)) {
+                problems->push_back(line_problem(n, "start: " + why));
+            } else {
+                c.start = std::move(start);
             }
         } else if (left[0] == "split") {
             RunSplit split;
@@ -417,8 +466,8 @@ std::optional<RunCategory> parse_run_category(std::string_view id, std::string_v
                 c.splits.push_back(std::move(split));
             }
         } else {
-            problems->push_back(
-                line_problem(n, "unknown line '" + printable(line) + "' (title, allow or split)"));
+            problems->push_back(line_problem(n, "unknown line '" + printable(line) +
+                                                    "' (title, allow, start or split)"));
         }
     }
     if (problems->size() != before) {
@@ -441,6 +490,9 @@ std::string run_category_text(const RunCategory &c) {
     out += "title = " + c.title + "\n";
     for (const RunVariableRule &r : c.allow) {
         out += "allow " + r.key + " = " + join(r.values, ", ") + "\n";
+    }
+    if (c.start.has_value()) {
+        out += "start = " + run_split_event_text(*c.start) + "\n";
     }
     for (const RunSplit &s : c.splits) {
         out += "split " + run_split_event_text(s) + " = " + s.title + "\n";
@@ -896,7 +948,12 @@ void RunTimer::clear_finished() {
 }
 
 void RunTimer::on_event(const mt_game_event &e) {
-    if (e.kind == MT_GAME_EVENT_NEW_CHARACTER) {
+    if (category_.start.has_value()) {
+        if (category_.start->matches(e) && (state_ != State::kRunning || practice_)) {
+            start();
+            return;
+        }
+    } else if (e.kind == MT_GAME_EVENT_NEW_CHARACTER) {
         start();
         return;
     }
@@ -1053,7 +1110,7 @@ void RunTimer::check() {
         if (row == nullptr) {
             continue;
         }
-        const std::string v = setting_text(s, *row);
+        const std::string v = run_variable_text(s, *row);
         if (values.empty() || values.back() != v) {
             values.push_back(v);
         }
@@ -1159,11 +1216,15 @@ std::vector<std::string> RunTimer::overlay_lines() const {
     if (!in_category_) {
         out.emplace_back("outside the category's run variables");
     }
-    std::string vars;
-    for (const auto &[key, values] : variables_) {
+    std::string vars; // two a line, so the box stays narrow
+    for (std::size_t i = 0; i < variables_.size(); i++) {
+        const auto &[key, values] = variables_[i];
         vars += (vars.empty() ? "" : "  ") + key + " " + (values.empty() ? "?" : values.back());
+        if (i % 2 == 1 || i + 1 == variables_.size()) {
+            out.push_back(vars);
+            vars.clear();
+        }
     }
-    out.push_back(vars);
     return out;
 }
 

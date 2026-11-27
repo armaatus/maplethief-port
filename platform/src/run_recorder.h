@@ -6,9 +6,16 @@
 // game's ticks, takes a checkpoint every kRunCheckpointTicks and checks the census's refusals
 // (run_census.h); finish() at the end writes <data dir>/runs/<UTC time>.mtrun.
 //
-// Playing (MapleThief --play-run FILE): play() makes the tape the clock and the only input;
-// turn_begin() applies the settings changed at this turn, turn_end() takes the same checkpoints
-// and compares them with the file's, and done() says when the recorded turns are over.
+// Splits (#408): split() at each split the live timer reaches; the recorder keeps its name and
+// both times at that turn and takes a checkpoint at the turn's end. category() keeps each run
+// category the session timed (its text), so a player's own category travels with the file.
+//
+// Playing (MapleThief --play-run FILE, --verify-run FILE): play() makes the tape the clock and the
+// only input; turn_begin() applies the settings changed at this turn, turn_end() takes a
+// checkpoint at every turn the file has one and compares it, and done() says when the recorded
+// turns are over. A replay that reaches a checkpoint's tick (every kRunCheckpointTicks) or a split
+// at a turn the file has no checkpoint for differs there too. Its own splits are kept
+// (replayed_splits) for the verifier to compare with the file's.
 //
 // A refusal (run_refuse, from the census's refused sites): the recording ends at that turn, its
 // file saying why; it replays up to there.
@@ -52,7 +59,8 @@ std::string run_state_line(const mt_cpu *cpu, std::uint64_t ticks);
 std::vector<RunBootFile> read_boot_files(const std::string &saves_dir);
 
 // --play-run's scratch data folder: reads the run file at `path` into *run, makes a new folder
-// under the system's temporary one with the file's game files in its saves/, and returns it; ""
+// under the system's temporary one with the file's game files in its saves/ and its run
+// categories in its categories/ (#408), and returns it; ""
 // with `why` (the file does not read, is not a run file, or the folder cannot be made).
 std::string prepare_run_folder(const std::string &path, RunFile *run, std::string *why);
 // Why a run file cannot play on this binary and port: "" if it can.
@@ -79,6 +87,14 @@ class RunRecorder {
     std::string finish(RunEnd end, const std::string &detail, const std::string &runs_dir,
                        const mt_cpu *cpu);
 
+    // A split the live timer reached in this turn (its name, its time since the run's start):
+    // recorded with a checkpoint at the turn's end (recording), or kept (playing).
+    void split(const std::string &name, std::uint64_t rta_us, std::uint64_t ticks);
+    // Recording: a run category the timer times (its id and file text), kept once.
+    void category(const std::string &id, const std::string &text);
+    // Playing: the splits the replay's timer reached, as split() was told them.
+    const std::vector<RunFileSplit> &replayed_splits() const { return replayed_splits_; }
+
     // Playing: the recorded turns are over.
     bool done() const;
     // Playing: checkpoints compared, and the first that differed ("" if none).
@@ -93,7 +109,13 @@ class RunRecorder {
     void refuse(const char *what);
 
   private:
-    void checkpoint(const mt_cpu *cpu, bool final);
+    RunCheckpoint take_checkpoint(const mt_cpu *cpu) const;
+    // Recording: a checkpoint at the end of this turn (one a turn).
+    void checkpoint(const mt_cpu *cpu);
+    // Playing: this turn's checkpoint compared with the file's; `due` if the replay's own
+    // triggers (a tick checkpoint, a split) asked for one.
+    void compare(const mt_cpu *cpu, bool due);
+    void differ(const std::string &what);
     // Recording: the tape so far into run_, and the tape stopped.
     void seal();
 
@@ -107,6 +129,8 @@ class RunRecorder {
     std::uint64_t compared_ = 0;
     std::string first_difference_;
     std::string refused_;
+    std::vector<RunFileSplit> replayed_splits_;
+    bool split_due_ = false;          // a split in this turn: a checkpoint at its end
     std::uint64_t complete_turn_ = 0; // the last turn whose turn_end ran
     bool sealed_ = false;
 };

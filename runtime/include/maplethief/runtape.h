@@ -125,6 +125,10 @@ int mt_runtape_poke(mt_cpu *cpu, uint32_t addr, const void *bytes, uint32_t leng
 /* The guest's CFAbsoluteTime as the host reads it, not taped: the wrapped clock while recording,
  * the last value played while playing, else mt_cf_absolute_time. */
 double mt_runtape_host_time(void) MT_NOEXCEPT;
+/* The last value the guest read from the MT_RUNTAPE_CLOCK stream (Unix microseconds), recorded
+ * or played; 0 when off or before the first read. A recording and its replay see the same value
+ * at the same point, so a time measured on it replays exactly (the speedrun timer, #408). */
+uint64_t mt_runtape_guest_clock_us(void) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

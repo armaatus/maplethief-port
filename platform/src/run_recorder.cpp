@@ -151,6 +151,20 @@ std::string prepare_run_folder(const std::string &path, RunFile *run, std::strin
             return {};
         }
     }
+    // The run categories the session timed (#408): a player's own replaces a shipped one of its
+    // name, as in the recording's data folder.
+    if (!run->categories.empty() && !fs::create_directories(dir / "categories", ec)) {
+        *why = "cannot make the scratch data folder's categories/";
+        return {};
+    }
+    for (const RunFileCategory &c : run->categories) {
+        std::ofstream out(dir / "categories" / utf8_path(c.id + ".mtcat"), std::ios::binary);
+        out.write(c.text.data(), static_cast<std::streamsize>(c.text.size()));
+        if (!out) {
+            *why = "cannot write the category " + c.id + " into the scratch data folder";
+            return {};
+        }
+    }
     const std::u8string u = dir.u8string();
     return std::string(u.begin(), u.end());
 }
@@ -243,40 +257,79 @@ void RunRecorder::seal() {
     mt_runtape_stop();
 }
 
-void RunRecorder::checkpoint(const mt_cpu *cpu, bool final) {
+RunCheckpoint RunRecorder::take_checkpoint(const mt_cpu *cpu) const {
     RunCheckpoint c;
     c.turn = mt_runtape_get_stats().turn;
     c.tick = ticks_.ticks();
     c.digest = mt_snapshot_memory_digest(const_cast<mt_cpu *>(cpu));
     c.state = run_state_line(cpu, c.tick);
-    if (mode_ == Mode::kRecording) {
-        run_.checkpoints.push_back(std::move(c));
+    return c;
+}
+
+void RunRecorder::checkpoint(const mt_cpu *cpu) {
+    const std::uint64_t turn = mt_runtape_get_stats().turn;
+    if (!run_.checkpoints.empty() && run_.checkpoints.back().turn == turn) {
+        return; // one a turn: a tick's, a split's and the end's at one turn are one checkpoint
+    }
+    run_.checkpoints.push_back(take_checkpoint(cpu));
+}
+
+void RunRecorder::differ(const std::string &what) {
+    if (first_difference_.empty()) {
+        first_difference_ = what;
+    }
+}
+
+void RunRecorder::compare(const mt_cpu *cpu, bool due) {
+    const std::uint64_t turn = mt_runtape_get_stats().turn;
+    while (next_compare_ < run_.checkpoints.size() && run_.checkpoints[next_compare_].turn < turn) {
+        next_compare_++; // a turn the replay never ran (cannot happen: turns go one by one)
+    }
+    if (next_compare_ >= run_.checkpoints.size() || run_.checkpoints[next_compare_].turn != turn) {
+        if (due) {
+            const RunCheckpoint c = take_checkpoint(cpu);
+            SDL_Log("runs: the replay needs a checkpoint at turn %" PRIu64 " (tick %" PRIu64
+                    "), the file has none: %s",
+                    turn, c.tick, c.state.c_str());
+            differ("turn " + std::to_string(turn) + " (tick " + std::to_string(c.tick) +
+                   "): the replay takes a checkpoint (" + c.state + ") where the file has none");
+        }
         return;
     }
-    // Playing: the file's checkpoint of this tick (at the end, the recording's last).
-    while (next_compare_ < run_.checkpoints.size() &&
-           run_.checkpoints[next_compare_].tick < c.tick) {
-        next_compare_++;
-    }
-    if (next_compare_ >= run_.checkpoints.size()) {
-        return;
-    }
-    const RunCheckpoint &want = run_.checkpoints[next_compare_];
-    if (want.tick != c.tick || (final && want.turn != c.turn)) {
-        return;
-    }
-    next_compare_++;
+    const RunCheckpoint &want = run_.checkpoints[next_compare_++];
+    const RunCheckpoint c = take_checkpoint(cpu);
     compared_++;
-    const bool same = want.digest == c.digest && want.state == c.state && want.turn == c.turn;
-    SDL_Log("runs: checkpoint at tick %" PRIu64 " (turn %" PRIu64 "): %s  digest %s  %s", c.tick,
-            c.turn, same ? "same" : "DIFFERS", hex64(c.digest).c_str(), c.state.c_str());
-    if (!same && first_difference_.empty()) {
-        first_difference_ = "tick " + std::to_string(c.tick) + ": recorded turn " +
-                            std::to_string(want.turn) + " digest " + hex64(want.digest) + " " +
-                            want.state + "; replayed turn " + std::to_string(c.turn) + " digest " +
-                            hex64(c.digest) + " " + c.state;
-        SDL_Log("runs: recorded: turn %" PRIu64 " digest %s  %s", want.turn,
+    const bool same = want.digest == c.digest && want.state == c.state && want.tick == c.tick;
+    SDL_Log("runs: checkpoint at turn %" PRIu64 " (tick %" PRIu64 "): %s  digest %s  %s", c.turn,
+            c.tick, same ? "same" : "DIFFERS", hex64(c.digest).c_str(), c.state.c_str());
+    if (!same) {
+        SDL_Log("runs: recorded: tick %" PRIu64 " digest %s  %s", want.tick,
                 hex64(want.digest).c_str(), want.state.c_str());
+        differ("turn " + std::to_string(c.turn) + ": recorded tick " + std::to_string(want.tick) +
+               " digest " + hex64(want.digest) + " " + want.state + "; replayed tick " +
+               std::to_string(c.tick) + " digest " + hex64(c.digest) + " " + c.state);
+    }
+}
+
+void RunRecorder::split(const std::string &name, std::uint64_t rta_us, std::uint64_t ticks) {
+    if (mode_ == Mode::kOff || sealed_) {
+        return;
+    }
+    RunFileSplit s{name, mt_runtape_get_stats().turn, rta_us, ticks};
+    SDL_Log("runs: split %s at turn %" PRIu64 ": %.3f s, %" PRIu64 " ticks", name.c_str(), s.turn,
+            static_cast<double>(rta_us) / 1e6, ticks);
+    (mode_ == Mode::kRecording ? run_.splits : replayed_splits_).push_back(std::move(s));
+    split_due_ = true;
+}
+
+void RunRecorder::category(const std::string &id, const std::string &text) {
+    if (mode_ != Mode::kRecording || sealed_) {
+        return;
+    }
+    const RunFileCategory c{id, text};
+    if (std::find(run_.categories.begin(), run_.categories.end(), c) == run_.categories.end() &&
+        run_.categories.size() < kRunMaxCategories && text.size() <= kRunMaxCategoryText) {
+        run_.categories.push_back(c);
     }
 }
 
@@ -285,16 +338,19 @@ void RunRecorder::turn_end(const mt_cpu *cpu, const Settings &settings) {
         return;
     }
     const std::uint64_t turn = mt_runtape_get_stats().turn;
+    bool due = split_due_;
+    split_due_ = false;
     if (ticks_.update(cpu) && ticks_.ticks() >= next_checkpoint_) {
-        checkpoint(cpu, false);
+        due = true;
         next_checkpoint_ += kRunCheckpointTicks;
     }
     complete_turn_ = turn;
     if (mode_ != Mode::kRecording) {
-        if (done()) {
-            checkpoint(cpu, true); // the recording's last, if it ended on a whole turn
-        }
+        compare(cpu, due); // and at the recording's last turn, its own when it ended on one
         return;
+    }
+    if (due) {
+        checkpoint(cpu);
     }
     if (!(settings == last_)) {
         for (const SettingInfo &row : settings_registry()) {
@@ -323,7 +379,7 @@ std::string RunRecorder::finish(RunEnd end, const std::string &detail, const std
     // the replay ends with the turn before.
     if (!sealed_ && cpu != nullptr && complete_turn_ == mt_runtape_get_stats().turn &&
         complete_turn_ != 0) {
-        checkpoint(cpu, true);
+        checkpoint(cpu);
     }
     seal();
     mode_ = Mode::kOff;
@@ -359,13 +415,7 @@ bool RunRecorder::done() const {
     return mode_ == Mode::kPlaying && mt_runtape_get_stats().turn >= run_.turns;
 }
 
-std::uint64_t RunRecorder::missed() const {
-    std::uint64_t n = 0;
-    for (std::size_t i = next_compare_; i < run_.checkpoints.size(); i++) {
-        n += i + 1 < run_.checkpoints.size() ? 1 : 0; // the last is the recording's end
-    }
-    return n;
-}
+std::uint64_t RunRecorder::missed() const { return run_.checkpoints.size() - next_compare_; }
 
 void RunRecorder::refuse(const char *what) {
     if (mode_ != Mode::kRecording || !refused_.empty()) {

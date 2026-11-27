@@ -61,6 +61,7 @@ fe::RunFile sample() {
     mt_runtape_event poke1 = event(50, MT_RUNTAPE_POKE, 0x1000, 1);
     poke1.value = 0xAB;
     r.events.push_back(poke1);
+    r.categories = {{"chapter_1", "title = Chapter 1\nsplit chapter_end 1 = Orbis\n"}};
     r.splits = {{"Chapter 1", 900, 61000000, 1200}};
     r.checkpoints = {{1074, 1000, 0xaf08dab41ff8995cull, "ticks=1000 mode=0 map=2.8"},
                      {3604, 2392, 0x0d0a5a6b0779d1dcull, "ticks=2392 mode=0 map=2.8"}};
@@ -178,8 +179,8 @@ TEST_CASE("run_file: a malformed header is refused with its byte") {
 TEST_CASE("run_file: a malformed body is refused with its byte in the body") {
     const std::vector<std::uint8_t> body = minimal_body();
     // The minimal body: BIND (32 + 1), SETS (1), CHGS (1), FILE (1), TAPE (3), EVTS (1), SPLT
-    // (1), CHKS (1), END_ (3).
-    REQUIRE(body.size() == 9 * 8 + 33 + 1 + 1 + 1 + 3 + 1 + 1 + 1 + 3);
+    // (2: no category, no split), CHKS (1), END_ (3).
+    REQUIRE(body.size() == 9 * 8 + 33 + 1 + 1 + 1 + 3 + 1 + 2 + 1 + 3);
     CHECK(read_error(with_body(body)).empty());
 
     std::vector<std::uint8_t> b = body;
@@ -258,6 +259,22 @@ TEST_CASE("run_file: a malformed body is refused with its byte in the body") {
         t = body_of(fe::write_run_file(r));
         CHECK(read_error(with_body(t)) ==
               "body byte " + std::to_string(file + 9) + ": 17 boot files, over the limit of 16");
+    }
+    // SPLT (#408): a category named with a path, too many categories.
+    {
+        fe::RunFile r;
+        r.categories = {{"any", "title = Any%\n"}};
+        std::vector<std::uint8_t> t = body_of(fe::write_run_file(r));
+        const std::size_t splt = tape + 11 + 9; // after EVTS (1 byte)
+        REQUIRE(std::memcmp(t.data() + splt, "SPLT", 4) == 0);
+        // The id's first byte, after the count and its length; refused once id and text read.
+        t[splt + 10] = '.';
+        CHECK(read_error(with_body(t)) == "body byte " + std::to_string(splt + 27) +
+                                              ": a category named '.ny' (a plain name expected)");
+        r.categories.assign(fe::kRunMaxCategories + 1, {"any", ""});
+        t = body_of(fe::write_run_file(r));
+        CHECK(read_error(with_body(t)) ==
+              "body byte " + std::to_string(splt + 9) + ": 17 categories, over the limit of 16");
     }
     // END_: an unknown end, a number longer than 64 bits.
     b = body;

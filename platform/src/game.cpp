@@ -89,6 +89,7 @@
 #include "rumble.h"
 #include "run_recorder.h"
 #include "run_timer.h"
+#include "run_verify.h"
 #include "save_menu.h"
 #include "save_state_input.h"
 #include "save_tools.h"
@@ -408,8 +409,22 @@ constexpr double kAnimationSeconds = 1.0 / 60;
 constexpr Uint64 kQuitGraceNs = 2000000000ull;
 
 // The speedrun timer's clocks (#406, run_timer.h): the host's monotonic clock and the game's
-// ticks; the local wall-clock time a run starts at.
+// ticks; the local wall-clock time a run starts at. While a run tape records or plays (#408),
+// the real time is the guest's clock as the guest last read it, which the tape holds: a replay
+// then recomputes the live timer's times exactly. It is the paced clock, within half a tick and
+// a refresh of the host's (pacing.h); after the tape stops, its last value.
 RunInstant run_clock_now() {
+    static bool taped = false;
+    static std::uint64_t taped_us = 0;
+    if (mt_runtape_get_mode() != MT_RUNTAPE_OFF) {
+        taped = true;
+        if (const std::uint64_t us = mt_runtape_guest_clock_us(); us != 0) {
+            taped_us = us;
+        }
+    }
+    if (taped) {
+        return RunInstant{static_cast<double>(taped_us) / 1e6, mt_input_get_stats().ticks};
+    }
     return RunInstant{static_cast<double>(SDL_GetTicksNS()) / 1e9, mt_input_get_stats().ticks};
 }
 
@@ -467,7 +482,8 @@ struct Game {
     // tape is the clock and the turn hook never waits, as in the fixed-step mode.
     RunRecorder runs;
     bool replay = false;
-    PacedClock *paced = nullptr;   // real time with pacing = display (pacing.h), or nullptr
+    std::vector<RunRecord> replayed_runs; // the replay's timer's runs (#408)
+    PacedClock *paced = nullptr;          // real time with pacing = display (pacing.h), or nullptr
     LaunchClock *launch = nullptr; // real time with pacing = wall (clock.h, #155), or nullptr
     // game_speed in guest memory (game_speed.h, #151): a change of g.settings' applies at the
     // next turn. fast-forward: the guest clock's rate now, and the host time spent faster.
@@ -2855,6 +2871,13 @@ void release_layers(Game &g, double t) {
 // here. The notice says what happened. After a load, the frontend's own per-tick state follows
 // the restored game: the interpolated frames start over, and game_speed (the player's setting,
 // not the state's) is written again into the restored guest memory.
+// --verify-run's report (#408) on its own stream (GameOptions::report), else stdout.
+void print_run_report(const GameOptions &options, const std::string &text) {
+    std::FILE *out = options.report != nullptr ? options.report : stdout;
+    std::fputs(text.c_str(), out);
+    std::fflush(out);
+}
+
 // The speedrun timer's game-event listener (#406): every event, while run_timer is on.
 void run_timer_event(void *user, const mt_game_event *e) {
     Game &g = *static_cast<Game *>(user);
@@ -2874,6 +2897,9 @@ void write_run_records(Game &g) {
         }
     }
     for (RunRecord &r : g.run_timer.take_records()) {
+        if (g.replay) {
+            g.replayed_runs.push_back(r); // --verify-run's report (#408)
+        }
         std::string path, why;
         bool best = false;
         const std::optional<RunRecord> &old = g.run_timer.best();
@@ -2921,6 +2947,7 @@ void follow_run_timer(Game &g) {
                     best ? (", the best " + format_run_time(best->end.ms)).c_str() : "");
             g.run_timer.set_category(*it, std::move(best), load_run_segments(data_dir(), it->id));
             g.practice.forget();
+            g.runs.category(it->id, run_category_text(*it)); // into the run file (#408)
         }
     }
     g.run_timer.turn();
@@ -3786,6 +3813,13 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         if (const std::string m = run_binding_mismatch(*options.run_file, sha); !m.empty()) {
             SDL_Log("game: --play-run: this file cannot play here: %s", m.c_str());
             set_run_recorder(nullptr);
+            if (options.verify_run) { // the refusal on stdout (#408)
+                RunVerification v;
+                v.path = options.run_path;
+                v.refused = m;
+                print_run_report(options, run_verify_report(v));
+                return kExitRunDiffers;
+            }
             return kExitNoGame;
         }
         if (!g.runs.play(*options.run_file, &why)) {
@@ -4013,6 +4047,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     cfg.app_user = &ui;
 
     int status = kExitOk;
+    std::optional<RunVerification> verification; // --verify-run (#408)
     g.rumble.install();
     // The speedrun timer (#406): the categories (shipped and the data folder's), the settings it
     // checks, and its listener beside rumble's hook.
@@ -4028,8 +4063,17 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         }
         set_run_category_choices(std::move(names));
         g.run_timer.attach(&g.settings);
-        g.run_timer.set_listener(
-            [&g](RunSignal signal, const RunTime &t) { g.livesplit.on_signal(signal, t); });
+        g.run_timer.set_listener([&g](RunSignal signal, const RunTime &t) {
+            g.livesplit.on_signal(signal, t);
+            // A split into the run file, or the replay's for the verifier (#408).
+            const std::size_t n = g.run_timer.times().size();
+            if (signal == RunSignal::kSplit && n != 0 &&
+                n <= g.run_timer.category().splits.size()) {
+                const RunTime &at = g.run_timer.times()[n - 1];
+                g.runs.split(g.run_timer.category().splits[n - 1].title,
+                             static_cast<std::uint64_t>(at.ms) * 1000, at.ticks);
+            }
+        });
         if (mt_game_events_add_listener(run_timer_event, &g) != 0) {
             SDL_Log("run: no room for the timer's game-event listener: it never starts");
         }
@@ -4314,6 +4358,23 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             if (!reached || !g.runs.first_difference().empty() || missed != 0 || !clean) {
                 status = kExitRunDiffers;
             }
+            if (options.verify_run) {
+                const RunFile &f = g.runs.file();
+                verification.emplace();
+                verification->path = options.run_path;
+                verification->port_version = f.port_version;
+                verification->turns = f.turns;
+                verification->events = f.events.size();
+                verification->checkpoints = f.checkpoints.size();
+                verification->categories = f.categories;
+                verification->recorded = f.splits;
+                verification->reached = reached;
+                verification->guest_ok = clean;
+                verification->compared = g.runs.compared();
+                verification->missed = missed;
+                verification->first_difference = g.runs.first_difference();
+                verification->replayed = g.runs.replayed_splits();
+            }
         }
         set_run_recorder(nullptr);
         mt_process_destroy(p);
@@ -4329,6 +4390,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.run_timer.reset();
     g.livesplit.pump(); // the reset, if the socket takes it now
     write_run_records(g);
+    // --verify-run's report (#408, run_verify.h), with the runs the replay's timer ended.
+    if (verification) {
+        verification->runs = g.replayed_runs;
+        print_run_report(options, run_verify_report(*verification));
+        status = run_verified(*verification) ? kExitOk : kExitRunDiffers;
+    }
     detach_script_pad(g);
     g.rumble.stop();
     g.game_center.install(false); // its hook points at `g`

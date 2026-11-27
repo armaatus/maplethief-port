@@ -140,3 +140,37 @@ Built in [`platform/src/livesplit.h`](../../platform/src/livesplit.h) with `live
 - **Addresses are typed, never looked up.** HOST is `localhost`, an IPv4 address or a bracketed IPv6 one. A name would need a DNS query, and a query can block. A second computer running LiveSplit on the network still works by its address.
 - **No turn waits.** The socket is non-blocking. A connect carries on across turns and gives up after 3 s. A refused or lost connection is retried every 3 s and logged once per run of failures. Lines are queued while connecting, up to 64 KiB (a full queue drops the connection), and dropped while there is no connection: LiveSplit then misses them. The link reads LiveSplit's replies only to notice that it closed. POSIX sockets, and Winsock (`ws2_32`) on Windows. The Switch build has no socket code (no capability, no row).
 - **Evidence.** `tests/cpp/livesplit_test.cpp` (CI) sets up a TCP server on 127.0.0.1 that receives the exact lines of a synthetic run (start, two splits, a reset, the game time) and of a finished run followed by the next start. A refused port and an address that never answers keep every turn under 50 ms, log one line and reconnect once a server is there. A headless game run against a local listener sent `starttimer`, `pausegametime`, a `setgametime` per tick and `reset` at the quit.
+
+## Addendum (#408): the verifier, splits in the file and the presentation check
+
+Accepted (delegated by Joris, 2026-11-27). Built in [`platform/src/run_verify.h`](../../platform/src/run_verify.h) and `MapleThief --verify-run FILE` (`scripts/verify-run`, `scripts/verify-run.ps1`). The calls this child made:
+
+- **`--verify-run` is `--play-run` with no window and no audio device** (`SDL_VIDEO_DRIVER=dummy`, `--no-audio`). Before it plays, it refuses a file that does not read (a flipped byte fails the packed body's CRC-32), one of another binary or port version, and one with a missing checkpoint or checkpoints out of turn order (`run_file_problem`). A checkpoint is required every 1,000 game ticks up to the last checkpoint's tick, and at every split's turn. It prints a report on the process's own stdout (the guest's printing goes to stderr for the run) and exits 0 when the file verifies, 6 when it does not, refusals included.
+- **Checkpoints are matched by turn.** A replay takes a checkpoint at every turn the file has one and compares the digest, the tick count and the state line. One where the replay's own triggers (a 1,000-tick mark, a split) ask for a checkpoint and the file has none is a difference too, so a cut or shortened file cannot verify. The recorder keeps at most one checkpoint a turn.
+- **Splits go into the file.** The recorder takes each split from the timer's listener: its title, its turn, its real time in the timer's whole milliseconds and its ticks (`SPLT`). It also takes a checkpoint at that turn. `SPLT` also holds the run categories the session timed (id and `run_category_text`), and `--play-run` writes them into its scratch `categories/`, so a player's own category travels with the file. The report says whether each one is the shipped category or the file's own. The format stays 1: #405's file was never released.
+- **One clock for the timer.** While a tape records or plays, the timer's real time is the guest's clock as the guest last read it (`mt_runtape_guest_clock_us`), which the tape holds, so the replay gives the recorded times to the microsecond. That clock is the paced clock, within half a tick and a refresh of the host's (pacing.h); without a tape the timer keeps the host's monotonic clock. The split times are recomputed and compared, never taken from the file. Clean or assisted is the replay's own timer's, from the recorded settings and every change.
+- **A run from a save.** A category may name its start: `start = EVENT`, a split's event or `load_character SLOT` (`MT_GAME_EVENT_LOAD_CHARACTER`). The run then starts there, and only while no run is in progress, in place of a new character. A loaded save fires no map change, so `load_character` is the way to time a stretch from a save.
+
+**Evidence** (local, real assets, Debug, Apple M4, 2026-11-27).
+
+- *Chapter 1's last stretch, from a save.* A save built from `play.chapter_1_k`'s (`mtport.savedata describe`/`build`, kept in a scratch folder): the hero on the Pirate's platform of map 2.0 with the Pirate's Request done, and a category `start = load_character 0`, `split chapter_end 1 = Orbis`. A real-time session in a window (display pacing at 60 Hz, `record_runs = on`, a virtual Xbox 360 pad from `--pad`: Play, the slot, Start, up to the Pirate, A through the chat) reached Orbis. The live timer showed **0:23.8** and logged 23,817 ms and 466 ticks. `scripts/verify-run` on the file (7,416 bytes, 1,006 turns, 37 input events, 2 checkpoints) printed `0:23.817 466 ticks` recorded and replayed, `same`, `clean`, 2 of 2 checkpoints the same and `verdict: VERIFIED`, exit 0, in 17 s.
+- *One input moved.* The same file with one action press (event 17, turn 552) moved 3 turns later: exit 6, `a checkpoint differs at turn 593` (the split's checkpoint, the first after the move; ticks 470 recorded, 439 replayed). The split also differs (0:22.417, 435 ticks).
+
+**The presentation check.** The recording above was replayed with each presentation setting changed in the file's settings, comparing every checkpoint's digest:
+
+| Changed | Guest digest |
+|---|---|
+| `hd_text = on` with `render_scale = 2` (at render scale 1 it does nothing) | the same |
+| `render_scale = 2` | the same |
+| `gapless_music = on` | the same |
+| `texture_pack`: a 2× pack of the game's GL textures only (`mtport.texpack build --no-ui`, 614 textures) | the same |
+| `texture_pack`: the same pack with its UIKit images (691 files) | **differs** at the first checkpoint, with the same tick and state line |
+| `widescreen = auto` | **differs** at the first checkpoint |
+
+`widescreen` writes the view's width into guest memory (the census's pure sites), so the game lays out a wider field. A pack's UIKit images are decoded into the guest's own image buffers, so their pixels are in the digest. Neither changed the run here (the same tick count and state line), but by this ADR's rule both are now **run variables**: `kRunVariables` is `fix_original_bugs`, `skip_intros`, `widescreen` and `texture_pack`. A pack is recorded as `off` or `on`, never by its folder, and a category's `allow texture_pack = off, on` takes those. The shipped categories name neither, so both must be off in them, like the original game. A run with a texture pack also verifies only where the verifier has the same pack in the same folder.
+
+**Consequences.**
+
+- A file verifies only on the build that recorded it, as before. A player's verifying build needs the same port version and their own copy of the game.
+- The guest's printing on stdout no longer reaches a verifier's report. A script reads the report from stdout and the log from stderr.
+- How we'd know this was wrong: a recording that does not verify on the build that made it (a clock read or input the tape misses), or a split time that differs between the live timer and the replay (a timer reading that does not go through the tape).

@@ -13,7 +13,9 @@
 //
 // The run.
 //   - It starts at MT_GAME_EVENT_NEW_CHARACTER (a new character in any slot), and again at the
-//     next one: a run in progress then ends as reset and a new one starts.
+//     next one: a run in progress then ends as reset and a new one starts. A category with a
+//     `start` line (#408) starts at that event instead, and only while no run is in progress
+//     (a run from a save: `start = load_character 0`, or `start = map_change 2.0`).
 //   - Its splits fire in the category's order: only the next split's event counts (a later
 //     split's event before it does nothing). The last split ends the run (finished).
 //   - Each split records two times since the start: real time (the host's monotonic clock, what
@@ -30,10 +32,10 @@
 // the run assisted for good, even if it goes back, and the record names it. The rows are found
 // by their group, so a new Assist is covered with no change here.
 //
-// Run variables: fix_original_bugs and skip_intros. Allowed, recorded (every value seen during
-// the run) and shown. A category names the values it allows (`allow` lines); a variable it does
-// not name may only be off (its Original column). A run whose variable takes another value is
-// outside the category: it is recorded and shown, never a personal best.
+// Run variables: fix_original_bugs, skip_intros, widescreen and texture_pack. Allowed, recorded
+// (every value seen during the run) and shown. A category names the values it allows (`allow`
+// lines); a variable it does not name may only be off (its Original column). A run whose variable
+// takes another value is outside the category: it is recorded and shown, never a personal best.
 //
 // The personal best of a category is its fastest finished run that is clean and inside the
 // category, by real time; the overlay compares the last split reached with the best's same
@@ -76,8 +78,15 @@ inline constexpr const char *kRunCategoryExtension = ".mtcat";
 inline constexpr std::size_t kMaxRunCategoryFileBytes = 16 * 1024;
 inline constexpr std::size_t kMaxRunSplits = 64;
 inline constexpr std::size_t kMaxRunNameBytes = 32; // a category's or a split's title
-// The run variables (ADR 0156): allowed in a run, recorded and shown.
-inline constexpr const char *kRunVariables[] = {"fix_original_bugs", "skip_intros"};
+// The run variables (ADR 0156): allowed in a run, recorded and shown. widescreen and
+// texture_pack reach guest memory (#408's presentation check, ADR 0156's addendum): the view
+// width, and a pack's UIKit images' pixels. texture_pack is recorded as off or on (a pack set),
+// never its folder.
+inline constexpr const char *kRunVariables[] = {"fix_original_bugs", "skip_intros", "widescreen",
+                                                "texture_pack"};
+// A run variable's value as a run records it: texture_pack's "off" or "on", every other one's
+// setting text.
+std::string run_variable_text(const Settings &s, const SettingInfo &row);
 
 // One split: a run event of `kind` whose values are `a` (the event's value) and, for a job
 // advance and a map change, `b` (more[0]: the tier, the map).
@@ -109,6 +118,10 @@ struct RunCategory {
     std::string title; // `title = ...`: what the overlay shows
     std::vector<RunVariableRule> allow;
     std::vector<RunSplit> splits;
+    // `start = EVENT` (#408): the event that starts a run while none is in progress, in place
+    // of a new character: a split's event, or load_character SLOT (a run from a save); its title
+    // is unused. None: a new character.
+    std::optional<RunSplit> start;
 
     // The values `key` may take: its `allow` line's, else its Original column only.
     std::vector<std::string> allowed(std::string_view key) const;

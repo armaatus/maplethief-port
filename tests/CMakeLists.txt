@@ -399,6 +399,8 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # Practice states (#409, practice_state_test.cpp): practice_pick F7 and practice_load F8, the
 # state per category, slot and split, armed by a split and taken at the first safe turn, the pick,
 # and a load with the quick-load's refusals.
+# The run verifier (#408, run_verify_test.cpp): synthetic run files refused for another binary
+# hash, another port version, a flipped byte and a missing checkpoint; the report's format.
 # The LiveSplit link (#407, livesplit_test.cpp): a test TCP server on 127.0.0.1 receives the
 # exact lines of a synthetic run (start, splits, reset, game time); a refused or unanswered
 # connection never holds a turn and logs once.
@@ -463,6 +465,7 @@ maplethief_add_cpp_test(
             cpp/switch_input_test.cpp
             cpp/gfx_dksh_test.cpp
             cpp/run_timer_test.cpp
+            cpp/run_verify_test.cpp
             cpp/livesplit_test.cpp
             cpp/practice_state_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)

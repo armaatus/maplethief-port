@@ -3,9 +3,9 @@
 A run file is a session of `MapleThief` played in real time, kept so that it plays back exactly ([#405](https://github.com/armaatus/maplethief-port/issues/405), [ADR 0156](../adr/0156-speedrun-kit-splits-clean-runs-and-verifiable-replays.md) and its addendum). It is our format, not the game's. It holds no game content: the clock values the guest read, the input the port gave it, the player's settings and the player's own save files.
 
 - **Written by**: `record_runs = on` (Other, off by default): `<data dir>/runs/<UTC YYYYMMDD-HHMMSS>.mtrun` at the end of every session (`platform/src/run_recorder.cpp`).
-- **Read by**: `MapleThief --play-run FILE` (`platform/src/main.cpp`), the verifier of #408.
+- **Read by**: `MapleThief --play-run FILE` and `MapleThief --verify-run FILE` (`platform/src/main.cpp`, `platform/src/run_verify.h`, [#408](https://github.com/armaatus/maplethief-port/issues/408); the player's page is [Speedrun timer](../play/speedrun.md#recording-and-verifying-a-run)).
 - **Parser and writer**: `platform/src/run_file.{h,cpp}` (`read_run_file`, `write_run_file`). The tape it carries is `runtime/include/maplethief/runtape.h`'s.
-- **Validation**: synthetic files in CI (`tests/cpp/run_file_test.cpp`: the round trip, each malformed header and body field refused with its byte, every byte of a good body flipped, every cut, random bodies); locally, recorded sessions replayed with equal checkpoints (ADR 0156's addendum). There is no shipped file to parse: the IPA has none.
+- **Validation**: synthetic files in CI (`tests/cpp/run_file_test.cpp`: the round trip, each malformed header and body field refused with its byte, every byte of a good body flipped, every cut, random bodies; `tests/cpp/run_verify_test.cpp`: the verifier's refusals and report); locally, recorded sessions replayed with equal checkpoints (ADR 0156's addendum). There is no shipped file to parse: the IPA has none.
 
 ## What it is bound to, and what it holds
 
@@ -21,11 +21,11 @@ A run file is a session of `MapleThief` played in real time, kept so that it pla
 |---|---|
 | every value the guest's clock hooks returned, run-length coded | `TAPE` |
 | the host's calls at the guest's boundary, at their run-loop turn | `EVTS` |
-| splits (#406) | `SPLT` |
-| checkpoints: every 1,000 game ticks, and the last whole turn when the session ended on one | `CHKS` |
+| the run categories the session timed, and the splits the live timer reached ([#408](https://github.com/armaatus/maplethief-port/issues/408)) | `SPLT` |
+| checkpoints: every 1,000 game ticks, at every split's turn, and the last whole turn when the session ended on one; at most one a turn | `CHKS` |
 | why the recording ended, and the turns it covers | `END_` |
 
-A replay is valid on the binary and port version that recorded it: `--play-run` refuses another.
+A replay is valid on the binary and port version that recorded it: `--play-run` and `--verify-run` refuse another. `--verify-run` also refuses a file with a checkpoint missing (one every 1,000 game ticks up to the last checkpoint's tick, and one at every split's turn) or with checkpoints out of turn order, before it plays.
 
 ## Layout
 
@@ -55,7 +55,7 @@ Nine sections, each `char tag[4]`, `u32 length` and `length` bytes, in this orde
 | `FILE` | *var* n (≤ 16); n × (*string* name ≤ 64, a plain file name; *var* size ≤ 4 MiB; the bytes) |
 | `TAPE` | three streams, `clock`, `gcd`, `music`, each: *var* n; n × (*svar* value − the previous run's value, *var* count ≥ 1) |
 | `EVTS` | *var* n; n × (*var* turn − the previous event's turn, `u8` kind, the kind's fields) |
-| `SPLT` | *var* n; n × (*string* name ≤ 256, *var* turn, *var* real time µs, *var* game ticks) |
+| `SPLT` | *var* m (≤ 16); m × (*string* category id ≤ 64, a plain name; *string* the category file's text ≤ 16 KiB); *var* n; n × (*string* name ≤ 256, *var* turn, *var* real time µs, *var* game ticks) |
 | `CHKS` | *var* n; n × (*var* turn, *var* game ticks, `u64` guest memory digest, *string* state line ≤ 1,024) |
 | `END_` | *var* end (0 quit, 1 refused, 2 failed); *string* detail ≤ 1,024; *var* the turns recorded |
 
@@ -76,6 +76,8 @@ Event kinds and their fields:
 Actions are numbered as `mt_input_action` in the version that recorded the file, which is why a file plays only on that version.
 
 The turn is the run loop's: UIApplicationMain's loop counts them from 1, 0 is before the first. A replay delivers a turn's events after that turn's run-loop work and before the turn hook. The recorded turns stop at the last whole one: a quit ends inside its turn (the delegate hears it terminates), and a refusal ends the recording before the refused call.
+
+A split (`SPLT`) is the live timer's ([#406](https://github.com/armaatus/maplethief-port/issues/406)): its title in the category, the turn it fired in, and its two times since the run's start: the real time in the timer's whole milliseconds (× 1,000) and the game ticks. While a tape records or plays, the timer's real time is the guest's clock as the guest last read it (`mt_runtape_guest_clock_us`), so a replay gives the same times. The categories are written as `run_category_text` writes them, once per distinct id and text; `--play-run` puts them in its scratch data folder's `categories/`, where they replace a shipped category of the same name as a player's own would.
 
 The guest memory digest is FNV-1a 64 over each writable image segment and the heap up to its committed end, each preceded by its `u32` address and `u32` length (`mt_snapshot_memory_digest`). The state line is `ticks=N mode=M map=A.B popup=P panel=K`.
 
