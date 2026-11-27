@@ -1962,6 +1962,54 @@ set_tests_properties(
     PROPERTIES LABELS "cpp;real_assets;gpu" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
                SKIP_REGULAR_EXPRESSION "widescreen_filters: skipped"
                ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+# Scenes at the field's width (#396, ADR 0090's addendum, docs/re/widescreen.md): from a built
+# start on a wide map (tests/starts/widescreen_scene_<start>.json, synthetic), scene <n> as the
+# map's script plays it (runAnimation: queued by the test from the field, or the map's own script
+# on entry: PerionMap's 15 and 20). play.widescreen_scene_<n>_on_synthetic runs at 568 points:
+# the game state equals the 3:2 run's at every tick, a listed scene keeps the field's E at its
+# edges with the field, an unlisted one (12) is drawn at 480. 16 runs on through 17 and 18
+# (30-tile maps) to 19, which ends in the field of 8.4.
+set(_wide_scenes 16:8_4 15:1_0 20:1_0_ch2 2:2_11 11:2_0 13:6_0 12:2_0)
+set(_wide_scene_starts)
+foreach(pair IN LISTS _wide_scenes)
+    string(REPLACE ":" ";" pair "${pair}")
+    list(GET pair 0 scene)
+    list(GET pair 1 start)
+    if(NOT start IN_LIST _wide_scene_starts)
+        list(APPEND _wide_scene_starts ${start})
+        add_test(NAME starts.widescreen_scene_${start}
+                 COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                         "${PROJECT_SOURCE_DIR}/tests/starts/widescreen_scene_${start}.json"
+                         "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_widescreen_scene_${start}/data/saves"
+                         --app "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+        set_tests_properties(
+            starts.widescreen_scene_${start}
+            PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_SETUP
+                       start_widescreen_scene_${start} ENVIRONMENT
+                       "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+    endif()
+    set(_env
+        "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_widescreen_scene_${start};MT_SCENE=${scene}"
+    )
+    add_test(NAME play.widescreen_scene_${scene}_off_synthetic
+             COMMAND play_real_test widescreen_scene_off
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_scene_${scene}_off")
+    add_test(NAME play.widescreen_scene_${scene}_on_synthetic
+             COMMAND play_real_test widescreen_scene_on
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_scene_${scene}_on")
+    set_tests_properties(
+        play.widescreen_scene_${scene}_off_synthetic
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE
+                   FIXTURES_REQUIRED start_widescreen_scene_${start}
+                   FIXTURES_SETUP play_widescreen_scene_${scene} ENVIRONMENT "${_env}")
+    set_tests_properties(
+        play.widescreen_scene_${scene}_on_synthetic
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE
+                   FIXTURES_REQUIRED
+                   "start_widescreen_scene_${start};play_widescreen_scene_${scene}"
+                   ENVIRONMENT
+                   "${_env};MT_WIDESCREEN_SCENE_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_scene_${scene}_off")
+endforeach()
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43

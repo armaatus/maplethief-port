@@ -23,7 +23,11 @@
 //                                             MT_WIDESCREEN_PAD_BASE: CTests
 //                                             play.widescreen_pad_off, play.widescreen_pad_on,
 //                                             #168; widescreen_filters: CTest
-//                                             play.widescreen_filters, #170; minimap: CTest
+//                                             play.widescreen_filters, #170;
+//                                             widescreen_scene_off, then widescreen_scene_on
+//                                             with MT_SCENE and MT_WIDESCREEN_SCENE_BASE:
+//                                             CTests play.widescreen_scene_<n>_off_synthetic,
+//                                             _on_synthetic, #396; minimap: CTest
 //                                             play.minimap, #176; hud_labels: CTest
 //                                             play.hud_labels, ADR 0101; minimap_wide: CTest
 //                                             play.minimap_wide, the corner;
@@ -4512,6 +4516,243 @@ void flashes_checks(Run &r, u64) {
                   "); frames byte for byte the base run's: " + std::to_string(same) + " of " +
                   std::to_string(base.size()));
     }
+}
+
+// --- widescreen scenes (#396, ADR 0090's addendum, docs/re/widescreen.md) ----------------------
+//
+// widescreen_scene_off and widescreen_scene_on start from a built start on a map (MT_FROM_SAVE,
+// tests/starts/widescreen_scene_*.json: synthetic) and, a second into the field, queue scene
+// MT_SCENE as the map scripts' runAnimation does (CStateGame +0x1E4 = the scene, then
+// QueueScene 0x80935: game mode 10). A goes down once a second while a speech box waits, until
+// the field shows for 2 s (a scene that ends in another scene, 16 to 19, runs on through the
+// chain). Each run writes the state line of widescreen_off at every game tick (state.txt) and,
+// at every tick, the game mode, the scene (+0x1E4), its step, the view width E, the camera's x
+// (CMMap +0x70) and the hero's map and x (scene.txt). widescreen_scene_on runs at 568 points and
+// compares state.txt with the off run's (MT_WIDESCREEN_SCENE_BASE) line by line. It also checks
+// E at the scene's edges: for a scene on mt_widescreen_scene_wide's list that starts or ends in
+// a wide field, E on the last field tick equals E on the first scene tick (and the same at the
+// scene's end); an unlisted scene is drawn at 480. Both runs write window shots every 25 steps
+// and at each step a picture is up (OUT_DIR/scene_<n>_step_<s>.png, scene_<n>_picture_<s>.png,
+// the wide picture in the on run; never committed).
+
+void wr(mt_cpu *cpu, u32 addr, u32 v);                // below, with systems sweep 2
+u32 call(mt_cpu *cpu, u32 fn, std::vector<u32> args); // the same
+
+struct SceneEdge {
+    u64 tick = 0;
+    i32 from_mode = 0, to_mode = 0;
+    u32 from_view = 0, to_view = 0;
+    i32 scene = -1;
+    std::string map;
+};
+struct WideSceneRun {
+    i32 scene = -1;
+    std::ofstream log;
+    u64 last_tick = ~0ull;
+    i32 last_mode = -1;
+    u32 last_view = 0;
+    i32 last_scene = -1;
+    std::string last_map;
+    std::vector<SceneEdge> edges;              // field (0) <-> scene (9, 10)
+    std::map<i32, std::set<u32>> views;        // scene -> the view widths in game mode 9
+    std::map<i32, std::set<std::string>> maps; // scene -> the maps it ran on
+    std::set<std::string> shots;
+    bool queued = false; // by the test (else the map's script played it)
+};
+WideSceneRun g_wscene;
+
+bool scene_mode(i32 mode) { return mode == 9 || mode == 10; }
+
+// Once a game tick, after wide_tick: scene.txt's line, the edges, a shot every 25 steps.
+void wide_scene_tick(Run &r, mt_cpu *cpu) {
+    if (r.ticks == g_wscene.last_tick) {
+        return;
+    }
+    g_wscene.last_tick = r.ticks;
+    const u32 st = game_state(cpu);
+    if (st == 0 || rd(cpu, st) != 0x119B78u) {
+        return;
+    }
+    const Hero h = hero(cpu);
+    const i32 mode = game_mode(cpu);
+    const i32 scene = rdi(cpu, st + 0x1E4);
+    const fe::SceneView v = fe::read_scene_view(fe::guest_reader(cpu));
+    const u32 map = rd(cpu, st + 0x2C);
+    const i32 camera = map != 0 ? rdi(cpu, map + 0x70) : -1;
+    const u32 view = mt_widescreen_view();
+    const std::string where = std::to_string(h.area) + "." + std::to_string(h.map);
+    g_wscene.log << r.ticks << " mode " << mode << " scene " << scene << " step " << v.step
+                 << " view " << view << " camera " << camera << " hero " << where << " " << h.x
+                 << '\n';
+    const bool was = scene_mode(g_wscene.last_mode), is = scene_mode(mode);
+    if (g_wscene.last_mode >= 0 && was != is && (g_wscene.last_mode == 0 || mode == 0)) {
+        g_wscene.edges.push_back({r.ticks, g_wscene.last_mode, mode, g_wscene.last_view, view,
+                                  is ? scene : g_wscene.last_scene,
+                                  is ? where : g_wscene.last_map});
+    }
+    if (mode == 9) {
+        g_wscene.views[scene].insert(view);
+        g_wscene.maps[scene].insert(where);
+        // A picture up (CStateGame +0x498: the five slots' images, docs/re/qol.md's command 30).
+        const u32 slots = rd(cpu, st + 0x498);
+        bool picture = false;
+        for (u32 i = 0; slots != 0 && i < 5; i++) {
+            picture = picture || rd(cpu, slots + 4 * i) != 0;
+        }
+        const std::string name = "scene_" + std::to_string(scene) +
+                                 (picture ? "_picture_" : "_step_") + std::to_string(v.step);
+        if (v.step >= 0 && (picture || v.step % 25 == 0) && g_wscene.shots.insert(name).second) {
+            if (r.widescreen != 0) {
+                wide_shot(r, cpu, name);
+            } else {
+                save_shot(r, cpu, name);
+            }
+        }
+    }
+    g_wscene.last_mode = mode;
+    g_wscene.last_view = view;
+    g_wscene.last_scene = scene;
+    g_wscene.last_map = where;
+}
+
+void widescreen_scene(Run &r, u64) {
+    from_save(r, [](mt_cpu *cpu) { return field(cpu) || game_mode(cpu) == 9; });
+    std::function<void(mt_cpu *)> inner = r.on_turn;
+    r.on_turn = [&r, inner](mt_cpu *cpu) {
+        inner(cpu);
+        wide_tick(r, cpu);
+        wide_scene_tick(r, cpu);
+    };
+    // A map whose script plays the scene on entry (PerionMap: 15, 20) plays it on its own.
+    then(r, "the field, or the scene on the way in", 600, [&r](mt_cpu *cpu, double el) {
+        hold(r, A, mt_input_panel() == 3 && std::fmod(el, 1.0) < 0.1);
+        return field(cpu) && el >= 1.0;
+    });
+    then_do(r, "scene " + std::to_string(g_wscene.scene) + " queued (runAnimation)",
+            [](mt_cpu *cpu) {
+                if (g_wscene.views.count(g_wscene.scene) != 0) {
+                    std::printf("scene %d played on the way in\n", g_wscene.scene);
+                    return;
+                }
+                const u32 st = game_state(cpu);
+                wr(cpu, st + 0x1E4, static_cast<u32>(g_wscene.scene));
+                call(cpu, 0x80935u, {st});
+                g_wscene.queued = true;
+            });
+    auto since = std::make_shared<double>(-1);
+    then(r, "A through the scene, then 2 s of field", 600, [&r, since](mt_cpu *cpu, double el) {
+        hold(r, A, mt_input_panel() == 3 && std::fmod(el, 1.0) < 0.1);
+        if (!field(cpu) || g_wscene.views.empty()) {
+            *since = -1;
+            return false;
+        }
+        *since = *since < 0 ? el : *since;
+        return el - *since >= 2.0;
+    });
+    then_finish(r);
+}
+
+int widescreen_scene_off_setup(Run &r) {
+    const char *scene = std::getenv("MT_SCENE");
+    if (scene == nullptr || std::sscanf(scene, "%d", &g_wscene.scene) != 1 || g_wscene.scene < 0 ||
+        g_wscene.scene > 20) {
+        std::printf("FAIL: MT_SCENE must name a scene, 0 ... 20\n");
+        return 1;
+    }
+    g_wscene.log.open(r.out / "scene.txt", std::ios::binary | std::ios::trunc);
+    return widescreen_off_setup(r);
+}
+
+int widescreen_scene_on_setup(Run &r) {
+    const char *base = std::getenv("MT_WIDESCREEN_SCENE_BASE");
+    if (base == nullptr || !fs::is_regular_file(fs::path(base) / "state.txt")) {
+        std::printf("skipped: MT_WIDESCREEN_SCENE_BASE names no widescreen_scene_off run\n");
+        return 77;
+    }
+    r.widescreen = MT_WIDESCREEN_WIDE;
+    return widescreen_scene_off_setup(r);
+}
+
+std::string scene_views_text() {
+    std::string text;
+    for (const auto &[scene, set] : g_wscene.views) {
+        text += " scene " + std::to_string(scene) + " on";
+        for (const std::string &m : g_wscene.maps[scene]) {
+            text += " " + m;
+        }
+        text += ":";
+        for (const u32 v : set) {
+            text += " " + std::to_string(v);
+        }
+    }
+    return text;
+}
+
+void widescreen_scene_common_checks() {
+    g_wide.state.close();
+    g_wscene.log.close();
+    std::printf("widescreen_scene: %llu state lines; views%s\n",
+                static_cast<unsigned long long>(g_wide.lines), scene_views_text().c_str());
+    for (const SceneEdge &e : g_wscene.edges) {
+        std::printf("edge at tick %llu: mode %d -> %d, view %u -> %u (scene %d on %s)\n",
+                    static_cast<unsigned long long>(e.tick), e.from_mode, e.to_mode, e.from_view,
+                    e.to_view, e.scene, e.map.c_str());
+    }
+    check(g_wscene.views.count(g_wscene.scene) != 0,
+          "scene " + std::to_string(g_wscene.scene) + " ran (game mode 9)");
+    check(g_wide.lines > 0, "the state was written at every tick");
+}
+
+void widescreen_scene_off_checks(Run &, u64) {
+    widescreen_scene_common_checks();
+    const mt_widescreen_stats st = mt_widescreen_get_stats();
+    check(st.changes == 0 && st.wide_turns == 0, "widescreen off: the view never left 480 points");
+}
+
+void widescreen_scene_on_checks(Run &r, u64) {
+    widescreen_scene_common_checks();
+    // At each edge between the field and a scene: a listed scene keeps the field's E, an
+    // unlisted one drops to 480.
+    for (const SceneEdge &e : g_wscene.edges) {
+        const bool wide = mt_widescreen_scene_wide(static_cast<u32>(e.scene)) != 0;
+        const std::string what = "scene " + std::to_string(e.scene) + " on " + e.map + ", mode " +
+                                 std::to_string(e.from_mode) + " -> " + std::to_string(e.to_mode) +
+                                 ": view " + std::to_string(e.from_view) + " -> " +
+                                 std::to_string(e.to_view);
+        if (wide) {
+            check(e.from_view == e.to_view, "a listed scene keeps the field's width: " + what);
+        } else {
+            check(e.from_view == MT_WIDESCREEN_NARROW || e.to_view == MT_WIDESCREEN_NARROW,
+                  "an unlisted scene is 480 points wide: " + what);
+        }
+    }
+    for (const auto &[scene, set] : g_wscene.views) {
+        if (mt_widescreen_scene_wide(static_cast<u32>(scene)) == 0) {
+            check(set == std::set<u32>{MT_WIDESCREEN_NARROW},
+                  "unlisted scene " + std::to_string(scene) + " drawn at 480 points");
+        }
+    }
+    std::ifstream a(r.out / "state.txt", std::ios::binary);
+    std::ifstream b(fs::path(std::getenv("MT_WIDESCREEN_SCENE_BASE")) / "state.txt",
+                    std::ios::binary);
+    std::string la, lb, first;
+    u64 n = 0;
+    bool same = true;
+    while (true) {
+        const bool ga = static_cast<bool>(std::getline(a, la));
+        const bool gb = static_cast<bool>(std::getline(b, lb));
+        if (!ga && !gb) {
+            break;
+        }
+        n++;
+        if (ga != gb || la != lb) {
+            same = false;
+            first = "line " + std::to_string(n) + ": on '" + la + "', off '" + lb + "'";
+            break;
+        }
+    }
+    check(same && n > 0, "the game state at every tick equals the 3:2 run's (" + std::to_string(n) +
+                             " ticks)" + (same ? "" : ": " + first));
 }
 
 // --- widescreen with the touch key pad (#168) ---------------------------------------------------
@@ -12882,6 +13123,10 @@ constexpr Mode k_modes[] = {
     {"popup_menu_shoulders", popup_menu_shoulders, popup_menu_shoulders_checks, 1},
     {"widescreen_off", widescreen_flow, widescreen_off_checks, 2400, false, widescreen_off_setup},
     {"widescreen_on", widescreen_flow, widescreen_on_checks, 2400, false, widescreen_on_setup},
+    {"widescreen_scene_off", widescreen_scene, widescreen_scene_off_checks, 1, false,
+     widescreen_scene_off_setup},
+    {"widescreen_scene_on", widescreen_scene, widescreen_scene_on_checks, 1, false,
+     widescreen_scene_on_setup},
     {"popup_menu_scroll", popup_menu_scroll, popup_menu_scroll_checks, 1, false,
      popup_menu_scroll_setup},
     {"screen_shake", screen_shake, screen_shake_checks, 1, false, screen_shake_setup},
