@@ -176,7 +176,8 @@ def test_boss_whose_event_no_map_runs(built):
     reach = section_of(page, "how-to-reach-the-fight")
     assert "event/chapter2-FrostMap-boss.html" in reach
     assert "never named by a map object" in reach
-    assert "not been confirmed in play" in section_of(page, "the-fight")
+    assert "the scene never plays" in section_of(page, "the-fight")
+    assert "confirmed in play" in section_of(page, "the-fight")
 
 
 def test_bomb_and_unplaced_monster(built):
