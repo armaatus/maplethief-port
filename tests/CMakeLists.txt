@@ -1847,11 +1847,11 @@ endforeach()
 # level-up rules (tests/starts/raise/chapter_3_<part>.json over that save), and its test says
 # synthetic. Part e plays the last boss and the ending watched; e_skipped the same from the same
 # save with skip_intros on, and compares the state the ending left with e's (MT_SKIP_WATCHED). The
-# post-game pair: postgame_quit loads e's save, saves again (byte for byte), plays on and saves;
-# postgame_relaunch, a second process on the same data directory, checks the files and the hero
-# and saves the same bytes again.
+# post-game: postgame_quit loads e's save, saves again, plays on and saves; postgame_relaunch, a
+# second process on the same data directory, checks the files and the hero and saves again;
+# postgame_reload, a third, loads that save and saves it again byte for byte.
 set(_chapter_3_parts a b c d e)
-set(_chapter_3_raised)
+set(_chapter_3_raised e)
 set(_chapter_3_env "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 foreach(part IN LISTS _chapter_3_parts)
     set(_name play.chapter_3_${part})
@@ -1909,10 +1909,18 @@ set_tests_properties(
                FIXTURES_REQUIRED play_chapter_3_e FIXTURES_SETUP play_chapter_3_postgame
                ENVIRONMENT
                "${_chapter_3_env};MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_e")
+add_test(NAME play.chapter_3_postgame_reload
+         COMMAND play_real_test chapter_3_postgame_reload
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_postgame")
 set_tests_properties(
     play.chapter_3_postgame_relaunch
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
-               FIXTURES_REQUIRED play_chapter_3_postgame ENVIRONMENT "${_chapter_3_env}")
+               FIXTURES_REQUIRED play_chapter_3_postgame FIXTURES_SETUP
+               play_chapter_3_postgame_relaunch ENVIRONMENT "${_chapter_3_env}")
+set_tests_properties(
+    play.chapter_3_postgame_reload
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_chapter_3_postgame_relaunch ENVIRONMENT "${_chapter_3_env}")
 # The popup menu's skill, quest and option tabs by the d-pad (#164, prompts.h): from part c's
 # save, each list shows and the port's frame sits on its cursor, in each tab's window shot; A
 # opens each quest's page and B closes it (#167, the quest page fix).
