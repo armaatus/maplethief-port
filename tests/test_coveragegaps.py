@@ -227,3 +227,26 @@ def test_a_rule_can_class_dead_and_name_a_follow_up(monkeypatch) -> None:
     assert (gaps[CALLED].cls, gaps[CALLED].evidence) == ("dead", "only the port skips it")
     assert gaps[METHOD].evidence == "selector `go` loaded by live `Sender`; follow-up #9"
     assert gaps[LEAF].cls == "difftest" and gaps[DEAD_CALLER].cls == "dead"
+
+
+def test_update_adds_a_runs_coverage_to_the_docs_executed_functions(monkeypatch, tmp_path) -> None:
+    """``update`` (#432): what a new run entered leaves the doc; the rest stays as it was."""
+    p = program(monkeypatch)
+    monkeypatch.setattr(cg, "load_program", lambda: p)
+    executed = {MAIN, SENDER, CTOR, CALLNATIVE}
+    doc = tmp_path / "gaps.md"
+    doc.write_text(cg.document(p, {a & ~1 for a in executed})[0], encoding="utf-8")
+    cov = tmp_path / "coverage-1.txt"
+    cov.write_text(
+        "# maplethief coverage 1: 1 guest functions entered (pointer, entries, name)\n"
+        f"0x{CALLED:08X} 1 Called\n",
+        encoding="utf-8",
+    )
+    assert cg.main(["update", "--coverage", str(cov), "--doc", str(doc)]) == 0
+    text = doc.read_text(encoding="utf-8")
+    assert "executed by a run: 5; not executed: 14." in text
+    assert CALLED & ~1 not in cg.doc_unexecuted(text)
+    assert cg.doc_unexecuted(text) | {CALLED & ~1} == {
+        g.address & ~1 for g in cg.classify(p, {a & ~1 for a in executed}, cg.RULES)
+    }
+    assert cg.main(["check", "--doc", str(doc)]) == 0
