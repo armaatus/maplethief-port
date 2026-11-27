@@ -6324,6 +6324,9 @@ void minimap_tick(Run &r, mt_cpu *cpu) {
                       v.rows, file.w, file.h);
         m.grid_note = buf;
         for (const fe::MinimapMarker &mk : v.markers) {
+            if (mk.kind == fe::MinimapMarker::kMob) {
+                continue; // the mob list's, checked below
+            }
             bool found = false;
             for (const world_map::Object &o : file.objects) {
                 const bool portal = o.kind >= 0 && o.kind <= 2;
@@ -6414,6 +6417,8 @@ void minimap_tick(Run &r, mt_cpu *cpu) {
     }
 }
 
+void then_korean_terms(Run &r); // the Korean runs' (below)
+
 void minimap(Run &r, u64 goal) {
     attach_pad(r);
     g_minimap = std::make_shared<MinimapRun>();
@@ -6435,6 +6440,9 @@ void minimap(Run &r, u64 goal) {
         monitor(r, cpu);
         minimap_tick(r, cpu);
     };
+    if (g_minimap->lang == "ko") {
+        then_korean_terms(r); // the Korean bundle's terms screen first
+    }
     then_new_game(r);
     then_tutorial(r);
     then_walk_to(r, 42);
@@ -6489,7 +6497,7 @@ void minimap_checks(Run &, u64) {
               " mob-turns over " + std::to_string(m.mob_turns) + " turns, " +
               std::to_string(m.mobs_bad) + " without" +
               (m.first_mob_bad.empty() ? "" : "; first: " + m.first_mob_bad) + ")");
-    check(!m.want_name.empty() && m.name_turns == m.on_23 && m.name_bad == 0,
+    check(!m.want_name.empty() && m.name_turns > 0 && m.name_turns == m.on_23 && m.name_bad == 0,
           "the name on 2.3 is the knowledge base's (" + m.lang + ": '" + m.want_name +
               "') on its strip in every turn (" + std::to_string(m.name_bad) + " of " +
               std::to_string(m.name_turns) + " not" +
