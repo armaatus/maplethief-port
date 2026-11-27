@@ -78,6 +78,8 @@ A receipt stays in its list until a server confirms it, so a purchase interrupte
 | Grade revival with `riprestore2` count > 0 | `0x263`, then `0x264` | 5 | first `riprestore2` entry | op 3, revive |
 | `totalrestore` count > 0, checked by `CStateGame::Paint` in the field | `0x267`, then `0x268` "..." | 6 | first `totalrestore` entry, as op 4 | op 5 per entry; popup `0x269` "Restoration Complete!" |
 
+With the fake server (`play.systems2_cash_restores_synthetic`, real assets, one synthetic receipt in each list): `riprestore1` (`powpackage`) and `riprestore2` (`ComebackPack`) revive in place with 30 Power Elixirs (and +40 % EXP for the second), free, as a purchase does. `crestore` sends its one receipt twice and grants it twice ([original-bugs.md 17](original-bugs.md#17-a-crestore-receipt-is-granted-twice)); `totalrestore` empties the list but grants no EXP pack and opens the cash shop ([18](original-bugs.md#18-totalrestore-grants-no-exp-pack)). Every list ends empty.
+
 Offline each of these ends in popup `0x20`. A receipt left in `crestore` therefore blocks the cash shop for good, and one in `riprestore1` / `riprestore2` turns that revive button into a restore that fails. Under ADR 0034 no receipt is ever written, so this cannot happen in the port today.
 
 ## What is saved

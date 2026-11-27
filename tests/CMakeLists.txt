@@ -916,6 +916,17 @@ add_test(
 set_tests_properties(
     input.menu_shops_save PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
                                      TIMEOUT 1200 RUN_SERIAL TRUE FIXTURES_SETUP menu_shops_save)
+# The same flow with auto_potion = 50 (#304): its hunt's bot once stood still in Henesys with
+# that setting (docs/re/qol.md); it drinks quick slot 1 as HP falls and the flow completes.
+add_test(
+    NAME input.menu_shops_save_auto_potion
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=shops_save"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops_save_auto_potion" -P
+            "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+set_tests_properties(
+    input.menu_shops_save_auto_potion
+    PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:" TIMEOUT 1200 RUN_SERIAL
+               TRUE ENVIRONMENT "MAPLETHIEF_SETTINGS=auto_potion = 50")
 add_test(
     NAME input.menu_shops
     COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=shops"
@@ -1397,8 +1408,10 @@ set_tests_properties(
 # starts.<name> builds tests/starts/<name>.json into the test output directory with
 # mtport.savedata (skipped, 77, without your own copy); each play test loads it (MT_FROM_SAVE).
 # The jobs_* modes talk to the Dark Lord by play at each of the knowledge base's advancement
-# points, the skills_* modes learn and use every skill of a branch with its rule checked. Their
-# starts equal no chained state yet, so the tests are named synthetic (start-states.md).
+# points, the skills_* modes learn and use every skill of a branch with its rule checked. The
+# systems2_* modes (#304, docs/testing/systems-sweep.md) buy every cash shop tile, restore the
+# four receipt lists, use the 10 scrolls, open the Pigmy dialog and take portal620. Their starts
+# equal no chained state yet, so the tests are named synthetic (start-states.md).
 set(_starts
     jobs_ch1_beginner_10
     jobs_ch1_rogue_30
@@ -1410,7 +1423,12 @@ set(_starts
     jobs_ch3_assassin_60
     jobs_ch3_bandit_60
     skills_assassin
-    skills_bandit)
+    skills_bandit
+    systems2_cash
+    systems2_scrolls_success
+    systems2_scrolls_failure
+    systems2_pigmy
+    systems2_portal620)
 foreach(start IN LISTS _starts)
     add_test(NAME starts.${start}
              COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
@@ -1437,7 +1455,13 @@ set(_from_starts
     jobs_3_4_assassin:jobs_ch3_assassin_60
     jobs_3_4_bandit:jobs_ch3_bandit_60
     skills_assassin:skills_assassin
-    skills_bandit:skills_bandit)
+    skills_bandit:skills_bandit
+    systems2_cash_tiles:systems2_cash
+    systems2_cash_restores:systems2_cash
+    systems2_scrolls_success:systems2_scrolls_success
+    systems2_scrolls_failure:systems2_scrolls_failure
+    systems2_pigmy:systems2_pigmy
+    systems2_portal620:systems2_portal620)
 foreach(pair IN LISTS _from_starts)
     string(REPLACE ":" ";" pair "${pair}")
     list(GET pair 0 mode)

@@ -428,6 +428,14 @@ inline bool logged(const Run &r, std::size_t from, const std::string &needle) {
     return false;
 }
 
+inline int count_logged(const Run &r, std::size_t from, const std::string &needle) {
+    int n = 0;
+    for (std::size_t i = from; i < r.log.size(); i++) {
+        n += r.log[i].find(needle) != std::string::npos ? 1 : 0;
+    }
+    return n;
+}
+
 inline std::uintmax_t file_size(const Run &r, const char *name) {
     std::error_code ec;
     const std::uintmax_t n = fs::file_size(r.data / "saves" / name, ec);
@@ -969,7 +977,8 @@ inline void then_new_game(Run &r) {
         r, "the focus on Play", 5, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
     then_press(r, A);
 }
-inline void then_load_slot0(Run &r) {
+// `ready` ends it (default: the field), for a save that opens a popup over the field at once.
+inline void then_load_slot0(Run &r, Pred ready = nullptr) {
     then_wait_for(
         r, "the focus on Play", 15, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
     then_press(r, A);
@@ -981,7 +990,7 @@ inline void then_load_slot0(Run &r) {
     // load follow the game's random numbers, and so the run's clock.
     then_wait(r, 1.5);
     then_press(r, A);
-    then_wait_for(r, "the game", 30, field, 1.0);
+    then_wait_for(r, "the game", 30, ready != nullptr ? ready : Pred(field), 1.0);
 }
 
 inline void then_finish(Run &r) {
