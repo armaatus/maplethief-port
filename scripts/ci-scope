@@ -46,6 +46,7 @@ while IFS= read -r path || [ -n "$path" ]; do
         tests/test_ci_scope.py) continue ;;
         .github/ISSUE_TEMPLATE/*) continue ;;
         tests/test_issue_templates.py) continue ;;
+        tests/test_pr_template.py) continue ;;
         tests/fixtures/compendium/*) continue ;;
         scripts/compendium) continue ;;
         scripts/ci-scope) continue ;;
