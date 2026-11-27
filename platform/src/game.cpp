@@ -499,6 +499,10 @@ struct Game {
     Uint64 last_present_host = 0;    // when the last window present returned (SDL_GetTicksNS)
     PresentHold hold;                // locked: the present point after each wake (pacing.h)
     OverloadGuard overload;          // locked: the wall clock while starved (pacing.h, #163)
+    // The display, rate and tick the lockable rates were last logged for (lock_advice, #410).
+    SDL_DisplayID advised_display = 0;
+    double advised_hz = 0;
+    std::int64_t advised_tick = 0;
     // frame_rate = smooth (#87, ADR 0091, frame_interp.h): the last two ticks' draws, the
     // fraction of the last tick the window shows, and the latency that costs.
     FrameInterpolator interp;
@@ -678,6 +682,26 @@ double display_refresh_hz(SDL_Window *window) {
         return static_cast<double>(m->refresh_rate_numerator) / m->refresh_rate_denominator;
     }
     return static_cast<double>(m->refresh_rate);
+}
+
+// The refresh rates of the window's display's modes (SDL_GetFullscreenDisplayModes; none on the
+// dummy driver), for lock_advice (#410).
+std::vector<double> display_mode_rates(SDL_DisplayID display) {
+    std::vector<double> rates;
+    int count = 0;
+    SDL_DisplayMode **modes = SDL_GetFullscreenDisplayModes(display, &count);
+    if (modes == nullptr) {
+        return rates;
+    }
+    for (int i = 0; i < count; i++) {
+        const SDL_DisplayMode *m = modes[i];
+        rates.push_back(m->refresh_rate_numerator > 0 && m->refresh_rate_denominator > 0
+                            ? static_cast<double>(m->refresh_rate_numerator) /
+                                  m->refresh_rate_denominator
+                            : static_cast<double>(m->refresh_rate));
+    }
+    SDL_free(modes);
+    return rates;
 }
 
 // The game's tick interval in ms: CMTimer's frame interval, the i64 at 0x11A478
@@ -2772,6 +2796,24 @@ void set_fast_forward(Game &g, double t) {
     }
 }
 
+// A display that cannot lock the tick (#410, after #366): which of its own rates would, logged
+// once per display, rate and tick. The 1 ms grid keeps the speed exact, but a tick of 7.2
+// refreshes is shown for 7 or 8 whatever the clock.
+void advise_lockable_rates(Game &g, const PacingPlan &plan) {
+    const SDL_DisplayID display = SDL_GetDisplayForWindow(g.window);
+    const double hz = g.stats.refresh_hz();
+    if (display == g.advised_display && hz == g.advised_hz && g.tick_ms == g.advised_tick) {
+        return;
+    }
+    if (lock_advice(plan, hz, {}).empty()) {
+        return; // locked, or the grid for another reason: no advice, and no mode list read
+    }
+    SDL_Log("pacing: %s", lock_advice(plan, hz, display_mode_rates(display)).c_str());
+    g.advised_display = display;
+    g.advised_hz = hz;
+    g.advised_tick = g.tick_ms;
+}
+
 // The guest clock's rate in real time at run time `t` (#151): fast-forward from its action, and
 // with pacing = display the paced clock's plan for it and the display (pacing.h, ADR 0075).
 void follow_clock_rate(Game &g, double t) {
@@ -2780,9 +2822,10 @@ void follow_clock_rate(Game &g, double t) {
     }
     if (g.paced != nullptr) {
         // The overload guard (#163): the wall clock for a while when the lock costs speed.
-        const PacingPlan plan = g.overload.apply(
-            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms, g.ff_rate),
-            SDL_GetTicksNS());
+        const PacingPlan planned =
+            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms, g.ff_rate);
+        advise_lockable_rates(g, planned);
+        const PacingPlan plan = g.overload.apply(planned, SDL_GetTicksNS());
         if (g.paced->set_plan(plan)) {
             SDL_Log("pacing: %s, at %.3f s", describe(plan).c_str(), t);
         }
