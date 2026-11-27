@@ -91,6 +91,7 @@ add_library(
     src/file_dialog.cpp
     src/save_menu.cpp
     src/save_state_input.cpp
+    src/practice_state.cpp
     src/quick_state.cpp
     src/recovery.cpp
     src/save_tools.cpp

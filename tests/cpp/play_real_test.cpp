@@ -119,6 +119,7 @@
 #include "maplethief/textpack.h"
 #include "maplethief/widescreen.h"
 #include "minimap.h"
+#include "practice_state.h"
 #include "present.h"
 #include "price_line.h"
 #include "quest_bot.h"
@@ -7562,6 +7563,207 @@ void quick_state_checks(Run &r, u64) {
     }
 }
 
+// --- practice states per split (#409, practice_state.h, ADR 0189) ------------------------------
+//
+// practice_state: from part c's save (MT_FROM_SAVE), the hero in Perion (1.0), the speedrun timer
+// times a synthetic category of three splits: the map change to 1.2, the one back to 1.0, and
+// one never reached. The run starts at once (a run from a save, as chapter_1_l's). Each split
+// arms a practice state, taken at the first safe turn after it (PracticeStates on the frontend's
+// game_quick_ops, as game.cpp's turn hook runs it) to OUT_DIR/data/states/practice_test/: two
+// splits, two states. Then F7 picks the first split's state and F8 loads it: the guest digest
+// (the FNV-1a of mt_snapshot_save of the game right after the load) equals the state file's as
+// taken, the hero's state line is the one at the take, and the timer is practice with its segment
+// timer back at zero. The way back to 1.0 then ends the practised segment (and, a split of the
+// practice, takes split 2's state again).
+namespace practice_test {
+fe::PracticeStates g_states;
+fe::RunTimer *g_timer = nullptr;
+struct Taken {
+    std::string path, digest, state;
+};
+std::map<std::size_t, Taken> g_taken;
+std::string g_loaded_digest, g_loaded_state, g_load_log;
+fe::RunTime g_before_load, g_after_load;
+std::size_t g_picked = 0;
+std::uint64_t g_saves_at_load = 0; // the practice states taken before the load
+bool g_practice = false;
+std::size_t g_next = 0;
+std::optional<fe::RunTime> g_segment;
+std::vector<fe::RunRecord> g_records;
+constexpr const char *k_category = "practice_test";
+
+// The hero's state, without the harness's own counters (a load does not rewind them).
+std::string hero_state(mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    char buf[200];
+    std::snprintf(buf, sizeof buf, "map=%d.%d x=%d y=%d hp=%d mp=%d level=%d exp=%d meso=%d",
+                  h.area, h.map, h.x, h.y, h.hp, h.mp, h.level, h.exp, h.meso);
+    return buf;
+}
+
+std::string bytes_digest(const std::vector<std::uint8_t> &b) {
+    return fe::hex64(fe::fnv1a64(b.data(), b.size()));
+}
+
+// The guest digest now: the game's state file at this moment, as a practice state takes it.
+std::string guest_digest(mt_cpu *cpu, std::uint32_t slot) {
+    mt_snapshot_meta meta = mt_snapshot_meta_default();
+    mt_process_image_sha256(mt_process_current(), meta.binary_sha256);
+    meta.slot = slot;
+    std::uint8_t *bytes = nullptr;
+    std::size_t size = 0;
+    char why[256] = {};
+    if (mt_snapshot_save(cpu, &meta, &bytes, &size, why, sizeof why) != 0) {
+        return std::string("no save: ") + why;
+    }
+    const std::string d = fe::hex64(fe::fnv1a64(bytes, size));
+    std::free(bytes);
+    return d;
+}
+
+fe::RunCategory category() {
+    std::vector<std::string> problems;
+    std::optional<fe::RunCategory> c = fe::parse_run_category(k_category,
+                                                              "title = Practice test\n"
+                                                              "split map_change 1.2 = Dark Stumps\n"
+                                                              "split map_change 1.0 = Perion\n"
+                                                              "split chapter_end 9 = Never\n",
+                                                              &problems);
+    check(c.has_value() && problems.empty(), "the test category parses");
+    return c.value_or(fe::RunCategory{});
+}
+} // namespace practice_test
+
+void practice_state(Run &r, u64) {
+    using namespace quest_bot;
+    namespace pt = practice_test;
+    from_save(r);
+    static fe::RunTimer timer(fe::RunClock{[] {
+                                               return fe::RunInstant{
+                                                   static_cast<double>(SDL_GetTicksNS()) / 1e9,
+                                                   mt_input_get_stats().ticks};
+                                           },
+                                           [] { return std::string("2026-11-27 00:00:00"); }});
+    pt::g_timer = &timer;
+    // Every turn: a split the timer reached arms its state; an armed state is taken at the first
+    // safe turn.
+    r.on_turn = [&r, monitor_turn = r.on_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        if (const std::optional<std::size_t> s = pt::g_timer->take_reached()) {
+            pt::g_states.reached(*s, pt::g_timer->category().splits.size());
+            std::printf("practice: split %zu reached at step %llu\n", *s,
+                        static_cast<unsigned long long>(r.step()));
+        }
+        if (!pt::g_states.armed()) {
+            return;
+        }
+        const std::size_t split = *pt::g_states.armed();
+        const fe::QuickResult res =
+            pt::g_states.take_armed(run_quick_ops(r, cpu), r.data.string(), pt::k_category);
+        if (res.done) {
+            const fe::AutosaveCheck c = fe::check_autosave(cpu);
+            pt::Taken t;
+            t.path = fe::practice_state_path(r.data.string(), pt::k_category, c.slot, split);
+            t.digest = pt::bytes_digest(
+                fe::read_quick_state(t.path).value_or(std::vector<std::uint8_t>{}));
+            t.state = pt::hero_state(cpu);
+            std::printf("practice: %s; digest %s, %s\n", res.log.c_str(), t.digest.c_str(),
+                        t.state.c_str());
+            pt::g_taken[split] = t;
+        }
+    };
+    then_do(r, "the speedrun timer: the test category, a run from here", [](mt_cpu *) {
+        g_run_timer = pt::g_timer;
+        pt::g_timer->set_category(pt::category(), std::nullopt);
+        pt::g_timer->start();
+        check(pt::g_timer->state() == fe::RunTimer::State::kRunning, "the timer runs");
+    });
+    const wm::Object *back = wm::get(1, 2).portal(1); // 1.2's portal to Perion
+    const Goal on_1_2 = back != nullptr ? Goal{1, 2, back->x, back->y, 40} : Goal{1, 2, 0, 0, 40};
+    then_go(r, "the Dark Stumps' map (1.2), by its portal back", on_1_2, 300);
+    then_wait_for(r, "the practice state after split 1 (1.2)", 60,
+                  [](mt_cpu *) { return pt::g_taken.count(1) == 1; });
+    then_go(r, "back to Perion (1.0)", {1, 0, 376, 399, 30}, 300);
+    then_wait_for(r, "the practice state after split 2 (1.0)", 60,
+                  [](mt_cpu *) { return pt::g_taken.count(2) == 1; });
+    then_wait(r, 1);
+    // F7 picks the first split with a state, F8 loads it, as game.cpp's run_practice_state.
+    then_do(r, "F7: pick; F8: load the first split's state", [&r](mt_cpu *cpu) {
+        const fe::QuickOps ops = run_quick_ops(r, cpu);
+        const fe::RunCategory &c = pt::g_timer->category();
+        tap_key(r, SDLK_F7);
+        check(pt::g_states.take(r.actions, true) == fe::PracticeRequest::kPick, "F7 picks");
+        const std::optional<std::size_t> picked =
+            pt::g_states.pick(pt::g_timer->picked(), c.splits.size(), ops, r.data.string(),
+                              pt::k_category, fe::practice_state_exists);
+        pt::g_picked = picked.value_or(0);
+        pt::g_timer->set_picked(picked);
+        tap_key(r, SDLK_F8);
+        check(pt::g_states.take(r.actions, true) == fe::PracticeRequest::kLoad, "F8 loads");
+        pt::g_before_load = pt::g_timer->elapsed();
+        pt::g_saves_at_load = pt::g_states.stats().saves;
+        const fe::QuickResult res =
+            pt::g_states.load(ops, r.data.string(), pt::k_category, pt::g_picked);
+        pt::g_load_log = res.log;
+        if (!res.done) {
+            return;
+        }
+        const fe::AutosaveCheck slot = fe::check_autosave(cpu);
+        pt::g_loaded_digest = pt::guest_digest(cpu, static_cast<std::uint32_t>(slot.slot));
+        pt::g_loaded_state = pt::hero_state(cpu);
+        pt::g_timer->start_practice(pt::g_picked);
+        pt::g_practice = pt::g_timer->practice();
+        pt::g_next = pt::g_timer->next_split();
+        pt::g_after_load = pt::g_timer->elapsed();
+        pt::g_records = pt::g_timer->take_records();
+        std::printf("practice: %s; digest %s, %s; overlay:\n", res.log.c_str(),
+                    pt::g_loaded_digest.c_str(), pt::g_loaded_state.c_str());
+        for (const std::string &line : pt::g_timer->overlay_lines()) {
+            std::printf("  %s\n", line.c_str());
+        }
+    });
+    then_go(r, "back to Perion (1.0) again: the practised segment", {1, 0, 376, 399, 30}, 300);
+    then_do(r, "the practised segment's time", [](mt_cpu *) {
+        pt::g_segment = pt::g_timer->last_segment();
+        for (const std::string &line : pt::g_timer->overlay_lines()) {
+            std::printf("  %s\n", line.c_str());
+        }
+        g_run_timer = nullptr;
+    });
+    then_finish(r);
+}
+
+void practice_state_checks(Run &, u64) {
+    namespace pt = practice_test;
+    check(pt::g_taken.size() == 2 && pt::g_saves_at_load == 2,
+          "two splits took two practice states before the load (" +
+              std::to_string(pt::g_saves_at_load) + ")");
+    std::error_code ec;
+    for (const auto &[split, t] : pt::g_taken) {
+        check(fs::is_regular_file(t.path, ec),
+              "split " + std::to_string(split) + "'s state is a file: " + t.path);
+    }
+    check(pt::g_picked == 1, "F7 picked the first split (" + std::to_string(pt::g_picked) + ")");
+    check(pt::g_states.stats().loads == 1, "F8 loaded it: " + pt::g_load_log);
+    const pt::Taken &first = pt::g_taken[1];
+    check(!first.digest.empty() && pt::g_loaded_digest == first.digest,
+          "the guest digest after the load is the one taken (" + pt::g_loaded_digest + ", taken " +
+              first.digest + ")");
+    check(pt::g_loaded_state == first.state,
+          "the hero is where the state was taken (" + pt::g_loaded_state + ")");
+    check(pt::g_practice && pt::g_next == 1,
+          "the load marked the run as practice, timing split 2 (next " +
+              std::to_string(pt::g_next) + ")");
+    check(pt::g_records.size() == 1 && !pt::g_records[0].finished,
+          "the run before the load ended as reset");
+    check(pt::g_after_load.ms < pt::g_before_load.ms && pt::g_after_load.ms < 1000,
+          "the segment timer restarted (" + fe::format_run_time(pt::g_before_load.ms) + " -> " +
+              fe::format_run_time(pt::g_after_load.ms) + ")");
+    check(pt::g_segment.has_value() && pt::g_segment->ms > 0 && pt::g_segment->ticks > 0,
+          "the way back to 1.0 ended the practised segment (" +
+              (pt::g_segment ? fe::format_run_time(pt::g_segment->ms) : std::string("none")) + ")");
+}
+
 // --- the save-state census (#202, ADR 0105, docs/re/save-states.md) -----------------------------
 //
 // --- crash recovery points across two processes (#335, ADR 0151, recovery.h) -------------------
@@ -11714,6 +11916,7 @@ constexpr Mode k_modes[] = {
     {"save_state_census", save_state_census, save_state_census_checks, 1, false,
      save_state_census_setup},
     {"quick_state", quick_state, quick_state_checks, 1, false, quick_state_setup},
+    {"practice_state", practice_state, practice_state_checks, 1},
     {"recovery_crash", recovery_crash, recovery_crash_checks, 1, false, recovery_crash_setup},
     {"recovery_resume", recovery_resume, recovery_resume_checks, 1, true, recovery_resume_setup},
     {"recovery_off", recovery_off, recovery_off_checks, 1, false, recovery_off_setup},

@@ -73,6 +73,7 @@
 #include "perf_overlay.h"
 #include "perf_session.h"
 #include "port_text.h"
+#include "practice_state.h"
 #include "present.h"
 #include "price_line.h"
 #include "prompts.h"
@@ -580,6 +581,7 @@ struct Game {
     RunTimer run_timer{RunClock{run_clock_now, run_clock_stamp}};
     std::vector<RunCategory> run_categories;
     std::string run_category_loaded;
+    PracticeStates practice; // its practice states, with save_states (#409, practice_state.h)
     // --perf-session (#244, perf_session.h): a line per second; the scene and the screen as of
     // the last run-loop turn.
     PerfSession session;
@@ -2737,8 +2739,15 @@ void run_timer_event(void *user, const mt_game_event *e) {
 }
 
 // The speedrun timer's finished and reset runs to <data dir>/runs/ (run_timer.h), each logged;
-// a new personal best becomes the one the timer compares with.
+// a new personal best becomes the one the timer compares with. A best segment that improved
+// (#409) writes runs/<category>.segments again.
 void write_run_records(Game &g) {
+    if (g.run_timer.take_segments_changed()) {
+        std::string why;
+        if (!write_run_segments(data_dir(), g.run_timer.segments(), &why)) {
+            SDL_Log("run: cannot write the best segments: %s", why.c_str());
+        }
+    }
     for (RunRecord &r : g.run_timer.take_records()) {
         std::string path, why;
         bool best = false;
@@ -2774,15 +2783,27 @@ void follow_run_timer(Game &g) {
             SDL_Log("run: no category '%s' (shipped or in categories/): the timer waits",
                     g.settings.run_category.c_str());
             g.run_timer.set_category(RunCategory{}, std::nullopt);
+            g.practice.forget();
         } else {
             std::optional<RunRecord> best = load_run_best(data_dir(), it->id);
             SDL_Log("run: the timer times %s (%zu splits)%s", it->title.c_str(), it->splits.size(),
                     best ? (", the best " + format_run_time(best->end.ms)).c_str() : "");
-            g.run_timer.set_category(*it, std::move(best));
+            g.run_timer.set_category(*it, std::move(best), load_run_segments(data_dir(), it->id));
+            g.practice.forget();
         }
     }
     g.run_timer.turn();
     write_run_records(g);
+}
+
+// After a save state was loaded (a quick-load's or a practice state's): the frontend's own per-tick
+// state follows the restored game: the interpolated frames start over, and game_speed (the
+// player's setting, not the state's) is written again into the restored guest memory.
+void after_state_load(Game &g, mt_cpu *cpu) {
+    g.interp.forget();
+    g.ff_presents.restart();
+    apply_game_speed(cpu, g.settings.game_speed);
+    g.game_speed = g.settings.game_speed;
 }
 
 bool run_quick_state(Game &g, mt_cpu *cpu, double now) {
@@ -2798,12 +2819,77 @@ bool run_quick_state(Game &g, mt_cpu *cpu, double now) {
     g.notice_until = SDL_GetTicksNS() + kStateNoticeNs;
     g.event_seen = true;
     if (res.done && r == QuickRequest::kLoad) {
-        g.interp.forget();
-        g.ff_presents.restart();
-        apply_game_speed(cpu, g.settings.game_speed);
-        g.game_speed = g.settings.game_speed;
+        after_state_load(g, cpu);
     }
     return true;
+}
+
+// The speedrun timer's practice states (#409, practice_state.h), after run_quick_state: a split
+// reached since the last turn arms a state, taken at this turn if it is safe (never in a
+// quick-save's or quick-load's turn); practice_pick and practice_load pressed since the last turn.
+// True if a state was saved or loaded.
+bool run_practice_state(Game &g, mt_cpu *cpu, double now, bool quick_ran) {
+    const PracticeRequest r = g.practice.take(g.actions, g.settings.save_states);
+    const std::optional<std::size_t> reached = g.run_timer.take_reached();
+    const RunCategory &c = g.run_timer.category();
+    const bool on = g.settings.save_states && g.settings.run_timer && !c.splits.empty();
+    if (!on) {
+        g.practice.forget();
+    } else if (reached) {
+        g.practice.reached(*reached, c.splits.size());
+    }
+    if (!on && r == PracticeRequest::kNone) {
+        return false;
+    }
+    const double t = now - g.first_turn;
+    const QuickOps ops =
+        game_quick_ops(cpu, [&g, t] { release_layers(g, t); }, rebase_guest_clock, &g);
+    const auto notice = [&g](const std::string &text) {
+        g.notice = text;
+        g.notice_until = SDL_GetTicksNS() + kStateNoticeNs;
+        g.event_seen = true;
+    };
+    bool ran = false;
+    if (on && !quick_ran && g.practice.armed()) {
+        const std::size_t split = *g.practice.armed();
+        const QuickResult res = g.practice.take_armed(ops, data_dir(), c.id);
+        if (res.done) {
+            notice(tr(Txt::practice_saved, {c.splits[split - 1].title}));
+            ran = true;
+        }
+    }
+    if (r == PracticeRequest::kNone) {
+        return ran;
+    }
+    if (!on) {
+        notice(tr(Txt::state_load_refused, {tr(Txt::practice_why_no_timer)}));
+        SDL_Log("practice: refused: the speedrun timer is off or has no category");
+        return ran;
+    }
+    std::optional<std::size_t> split = g.run_timer.picked();
+    if (r == PracticeRequest::kPick || !split) {
+        split =
+            g.practice.pick(split, c.splits.size(), ops, data_dir(), c.id, practice_state_exists);
+        g.run_timer.set_picked(split);
+        if (!split) {
+            notice(tr(Txt::practice_none));
+            SDL_Log("practice: no practice state of %s for this character", c.id.c_str());
+            return ran;
+        }
+        if (r == PracticeRequest::kPick) {
+            notice(tr(Txt::practice_picked, {c.splits[*split - 1].title}));
+            return ran;
+        }
+    }
+    const QuickResult res = g.practice.load(ops, data_dir(), c.id, *split);
+    notice(res.notice);
+    if (res.done) {
+        after_state_load(g, cpu);
+        g.run_timer.start_practice(*split);
+        write_run_records(g); // a run in progress ended as reset
+        ran = true;
+    }
+    return ran;
 }
 
 // crash_recovery (#335, recovery.h): a recovery point at the first safe turn after a map load,
@@ -2958,7 +3044,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // save_states (#204): a quick-save or quick-load asked for, at this safe turn; then
     // crash_recovery's point (#335).
     const bool quick_ran = run_quick_state(g, cpu, now);
-    run_recovery(g, cpu, now, quick_ran);
+    const bool practice_ran = run_practice_state(g, cpu, now, quick_ran); // #409
+    run_recovery(g, cpu, now, quick_ran || practice_ran);
     // stick_mode and direction_priority (#138, ADR 0128), as in effect now; the clock a menu's
     // diagonal is timed by.
     g.actions.set_clock([](void *) { return mt_cf_absolute_time(); }, nullptr);

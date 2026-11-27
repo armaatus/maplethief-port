@@ -76,12 +76,14 @@ typedef enum mt_input_action {
     /* The port's own actions (#151): bound, remapped and saved like the others, but the
      * frontend handles them (platform/src/actions.h) and they never reach the guest:
      * mt_input_press ignores them. */
-    MT_ACTION_FAST_FORWARD, /* held: the game runs faster (fast_forward, ADR 0087) */
-    MT_ACTION_AUTO_RUN,     /* pressed: the walk goes on by itself (auto_run, ADR 0094) */
-    MT_ACTION_PAGE,         /* held: up / down page a list a view at a time (ADR 0114) */
-    MT_ACTION_POINTER_TAP,  /* held: the gamepad pointer's touch (pad_pointer, ADR 0107) */
-    MT_ACTION_QUICK_SAVE,   /* pressed: a save state of the game now (save_states, ADR 0105) */
-    MT_ACTION_QUICK_LOAD,   /* pressed: the save state back (save_states, ADR 0105) */
+    MT_ACTION_FAST_FORWARD,  /* held: the game runs faster (fast_forward, ADR 0087) */
+    MT_ACTION_AUTO_RUN,      /* pressed: the walk goes on by itself (auto_run, ADR 0094) */
+    MT_ACTION_PAGE,          /* held: up / down page a list a view at a time (ADR 0114) */
+    MT_ACTION_POINTER_TAP,   /* held: the gamepad pointer's touch (pad_pointer, ADR 0107) */
+    MT_ACTION_QUICK_SAVE,    /* pressed: a save state of the game now (save_states, ADR 0105) */
+    MT_ACTION_QUICK_LOAD,    /* pressed: the save state back (save_states, ADR 0105) */
+    MT_ACTION_PRACTICE_PICK, /* pressed: the next split with a practice state (ADR 0189) */
+    MT_ACTION_PRACTICE_LOAD, /* pressed: the picked split's practice state back (ADR 0189) */
     MT_ACTION_COUNT
 } mt_input_action;
 
