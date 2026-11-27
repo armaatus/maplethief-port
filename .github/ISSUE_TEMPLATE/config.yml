@@ -1,1 +1,8 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Question
+    url: https://github.com/armaatus/maplethief-port/discussions/categories/q-a
+    about: Ask in Discussions. Start with the FAQ, which may already answer it.
+  - name: Idea
+    url: https://github.com/armaatus/maplethief-port/discussions/categories/ideas
+    about: Talk an idea through in Discussions before it becomes a feature request.
