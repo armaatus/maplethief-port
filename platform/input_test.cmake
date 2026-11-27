@@ -24,6 +24,9 @@
 #     docs/re/original-bugs.md): the early Play guard hook drops it, the run raises nothing,
 #     and a second tap on Play at 4.5 s starts a new game (saves/theif0 written).
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 if(MODE STREQUAL "usage")
     foreach(value 480,10 10,320 -1,5 1.5,2 abc 5 "1,2,3" on)
         execute_process(

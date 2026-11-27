@@ -34,6 +34,9 @@
 #   cmake -DPROGRAM=<MapleThief> [-DBUNDLE=<MapleThief.app>] -DPYTHON=<python3> -DTOOLS=<tools/>
 #         -DMODE=cli|game -DOUT=<dir> -P data_folder_test.cmake
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 file(REMOVE_RECURSE "${OUT}")
 file(MAKE_DIRECTORY "${OUT}/home" "${OUT}/kit")
 set(kit "${OUT}/kit")

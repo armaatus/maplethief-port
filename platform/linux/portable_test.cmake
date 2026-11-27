@@ -6,6 +6,9 @@
 #
 #   cmake -DPROGRAM=<MapleThief> -DREADELF=<readelf> [-DGLIBC_FLOOR=2.39] -P portable_test.cmake
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 set(allowed_needed
     libc.so.6
     libm.so.6
