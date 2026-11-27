@@ -1385,6 +1385,18 @@ set_tests_properties(
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
+# The host-driven tests (#432, ADR 0242, docs/testing/run-coverage.md): after the tutorial, the
+# functions no play can enter are entered from the host: a push token, a memory warning, an
+# audio interruption, the death popup's grade revival, a coupon deleted, and the teardown (every
+# destructor and dealloc on its object, a save state restored before each). For the run coverage:
+# re/coverage-gaps.md has no `unreachable` row. TICKS 1: no play time is asked for.
+add_test(NAME play.host_events COMMAND play_real_test host_events
+                                       "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_host_events" 1)
+set_tests_properties(
+    play.host_events
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
 # Quality of life (#90, assists.h, ADR 0092), each from a new game on the tutorial's map 2.8:
 # auto_potion off drinks nothing at a fifth of max HP, = 50 drinks quick slot 1's Red Potion
 # once and none in the popup menu (play.auto_potion); X held 3 s attacks once with
