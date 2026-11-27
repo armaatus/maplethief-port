@@ -15,6 +15,7 @@ scripts/regress                        # builds play_real_test (mac-debug), play
 scripts/regress --repeat 10            # ten plays: each passes, one digest
 scripts/regress --preset original      # MAPLETHIEF_SETTINGS=preset=original
 scripts/regress --settings turbo_attack=on --preset enhanced
+scripts/regress --native-script-vm shadow  # each script call run as the original and the host VM
 ```
 
 On Windows: `scripts\regress.ps1 --repeat 10` from a Visual Studio x64 developer shell.
@@ -83,6 +84,17 @@ scripts/regress --preset original --baseline work/regress/original.txt        # 
 The second fails if any checkpoint differs from the baseline and names the first one. Baselines
 hold hashes of our renders and stay in `work/` (never committed). The digests of two runs can
 also be compared by eye: the last line of each.
+
+`--native-script-vm on|off|shadow` sets `MAPLETHIEF_NATIVE_SCRIPT_VM` for the plays, which the
+driver applies as the game's `--native-script-vm` ([ADR 0226](../adr/0226-the-host-script-vm.md),
+#386, #430): the script VM's loop on the host (the default), the recompiled original, or the
+shadow runs, which run each outermost `Lua::execute` both ways from one state and fail the play
+on any difference (`maplethief/scriptvm.h`). A shadow play's summary line (`scriptvm shadow: N
+runs, M native calls replayed, 0 with a difference`) is repeated in the runner's output; each
+difference is written to the play's `stderr.txt` with the address, both words and the host VM's
+last opcodes. `on`, `off` and `shadow` give the same digest (`8a2f05733c8d4603`, 2026-11-27).
+The playthrough below takes the same variable from the environment
+(`MAPLETHIEF_NATIVE_SCRIPT_VM=shadow scripts/playthrough`).
 
 Which settings reach the run: those the driver applies as the game does. These are the Assists
 (`turbo_attack`, `auto_potion`, `auto_run`, `hold_toggle`, `auto_loot`), `skip_intros`,

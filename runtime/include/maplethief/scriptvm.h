@@ -23,8 +23,10 @@
  * Step observer: mt_scriptvm_set_step_observer gets every opcode the loop runs, as the script
  * corpus test (#431) compares it with the recompiled loop's opcode fetches.
  *
- * Off by default: the developer switch --native-script-vm on|off (platform) registers the hook
- * on or off. C17 that also compiles as C++20; the implementation is runtime/src/scriptvm/. */
+ * On by default since #430 and #431 (ADR 0226's addenda): the developer switch
+ * --native-script-vm on|off|shadow (platform) registers the hook on or off, or the shadow runs
+ * below. C17 that also compiles as C++20; the implementation
+ * is runtime/src/scriptvm/. */
 #ifndef MAPLETHIEF_SCRIPTVM_H
 #define MAPLETHIEF_SCRIPTVM_H
 
@@ -57,6 +59,64 @@ typedef struct mt_scriptvm_stats {
 
 mt_scriptvm_stats mt_scriptvm_get_stats(void) MT_NOEXCEPT;
 void mt_scriptvm_reset_stats(void) MT_NOEXCEPT;
+
+/* --- the shadow runs (#430, ADR 0226) ---------------------------------------------------------
+ *
+ * The proof that the host loop equals the original, call by call: --native-script-vm shadow.
+ * At each outermost Lua::execute (one comparison covers its whole call tree), the handler copies
+ * guest memory outside the call's frame (the writable image, the heap up to its committed end and
+ * its host bookkeeping, the stack from the entry sp up; the dead stack below the entry sp, where
+ * the two leave different scratch, is left out) and the registers, then:
+ *
+ *   1. runs the original (nested executes too). Lua::callNative 0x9B37D is hooked as well
+ *      (MT_HOOK_FN_LUA_CALL_NATIVE): each native call is recorded with the state just before
+ *      it and just after it.
+ *   2. puts the entry state back and runs the rewrite (the host loop, nested calls too). At each
+ *      native call the state and the call (L, index, base, sp, lr) must be run 1's at the same
+ *      call; the native is then replayed, not run again (its state after it put in), so what a
+ *      native does outside guest memory (a sound, a popup, Game Center, an ObjC object) happens
+ *      once.
+ *   3. compares r0, r4-r8, r10, r11 and sp (r9 is a scratch register on iOS), memory and the
+ *      heap's bookkeeping with run 1's end, and the number of native calls. Then the game goes on
+ * from run 1's end: the original's.
+ *
+ * The first difference of a run (where, the address and both words, the native calls so far and
+ * the rewrite's last opcodes from the scriptvm recorder) is written to stderr and counted; the
+ * process's first is kept (mt_scriptvm_shadow_first_difference). Guest thread only.
+ *
+ * Without an mt_mem (a synthetic guest's flat memory), all of cpu->mem is compared but the
+ * 64 KiB below the entry sp, and there is no heap bookkeeping. */
+
+/* The loop a shadow run checks: mt_scriptvm_execute's signature. */
+typedef uint32_t (*mt_scriptvm_execute_fn)(mt_cpu *cpu, uint32_t lua, uint32_t tfunc,
+                                           uint32_t base);
+
+/* Registers the shadow runs as the handlers of Lua::execute and Lua::callNative, on or off
+ * (replacing mt_hooks_install_native_script_vm's handler). `rewrite` NULL: the host loop,
+ * mt_scriptvm_execute; a test passes its own. */
+void mt_scriptvm_shadow_install(int enabled, mt_scriptvm_execute_fn rewrite) MT_NOEXCEPT;
+
+typedef struct mt_scriptvm_shadow_stats {
+    uint64_t runs;        /* outermost calls run both ways */
+    uint64_t natives;     /* native calls recorded in run 1 and replayed in run 2 */
+    uint64_t differences; /* runs with a difference */
+} mt_scriptvm_shadow_stats;
+
+typedef struct mt_scriptvm_shadow_difference {
+    uint64_t run;        /* the shadow run (1 is the process's first) */
+    uint32_t checkpoint; /* the native calls before the difference (run 1's count at the end) */
+    uint32_t at_end;     /* 1: at the call's end; 0: at native call `checkpoint` + 1 */
+    char what[64];       /* "memory", "heap bookkeeping", "r0", "sp", "native call index", ... */
+    uint32_t address;    /* memory: the first differing byte */
+    uint32_t original;   /* memory: the word at address & ~3 after the original; else its value */
+    uint32_t rewrite;    /* the same after the rewrite */
+} mt_scriptvm_shadow_difference;
+
+mt_scriptvm_shadow_stats mt_scriptvm_shadow_get_stats(void) MT_NOEXCEPT;
+/* 1 and *out if a run has differed since the start (or the last reset), else 0. */
+int mt_scriptvm_shadow_first_difference(mt_scriptvm_shadow_difference *out) MT_NOEXCEPT;
+/* The numbers and the first difference cleared. */
+void mt_scriptvm_shadow_reset(void) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

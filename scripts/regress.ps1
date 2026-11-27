@@ -13,7 +13,7 @@
     The runs' output (default build/test-output/<preset>/regress).
 .PARAMETER Rest
     Arguments for python -m mtport.regress: --repeat N, --preset NAME, --settings LIST,
-    --baseline FILE, --save-baseline FILE, --replay FILE.
+    --baseline FILE, --save-baseline FILE, --replay FILE, --native-script-vm on|off|shadow.
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\regress.ps1 --repeat 10 --preset original
 #>

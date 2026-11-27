@@ -252,7 +252,9 @@ HOOKED: dict[int, Hooked] = {
         "Lua::callNative",
         "(L, index, base): runs native `index` of the script VM with the arguments above base "
         "and returns the first result's stack index; the script corpus test (#431) puts a "
-        "recording stub there, so the recompiled and the host VM see the same answers",
+        "recording stub there, so the recompiled and the host VM see the same answers; "
+        "--native-script-vm shadow (#430) records each native call of the original's run and "
+        "replays it in the host VM's (runtime/src/scriptvm/shadow.cpp)",
     ),
     0x9CE2D: Hooked(
         "Lua::runCallback",

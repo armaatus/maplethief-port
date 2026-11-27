@@ -16,6 +16,9 @@
 #     --baseline FILE      compare the first run's checkpoints with FILE (another build's)
 #     --save-baseline FILE write them to FILE (keep baselines in work/regress/: never committed)
 #     --replay FILE        another replay (play_real_test regress_record records one)
+#     --native-script-vm on|off|shadow
+#                          the script VM's loop on the host, the original, or both compared at
+#                          every call (#430; MAPLETHIEF_NATIVE_SCRIPT_VM); on and off give one digest
 #     --out DIR            the runs' output (default build/test-output/<preset>/regress)
 #
 # The last line is "regress: digest <16 hex>": two builds or two presets compare by it.
@@ -48,7 +51,7 @@ while [ $# -gt 0 ]; do
         shift 2
         ;;
     -h | --help)
-        sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
         exit 0
         ;;
     *)

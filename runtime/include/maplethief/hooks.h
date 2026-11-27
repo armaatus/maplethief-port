@@ -124,7 +124,8 @@ MT_EXTERN_C_BEGIN
  * offers a restored shop beside it (restored_content) */
 #define MT_HOOK_FN_LUA_SHOW_MARKET 0x998D1u
 /* Lua::callNative (L, index, base): the script natives' dispatch (#431: the script corpus test's
- * recording stub) */
+ * recording stub; #430: the shadow runs record and replay each native call,
+ * maplethief/scriptvm.h) */
 #define MT_HOOK_FN_LUA_CALL_NATIVE 0x9B37Du
 /* Lua::execute (L, tfunc, base): the script VM's opcode loop (#386, ADR 0226: the host VM,
  * maplethief/scriptvm.h) */

@@ -63,6 +63,8 @@ struct State {
     u32 native_result = 77;   // doCall's first result
     bool flip_symbol = false; // pushGlobal makes the symbol it read a number
     std::string sprintf_out = "AB";
+    bool native_hook = false;      // doCall runs a native through the hooked Lua::callNative
+    bool original_is_host = false; // Lua::execute's original body is the host loop (shadow tests)
 };
 State *g = nullptr;
 
@@ -161,8 +163,17 @@ void s_adjust_top(mt_cpu *cpu) { // top = stack + index, filled with nil
     }
     put(k_g_top, stack() + 8u * cpu->r[1]);
 }
+void hooked_call_native(mt_cpu *MT_RESTRICT cpu);
 void s_do_call(mt_cpu *cpu) { // the function and its arguments replaced by its results
     record(cpu, 0x9BA11u);
+    if (g->native_hook && tag(cpu->r[1] - 1u) == CFUN) { // Lua::callNative (L, index, base)
+        const u32 first = cpu->r[1], nresults = cpu->r[2];
+        cpu->r[1] = val(first - 1u);
+        cpu->r[2] = first;
+        hooked_call_native(cpu);
+        cpu->r[1] = first;
+        cpu->r[2] = nresults;
+    }
     put(k_g_top, stack() + 8u * (cpu->r[1] - 1u));
     for (u32 i = 0; i < cpu->r[2] && cpu->r[2] != 255u; i++) {
         push(NUM, g->native_result + i);
@@ -198,10 +209,23 @@ void s_new_array(mt_cpu *cpu) {
 int g_original_runs = 0;
 void execute_original(mt_cpu *MT_RESTRICT cpu) {
     g_original_runs++;
-    cpu->r[0] = 0x1234u;
+    cpu->r[0] =
+        g->original_is_host ? mt_scriptvm_execute(cpu, cpu->r[0], cpu->r[1], cpu->r[2]) : 0x1234u;
 }
 void hooked_execute(mt_cpu *MT_RESTRICT cpu) {
     MT_FN_HOOK(MT_HOOK_FN_LUA_EXECUTE, execute_original);
+}
+
+// The guest's Lua::callNative behind its hook: a native whose work is one counter in guest
+// memory (k_native_word) and one on the host (g_native_runs, what a replay must not repeat).
+constexpr u32 k_native_word = 0x7000u;
+int g_native_runs = 0;
+void call_native_original(mt_cpu *MT_RESTRICT cpu) {
+    g_native_runs++;
+    put(k_native_word, get(k_native_word) + cpu->r[1]);
+}
+void hooked_call_native(mt_cpu *MT_RESTRICT cpu) {
+    MT_FN_HOOK(MT_HOOK_FN_LUA_CALL_NATIVE, call_native_original);
 }
 
 // A fresh guest: an empty stack of `slots` slots, the function's code, the reader at its start.
@@ -678,6 +702,149 @@ TEST_CASE("scriptvm: the hook runs the host loop when on, and the original when 
     hooked_execute(&vm.state.cpu);
     CHECK(vm.state.cpu.r[0] == 0x1234u);
     CHECK(g_original_runs == 1);
+}
+
+// --- the shadow runs (#430) ---------------------------------------------------------------------
+
+namespace {
+
+// PUSHGLOBAL 1 (the native 17), PUSHBYTE 5, CALLFUNC 1 1, POP, PUSH2, RETCODE0.
+const std::vector<std::uint8_t> k_shadow_code = {0x14, 1, 0, 0x04, 5, 0x3F, 1, 1, 0x3E, 0x03, 0x40};
+
+// A guest whose execute's original body is the host loop (so the two runs agree unless a
+// rewrite is made to differ) and whose doCall reaches the hooked callNative; the shadow runs on.
+struct ShadowGuest : Guest {
+    explicit ShadowGuest(mt_scriptvm_execute_fn rewrite) : Guest(k_shadow_code) {
+        state.native_hook = true;
+        state.original_is_host = true;
+        put(k_sym0 + 0x10u + 8u, CFUN); // symbol 1: the native 17
+        put(k_sym0 + 0x10u + 12u, 17);
+        g_native_runs = 0;
+        g_original_runs = 0;
+        mt_scriptvm_shadow_reset();
+        mt_scriptvm_shadow_install(1, rewrite);
+    }
+    // The hooked Lua::execute (L, tfunc, base 0), as a guest caller calls it.
+    void call() {
+        state.cpu.r[0] = k_lua;
+        state.cpu.r[1] = k_tfunc;
+        state.cpu.r[2] = 0;
+        hooked_execute(&state.cpu);
+        CHECK(state.cpu.r[MT_SP] == k_sp);
+        for (u32 i = 4; i < 12; i++) {
+            CHECK(state.cpu.r[i] == 0x100u + i);
+        }
+    }
+};
+
+// Rewrites: the host loop, with one deliberate difference each.
+u32 rewrite_scratch_below_sp(mt_cpu *cpu, u32 lua, u32 tfunc, u32 base) {
+    put(k_sp - 0x100u, 0xDEADu); // the dead stack below the entry sp: not compared
+    return mt_scriptvm_execute(cpu, lua, tfunc, base);
+}
+u32 rewrite_late_write(mt_cpu *cpu, u32 lua, u32 tfunc, u32 base) {
+    const u32 r = mt_scriptvm_execute(cpu, lua, tfunc, base);
+    put(0x7104u, 0xBADu); // two writes the original does not make, the lower one second
+    put(0x7100u, 0x1u);
+    return r;
+}
+u32 rewrite_early_write(mt_cpu *cpu, u32 lua, u32 tfunc, u32 base) {
+    put(0x7300u, 0x55u); // before the native call
+    const u32 r = mt_scriptvm_execute(cpu, lua, tfunc, base);
+    put(0x7100u, 0x1u); // a lower address, but after it
+    return r;
+}
+u32 rewrite_result(mt_cpu *cpu, u32 lua, u32 tfunc, u32 base) {
+    return mt_scriptvm_execute(cpu, lua, tfunc, base) + 1u;
+}
+
+} // namespace
+
+TEST_CASE("scriptvm shadow: the host loop against an equal original: no difference, the native "
+          "run once") {
+    for (const mt_scriptvm_execute_fn rewrite :
+         {static_cast<mt_scriptvm_execute_fn>(nullptr), rewrite_scratch_below_sp}) {
+        ShadowGuest vm(rewrite);
+        vm.call();
+        const mt_scriptvm_shadow_stats st = mt_scriptvm_shadow_get_stats();
+        CHECK(st.runs == 1u);
+        CHECK(st.natives == 1u);
+        CHECK(st.differences == 0u);
+        CHECK(mt_scriptvm_shadow_first_difference(nullptr) == 0);
+        // Both ran: the original once, the rewrite once; the native ran in run 1 only and was
+        // replayed in run 2, so its guest word moved by its index once.
+        CHECK(g_original_runs == 1);
+        CHECK(g_native_runs == 1);
+        CHECK(get(k_native_word) == 17u);
+        CHECK(vm.state.cpu.r[0] == 0u); // RETCODE0: base
+        REQUIRE(depth() == 1u);
+        CHECK((tag(0) == NUM && val(0) == 2u));
+        mt_scriptvm_shadow_install(0, nullptr);
+    }
+}
+
+TEST_CASE("scriptvm shadow: a different rewrite is caught at its first differing write") {
+    {
+        ShadowGuest vm(rewrite_late_write);
+        vm.call();
+        mt_scriptvm_shadow_difference d{};
+        REQUIRE(mt_scriptvm_shadow_first_difference(&d) == 1);
+        CHECK(mt_scriptvm_shadow_get_stats().differences == 1u);
+        CHECK(d.run == 1u);
+        CHECK(d.at_end == 1u);
+        CHECK(d.checkpoint == 1u); // after the one native call
+        CHECK(std::string(d.what) == "memory");
+        CHECK(d.address == 0x7100u);
+        CHECK(d.original == 0u);
+        CHECK(d.rewrite == 1u);
+        // The game goes on from the original's end: neither write is there.
+        CHECK(get(0x7100u) == 0u);
+        CHECK(get(0x7104u) == 0u);
+        CHECK(get(k_native_word) == 17u);
+        CHECK(g_native_runs == 1);
+    }
+    {
+        // Before the native call: caught at that call, though a lower address differs later.
+        ShadowGuest vm(rewrite_early_write);
+        vm.call();
+        mt_scriptvm_shadow_difference d{};
+        REQUIRE(mt_scriptvm_shadow_first_difference(&d) == 1);
+        CHECK(d.at_end == 0u);
+        CHECK(d.checkpoint == 0u); // at native call 1
+        CHECK(std::string(d.what) == "memory");
+        CHECK(d.address == 0x7300u);
+        CHECK(d.original == 0u);
+        CHECK(d.rewrite == 0x55u);
+        CHECK(get(0x7300u) == 0u);
+        CHECK(g_native_runs == 1);
+    }
+    {
+        ShadowGuest vm(rewrite_result);
+        vm.call();
+        mt_scriptvm_shadow_difference d{};
+        REQUIRE(mt_scriptvm_shadow_first_difference(&d) == 1);
+        CHECK(std::string(d.what) == "r0");
+        CHECK(d.original == 0u);
+        CHECK(d.rewrite == 1u);
+        CHECK(vm.state.cpu.r[0] == 0u); // the original's result
+    }
+    {
+        // Two calls: the numbers add up, the first difference stays the process's first.
+        ShadowGuest vm(rewrite_result);
+        vm.call();
+        put(k_g_top, k_stack);
+        put(k_tfunc + 0x1C, 0);
+        put(k_reader + 8, k_mark);
+        vm.call();
+        const mt_scriptvm_shadow_stats st = mt_scriptvm_shadow_get_stats();
+        CHECK(st.runs == 2u);
+        CHECK(st.natives == 2u);
+        CHECK(st.differences == 2u);
+        mt_scriptvm_shadow_difference d{};
+        REQUIRE(mt_scriptvm_shadow_first_difference(&d) == 1);
+        CHECK(d.run == 1u);
+        mt_scriptvm_shadow_install(0, nullptr);
+    }
 }
 
 TEST_CASE("scriptvm: the step observer sees each opcode with its TFunc and pc") {
