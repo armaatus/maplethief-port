@@ -4,14 +4,15 @@ Thanks for wanting to help! Bug reports, playtesting, code and docs are all welc
 
 ## Without writing code
 
-- **Report a bug**: [open an issue](https://github.com/armaatus/maplethief-port/issues/new) with your system, what happened, what you expected, and the log ([how to get it](docs/play/troubleshooting.md#seeing-what-went-wrong)). A screenshot of a glitch helps too, but keep it to the glitch.
+- **Report a bug**: the [bug report](https://github.com/armaatus/maplethief-port/issues/new?template=bug.yml) asks for the version, your system, what happened, what you expected, and the log ([how to get it](docs/play/troubleshooting.md#seeing-what-went-wrong)). A screenshot of a glitch helps too, but keep it to the glitch. Don't attach the game's files.
+- **Request a feature**: the [feature request](https://github.com/armaatus/maplethief-port/issues/new?template=feature.yml) is for something concrete; a loose idea fits better in Discussions.
 - **Playtest**: play through a part of the game and note anything that differs from the iPhone. [docs/testing/](docs/testing/README.md) has step-by-step runs.
 - **Ask a question or suggest an idea** in [Discussions](https://github.com/armaatus/maplethief-port/discussions): Q&A for questions, Ideas for suggestions. Start with the [FAQ](https://github.com/armaatus/maplethief-port/discussions/418).
 - **Improve the docs**: if something in [the player guide](docs/play/README.md) confused you, it will confuse others. A pull request or an issue is welcome.
 
 ## Triage
 
-Every new bug report gets the `needs-triage` label from its template. The maintainer reads it, asks for what is missing (version, system, the log), and replaces `needs-triage` with a type, an area and a priority, or closes it with a reason: a duplicate, a known issue, a question (moved to Discussions), or not about the port. Small, self-contained issues get `good first issue`.
+Every new bug report and feature request gets the `needs-triage` label from its template. The maintainer reads it, asks for what is missing (version, system, the log), and replaces `needs-triage` with a type, an area and a priority, or closes it with a reason: a duplicate, a known issue, a question (moved to Discussions), or not about the port. Small, self-contained issues get `good first issue`.
 
 The project has one maintainer, working in spare time, so answers are best effort: there is no promised response time. Questions in Discussions are answered by whoever knows, the maintainer included.
 

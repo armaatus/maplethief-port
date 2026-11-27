@@ -1,20 +1,64 @@
-name: Bug
-description: Something in the tools, recompiler, runtime or a build behaves incorrectly.
+name: Bug report
+description: Something in the game, a build or the tools behaves wrongly, or the game crashed.
 title: "[bug] "
 labels: ["type:bug", "needs-triage"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Check [Known issues](https://github.com/armaatus/maplethief-port/blob/dev/docs/KNOWN_ISSUES.md) and [Troubleshooting](https://github.com/armaatus/maplethief-port/blob/dev/docs/play/troubleshooting.md) first. Questions go to [Discussions](https://github.com/armaatus/maplethief-port/discussions/categories/q-a).
+
+        **Don't attach game files**: no IPA, nothing from the game's `game/` folder, no pictures, sounds or text taken out of the game. The log and the crash report hold none of that, so attach them.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The first line of the log (`MapleThief 1.0.0`), the version in the download's file name, or what `MapleThief --version` prints.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Download or self-built
+      options:
+        - Downloaded from the releases page
+        - Built myself from the repository
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      options: [Windows, macOS, Linux, Steam Deck, iPhone or iPad, Nintendo Switch, Android, Other]
+    validations:
+      required: true
+  - type: input
+    id: system-details
+    attributes:
+      label: System details
+      description: The system's version and your device, if you know them.
+      placeholder: Windows 11, GeForce GTX 1060
+  - type: dropdown
+    id: preset
+    attributes:
+      label: Preset
+      description: Settings menu → Preset, at the top.
+      options: [Original, Original + controller, Enhanced, Custom, "Don't know"]
+    validations:
+      required: true
   - type: textarea
     id: what
     attributes:
       label: What happened
-      description: Observed vs. expected behavior.
+      description: What you saw, and what you expected instead.
     validations:
       required: true
   - type: textarea
-    id: repro
+    id: steps
     attributes:
-      label: Steps to reproduce
-      description: Commands, save state, input replay file, map id, etc.
+      label: Steps
+      description: What you did just before, as steps someone else can follow. The map or quest helps.
       value: |
         1. 
     validations:
@@ -22,23 +66,10 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: Logs / trace
-      description: The newest file in logs/ (settings menu > Saves > Open logs folder) and, after a crash, the file in crashes/ the dialog named. For developers, also an HLE trace excerpt, guest backtrace, or unimplemented-import report. Do not paste copyrighted assets.
-      render: text
-  - type: dropdown
-    id: platform
-    attributes:
-      label: Platform
-      multiple: true
-      options: [macOS arm64, macOS x86_64, Windows x64, iOS, Linux, Steam Deck, CI]
-    validations:
-      required: true
-  - type: input
-    id: commit
-    attributes:
-      label: Commit / build
-      description: git rev-parse --short HEAD
+      label: Log and crash report
+      description: Drag in the newest file from `data/logs/` (settings menu → Saves → **Open logs folder**) and, after a crash, the file in `data/crashes/` that the dialog named. Paths in them have your folders replaced by `<data>`, `<game folder>` and `~`.
   - type: textarea
     id: notes
     attributes:
-      label: Notes / suspected cause
+      label: Anything else
+      description: For developers, a commit (`git rev-parse --short HEAD`), an HLE trace excerpt, a guest backtrace or an unimplemented-import report.
