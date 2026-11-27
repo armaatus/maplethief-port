@@ -128,6 +128,7 @@ MT_TEXT(menu_game_options_later, "The game's options are in its popup menu: play
 MT_TEXT(menu_cannot_quit, "Cannot quit: {0}")
 // The pack rows where the platform keeps packs in folders of its own (#241, pack_folders.h).
 MT_TEXT(menu_pack_none, "none")
+MT_TEXT(menu_language_auto, "auto ({0})")
 MT_TEXT(menu_pack_folder_empty, "None found: put them in the {0} folder beside game/, then restart")
 // The packs screen (#370, packs.h).
 MT_TEXT(packs_title, "Packs: the first one on wins; from the next start")

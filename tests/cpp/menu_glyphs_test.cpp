@@ -200,16 +200,18 @@ bool overlaps(const Seen &a, const Seen &b) {
 
 // Which of an overlay's draws have a golden image.
 enum class Goldens { kNone, k1x, k1x2x };
+// Off: no draw is checked against a golden (the shipped languages' runs, #373).
+bool g_goldens = true;
 
 // One overlay's draw at scales 1 to 4: no '?', every text inside `panel` and none over another;
 // the same texts at every scale; 1x (and 2x) checked against their goldens.
 void check_overlay(
     const std::string &name, Box panel,
     const std::function<void(std::uint8_t *, std::uint32_t, std::uint32_t, int)> &draw,
-    Goldens goldens = Goldens::k1x) {
+    Goldens goldens = Goldens::k1x, int max_scale = 4) {
     CAPTURE(name);
     std::vector<Seen> first;
-    for (int scale = 1; scale <= 4; scale++) {
+    for (int scale = 1; scale <= max_scale; scale++) {
         CAPTURE(scale);
         const auto w = static_cast<std::uint32_t>(480 * scale);
         const auto h = static_cast<std::uint32_t>(320 * scale);
@@ -240,8 +242,8 @@ void check_overlay(
         } else {
             CHECK(obs.seen.size() == first.size());
         }
-        if ((scale == 1 && goldens != Goldens::kNone) ||
-            (scale == 2 && goldens == Goldens::k1x2x)) {
+        if (g_goldens && ((scale == 1 && goldens != Goldens::kNone) ||
+                          (scale == 2 && goldens == Goldens::k1x2x))) {
             const std::string file = name + (scale == 1 ? "" : "_2x") + ".png";
             const auto r =
                 golden::check_golden(image_of(px, static_cast<int>(w), static_cast<int>(h)),
@@ -260,74 +262,11 @@ SDL_Event key_event(SDL_Keycode k, bool down) {
     return e;
 }
 
-} // namespace
-
-TEST_CASE("menu glyphs: cells, whole-character cuts, UTF-8 decoding (#372)") {
-    CHECK(Canvas::columns("Settings") == 8);
-    CHECK(Canvas::text_width("Settings") == 47); // as before: 6 a character less the last gap
-    CHECK(Canvas::columns("P\xC3\xB6tion") == 6);
-    CHECK(Canvas::columns("\xED\x95\x9C\xEA\xB8\x80") == 4); // two Hangul syllables
-    CHECK(Canvas::columns("a\xFF") == 2);                    // a stray byte: one cell
-    CHECK(Canvas::fit_columns("P\xC3\xB6tion", 2) == 3);     // "Pö", never half of "ö"
-    CHECK(Canvas::fit_columns("\xED\x95\x9C\xEA\xB8\x80", 3) == 3);
-    CHECK(Canvas::fit_columns("abc", 9) == 3);
-    std::size_t at = 0;
-    CHECK(fe::next_code_point("\xC0\xAF", &at) == -1); // overlong
-    CHECK(at == 1);
-    at = 0;
-    CHECK(fe::next_code_point("\xED\xA0\x80", &at) == -1); // a surrogate
-    at = 0;
-    CHECK(fe::next_code_point("\xF0\x9F\x98\x80", &at) == 0x1F600);
-    CHECK(at == 4);
-}
-
-TEST_CASE("menu glyphs: accents and Hangul from the bundled fonts, '?' for what neither has") {
-    Observer obs;
-    const auto draw = [](const char *s, int scale) {
-        std::vector<std::uint8_t> px(std::size_t{60} * 20 * 4 * scale * scale, 0);
-        Canvas c(px.data(), 60u * scale, 20u * scale, scale);
-        c.text(2, 4, s, {255, 255, 255, 255});
-        return px;
-    };
-    // An accented letter is not its base letter, nor '?'.
-    CHECK(draw("\xC3\xA9", 1) != draw("e", 1));
-    CHECK(draw("\xC3\xA9", 1) != draw("?", 1));
-    CHECK(draw("\xED\x95\x9C", 2) != draw("??", 2));
-    obs.seen.clear();
-    draw("H\xC3\xA9n\xC3\xA9sys \xED\x95\x9C\xEA\xB8\x80", 1);
-    REQUIRE(obs.seen.size() == 1);
-    CHECK(obs.seen[0].missing == 0);
-    CHECK(obs.seen[0].w == (7 + 1 + 4) * 6 - 1);
-    obs.seen.clear();
-    draw("\xF0\x9F\x98\x80 a\xFF", 1); // an emoji neither font has, a stray byte
-    CHECK(obs.seen[0].missing == 2);
-    // The line at 1x to 3x: a golden of the canvas alone.
-    const char *line = "Einstellungen f\xC3\xBCr Gr\xC3\xB6\xC3\x9F"
-                       "e \xC3\x85\xC3\x86\xC5\x93 "
-                       "\xED\x95\x9C\xEA\xB5\xAD\xEC\x96\xB4 \xE2\x80\x9Cq\xE2\x80\x9D\xE2\x80\xA6";
-    for (int scale = 1; scale <= 3; scale++) {
-        CAPTURE(scale);
-        const int w = 240 * scale, h = 14 * scale;
-        std::vector<std::uint8_t> px(static_cast<std::size_t>(w) * h * 4, 0);
-        for (std::size_t i = 3; i < px.size(); i += 4) {
-            px[i - 3] = 0x20, px[i - 2] = 0x24, px[i - 1] = 0x2C, px[i] = 255;
-        }
-        Canvas c(px.data(), static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), scale);
-        c.text(2, 3, line, {0xF0, 0xF2, 0xF5, 255});
-        const std::string file = "line_" + std::to_string(scale) + "x.png";
-        const auto r = golden::check_golden(image_of(px, w, h),
-                                            fs::path(MT_GOLDEN_DATA_DIR) / "menu_glyphs" / file,
-                                            "menu_glyphs/" + file, {24, 0.005});
-        CHECK_MESSAGE(r.passed, r.message);
-    }
-}
-
-TEST_CASE("menu glyphs: a pseudo-translation draws every overlay without '?' or clipping") {
-    REQUIRE(SDL_Init(SDL_INIT_GAMEPAD));
-    const PseudoPack pack;
-    // The pack's texts are what the overlays get.
-    CHECK(std::string(fe::tr(fe::Txt::menu_title)).find("\xC3\x89") != std::string::npos);
-
+// Every overlay (#372): each settings tab, a list view, the preset picker, the controls card
+// for touch, keyboard and gamepad, the remap overlay, the disconnect pause, the key pad editor,
+// both start questions, the import screen waiting and refused; `text` makes the synthetic texts
+// (a list's rows, a refusal's reason) as the pack under test would.
+void every_overlay(const std::function<std::string(const std::string &)> &text) {
     const Box screen{0, 0, 480, 320};
     const Box menu_panel{8, 6, 464, 308};
     // The settings menu: each tab, and a list view.
@@ -353,12 +292,12 @@ TEST_CASE("menu glyphs: a pseudo-translation draws every overlay without '?' or 
         // A list view (the Saves tab's kind): its title, rows and help come from elsewhere,
         // here synthetic and long.
         fe::MenuList list;
-        list.title = pseudo("Slot 1 of 3: the saves on this computer, newest first");
-        list.help = pseudo("Choose a save to load it; the game asks before it overwrites "
-                           "anything, and keeps a copy of what it replaces");
+        list.title = text("Slot 1 of 3: the saves on this computer, newest first");
+        list.help = text("Choose a save to load it; the game asks before it overwrites "
+                         "anything, and keeps a copy of what it replaces");
         for (int i = 0; i < 12; i++) {
-            list.rows.push_back({pseudo("Quick save " + std::to_string(i) + " in Henesys"),
-                                 pseudo("26 Nov 2026 10:0" + std::to_string(i % 10))});
+            list.rows.push_back({text("Quick save " + std::to_string(i) + " in Henesys"),
+                                 text("26 Nov 2026 10:0" + std::to_string(i % 10))});
         }
         menu.open_list(list);
         check_overlay("settings_list", menu_panel,
@@ -443,11 +382,11 @@ TEST_CASE("menu glyphs: a pseudo-translation draws every overlay without '?' or 
                       });
         // Refused: a synthetic importer's reason, then the SD-card route's question.
         fe::ImportScreen refused(
-            "/data/MapleThief", [](const std::string &, const fe::IpaProgress &) {
+            "/data/MapleThief", [text](const std::string &, const fe::IpaProgress &) {
                 fe::IpaResult r;
                 r.problem = fe::IpaProblem::kNotIpa;
-                r.why = pseudo("This file is not the iPhone game's version 1.5: its "
-                               "executable has another size and another checksum");
+                r.why = text("This file is not the iPhone game's version 1.5: its "
+                             "executable has another size and another checksum");
                 return r;
             });
         REQUIRE(refused.start("/Users/player/Downloads/MapleThief-1.5.ipa"));
@@ -457,5 +396,124 @@ TEST_CASE("menu glyphs: a pseudo-translation draws every overlay without '?' or 
                           refused.draw(px, w, h, s);
                       });
     }
+}
+
+} // namespace
+
+TEST_CASE("menu glyphs: cells, whole-character cuts, UTF-8 decoding (#372)") {
+    CHECK(Canvas::columns("Settings") == 8);
+    CHECK(Canvas::text_width("Settings") == 47); // as before: 6 a character less the last gap
+    CHECK(Canvas::columns("P\xC3\xB6tion") == 6);
+    CHECK(Canvas::columns("\xED\x95\x9C\xEA\xB8\x80") == 4); // two Hangul syllables
+    CHECK(Canvas::columns("a\xFF") == 2);                    // a stray byte: one cell
+    CHECK(Canvas::fit_columns("P\xC3\xB6tion", 2) == 3);     // "Pö", never half of "ö"
+    CHECK(Canvas::fit_columns("\xED\x95\x9C\xEA\xB8\x80", 3) == 3);
+    CHECK(Canvas::fit_columns("abc", 9) == 3);
+    std::size_t at = 0;
+    CHECK(fe::next_code_point("\xC0\xAF", &at) == -1); // overlong
+    CHECK(at == 1);
+    at = 0;
+    CHECK(fe::next_code_point("\xED\xA0\x80", &at) == -1); // a surrogate
+    at = 0;
+    CHECK(fe::next_code_point("\xF0\x9F\x98\x80", &at) == 0x1F600);
+    CHECK(at == 4);
+}
+
+TEST_CASE("menu glyphs: accents and Hangul from the bundled fonts, '?' for what neither has") {
+    Observer obs;
+    const auto draw = [](const char *s, int scale) {
+        std::vector<std::uint8_t> px(std::size_t{60} * 20 * 4 * scale * scale, 0);
+        Canvas c(px.data(), 60u * scale, 20u * scale, scale);
+        c.text(2, 4, s, {255, 255, 255, 255});
+        return px;
+    };
+    // An accented letter is not its base letter, nor '?'.
+    CHECK(draw("\xC3\xA9", 1) != draw("e", 1));
+    CHECK(draw("\xC3\xA9", 1) != draw("?", 1));
+    CHECK(draw("\xED\x95\x9C", 2) != draw("??", 2));
+    obs.seen.clear();
+    draw("H\xC3\xA9n\xC3\xA9sys \xED\x95\x9C\xEA\xB8\x80", 1);
+    REQUIRE(obs.seen.size() == 1);
+    CHECK(obs.seen[0].missing == 0);
+    CHECK(obs.seen[0].w == (7 + 1 + 4) * 6 - 1);
+    obs.seen.clear();
+    draw("\xF0\x9F\x98\x80 a\xFF", 1); // an emoji neither font has, a stray byte
+    CHECK(obs.seen[0].missing == 2);
+    // The line at 1x to 3x: a golden of the canvas alone.
+    const char *line = "Einstellungen f\xC3\xBCr Gr\xC3\xB6\xC3\x9F"
+                       "e \xC3\x85\xC3\x86\xC5\x93 "
+                       "\xED\x95\x9C\xEA\xB5\xAD\xEC\x96\xB4 \xE2\x80\x9Cq\xE2\x80\x9D\xE2\x80\xA6";
+    for (int scale = 1; scale <= 3; scale++) {
+        CAPTURE(scale);
+        const int w = 240 * scale, h = 14 * scale;
+        std::vector<std::uint8_t> px(static_cast<std::size_t>(w) * h * 4, 0);
+        for (std::size_t i = 3; i < px.size(); i += 4) {
+            px[i - 3] = 0x20, px[i - 2] = 0x24, px[i - 1] = 0x2C, px[i] = 255;
+        }
+        Canvas c(px.data(), static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), scale);
+        c.text(2, 3, line, {0xF0, 0xF2, 0xF5, 255});
+        const std::string file = "line_" + std::to_string(scale) + "x.png";
+        const auto r = golden::check_golden(image_of(px, w, h),
+                                            fs::path(MT_GOLDEN_DATA_DIR) / "menu_glyphs" / file,
+                                            "menu_glyphs/" + file, {24, 0.005});
+        CHECK_MESSAGE(r.passed, r.message);
+    }
+}
+
+TEST_CASE("menu glyphs: a pseudo-translation draws every overlay without '?' or clipping") {
+    REQUIRE(SDL_Init(SDL_INIT_GAMEPAD));
+    const PseudoPack pack;
+    // The pack's texts are what the overlays get.
+    CHECK(std::string(fe::tr(fe::Txt::menu_title)).find("\xC3\x89") != std::string::npos);
+
+    every_overlay(pseudo);
     SDL_Quit();
+}
+
+namespace {
+
+// One shipped language over every overlay (at UI scales 1 to 4), then every row of every settings
+// tab selected so that its help line draws too (at 1x: the layout counts the same cells at every
+// scale, and the sweep above checks the first rows at all four).
+void shipped_language_overlays(const char *tag) {
+    REQUIRE(SDL_Init(SDL_INIT_GAMEPAD));
+    g_goldens = false;
+    REQUIRE(fe::set_menu_language(tag));
+    CHECK(std::string(fe::tr(fe::Txt::menu_title)) != "SETTINGS");
+    every_overlay([](const std::string &s) { return s; });
+    fe::Settings live;
+    live.preset = fe::Preset::kEnhanced;
+    fe::SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    menu.attach(&live);
+    menu.set_started(fe::Settings{});
+    menu.open();
+    for (std::size_t t = 0; t < menu.tabs().size(); t++) {
+        for (std::size_t row = 0; row < menu.items().size(); row++) {
+            check_overlay(
+                "settings_" + std::to_string(t) + "_" + std::to_string(row), {8, 6, 464, 308},
+                [&menu](std::uint8_t *px, std::uint32_t w, std::uint32_t h, int s) {
+                    menu.draw(px, w, h, s);
+                },
+                Goldens::kNone, 1);
+            menu.handle(key_event(SDLK_DOWN, true));
+            menu.handle(key_event(SDLK_DOWN, false));
+        }
+        menu.handle(key_event(SDLK_TAB, true));
+        menu.handle(key_event(SDLK_TAB, false));
+    }
+    fe::set_menu_language("en");
+    g_goldens = true;
+    SDL_Quit();
+}
+
+} // namespace
+
+TEST_CASE("menu glyphs: the Dutch menus draw every overlay and settings row without '?' or "
+          "clipping (#373)") {
+    shipped_language_overlays("nl");
+}
+
+TEST_CASE("menu glyphs: the Korean menus draw every overlay and settings row without '?' or "
+          "clipping (#373)") {
+    shipped_language_overlays("ko");
 }

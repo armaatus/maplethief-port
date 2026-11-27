@@ -88,6 +88,15 @@ const char *mt_textpack_lookup(const char *table, const char *key) MT_NOEXCEPT;
 /* A manifest value of the first pack ("name", "language", "version", ...), or NULL. */
 const char *mt_textpack_manifest(const char *key) MT_NOEXCEPT;
 
+/* Parses `n` bytes of .strings text by a pack file's rules (the limits, strict UTF-8, the
+ * syntax above) and calls `fn` with each entry, key and value in UTF-8, in key order (a key
+ * given twice: its last value). Returns the entries, or -1 with the reason ("line 3: ...") in
+ * `why` (cut to `why_size`) when the text is refused whole. Opens no pack: the frontend reads
+ * the port's own shipped translations with it (#373). */
+typedef void (*mt_textpack_entry_fn)(void *user, const char *key, const char *value);
+int mt_textpack_parse(const void *bytes, uint32_t n, mt_textpack_entry_fn fn, void *user, char *why,
+                      uint32_t why_size) MT_NOEXCEPT;
+
 /* The counters since the first pack opened (zeros without one). */
 mt_textpack_stats mt_textpack_get_stats(void) MT_NOEXCEPT;
 

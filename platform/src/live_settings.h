@@ -36,6 +36,7 @@
 //                              next utterance), then a sample of the voice
 //   speech_notices             read from the live Settings by SpeechText::turn every turn
 //                              (#392, ADR 0191)
+//   menu_language              apply_menu_language (#373, port_text.h; the next draw)
 //   auto_loot                  install_auto_loot (#175; the next drop update)
 //   keypad_layout              install_keypad_layout (#159, ADR 0086; the next touch, GL frame
 //                              and composite)

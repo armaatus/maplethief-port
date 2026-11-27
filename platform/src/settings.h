@@ -90,6 +90,8 @@
 //   pause_unfocused = off
 //   # the game's language: en | ko (MAPLETHIEF_LANGUAGE overrides it; from the next start)
 //   language = en
+//   # the port's menus: auto (the system's language) | en | ko | nl
+//   menu_language = auto
 //   # a directory of translated text in UTF-8 (the menu's Other tab: Export text makes ...)
 //   text_pack =
 //   # a directory of HD textures made from your own texture dump (the menu's Other tab: ...)
@@ -424,6 +426,11 @@ inline constexpr const char *kFullscreenModeNames[] = {"desktop", "borderless"};
 // MAPLETHIEF_LANGUAGE overrides it.
 enum class Language { kEn, kKo };
 inline constexpr const char *kLanguageNames[] = {"en", "ko"};
+// menu_language (#373, ADR 0222): the language of the port's own menus, English or one of the
+// translations shipped in platform/lang/ (port_text.h; a test checks the names are those
+// folders). auto: the first of the system's preferred languages the port has, else English.
+enum class MenuLanguage { kAuto, kEn, kKo, kNl };
+inline constexpr const char *kMenuLanguageNames[] = {"auto", "en", "ko", "nl"};
 inline constexpr const char *kTextureFilterNames[] = {"game", "nearest"};
 // autosave (#150, autosave.h, docs/re/autosave.md): when the port saves the character in play
 // through the game's own save pair, and only where the game's menu Save would be allowed.
@@ -651,6 +658,8 @@ struct Settings {
     // a minimise does (lifecycle.h).
     bool pause_unfocused = false;
     Language language = Language::kEn; // language, --language (en | ko)
+    // menu_language, --menu-language (auto | en | ko | nl; #373): the port's menus.
+    MenuLanguage menu_language = MenuLanguage::kAuto;
     // fix_original_bugs, --fix-original-bugs (on | off; #155, docs/re/original-bugs.md): the
     // original game's crashes and dead ends fixed through guest function hooks
     // (maplethief/hooks.h): the NGB portal items' exit(1), Play before the engine's main menu

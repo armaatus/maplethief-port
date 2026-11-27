@@ -1742,6 +1742,7 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"vsync", true, ""},
     {"pause_unfocused", true, "the applet's focus (#240)"},
     {"language", true, ""},
+    {"menu_language", true, ""},
     {"text_pack", true, "offers <base>/text-packs/"},
     {"fix_original_bugs", true, ""},
     {"restored_content", true, ""},

@@ -201,6 +201,10 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
                 t.speech->backend_name());
         return true;
     }
+    if (is(row, "menu_language")) { // the next draw (#373)
+        apply_menu_language(s.menu_language);
+        return true;
+    }
     if (is(row, "auto_loot")) {
         install_auto_loot(s.auto_loot);
         return true;

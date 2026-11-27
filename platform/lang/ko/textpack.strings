@@ -1,0 +1,9 @@
+/* The port's own menus in Korean (#373, ADR 0222): our own text only, no game text. Shipped
+   inside the port (platform/CMakeLists.txt embeds it); also a text pack of its own.
+   DRAFT: no Korean speaker has reviewed it yet. A speaker's review changes the description
+   below (and tests/cpp/port_languages_test.cpp's check of it). */
+"format" = "1";
+"name" = "한국어 (초안)";
+"language" = "ko";
+"version" = "1";
+"description" = "Draft: the port's menus in Korean, not yet reviewed by a Korean speaker.";

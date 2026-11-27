@@ -1,0 +1,7 @@
+/* The port's own menus in Dutch (#373, ADR 0222): our own text only, no game text. Shipped
+   inside the port (platform/CMakeLists.txt embeds it); also a text pack of its own. */
+"format" = "1";
+"name" = "Nederlands";
+"language" = "nl";
+"version" = "1";
+"description" = "The port's menus in Dutch. Reviewed (delegated by Joris, 2026-11-27).";
