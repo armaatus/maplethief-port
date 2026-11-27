@@ -31,7 +31,13 @@ Generated code does not store the guest PC (ADR 0030): the hardware fault report
 
 The play harness (`tests/cpp/game_driver.h`) runs the watchdog at the player's limit in every real-asset run and fails a run with a hang report. Apple M4, macOS, Debug, local real assets, 2026-11-27, with other builds running:
 
-MEASUREMENTS
+| Run | What it loads and plays | Longest run-loop turn |
+|---|---|---|
+| `play.first_map` | the boot, a new character, the intro scene, the tutorial maps 2.8 and 2.9, Henesys, the map screen, field 2.3 for 15 game-minutes | 0.61 s |
+| `play.save_quit` | the boot, a save and the quit | 0.17 s |
+| `play.save_relaunch` | the boot and loading that save | 0.21 s |
+
+The longest, 0.61 s, is a twenty-fifth of the limit. The limit leaves room for a slow machine, a Debug build and a busy disk.
 
 `MapleThief --force-hang --hang-seconds 5` on the real game wrote the report after 5.0 s with the host PC in `__semwait_signal` (the sleeping turn) and the backtrace `#0 0x00002808 f_000027E0+0x28` from the build's symbol table.
 
