@@ -304,3 +304,67 @@ TEST_CASE("a rope beside a ledge is caught in a jump from it") {
     CHECK(up[0].edge.x == 84); // 3 px in from the ledge's near end
     CHECK(wm::route(m, floor, 40, top).empty());
 }
+
+// A rope with nothing at its top, 80 px above the floor and 8 px beside a ledge 32 px below its
+// foot, and a high platform 18 px beside it on the same side, like 7.5's rope by portal750: the
+// ledge reaches the high platform by a rope jump that starts with a jump onto the rope. With a
+// ladder from the ledge to the high platform as well, that move is left out.
+TEST_CASE("a rope with no top is caught from a ledge and hopped off") {
+    namespace wm = world_map;
+    auto grid = [](bool ladder) {
+        wm::Map m;
+        m.w = 40;
+        m.h = 30;
+        m.att.assign(static_cast<std::size_t>(m.w * m.h), wm::k_air);
+        auto set = [&m](int c, int r, wm::u8 v) {
+            m.att[static_cast<std::size_t>(r * m.w + c)] = v;
+        };
+        for (int c = 0; c < m.w; c++) {
+            set(c, 28, wm::k_foothold); // the floor: y 223
+        }
+        for (int c = 12; c <= 18; c++) {
+            set(c, 22, wm::k_foothold); // the ledge: y 175, x 96..151
+        }
+        for (int c = 14; c <= 30; c++) {
+            set(c, 12, wm::k_foothold); // the high platform: y 95, x 112..247
+        }
+        for (int r = 6; r <= 17; r++) { // the rope: x 88, y 48..143, nothing at its top
+            set(10, r, wm::k_ladder);
+            set(11, r, wm::k_ladder);
+        }
+        if (ladder) { // a ladder from the ledge's surface to the high platform: x 136
+            for (int r = 12; r <= 21; r++) {
+                const auto v = static_cast<wm::u8>(r == 12 ? wm::k_ladder | wm::k_foothold
+                                                           : wm::k_ladder);
+                set(16, r, v);
+                set(17, r, v);
+            }
+        }
+        wm::build(m);
+        return m;
+    };
+    auto index = [](const wm::Map &m, int row) {
+        for (std::size_t i = 0; i < m.platforms.size(); i++) {
+            if (m.platforms[i].row == row) {
+                return static_cast<int>(i);
+            }
+        }
+        return -1;
+    };
+    const wm::Map m = grid(false);
+    const int ledge = index(m, 22), high = index(m, 12);
+    REQUIRE(ledge >= 0);
+    REQUIRE(high >= 0);
+    const std::vector<wm::Step> up = wm::route(m, ledge, 120, high);
+    REQUIRE(up.size() == 1);
+    CHECK(up[0].edge.move == wm::Move::rope_jump);
+    CHECK(up[0].edge.caught);
+    CHECK(up[0].edge.dir > 0); // the hop off goes right, onto the high platform
+    CHECK(up[0].edge.x == 99); // 3 px in from the ledge's near end
+    const wm::Map with_ladder = grid(true);
+    bool caught = false;
+    for (const wm::Edge &e : with_ladder.edges[static_cast<std::size_t>(index(with_ladder, 22))]) {
+        caught = caught || e.caught;
+    }
+    CHECK_FALSE(caught);
+}

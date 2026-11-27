@@ -91,6 +91,7 @@ struct Edge {
     int ladder = -1;
     int cost = 0;
     bool long_hop = false; // a running jump across k_jump_side to k_jump_level px
+    bool caught = false;   // a rope jump that starts with a jump onto the rope (kept as long hops)
 };
 
 struct Map {
@@ -320,6 +321,57 @@ inline void build(Map &m) {
             }
         }
     }
+    // A rope with no platform at its top that hangs too high to grab from the floor: caught in
+    // the air from a platform beside it (as a rope grab), climbed and hopped off (as a rope jump)
+    // onto a platform beside it that it spans (7.5: the rope by portal750's platform hangs 63 px
+    // above the floor and 8 px left of platform 3; portal750 stands on platform 0, 16 px up the
+    // rope's other side). The edge is a rope jump from the near end of the platform it starts on.
+    for (std::size_t li = 0; li < m.ladders.size(); li++) {
+        const Ladder &l = m.ladders[li];
+        const int top = (m.at(l.c, l.r0) & k_foothold) != 0
+                            ? m.platform_at(l.x(), l.r0 * k_cell - 1, 0)
+                            : m.platform_at(l.x(), l.r0 * k_cell - 1, 3 * k_cell);
+        const int foot = m.platform_below(l.x(), l.bottom() - 2);
+        const bool grab =
+            foot >= 0 &&
+            m.platforms[static_cast<std::size_t>(foot)].y() - l.bottom() <= k_ladder_reach;
+        if (top >= 0 || grab) {
+            continue;
+        }
+        auto beside = [&l](const Platform &q, int dir) {
+            const int gap = dir < 0 ? l.x() - 6 - q.x1() : q.x0() - (l.x() + 6);
+            return gap >= 0 && gap <= k_rope_hop;
+        };
+        for (std::size_t qi = 0; qi < m.platforms.size(); qi++) {
+            const Platform &q = m.platforms[qi];
+            if (q.y() - k_cell < l.top() || q.y() > l.bottom() + k_ladder_reach) {
+                continue;
+            }
+            for (const int qdir : {-1, 1}) {
+                if (!beside(q, qdir)) {
+                    continue;
+                }
+                const int end = qdir < 0 ? q.x1() : q.x0();
+                for (std::size_t ti = 0; ti < m.platforms.size(); ti++) {
+                    const Platform &t = m.platforms[ti];
+                    if (ti == qi || t.y() >= q.y() || t.y() - k_cell < l.top() ||
+                        t.y() > l.bottom()) {
+                        continue;
+                    }
+                    for (const int dir : {-1, 1}) {
+                        if (!beside(t, dir)) {
+                            continue;
+                        }
+                        const int cost = (q.y() - t.y()) / k_cell * 3 + 60;
+                        Edge e{static_cast<int>(ti), Move::rope_jump, end + qdir * 3, dir,
+                               static_cast<int>(li), cost};
+                        e.caught = true;
+                        add(static_cast<int>(qi), e);
+                    }
+                }
+            }
+        }
+    }
     for (int i = 0; i < n; i++) {
         const Platform &p = m.platforms[static_cast<std::size_t>(i)];
         // Falls off each end, unless a wall stands there. fall_to: where each end's fall lands
@@ -437,8 +489,8 @@ inline void build(Map &m) {
             }
         }
     }
-    // A long hop stays only where nothing else leads from its platform to the far one, so maps
-    // that had a way keep their moves.
+    // A long hop, or a rope jump that starts with a jump onto the rope, stays only where nothing
+    // else leads from its platform to the far one, so maps that had a way keep their moves.
     const auto reaches = [&m](std::size_t from, int to) {
         std::vector<char> seen(m.platforms.size(), 0);
         std::vector<std::size_t> todo = {from};
@@ -448,7 +500,7 @@ inline void build(Map &m) {
             todo.pop_back();
             for (const Edge &e : m.edges[k]) {
                 const auto t = static_cast<std::size_t>(e.to);
-                if (!e.long_hop && seen[t] == 0) {
+                if (!e.long_hop && !e.caught && seen[t] == 0) {
                     if (e.to == to) {
                         return true;
                     }
@@ -462,7 +514,7 @@ inline void build(Map &m) {
     for (std::size_t i = 0; i < m.edges.size(); i++) {
         std::vector<Edge> keep;
         for (const Edge &e : m.edges[i]) {
-            if (!e.long_hop || !reaches(i, e.to)) {
+            if ((!e.long_hop && !e.caught) || !reaches(i, e.to)) {
                 keep.push_back(e);
             }
         }
