@@ -173,6 +173,10 @@ void mt_gles_set_host_x_transform(float scale, float offset) MT_NOEXCEPT;
 /* The transform in effect: its scale and offset (tests). */
 void mt_gles_get_host_x_transform(float *scale, float *offset) MT_NOEXCEPT;
 
+/* The mt_gfx texture of the bound 2D texture (mt_gfx_texture_texels reads its texels), 0 without
+ * one: what the next draw samples (widescreen's backdrop, #425). Guest thread. */
+uint32_t mt_gles_bound_texture_gfx(void) MT_NOEXCEPT;
+
 typedef struct mt_gles_stats {
     uint32_t calls;                      /* every GL call of this process */
     uint32_t op_calls[MT_GLES_OP_COUNT]; /* by op */
