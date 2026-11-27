@@ -40,6 +40,7 @@
 //              [--migrate-from DIR [--force]]
 //              [--safe-start] [--force-crash host|trap] [--crash-dialog FILE]
 //              [--force-hang] [--hang-seconds S] [--hang-dialog FILE]
+//              [--native-script-vm on|off]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -327,6 +328,9 @@
 // hang report to <data dir>/crashes/<time>.txt and asks Keep waiting or Quit.
 //   --hang-seconds S  the watchdog's limit (0: no watchdog; default 15, none with --fixed-step)
 //   --force-hang      the run-loop turn never ends 2 s after the first (a test aid)
+//   --native-script-vm on|off  the script VM's opcode loop as host code (#386, ADR 0226; a
+//                     developer switch, default off: the recompiled original); with
+//                     MAPLETHIEF_TRACE=scriptvm every opcode and native call is logged
 //   --hang-dialog FILE  shows the hang question for FILE and exits 3 for Quit, else 0: what the
 //                     watchdog starts, since the hung main thread cannot show it
 // Exit statuses: game.h (ExitStatus).
@@ -683,7 +687,7 @@ void print_usage() {
             "[--pack-scale K] [--pack-scaler scale|nearest] [--pack-no-ui]] [--export-text DIR] "
             "[--data-location game|user] [--switch-data-location game|user] "
             "[--migrate-from DIR [--force]] [--safe-start] [--force-crash host|trap] "
-            "[--force-hang] [--hang-seconds S]");
+            "[--force-hang] [--hang-seconds S] [--native-script-vm on|off]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -877,6 +881,14 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.crash_dialog = argv[++i];
         } else if (arg == "--hang-dialog" && has_value) {
             options.hang_dialog = argv[++i];
+        } else if (arg == "--native-script-vm" && has_value) {
+            const std::string_view value = argv[++i];
+            if (value != "on" && value != "off") {
+                SDL_Log("--native-script-vm needs on or off, got '%s'", argv[i]);
+                return false;
+            }
+            options.game.native_script_vm = value == "on";
+            options.game_option = true;
         } else if (arg == "--force-hang") {
             options.game.force_hang = true;
             options.game_option = true;
