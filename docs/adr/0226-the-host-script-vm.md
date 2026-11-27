@@ -45,3 +45,29 @@ For the checks: the host checks an operand read against the function's code size
 - **CI:** `runtime_test`'s `scriptvm_test.cpp` runs hand-made bytecode for each of the 67 opcodes, the eight differences as far as they live in the loop (1–5 in full; 6 as PUSHFUNCTION's `linkFunction` onto `L+0xC`; 7 as a builtin's CALLFUNC handed to `doCall` unchanged, its no-op being `callNative`'s; 8 is `Lua::reset`'s, outside the loop) and the five behaviours on a synthetic guest, with recording stand-ins for the guest helpers (`scriptvm_test_dispatch`): the stack, the TFunc and reader words, the helpers' arguments, the checks, and the hook on and off. `tests/test_recomp_hooks.py` checks that `HOOKED`, the define and the table agree.
 - **Not proved here:** equality on the real game. That is #430 and #431; until they pass, the switch is a developer's tool and the trace is its use.
 - How we'd know this was wrong: #430's shadow runs find differences inside the loop that come from the helper boundary (a helper that reads the original's frame, for example), which would mean the boundary has to move.
+
+## Addendum (#430): the shadow runs and the regress digest
+
+ADR 0153's proofs 1 and 3, decided and measured on 2026-11-27 (delegated by Joris).
+
+**The harness.** `--native-script-vm shadow` (`mt_scriptvm_shadow_install`, `runtime/src/scriptvm/shadow.cpp`, `MAPLETHIEF_NATIVE_SCRIPT_VM=shadow` in the scripted runs, `scripts/regress --native-script-vm shadow`) registers itself as `Lua::execute`'s handler. At the outermost call (nested calls belong to the run they are in) it copies guest memory outside the call's frame: the writable image, the heap up to its committed end with its host bookkeeping, the stack from the entry sp to its top. The dead stack below the entry sp is not compared. It runs the original (`call->original`), puts the copy back, runs the host loop, and compares r0, r4–r8, r10, r11, sp, memory and the heap's bookkeeping (its top, live blocks and free lists; not the committed end, since pages one run committed stay committed when the copy goes back). The game then goes on from the original's end state, so a shadow run plays the original.
+
+Options for the natives: run them in both runs, or **record them in the first run and replay them in the second (chosen)**. A native reaches state outside guest memory: sounds, popups, Game Center reports, ObjC host objects keyed by guest addresses. Running it twice would do those twice and leave the host's tables out of step with a restored heap. So `Lua::callNative` `0x9B37D` joins `HOOKED` (`MT_HOOK_FN_LUA_CALL_NATIVE`). In run 1 each native call is recorded with its arguments (L, index, base, sp, lr) and the state just before and just after it. In run 2 the same call must come in the same state, a checkpoint compared like the end. Then run 1's after-state is put in instead of running the native. A difference is therefore found at the first native call after it (or at the end), at its lowest address, and reported with both words, the native calls so far and the host loop's last opcodes from the `scriptvm` recorder. It goes to stderr and is counted, and a scripted run with any difference fails.
+
+**r9.** The first regress run in shadow mode found 6 differences in 54 calls, all in r9. Apple's armv7 ABI makes r9 a scratch register, not a callee-saved one: the original's natives leave it changed and the host loop puts back the caller's. Nothing can rely on it after the call, so the comparison leaves it out.
+
+**Results** (Debug for the replay, Release for the playthrough, the Mac):
+
+| Run | Outermost calls | Native calls | Differences |
+|---|---|---|---|
+| `scripts/regress --native-script-vm shadow` (title to the first fight) | 54 | 224 | 0 |
+| `MAPLETHIEF_NATIVE_SCRIPT_VM=shadow scripts/playthrough`, chapter 1 a–m and chapter 2 a–f (19 parts) | 2,305 | 9,943 | 0 |
+| the same, chapter 3, its side quests, the ending and the post-game (19 parts, from chapter 2 f's save) | 1,894 | 8,717 | 0 |
+
+The 38 parts are the whole played chain, every route that talks to NPCs: 4,199 outermost calls and 18,660 native calls, none different. One part, `play.chapter_2_f_synthetic`, failed a check of its own ("the trip kept the hero": one item stack 80 before the trip, 77 after). It fails the same way with the switch off, so the cause is in the branch the run was built from, not in the host loop. Its shadow runs (70 calls) showed no difference, and chapter 3 was played from its save.
+
+`scripts/regress` gives `8a2f05733c8d4603` with `--native-script-vm on`, `off` and `shadow`. That is the default's digest since 2026-11-05. With `on`, the host loop ran 66 calls, 1,620 opcodes and 224 native calls with 0 checks. No original fault had to be listed: the host loop refuses nothing the shipped scripts do.
+
+**The default.** It stays **off**. ADR 0153 asks for three proofs and #431's (every function of the 307 shipped scripts through both) is still open. The shadow harness is what #431 can run them through. When #431 holds, its addendum here turns the switch on by default.
+
+**CI.** `runtime_test`'s `scriptvm shadow:` cases run the harness on a synthetic guest whose `execute` body is the host loop and whose `doCall` reaches a hooked `callNative`. The host loop against itself, with scratch below the entry sp, shows no difference, and the native runs once. Deliberately different rewrites are caught at their first differing write: a late write at its address and both words at the end, an early one at the native call after it (though a lower address differs later), a wrong r0. Every case leaves the original's state behind.
