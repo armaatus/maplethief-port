@@ -74,7 +74,7 @@ One opcode byte, then its operands with no padding: `b` = u8, `w` = u16, `f` = 4
 
 | Code | Name | Operands | Stack | Uses | Game |
 |---|---|---|---|---|---|
-| `00` | PUSHNIL | | `→ nil` | 0 | |
+| `00` | PUSHNIL | | `→ nil` | 0 | writes the tag only |
 | `01` | PUSH0 | | `→ 0` | 1,752 | |
 | `02` | PUSH1 | | `→ 1` | 3,147 | |
 | `03` | PUSH2 | | `→ 2` | 950 | |
@@ -92,14 +92,14 @@ One opcode byte, then its operands with no padding: `b` = u8, `w` = u16, `f` = 4
 | `21` | STORELOCAL | `b` | `x →` (LOC[b] = x) | 0 | |
 | `22` | STOREGLOBAL | `g` | `x →` (VAR[g] = x) | 2,877 | |
 | `23` | STOREINDEXED0 | | `t i v →` (t[i] = v) | 0 | arrays only |
-| `24` | STOREINDEXED | `b` | `t i a_b…a_1 v → t i a_b…a_1` | 0 | arrays only |
+| `24` | STOREINDEXED | `b` | `t i a_b…a_1 v → t i a_b…a_1` | 0 | arrays only; a non-array leaves the fallback frame, two slots more ([script-vm.md](../re/script-vm.md#more-of-luaexecutes-behaviour)) |
 | `25` | STORELIST0 | `b` | `t v_1…v_b → t` (t[i] = v_i) | 0 | |
 | `26` | STORELIST | `b m, b n` | `t v_1…v_n → t` (t[i + 40·m] = v_i) | 0 | |
 | `27` | STORERECORD | `b n`, `n × s` | `t v_1…v_n → t` (t[STR[s_i]] = v_i) | 0 | uses the string object's address as an array index |
 | `28` | ADJUST0 | | top = base | 779 | |
 | `29` | ADJUST | `b` | top = base + b | 0 | |
 | `2A` | CREATEARRAY | `w` | `→ {}` | 0 | `new TObject*[w + 1]`, uninitialised, not a hash table |
-| `2B` | EQOP | | `x y → x == y` | 2,039 | 1 or nil, by `Lua::equalObjects` `0x9916D` |
+| `2B` | EQOP | | `x y → x == y` | 2,039 | 1 or nil (value word 1 either way), by `Lua::equalObjects` `0x9916D` |
 | `2C` | LTOP | | `x y → x < y` | 82 | numbers, or strings by `strcmp` |
 | `2D` | LEOP | | `x y → x <= y` | 19 | |
 | `2E` | GTOP | | `x y → x > y` | 1 | |
@@ -109,9 +109,9 @@ One opcode byte, then its operands with no padding: `b` = u8, `w` = u16, `f` = 4
 | `32` | MULTOP | | `x y → x · y` | 0 | integer |
 | `33` | DIVOP | | `x y → x / y` | 0 | integer (`__divsi3`) |
 | `34` | POWOP | | `x y → x ^ y` | 0 | no-op: both operands stay |
-| `35` | CONCOP | | `x y → x .. y` | 0 | `sprintf("%s%s")` into a 100-byte stack buffer |
+| `35` | CONCOP | | `x y → x .. y` | 0 | **both operands made numbers first**, then `sprintf("%s%s")` of their value words as string pointers into a 100-byte stack buffer |
 | `36` | MINUSOP | | `x → −x` | 290 | |
-| `37` | NOTOP | | `x → not x` | 0 | |
+| `37` | NOTOP | | `x → not x` | 0 | 1 or nil, value word 1 either way |
 | `38` | ONTJMP | `w` | `x → x` | 260 | jump if x ≠ nil (the compiler emits a `POP` after it) |
 | `39` | ONFJMP | `w` | `x → x` | 229 | jump if x = nil |
 | `3A` | JMP | `w` | | 1,099 | |
@@ -121,7 +121,7 @@ One opcode byte, then its operands with no padding: `b` = u8, `w` = u16, `f` = 4
 | `3E` | POP | | `x →` | 489 | |
 | `3F` | CALLFUNC | `b nargs, b nresults` | `f a_1…a_n → r_1…r_m` | 6,368 | `nresults` 255 = all. Shipped: 0 (5,281) or 1 (1,087) |
 | `40` | RETCODE0 | | returns base…top | 1,086 | |
-| `41` | RETCODE | `b` | returns base + b…top | 0 | |
+| `41` | RETCODE | `b` | returns base + b…top | 0 | **reads `b` after rewinding: the function's first byte** |
 | `42` | SETLINE | `w` | | 0 | debug line. The files were compiled without debug info. |
 
 Only the 24 opcodes with a non-zero *Uses* occur. The scripts have **no local variables, tables, loops, arithmetic other than `+` and unary `−`, or string concatenation**. Every value is a global, and every block is `if`/`elseif`/`else` (`IFFJMP` + `JMP`) or `and`/`or` (`ONTJMP`/`ONFJMP` + `POP`). None of the opcodes the game gets wrong (`PUSHFLOAT`, `PUSHSELF`, `STORELOCALn`, `POWOP`) appears. A runtime only needs the 24 that occur to run the shipped content (it should still reject the rest).
