@@ -176,6 +176,7 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Gameplay | `pause_unfocused` | off | on | on | #145 |
 | Gameplay | `autosave` | off | off | on_quit | #150 |
 | Gameplay | `fix_original_bugs` | off | off | on | #155 |
+| Gameplay | `restored_content` (after `fix_original_bugs`; ADR 0069's #379 addendum) | off | off | off | #389 |
 | Gameplay | `fast_text` / `skip_intros` | off / off | off / off | per #90 / off (#174, ADR 0096) | #90, #174 |
 | Accessibility | `colorblind_filter` / `screen_shake` | – (off / 100) | – | – | #158 |
 | Accessibility | `flashes` | – (100) | – | – | #186 |
@@ -326,3 +327,7 @@ The Switch's rows: `scale_mode = sharp` (720 / 320 = 2.25 and 1080 / 320 = 3.375
 ## Addendum: the Switch's performance rows (#244, 2026-11-11)
 
 Two more Switch rows, from [ADR 0145](0145-switch-performance-session-and-defaults.md)'s measurement. `gfx_backend = gpu`: the software rasterizer needs more than a 50 ms tick on a 1020 MHz Cortex-A57. `render_scale = 1`: Enhanced's `auto` budgets the CPU's time per frame and cannot see deko3d's. `filter` and `frame_rate` keep the registry's `none` and `original` in every column, so they need no row. `presets: the Switch's performance defaults hold the pace in every preset (#244)` pins all four. On the Switch the defaults still equal the Original column, apart from `hide_keypad`, because a platform row sets every column.
+
+## Addendum: #389's key (2026-11-27)
+
+#389 added `restored_content` (off / off / off, Gameplay, `--restored-content on|off`, game-only, `Applies::kNextStart`), right after `fix_original_bugs` in the registry and in a new file. It makes content the game ships but never reaches reachable ([original-bugs.md → Unreachable content](../re/original-bugs.md#unreachable-content)); per [ADR 0069](0069-guest-function-hooks.md)'s #379 addendum that is never a bug fix, so unlike `fix_original_bugs` it is off in the Enhanced column too, and applying any preset turns a player's `on` off. The Original preset never changes. Its default is every column's value, so both pinned lists are unchanged. `presets: restored_content is off in every column; Enhanced never turns it on (#389)` pins it.
