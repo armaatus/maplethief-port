@@ -50,6 +50,13 @@ faster than real time; a Release build of one architecture is faster still.
 
 Game time is the run's turns (about a thousand a game-second).
 
+Malady's closing scene in part K goes through the same step as the bosses of chapters 2 and 3
+(`then_boss_end`): the Release chain of [#306](https://github.com/armaatus/maplethief-port/issues/306)
+killed Malady with the hero knocked back, and the scene took no key for 600 s
+([original bug 19](../re/original-bugs.md#19-a-boss-killed-while-the-hero-is-knocked-back-locks-its-end-scene)).
+When A has not moved the scene on for 5 s with `CHero +0x119` set, the run prints
+`original bug 19: …` and clears that byte, as #420's fix does.
+
 ### Starting from a later point
 
 Every part ends with the game's own save (START → Save, slot 0), written to

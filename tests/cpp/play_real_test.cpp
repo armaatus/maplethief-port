@@ -2857,6 +2857,8 @@ void chapter_1_j_checks(Run &, u64) {}
 // leads to 3.8, whose map script (MelodyMap) shows the boss's lines and starts the boss scene.
 // Malady (mob 64) killed, Sabitrama there (Sabi2) ends 18, gives Master in Danger (19) and
 // sends the hero to Henesys; Stan (list 4) ends 19 and gives 20.
+void then_boss_end(Run &r, const std::string &what, Pred left, double timeout = 300);
+
 void chapter_1_k(Run &r, u64) {
     using namespace quest_bot;
     from_save(r);
@@ -2878,11 +2880,12 @@ void chapter_1_k(Run &r, u64) {
     then_run_event(r, "portal371 to the boss's map 3.8", MT_GAME_EVENT_MAP_CHANGE, 3, {8});
     then_run_event(r, "Malady (mob 64) killed", MT_GAME_EVENT_BOSS_KILLED, 64);
     // Malady's closing scene (4) moves Sabitrama (Sabi2) from where the map file puts him:
-    // then_talk_to follows the live object.
-    then(r, "Malady's closing scene (A through it)", 600, [&r](mt_cpu *cpu, double el) {
-        if (interrupted(r, cpu, el)) {
-            return false;
-        }
+    // then_talk_to follows the live object. Original bug 19 locked this scene in the Release
+    // chain (#306: Malady killed with the hero knocked back), so it goes through then_boss_end.
+    then_boss_end(
+        r, "Malady's closing scene (A through it)", [](mt_cpu *cpu) { return hero(cpu).on(3, 8); },
+        600);
+    then(r, "Sabi2 after the scene", 5, [](mt_cpu *cpu, double) {
         int x = 0, y = 0;
         const bool seen = live_object(cpu, "Sabi2", x, y);
         std::printf("after the scene: Sabi2 %s at %d,%d; %s\n", seen ? "visible" : "hidden", x, y,
@@ -3466,7 +3469,7 @@ quest_bot::FarmStyle chapter_3_fight() { return chapter_2_fight(); }
 // back leaves the scene's box deaf to every key; when A has not moved it on for 5 s with CHero
 // +0x119 still set, the run clears that byte (as #420's fix will) and says so. `left` says when
 // the scene is over (the map it ends on).
-void then_boss_end(Run &r, const std::string &what, Pred left, double timeout = 300) {
+void then_boss_end(Run &r, const std::string &what, Pred left, double timeout) {
     auto locked = std::make_shared<double>(-1);
     then(r, what, timeout, [&r, locked, left](mt_cpu *cpu, double el) {
         const Hero h = hero(cpu);
