@@ -159,8 +159,8 @@ struct Map {
 
 // Jumps the bot plans with (measured on the first maps: a jump rises about 50 px; walking while
 // in the air carries the hero a few cells sideways). Kept inside what always works.
-constexpr int k_jump_up = 44;    // px a jump reaches up onto a platform
-constexpr int k_jump_side = 40;  // px a running jump crosses sideways over a gap
+constexpr int k_jump_up = 44;   // px a jump reaches up onto a platform
+constexpr int k_jump_side = 40; // px a running jump crosses sideways over a gap
 // Sideways px a running jump has carried the hero when it comes down onto a platform `rise` px
 // above its start: 7 px a tick, the hero 25, 42, 50, 49, 41, 24 px up, then 2 px below the start
 // (mechanics.md, Movement). 42 px for a step 32 px up, 49 px on the level.
@@ -412,7 +412,8 @@ inline void build(Map &m) {
                     take_off = std::clamp(mid - dir * jump_travel(rise), p.x0() + 2, p.x1() - 2);
                 }
                 if (clear) {
-                    add(i, {j, Move::jump, take_off, dir, -1, 30 + std::max(0, rise) / 4 + gap / 8});
+                    add(i,
+                        {j, Move::jump, take_off, dir, -1, 30 + std::max(0, rise) / 4 + gap / 8});
                 }
             }
         }
