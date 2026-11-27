@@ -44,7 +44,8 @@ its test's name.**
 | `tests/starts/chapter_2.json`: the start of chapter 2, a level-34 Bandit on 4.1 with main 40 active | part L's save (`play.chapter_1_l`) | `tests/test_savedata_build_real.py` (local; skipped without the bundle or the chain's output, which `MT_CHAIN_OUTPUT` can name) |
 
 The synthetic starts of [skills-and-jobs.md](skills-and-jobs.md) (`tests/starts/jobs_*.json`,
-`tests/starts/skills_*.json`) are built by CTest itself: `starts.<name>` writes the save into
+`tests/starts/skills_*.json`) and [systems-sweep.md](systems-sweep.md)
+(`tests/starts/systems2_*.json`) are built by CTest itself: `starts.<name>` writes the save into
 the test output directory (skipped without the bundle) and `play.<mode>_synthetic` loads it.
 
 ## The bot's world
