@@ -142,7 +142,7 @@ A portal script is a main only: it reads a quest state with `getQuestState`, the
 | 49 | `startBoss` | `0x9971D` | – | – | 5 | world+0x1E4 = boss scene of the area (world+0x84) |
 | 50 | `setBoss` | `0x99705` | – | – | 5 | msg: the speaker is the map's boss: `0x32B4D` sets the speaker NPC to −1 and takes the sprite of the first mob whose id is 64 or more and not 65, the Malady Bomb (`CMobs_FindBoss` `0x75711`) |
 | 51 | `updateNPCState` | `0x99435` | – | – | 102 | msg+0x2D = 1: re-run NPC state scripts |
-| 52 | `clearAll` | `0x996ED` | – | – | 3 | end the chapter: reset quest states, chapter += 1 |
+| 52 | `clearAll` | `0x996ED` | – | – | 3 | end the chapter (`CQuestList::ClearAll` `0x7C61D`): reset quest states, keep the record of the main quest at 1 as main 40, chapter += 1 |
 | 53 | `getHeroClass` | `0x9AF29` | – | int | 10 | hero job (hero+0x88) |
 | 54 | `getClassUpCount` | `0x9AED5` | – | int | 38 | hero job advancements (hero+0x8C) |
 | 55 | `setNpcDir` | `0x99909` | int | – | 5 | current NPC object +8 = (arg ? 2 : 0) (facing) |

@@ -1532,7 +1532,8 @@ set(_from_starts
     systems2_scrolls_success:systems2_scrolls_success
     systems2_scrolls_failure:systems2_scrolls_failure
     systems2_pigmy:systems2_pigmy
-    systems2_portal620:systems2_portal620)
+    systems2_portal620:systems2_portal620
+    systems2_portal620_fixed:systems2_portal620)
 # The five map pages checked in the running port (#221): from a start on each map, the hero takes
 # one portal (MT_MAP_PAGE_PORTAL, its kind) and play_real_test map_page writes where it landed;
 # tests/test_compendium_world_port.py compares that with the page's Connections row. The 2.0

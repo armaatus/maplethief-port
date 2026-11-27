@@ -4080,7 +4080,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     }
     // Guest function hooks (maplethief/hooks.h, #143): registered for the whole run, each on or
     // off as its setting says. fix_original_bugs (#155, docs/re/original-bugs.md): the portal
-    // items' exit(1) and Play before the engine's main menu (#122).
+    // items' exit(1), Play before the engine's main menu (#122) and portal620's warp (#388).
     mt_hooks_install_original_bug_fixes(options.settings.fix_original_bugs ? 1 : 0);
     mt_cf_set_missing_key_fallback(options.settings.fix_original_bugs ? 1 : 0); // bug 15
     // The port's keys reach the popup menu's quest tab, which the device's never did (#167):

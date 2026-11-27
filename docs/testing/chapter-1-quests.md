@@ -130,7 +130,10 @@ quests (`clearAll`: every state back to 0) and starts chapter 2 on 4.1, with mai
 Part L checks it in guest memory and in the save: `ok: chapter 2 in the quest manager, map 4.1
 (want 2, 4.1); after clearAll: main 16:0 main 17:0 main 18:0 main 19:0 main 20:0 side 11:0` and
 `ok: the save: chapter 2 in quest0, map 4.1 in theif0 (want 2, 4.1)`. So main 20 is the one
-main quest that never reads 2: the game ends it by clearing it, not by a reward.
+main quest that never reads 2: the game ends it by clearing it, not by a reward. Its record is
+not dropped: `CQuestList::ClearAll` `0x7C61D` renumbers it main 40, chapter 2's first main quest
+(`ok: main 20's record carried into chapter 2 as main 40, the only active quest`; #388,
+[re/original-bugs.md](../re/original-bugs.md#16-chapter-1s-main-quest-20-is-never-completed)).
 
 ### Side quests
 

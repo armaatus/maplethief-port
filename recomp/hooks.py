@@ -189,6 +189,12 @@ HOOKED: dict[int, Hooked] = {
         "(list, text, colour): a notify line (pick-ups, meso, EXP, the map's name); the text "
         "events (#392) read the text for the speech",
     ),
+    0x81369: Hooked(
+        "CMapleWorld::changeMap",
+        "(this = CStateGame, area, map, portal, x at sp, y at sp + 4): a warp's target, from "
+        "the changeMap native 0x99969; common/portal620 warps to (6, 1, 2), a portal 6.1 lacks, "
+        "and the hook makes it (6, 1, 1) (fix_original_bugs, #388, docs/re/original-bugs.md)",
+    ),
     0x83C71: Hooked(
         "CStateGame::PaintExitToMenu",
         "(this): the scene runner, called by CStateGame::Paint before the shake is drawn; with "

@@ -99,6 +99,9 @@ MT_EXTERN_C_BEGIN
 #define MT_HOOK_FN_OBJECT_TOUCHES 0x6CF01u
 /* CNotifyTextList::Add (list, text, colour): a notify line (#392: the text events read it) */
 #define MT_HOOK_FN_NOTIFY_TEXT_ADD 0x78339u
+/* CMapleWorld::changeMap (this = CStateGame, area, map, portal, x at sp, y at sp + 4): a warp's
+ * target (#388: common/portal620's (6, 1, 2) becomes (6, 1, 1) under fix_original_bugs) */
+#define MT_HOOK_FN_CHANGE_MAP 0x81369u
 /* CStateGame::PaintExitToMenu (this): the scene runner, from CStateGame::Paint */
 #define MT_HOOK_FN_SCENE_RUNNER 0x83C71u
 #define MT_HOOK_FN_STATE_GAME_PAINT 0x87501u /* CStateGame::Paint (this): the field's frame */
@@ -193,8 +196,17 @@ void mt_hooks_install_early_play_guard(int enabled) MT_NOEXCEPT;
  * with `enabled` 1. Registers it, `enabled` or not (the original). */
 void mt_hooks_install_quest_page_fix(int enabled) MT_NOEXCEPT;
 
+/* CMapleWorld::changeMap 0x81369 (#388, docs/re/original-bugs.md 14): common/portal620, map
+ * 6.2's only portal, warps to (6, 1, 2), but map 6.1 has portals of kind 0 and 1 only. The map
+ * change 0x868D5 writes the hero's position only when an object's kind matches the target, so
+ * the hero lands on 6.1 at its 6.2 coordinates. The hook turns a warp to (6, 1, 2) into
+ * (6, 1, 1), portal611, the one that leads to 6.2, and runs the original; any other warp is the
+ * original alone. Registers it, `enabled` or not (the original). */
+void mt_hooks_install_portal620_fix(int enabled) MT_NOEXCEPT;
+
 /* Every fix of an original bug (docs/re/original-bugs.md, #155), the setting fix_original_bugs
- * (on in the Enhanced preset): the two hooks above, each registered `enabled` or not. */
+ * (on in the Enhanced preset): the portal items, the early Play guard and portal620, each
+ * registered `enabled` or not. */
 void mt_hooks_install_original_bug_fixes(int enabled) MT_NOEXCEPT;
 
 /* A scene's camera shake (#158, docs/re/screen-shake.md). The scene runner

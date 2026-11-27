@@ -95,3 +95,9 @@ For functions that never return:
   - Out of bounds: the Pigmy hatch's online part. The client never sends a request for it, and what the server did is unknown, so restoring it would mean inventing it.
 - **How a repair is made.** A guest function hook (this ADR) or the host's own HLE code, as for the earlier fixes. Where a script's behaviour has to change, an in-memory change made at load is allowed; the shipped files are never edited, and the repository holds no script bytes.
 - **Consequences.** The catalogue gets a fourth kind of entry, unreachable content, beside the three decisions. Every new repair follows "Adding a fix" with a test of the setting off (the device's behaviour) and on. Follow-ups: #388 (the three defect fixes) and #389 (the `restored_content` setting).
+
+## Addendum (#388): bug 16 is not a defect
+
+- **Status:** Accepted (delegated by Joris, 2026-11-27). It changes one line of the #379 addendum's classification.
+- **What was found.** `CQuestList::ClearAll` `0x7C61D`, which the `clearAll` native runs at a chapter's end, keeps the record of the main quest still in progress (state 1), renumbers it 40 and puts it back in the emptied active list: that is how chapter 2 starts with main 40 active. Chapter 1's main 20, which no script completes, is that record. Completing it first (the planned repair: a hook on `0x996ED` calling `CQuestList::GiveReward` `0x7BFC5`) leaves `ClearAll` with no record, and it writes through a stack slot it never initialised: the run from part K's save faulted at pc `0x7C7A0` (a store to guest address 9).
+- **Decision.** Bug 16 is **Kept** in every mode, with no hook ([re/original-bugs.md](../re/original-bugs.md#16-chapter-1s-main-quest-20-is-never-completed)). The defects under `fix_original_bugs` are bug 14 (`common/portal620`, a hook on `CMapleWorld::changeMap` `0x81369`: `mt_hooks_install_portal620_fix`) and bug 15 (the Korean key, in the host's string lookup).

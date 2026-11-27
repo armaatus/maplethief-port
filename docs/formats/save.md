@@ -161,7 +161,7 @@ Written by `CDataMgr::SaveQuestData` `0x38F55` from the quest manager (`[hero+0x
 
 `flags_a[i]` is the state of main quest *i* and `flags_b[i]` that of sub-quest *i* (the quest manager's arrays; `CQuestList::GetState` `0x799B1` picks one by the quest kind):
 
-- **0, not taken.** A new slot and the end of a chapter (`clearAll`, `0x996ED` → `CQuestList::ClearAll` `0x7C61D`, zeroes both arrays) start here. `removeQuest` (`0x995F1` → `CQuestList::Remove` `0x7BD75`) sets it back to 0; for a main quest it also sets main quest *i* − 1 back to 1.
+- **0, not taken.** A new slot and the end of a chapter (`clearAll`, `0x996ED` → `CQuestList::ClearAll` `0x7C61D`, zeroes both arrays) start here. `ClearAll` also empties the active list but for the record of the main quest that was at 1, which it renumbers main 40 (the next chapter's first main quest). `removeQuest` (`0x995F1` → `CQuestList::Remove` `0x7BD75`) sets it back to 0; for a main quest it also sets main quest *i* − 1 back to 1.
 - **1, taken.** `startQuest` (`0x99D65` → `CQuestList::StartPrepared` `0x7C7ED`) adds the prepared quest to the list of active quests and sets it to 1. `QuestSave_Apply` also calls `0x7C7ED` for each saved record, so a loaded record is 1 again.
 - **2, done.** `getReward` (`0x9B099` → `CQuestList::GiveReward` `0x7BFC5`) and `makeEquipItem` (`Quest_MakeEquipItem` `0x7C2D9`) complete the quest through `CQuestList::Complete` `0x7BEB1`: it leaves the active list and its state becomes 2.
 

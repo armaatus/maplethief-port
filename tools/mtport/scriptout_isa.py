@@ -230,7 +230,14 @@ def _natives() -> tuple[Native, ...]:
             ),
         ),
         ("updateNPCState", 0x99435, (), None, "msg+0x2D = 1: re-run NPC state scripts"),
-        ("clearAll", 0x996ED, (), None, "end the chapter: reset quest states, chapter += 1"),
+        (
+            "clearAll",
+            0x996ED,
+            (),
+            None,
+            "end the chapter (`CQuestList::ClearAll` `0x7C61D`): reset quest states, keep the "
+            "record of the main quest at 1 as main 40, chapter += 1",
+        ),
         ("getHeroClass", 0x9AF29, (), "int", "hero job (hero+0x88)"),
         ("getClassUpCount", 0x9AED5, (), "int", "hero job advancements (hero+0x8C)"),
         ("setNpcDir", 0x99909, (i,), None, "current NPC object +8 = (arg ? 2 : 0) (facing)"),
