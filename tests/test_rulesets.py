@@ -80,7 +80,13 @@ def test_main_requires_the_full_profile_and_the_release_title():
     }
     matrix = {
         f"{os} {cfg}"
-        for os in ("ubuntu-latest", "macos-latest", "windows-latest")
+        for os in (
+            "ubuntu-latest",
+            "macos-latest",
+            "windows-latest",
+            "ubuntu-24.04-arm",
+            "windows-11-arm",
+        )
         for cfg in ("debug", "release")
     }
     title = jobs("release.yml")["title"]["name"]

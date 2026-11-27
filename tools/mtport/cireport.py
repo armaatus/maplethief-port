@@ -34,7 +34,13 @@ EXPECTED: dict[str, tuple[str, ...]] = {
     "scope": ("scope",),
     "build": tuple(
         f"{os_name} {config}"
-        for os_name in ("ubuntu-latest", "macos-latest", "windows-latest")
+        for os_name in (
+            "ubuntu-latest",
+            "macos-latest",
+            "windows-latest",
+            "ubuntu-24.04-arm",
+            "windows-11-arm",
+        )
         for config in ("debug", "release")
     ),
     "asan": ("linux asan+ubsan",),

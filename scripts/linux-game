@@ -157,6 +157,9 @@ command -v "$PY" >/dev/null 2>&1 || die "need Python 3.10+, but '$PY' was not fo
 linux_game() { PYTHONPATH="$REPO/tools" "$PY" -B -m mtport.linux_game "$@"; }
 
 bundle=work/ipa/Payload/MapleThief.app
+# The presets for this machine's CPU: on aarch64 the linux-arm64-* ones, which check it (#362).
+preset_arch=""
+case "$(uname -m)" in aarch64 | arm64) [ "$(uname -s)" != Linux ] || preset_arch=arm64- ;; esac
 need_inputs() {
     [ "$player" -eq 1 ] || [ -d "$bundle" ] || die "no $bundle: run scripts/bootstrap"
     [ -f work/gen/gen.cmake ] || die "no work/gen/gen.cmake: run python3 -m recomp all"
@@ -164,7 +167,7 @@ need_inputs() {
 
 # The player tarball (ADR 0125): the linux-player workflow with the glibc floor, then CPack.
 build_player_native() {
-    local preset=linux-player name
+    local preset="linux-${preset_arch}player" name
     echo "== cmake --preset $preset -DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
     cmake --preset "$preset" "-DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
     echo "== cmake --build --preset $preset (MapleThief only)"
@@ -187,8 +190,8 @@ build_native() {
         build_player_native
         return
     fi
-    local preset=linux-release
-    [ "$debug" -eq 0 ] || preset=linux-debug
+    local preset="linux-${preset_arch}release"
+    [ "$debug" -eq 0 ] || preset="linux-${preset_arch}debug"
     echo "== cmake --preset $preset -DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
     cmake --preset "$preset" "-DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
     echo "== cmake --build --preset $preset --target MapleThief"

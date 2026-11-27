@@ -4,8 +4,8 @@
 #                            Debug build with the C/C++ tests. Feature and epic branches merge here.
 #   pull request into main   the full profile: the release pull request from dev (ADR 0126,
 #                            titled "Release vX.Y.Z"). Debug and Release builds with the C/C++
-#                            tests and the packaged kits on macOS, Windows and Linux, plus lint
-#                            and Python. release.yml checks the title and, after the merge, tags
+#                            tests and the packaged kits on macOS, Windows and Linux, and on
+#                            Windows ARM64 and Linux aarch64 (ADR 0194), plus lint and Python. release.yml checks the title and, after the merge, tags
 #                            and drafts the release.
 #   manual run               the full profile (Release unless its `release` input is off).
 #   weekly schedule          the full profile with Release, on dev (the default branch; issue #339):
@@ -151,14 +151,14 @@ jobs:
     needs: scope
     if: needs.scope.outputs.native == 'true'
     # The hosted image, or on a manual self-hosted run the matching self-hosted labels.
-    runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && (matrix.os == 'macos-latest' && '["self-hosted","macOS","ARM64"]' || matrix.os == 'windows-latest' && '["self-hosted","Windows","X64"]' || '["self-hosted","Linux","X64"]') || format('"{0}"', matrix.os)) }}
+    runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && (matrix.os == 'macos-latest' && '["self-hosted","macOS","ARM64"]' || matrix.os == 'windows-latest' && '["self-hosted","Windows","X64"]' || matrix.os == 'windows-11-arm' && '["self-hosted","Windows","ARM64"]' || matrix.os == 'ubuntu-24.04-arm' && '["self-hosted","Linux","ARM64"]' || '["self-hosted","Linux","X64"]') || format('"{0}"', matrix.os)) }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         # Into dev: Linux only. Into main (the release pull request), manual and weekly runs:
-        # all three.
-        os: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref != 'main' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
+        # all three, and the ARM64 runners for Windows and Linux (#362, ADR 0194).
+        os: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref != 'main' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest","ubuntu-24.04-arm","windows-11-arm"]') }}
         # Release builds and kits on the release pull request, the weekly run, and manual runs
         # unless the `release` input is off (ADR 0126).
         config: ${{ fromJSON(((github.event_name == 'pull_request' && github.base_ref == 'main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release)) && '["debug","release"]' || '["debug"]') }}
@@ -211,7 +211,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/_downloads
-          key: downloads-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          key: downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
 
       - &linux-deps
         name: Install SDL3 build dependencies (Linux)
@@ -229,11 +229,11 @@ jobs:
         if: runner.os == 'macOS'
         run: command -v ninja >/dev/null || brew install ninja
 
-      - name: Set up the Visual Studio x64 developer environment (Windows)
+      - name: Set up the Visual Studio developer environment (Windows; x64, or ARM64 native)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
-          arch: x64
+          arch: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
 
       - name: Show toolchain versions
         shell: bash
@@ -242,6 +242,7 @@ jobs:
           echo "ninja $(ninja --version)"
           "$PYTHON" --version
           if command -v uv >/dev/null 2>&1; then uv --version; fi
+          echo "runner $RUNNER_OS $RUNNER_ARCH"
           case "$RUNNER_OS" in
             Windows) cl 2>&1 | head -n 1 ;;
             macOS) clang++ --version | head -n 1; sw_vers -productVersion ;;
@@ -266,7 +267,7 @@ jobs:
         shell: pwsh
         run: cmake --workflow --preset $env:PRESET
         env:
-          PRESET: ${{ runner.os == 'macOS' && 'mac-release-universal' || runner.os == 'Windows' && 'win-release' || 'linux-release' }}
+          PRESET: ${{ runner.os == 'macOS' && 'mac-release-universal' || format('{0}{1}-release', runner.os == 'Windows' && 'win' || 'linux', runner.arch == 'ARM64' && '-arm64' || '') }}
 
       - name: Check the universal binary (macOS)
         if: matrix.config == 'release' && runner.os == 'macOS'
