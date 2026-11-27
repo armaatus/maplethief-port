@@ -155,3 +155,7 @@ Until now the wings were drawn from the GL frame through SDL's own texture shade
   A second run under the same load measured at most 0.261 ms (2880 × 1800, render scale 3, crt + colour-blind). `gfx_gpu.present widescreen: the wide picture's GPU time at 1080p and 1800p (under 1 ms)` asserts the 1 ms bar. On the CPU way the extra grading is the wing columns and the strips, 88 × 320 texels each at render scale 1 (18 % of the screen image's area each, which ADR 0093 measured at 0.80 ms); not measured separately.
 - The blur under widescreen with wings now continues the wide picture (it was the 3:2 image's). Beside a 16:9 picture on a 16:9 window there are no bars, so that only shows on wider windows.
 - With widescreen off nothing changed: `platform.border: color with black is byte-identical to the Presenter before #157, every mode` and `platform.colour-blind filter: off is byte-identical to the Presenter before #158` pass unchanged.
+
+## Addendum: past 568 points (#387, 2026-11-27)
+
+568 is not a limit of the code: a local build at 768 played `play.widescreen_on` and `play.widescreen_pad_on` tick-equal to the 3:2 runs. [ADR 0214](0214-widescreen-past-568-points.md) adds a `fill` value up to 768 points, capped by the window's shape, and tiles the nine backdrops that repeat every 160 points instead of stretching them.
