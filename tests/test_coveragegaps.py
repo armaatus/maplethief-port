@@ -220,6 +220,16 @@ def test_doc_round_trip(monkeypatch) -> None:
     assert cg.render(cg.classify(p, again, ()), p, len(executed)) == text
 
 
+def test_a_new_run_adds_to_the_doc(monkeypatch) -> None:
+    """generate --add (#433): a run step's coverage joins what the doc already counts."""
+    p = program(monkeypatch)
+    text = cg.render(cg.classify(p, {MAIN, SENDER}, ()), p, 2)
+    executed = cg.added_to_doc(p, text, {CTOR, CALLNATIVE})
+    assert executed == {a & ~1 for a in (MAIN, SENDER, CTOR, CALLNATIVE)} | {0x3000}
+    gaps = by_address(cg.classify(p, executed, ()))
+    assert CTOR not in gaps and gaps[VIRTUAL].cls == "missed"
+
+
 def test_a_rule_can_class_dead_and_name_a_follow_up(monkeypatch) -> None:
     p = program(monkeypatch)
     rules = (cg.Rule("Called", "dead", "only the port skips it"), cg.Rule(".*", "missed", "", 9))

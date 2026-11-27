@@ -35,9 +35,11 @@ Every ``unreachable`` and ``missed`` row names the follow-up issue that adds its
 step (:data:`HOST_TESTS`, :data:`RUN_STEPS`).
 
 ``generate`` writes the doc from a coverage file (``mtport.runcoverage`` format, or a
-directory of them); ``check`` regenerates it from the doc's own list of unexecuted functions
-and the current ``work/`` and fails when the committed doc differs, so a change to the
-evidence (a re-analysis, a difftest change) shows up without rerunning every play test.
+directory of them; with ``--add``, the functions they entered are added to those the doc
+already counts as executed, for a new run step); ``check`` regenerates it from the doc's own
+list of unexecuted functions and the current ``work/`` and fails when the committed doc
+differs, so a change to the evidence (a re-analysis, a difftest change) shows up without
+rerunning every play test.
 
 Inputs, all derived from your own copy of the game in git-ignored ``work/``: the function tags
 (``work/re/function-tags.json``), the Ghidra cross-references, ``work/re/objc.json``,
@@ -108,7 +110,7 @@ class Rule:
 
 
 HOST_TESTS = 432  # host-driven tests for the unreachable functions
-RUN_STEPS = 433  # run steps for the missed functions
+RUN_STEPS = 435  # run steps for the missed functions (#433, then #435)
 
 # Checked in order; the first match wins.
 RULES: tuple[Rule, ...] = (
@@ -120,6 +122,15 @@ RULES: tuple[Rule, ...] = (
          "`initMonCa` in `Spiegelman1`–`3`, scripts no map names (ANALYSIS.md, unused scripts)"),
     Rule(r"-\[(MoviePlayerController|MovieOverlayView) .*\]", "dead", "the movie player "
          "classes: nothing creates them (ANALYSIS.md)"),
+    Rule(r"IStateAdaptor::(PushState|PopState|PopAndRestart|PopAllStates|GetRootState)|"
+         r"CStateTitle::OnPointerEvent", "dead", "a state's virtual that no code calls through "
+         "its slot: the state stack is never pushed or popped, and no caller sends the pointer "
+         "event (re/program-flow.md, re/cpp-classes.md)"),
+    Rule(r"-\[EAGLViewController viewDidLoad\]", "dead", "the controller is given its view "
+         "by `setView:`, so UIKit never loads one and never sends `viewDidLoad`; it only "
+         "presents Game Center, which the port draws itself (re/program-flow.md, ADR 0084)"),
+    Rule(r"-\[TouchKeyPadView (release[4568]|click[58])Button:\]", "dead", "sent only by "
+         "`setKeySequence:`'s 9-key chord mode, which only ever gets −1 (controls/keypad.md)"),
     Rule(r".*::~.*|-\[\w+ dealloc\]|SoundPlayer_ShutdownOpenAL|FUN_0000f000|FUN_000c0f30",
          "unreachable", "teardown: no run frees the object (the game keeps it until the "
          "process ends, and iOS ends it without unwinding)", HOST_TESTS),
@@ -533,6 +544,11 @@ def executed_from_doc(p: Program, text: str) -> set[int]:
     return {a for a in p.functions if a not in unrun}
 
 
+def added_to_doc(p: Program, text: str, executed: Iterable[int]) -> set[int]:
+    """The functions a doc counts as executed and those of a new run (``generate --add``)."""
+    return executed_from_doc(p, text) | {a & ~1 for a in executed}
+
+
 def document(p: Program, executed: set[int]) -> tuple[str, list[Gap]]:
     """The doc for the functions ``executed`` (plain addresses), and its rows."""
     gaps = classify(p, executed)
@@ -548,6 +564,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     g = sub.add_parser("generate", help="write the doc from a run coverage")
     g.add_argument("--coverage", type=Path, nargs="+", required=True)
     g.add_argument("--out", type=Path, default=DOC)
+    g.add_argument(
+        "--add",
+        action="store_true",
+        help="add these runs' functions to the ones the doc already counts as executed (a new "
+        "run step, without rerunning the whole suite)",
+    )
     c = sub.add_parser("check", help="regenerate from the doc's own list; fail when stale")
     c.add_argument("--doc", type=Path, default=DOC)
     args = parser.parse_args(argv)
@@ -564,6 +586,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         executed = {a & ~1 for a in cov.functions}
         out = args.out
+        if args.add:
+            executed = added_to_doc(p, out.read_text(encoding="utf-8"), executed)
     else:
         out = args.doc
         executed = executed_from_doc(p, out.read_text(encoding="utf-8"))
