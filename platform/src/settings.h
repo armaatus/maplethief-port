@@ -153,6 +153,11 @@
 //   run_timer = off
 //   # the timer's category: any | chapter_1, or a file of your own in <data dir>/categories
 //   run_category = any
+//   # send the run timer's start, splits and resets to LiveSplit's TCP server
+//   # (livesplit.h): off | HOST:PORT (localhost:16834)
+//   livesplit = off
+//   # with livesplit, LiveSplit's game time is the game's ticks (50 ms each): on | off
+//   livesplit_game_time = on
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -723,6 +728,10 @@ struct Settings {
     // category it times (a category file's name, without .mtcat). Outside the presets.
     bool run_timer = false;           // run_timer, --run-timer (on | off)
     std::string run_category = "any"; // run_category, --run-category (NAME)
+    // The LiveSplit link (#407, ADR 0156, livesplit.h): HOST:PORT of LiveSplit's TCP server, empty
+    // for off; and whether it gets the game time. Desktop only, outside the presets.
+    std::string livesplit;           // livesplit, --livesplit (off | HOST:PORT)
+    bool livesplit_game_time = true; // livesplit_game_time, --livesplit-game-time (on | off)
 
     bool operator==(const Settings &) const = default;
 };

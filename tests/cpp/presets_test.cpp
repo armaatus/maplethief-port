@@ -118,6 +118,8 @@ const Expected kExpected[] = {
     {"update_check", {nullptr, nullptr, nullptr}}, // #199: opt-in, in no preset
     {"run_timer", {nullptr, nullptr, nullptr}},    // #406: the speedrun timer, in no preset
     {"run_category", {nullptr, nullptr, nullptr}},
+    {"livesplit", {nullptr, nullptr, nullptr}}, // #407: the LiveSplit link, in no preset
+    {"livesplit_game_time", {nullptr, nullptr, nullptr}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
@@ -137,6 +139,9 @@ std::string other_value(const SettingInfo &info, const std::string &not_this) {
     }
     if (std::string_view(info.key) == "run_category") {
         return not_this == "any" ? "chapter_1" : "any";
+    }
+    if (std::string_view(info.key) == "livesplit") {
+        return not_this == "off" ? "localhost:16834" : "off";
     }
     if (std::string(info.key) == "keypad_layout") {
         return not_this == "original" ? "dpad=80,10,-10,60" : "original";
