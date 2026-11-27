@@ -9,6 +9,7 @@
 #include <set>
 #include <vector>
 
+#include "canvas.h"
 #include "maplethief/textpack.h"
 
 namespace maplethief::frontend {
@@ -77,7 +78,7 @@ struct Cache {
 };
 Cache g_cache;
 
-// The pack's text for `key` folded to ASCII, if it has one with the English's places.
+// The pack's text for `key`, if it has one with the English's places.
 std::optional<std::string> packed(const char *key, const char *english) {
     if (mt_textpack_is_open() == 0) {
         return std::nullopt;
@@ -86,8 +87,8 @@ std::optional<std::string> packed(const char *key, const char *english) {
     if (v == nullptr) {
         return std::nullopt;
     }
-    const std::string folded = ascii_fold(v);
-    if (places(folded) != places(english)) {
+    const std::string text = v;
+    if (places(text) != places(english)) {
         if (g_cache.refused.insert(key).second) {
             SDL_Log("textpack: Port.strings \"%s\": its places ({0}, ...) are not the English "
                     "text's: the English kept",
@@ -95,7 +96,7 @@ std::optional<std::string> packed(const char *key, const char *english) {
         }
         return std::nullopt;
     }
-    return folded;
+    return text;
 }
 
 } // namespace
@@ -165,28 +166,11 @@ std::string ascii_fold(std::string_view s) {
             continue;
         }
         // One UTF-8 character (strict), else one '?' for the byte.
-        std::size_t len = 0;
-        std::uint32_t cp = 0, min = 0;
-        if (c >= 0xC2 && c <= 0xDF) {
-            len = 2, cp = c & 0x1Fu, min = 0x80;
-        } else if (c >= 0xE0 && c <= 0xEF) {
-            len = 3, cp = c & 0x0Fu, min = 0x800;
-        } else if (c >= 0xF0 && c <= 0xF4) {
-            len = 4, cp = c & 0x07u, min = 0x10000;
-        }
-        bool ok = len != 0 && i + len <= s.size();
-        for (std::size_t k = 1; ok && k < len; k++) {
-            const auto b = static_cast<unsigned char>(s[i + k]);
-            ok = (b & 0xC0u) == 0x80u;
-            cp = (cp << 6) | (b & 0x3Fu);
-        }
-        ok = ok && cp >= min && cp <= 0x10FFFF && !(cp >= 0xD800 && cp < 0xE000);
-        if (!ok) {
+        const std::int32_t cp = next_code_point(s, &i);
+        if (cp < 0) {
             out.push_back('?');
-            i++;
             continue;
         }
-        i += len;
         if (cp >= 0xA0 && cp < 0x180) {
             out += kFold[cp - 0xA0];
         } else if (cp == 0x2018 || cp == 0x2019 || cp == 0x201A || cp == 0x2032) {

@@ -132,12 +132,13 @@ static_assert(!kSettingsForIos && kSettingsPlatform != SettingsPlatform::kIos);
 const Preset kPresetCycle[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced,
                                Preset::kCustom};
 
-// `text` in at most `lines` lines of at most `max` characters, broken at blanks.
+// `text` in at most `lines` lines of at most `max` cells (Canvas::columns), broken at blanks.
 std::vector<std::string> wrap(const std::string &text, std::size_t max, std::size_t lines) {
     std::vector<std::string> out;
+    const int cols = static_cast<int>(max);
     std::size_t at = 0;
     while (at < text.size() && out.size() < lines) {
-        std::size_t end = std::min(text.size(), at + max);
+        std::size_t end = at + Canvas::fit_columns(std::string_view(text).substr(at), cols);
         if (end < text.size()) {
             const std::size_t blank = text.rfind(' ', end);
             if (blank != std::string::npos && blank > at) {
@@ -150,15 +151,17 @@ std::vector<std::string> wrap(const std::string &text, std::size_t max, std::siz
             at++;
         }
         if (out.size() + 1 == lines && at < text.size()) {
-            line = line.substr(0, std::min(line.size(), max - 3)) + "...";
+            line = line.substr(0, Canvas::fit_columns(line, cols - 3)) + "...";
         }
         out.push_back(line);
     }
     return out;
 }
 
+// `s` in at most `max` cells, cut at a whole character with "..." when longer.
 std::string fit(const std::string &s, std::size_t max) {
-    return s.size() <= max ? s : s.substr(0, max - 3) + "...";
+    const int cols = static_cast<int>(max);
+    return Canvas::columns(s) <= cols ? s : s.substr(0, Canvas::fit_columns(s, cols - 3)) + "...";
 }
 
 const char *tab_note(SettingGroup g) {
@@ -988,10 +991,39 @@ bool SettingsMenu::handle(const SDL_Event &e) {
     }
 }
 
+namespace {
+
+// The cells a tab's name may have: all of it, unless the names would not fit in one bar (a
+// translation, #372); then the most cells for each that do.
+int tab_cells(const std::vector<SettingGroup> &tabs) {
+    const auto bar = [&tabs](int cells) {
+        int w = 0;
+        for (const SettingGroup g : tabs) {
+            w += Canvas::text_width(fit(setting_group_name(g), static_cast<std::size_t>(cells))) +
+                 12 + (g == SettingGroup::kAssists ? 6 : 0);
+        }
+        return w - 2;
+    };
+    int cells = 0;
+    for (const SettingGroup g : tabs) {
+        cells = std::max(cells, Canvas::columns(setting_group_name(g)));
+    }
+    while (cells > 4 && bar(cells) > SettingsMenu::kListW) {
+        cells--;
+    }
+    return cells;
+}
+
+} // namespace
+
+std::string SettingsMenu::tab_name(std::size_t i) const {
+    return fit(setting_group_name(tabs_[i]), static_cast<std::size_t>(tab_cells(tabs_)));
+}
+
 std::pair<int, int> SettingsMenu::tab_box(std::size_t i) const {
     int x = kListX;
     for (std::size_t k = 0; k < tabs_.size(); k++) {
-        const int w = Canvas::text_width(setting_group_name(tabs_[k])) + 10;
+        const int w = Canvas::text_width(tab_name(k)) + 10;
         if (tabs_[k] == SettingGroup::kAssists) {
             x += 6; // set apart from the enhancements
         }
@@ -1224,8 +1256,7 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         if (on) {
             c.frame(bx, kTabsY, bw, kTabH, 1, assists ? kAssist : kBorder);
         }
-        c.text(bx + 5, kTabsY + 3, setting_group_name(tabs_[i]),
-               assists ? kAssist : (on ? kText : kDim));
+        c.text(bx + 5, kTabsY + 3, tab_name(i), assists ? kAssist : (on ? kText : kDim));
     }
     c.fill(kListX, kTabsY + kTabH, kListW, 1, kBorder);
     if (list_open_) {

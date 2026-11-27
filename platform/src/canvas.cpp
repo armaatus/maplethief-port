@@ -3,6 +3,12 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <map>
+#include <mutex>
+#include <tuple>
+#include <vector>
+
+#include "maplethief/cg.h"
 
 namespace maplethief::frontend {
 
@@ -252,11 +258,157 @@ void Canvas::triangle_outline(int x, int y, int w, int h, int t, Rgba c) {
     }
 }
 
+namespace {
+
+// A bundled font's glyph at one size (mt_cg_bundled_glyph), kept: the overlays draw the same
+// few characters frame after frame.
+struct BundledGlyph {
+    bool ok = false;
+    mt_cg_glyph g{};
+    std::vector<std::uint8_t> coverage;
+};
+
+const BundledGlyph &bundled_glyph(char32_t cp, int em, int max_width) {
+    static std::mutex lock;
+    static std::map<std::tuple<char32_t, int, int>, BundledGlyph> cache;
+    const std::lock_guard<std::mutex> hold(lock);
+    if (cache.size() >= 4096) {
+        cache.clear();
+    }
+    const auto key = std::make_tuple(cp, em, max_width);
+    auto it = cache.find(key);
+    if (it == cache.end()) {
+        BundledGlyph b;
+        b.ok = mt_cg_bundled_glyph(cp, em, max_width, &b.g, nullptr, 0) != 0;
+        b.coverage.resize(static_cast<std::size_t>(b.g.width) *
+                          static_cast<std::size_t>(b.g.height));
+        if (b.ok && !b.coverage.empty()) {
+            mt_cg_bundled_glyph(cp, em, max_width, &b.g, b.coverage.data(), b.coverage.size());
+        }
+        it = cache.emplace(key, std::move(b)).first;
+    }
+    return it->second; // std::map's nodes stay put until the cache is cleared, under the lock
+}
+
+} // namespace
+
+namespace {
+TextObserver g_text_observer = nullptr;
+void *g_text_observer_user = nullptr;
+} // namespace
+
+void set_text_observer(TextObserver fn, void *user) {
+    g_text_observer = fn;
+    g_text_observer_user = user;
+}
+
+std::int32_t next_code_point(std::string_view s, std::size_t *at) {
+    const std::size_t i = *at;
+    const auto c = static_cast<unsigned char>(s[i]);
+    if (c < 0x80) {
+        *at = i + 1;
+        return c;
+    }
+    std::size_t len = 0;
+    std::uint32_t cp = 0, min = 0;
+    if (c >= 0xC2 && c <= 0xDF) {
+        len = 2, cp = c & 0x1Fu, min = 0x80;
+    } else if (c >= 0xE0 && c <= 0xEF) {
+        len = 3, cp = c & 0x0Fu, min = 0x800;
+    } else if (c >= 0xF0 && c <= 0xF4) {
+        len = 4, cp = c & 0x07u, min = 0x10000;
+    }
+    bool ok = len != 0 && i + len <= s.size();
+    for (std::size_t k = 1; ok && k < len; k++) {
+        const auto b = static_cast<unsigned char>(s[i + k]);
+        ok = (b & 0xC0u) == 0x80u;
+        cp = (cp << 6) | (b & 0x3Fu);
+    }
+    ok = ok && cp >= min && cp <= 0x10FFFF && !(cp >= 0xD800 && cp < 0xE000);
+    *at = i + (ok ? len : 1);
+    return ok ? static_cast<std::int32_t>(cp) : -1;
+}
+
+int Canvas::char_columns(char32_t cp) {
+    const auto in = [cp](char32_t lo, char32_t hi) { return cp >= lo && cp <= hi; };
+    const bool wide = in(0x1100, 0x115F) || in(0x2E80, 0x303E) || in(0x3041, 0x33FF) ||
+                      in(0x3400, 0x4DBF) || in(0x4E00, 0x9FFF) || in(0xA960, 0xA97F) ||
+                      in(0xAC00, 0xD7A3) || in(0xF900, 0xFAFF) || in(0xFE30, 0xFE4F) ||
+                      in(0xFF00, 0xFF60) || in(0xFFE0, 0xFFE6) || in(0x20000, 0x3FFFD);
+    return wide ? 2 : 1;
+}
+
+int Canvas::columns(std::string_view s) {
+    int cols = 0;
+    for (std::size_t at = 0; at < s.size();) {
+        const std::int32_t cp = next_code_point(s, &at);
+        cols += cp < 0 ? 1 : char_columns(static_cast<char32_t>(cp));
+    }
+    return cols;
+}
+
+std::size_t Canvas::fit_columns(std::string_view s, int cols) {
+    int used = 0;
+    std::size_t at = 0;
+    while (at < s.size()) {
+        std::size_t next = at;
+        const std::int32_t cp = next_code_point(s, &next);
+        used += cp < 0 ? 1 : char_columns(static_cast<char32_t>(cp));
+        if (used > cols) {
+            break;
+        }
+        at = next;
+    }
+    return at;
+}
+
+std::string Canvas::fit_width(std::string_view s, int max_w, int size) {
+    if (text_width(s, size) <= max_w) {
+        return std::string(s);
+    }
+    const int cols = (max_w + size) / (6 * size) - 3; // "..." takes three cells
+    if (cols < 0) {
+        return {};
+    }
+    return std::string(s.substr(0, fit_columns(s, cols))) + "...";
+}
+
 int Canvas::text(int x, int y, std::string_view s, Rgba c, int size) {
     int pen = x;
-    for (const char ch : s) {
-        const unsigned u = static_cast<unsigned char>(ch);
-        const unsigned index = u >= 0x20 && u <= 0x7E ? u - 0x20 : '?' - 0x20;
+    int missing = 0;
+    for (std::size_t at = 0; at < s.size();) {
+        const std::int32_t cp = next_code_point(s, &at);
+        const int cells = cp < 0 ? 1 : char_columns(static_cast<char32_t>(cp));
+        unsigned index = '?' - 0x20;
+        if (cp >= 0x20 && cp <= 0x7E) {
+            index = static_cast<unsigned>(cp) - 0x20;
+        } else if (cp >= 0xA0) {
+            // The bundled fonts, at the image's pixels: centred in the cells' span (their last
+            // gap left out), on the 5x7 font's baseline.
+            const int span = (cells * 6 - 1) * size * scale_;
+            const BundledGlyph &b =
+                bundled_glyph(static_cast<char32_t>(cp), kFontEm * size * scale_, span);
+            if (b.ok) {
+                const int left = pen * scale_ + (span - b.g.width) / 2;
+                const int top = (y + 7 * size) * scale_ + b.g.top;
+                for (int gy = 0; gy < b.g.height; gy++) {
+                    for (int gx = 0; gx < b.g.width; gx++) {
+                        const unsigned cov = b.coverage[static_cast<std::size_t>(gy) *
+                                                            static_cast<std::size_t>(b.g.width) +
+                                                        static_cast<std::size_t>(gx)];
+                        if (cov != 0) {
+                            blend(left + gx, top + gy,
+                                  {c.r, c.g, c.b, static_cast<std::uint8_t>(c.a * cov / 255)});
+                        }
+                    }
+                }
+                pen += 6 * size * cells;
+                continue;
+            }
+        }
+        if (cp != '?' && index == '?' - 0x20) {
+            missing++;
+        }
         for (int gy = 0; gy < kGlyphHeight; gy++) {
             for (int gx = 0; gx < 5; gx++) {
                 if (kFont[index][gy][gx] == '#') {
@@ -264,13 +416,17 @@ int Canvas::text(int x, int y, std::string_view s, Rgba c, int size) {
                 }
             }
         }
-        pen += 6 * size;
+        pen += 6 * size * cells;
     }
-    return text_width(s, size);
+    const int w = text_width(s, size);
+    if (g_text_observer != nullptr) {
+        g_text_observer(g_text_observer_user, {x, y, w, kGlyphHeight * size, s, missing});
+    }
+    return w;
 }
 
 int Canvas::text_width(std::string_view s, int size) {
-    return s.empty() ? 0 : static_cast<int>(s.size()) * 6 * size - size;
+    return s.empty() ? 0 : columns(s) * 6 * size - size;
 }
 
 } // namespace maplethief::frontend

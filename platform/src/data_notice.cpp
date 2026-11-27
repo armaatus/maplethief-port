@@ -6,6 +6,8 @@
 #include <mutex>
 #include <utility>
 
+#include "canvas.h"
+
 namespace maplethief::frontend {
 
 namespace {
@@ -55,8 +57,12 @@ std::vector<std::string> wrap_notice(const std::string &text, std::size_t column
         }
         std::string word = text.substr(i, end - i);
         i = end;
-        // A word that fits on the line, or on a line of its own.
-        if (!line.empty() && line.size() + 1 + word.size() <= columns) {
+        // A word that fits on the line, or on a line of its own. Columns are the overlays'
+        // cells (Canvas::columns: a Hangul syllable two, #372).
+        const auto cells = [](const std::string &s) {
+            return static_cast<std::size_t>(Canvas::columns(s));
+        };
+        if (!line.empty() && cells(line) + 1 + cells(word) <= columns) {
             line += ' ' + word;
             continue;
         }
@@ -65,9 +71,12 @@ std::vector<std::string> wrap_notice(const std::string &text, std::size_t column
             line.clear();
         }
         // Longer than a line: broken at the edge, after its last separator before it if any.
-        while (word.size() > columns) {
-            std::size_t cut = columns;
-            const std::size_t sep = word.find_last_of("/\\", columns - 1);
+        while (cells(word) > columns) {
+            std::size_t cut = Canvas::fit_columns(word, static_cast<int>(columns));
+            if (cut == 0) { // one character wider than the line
+                next_code_point(word, &cut);
+            }
+            const std::size_t sep = word.find_last_of("/\\", cut - 1);
             if (sep != std::string::npos && sep > 0) {
                 cut = sep + 1;
             }

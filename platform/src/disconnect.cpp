@@ -180,13 +180,16 @@ void DisconnectPause::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_
     const auto centred = [&](int ty, const std::string &s, Rgba colour, int size) {
         c.text(x + (kBoxW - Canvas::text_width(s, size)) / 2, ty, s, colour, size);
     };
-    centred(y + 12, tr(Txt::disconnect_title), kTitle, 2);
+    // A translation is cut to the box (#372).
+    centred(y + 12, Canvas::fit_width(tr(Txt::disconnect_title), kBoxW - 8, 2), kTitle, 2);
     const std::string pad = tr(Txt::disconnect_pad, {glyph_set_name(glyph_set_for(lost_type_))}) +
                             (lost_name_.empty() ? std::string() : ": " + lost_name_);
-    centred(y + 36, pad.size() > 46 ? pad.substr(0, 45) + "~" : pad, kDim, 1);
-    centred(y + 54, tr(Txt::disconnect_reconnect), kText, 1);
+    centred(y + 36,
+            Canvas::columns(pad) > 46 ? pad.substr(0, Canvas::fit_columns(pad, 45)) + "~" : pad,
+            kDim, 1);
+    centred(y + 54, Canvas::fit_width(tr(Txt::disconnect_reconnect), kBoxW - 8), kText, 1);
     // The lost pad's glyphs: its face buttons and Start, which close it from another pad too.
-    const std::string label = tr(Txt::disconnect_other_pad);
+    const std::string label = Canvas::fit_width(tr(Txt::disconnect_other_pad), kBoxW - 8 - 60);
     const Control buttons[] = {
         {ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_SOUTH},
         {ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_EAST},
