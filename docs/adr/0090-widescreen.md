@@ -158,7 +158,7 @@ Until now the wings were drawn from the GL frame through SDL's own texture shade
 
 ## Addendum: past 568 points (#387, 2026-11-27)
 
-568 is not a limit of the code: a local build at 768 played `play.widescreen_on` and `play.widescreen_pad_on` tick-equal to the 3:2 runs. [ADR 0214](0214-widescreen-past-568-points.md) adds a `fill` value up to 768 points, capped by the window's shape, and tiles the nine backdrops that repeat every 160 points instead of stretching them.
+568 is not a limit of the code: a local build at 768 played `play.widescreen_on` and `play.widescreen_pad_on` tick-equal to the 3:2 runs. [ADR 0214](0214-widescreen-past-568-points.md) adds a `fill` value up to 768 points, capped by the window's shape, and tiles the nine backdrops that repeat every 160 points instead of stretching them. Built in #425 (see ADR 0214's addendum): the backdrop hook now tiles under `auto` too.
 
 ## Addendum: scenes at the field's width (#396, 2026-11-27)
 
