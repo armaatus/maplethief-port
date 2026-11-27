@@ -1804,6 +1804,10 @@ constexpr SwitchDecision kSwitchActions[] = {
     {"achievements", true, ""},
     {"keypad_layout_edit", true, "the editor takes the pad"},
     {"update_notice", false, "no update check"},
+    {"dump_textures", true, "into sdmc:/switch/maplethief/texture-dumps (#371)"},
+    {"build_texture_pack", true, "into texture-packs/, which the pack rows list"},
+    {"export_text", true, "into text-packs/, to translate on a computer"},
+    {"check_packs", true, "the verdicts in a list, the reports in the log"},
     {"quit", true, "back to the Homebrew Menu"},
 };
 

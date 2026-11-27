@@ -197,7 +197,7 @@ void StartQuestion::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t 
             c.frame(kListX, by, kListW, kRowH - 4, 1, kRowFrame);
         }
         c.text(kListX + 8, by + 6, std::to_string(i + 1), on ? kHeader : kDim, 2);
-        c.text(kListX + 30, by + 6, buttons_[i], kText, 2);
+        c.text(kListX + 30, by + 6, Canvas::fit_width(buttons_[i], kListW - 38, 2), kText, 2);
     }
     // The hints, with the pad's own glyphs.
     int x = kListX;
@@ -211,7 +211,13 @@ void StartQuestion::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t 
     const auto button = [&](int b) {
         x += draw_glyph(c, x, kHintY, Control{ControlKind::kGamepadButton, b}, type, face) + 2;
     };
-    const auto words = [&](std::string_view s) { x += c.text(x, kHintY + 3, s, kDim) + 8; };
+    // A translation longer than the room left is cut; none at all once the room is gone.
+    const auto words = [&](std::string_view s) {
+        const std::string t = Canvas::fit_width(s, kListX + kListW - x);
+        if (!t.empty()) {
+            x += c.text(x, kHintY + 3, t, kDim) + 8;
+        }
+    };
     key(SDLK_UP);
     key(SDLK_DOWN);
     x +=

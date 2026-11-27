@@ -51,6 +51,13 @@ def test_allowlist_pins_the_committed_files():
     sources = {
         "MapleThief.app/Contents/Resources/MapleThief.icns": ICON_DIR / "MapleThief.icns",
         "icon.png": ICON_DIR / "icon.png",
+        # The same icon where the AppImage and the Flatpak bundle name it (ADR 0193).
+        "io.github.armaatus.maplethief.png": ICON_DIR / "icon.png",
+        "files/icon.png": ICON_DIR / "icon.png",
+        "files/share/icons/hicolor/256x256/apps/io.github.armaatus.maplethief.png": ICON_DIR
+        / "icon.png",
+        "export/share/icons/hicolor/256x256/apps/io.github.armaatus.maplethief.png": ICON_DIR
+        / "icon.png",
     }
     # Drawn by the Switch build: the NRO alone or in a kit, and in the Switch player zip (#243).
     built = {

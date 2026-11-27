@@ -86,9 +86,9 @@
 //   pause_unfocused = off
 //   # the game's language: en | ko (MAPLETHIEF_LANGUAGE overrides it; from the next start)
 //   language = en
-//   # a directory of translated text in UTF-8 (python3 -m mtport.textpack export makes ...)
+//   # a directory of translated text in UTF-8 (the menu's Other tab: Export text makes ...)
 //   text_pack =
-//   # a directory of HD textures made from your own --dump-textures (python3 -m ...); empty: none
+//   # a directory of HD textures made from your own texture dump (the menu's Other tab: ...)
 //   texture_pack =
 //   # how textures are sampled at render scale 2 and up: game (smooth, the device's look) | ...
 //   texture_filter = game

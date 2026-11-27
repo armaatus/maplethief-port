@@ -106,6 +106,8 @@ constexpr bool action_shown(const MenuActionInfo &a,
 //                            needs kCapUpdateFetch: not on the Switch)
 //   achievements   Gameplay  #154: the summary, then each local achievement in turn
 //   keypad_layout_edit  Controls  #159: the touch key pad editor (keypad_editor.h)
+//   dump_textures, build_texture_pack, export_text, check_packs  Other  #371: the pack tools
+//                            (pack_tools.h), writing beside game/ in the pack folders
 //   quit           every tab #179: "Quit MapleThief?" then the same quit as Cmd-Q
 //                            (SDL_EVENT_QUIT: applicationWillTerminate:, autosave = on_quit
 //                            first; on the Switch back to the Homebrew Menu). Needs kCapQuit:
@@ -321,6 +323,8 @@ class SettingsMenu {
     int tab_at(float x, float y) const;
     // Where tab i is drawn (x, width), in screen points.
     std::pair<int, int> tab_box(std::size_t i) const;
+    // Tab i's name as the bar shows it: cut when the names would not fit (tab_cells).
+    std::string tab_name(std::size_t i) const;
     unsigned opens() const { return opens_; }
     // What draw() writes, as text: the tab's note line, item i's label and value, the help of the
     // selected item (unwrapped). dump(): the tab, its note, the visible rows ("> " selected,

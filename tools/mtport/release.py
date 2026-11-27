@@ -39,6 +39,14 @@ The rules:
 * **the guest symbol table** (``# maplethief symbols`` text, recomp/symbols.py, ADR 0030):
   function names of the game, whatever the file is called.
 
+The Linux player AppImage and Flatpak bundle (ADR 0193), given on their own or found inside a
+kit, are opened the same way: an AppImage (``*.AppImage``) becomes ``<name>.AppImage``, its
+runtime, which must be the pinned one of :data:`APPIMAGE_RUNTIMES`, plus every file of its
+SquashFS image below ``<name>.AppImage/`` (mtport.squashfs); a ``*.flatpak`` bundle becomes
+every file of the tree it installs below ``<name>.flatpak/`` (mtport.flatpak_bundle, each
+object checked against its checksum), plus any other bytes its header carries below
+``<name>.flatpak/.bundle/``.
+
 A Nintendo Switch NRO (ADR 0138), given on its own or found inside a kit, is split into its
 parts first (mtport.nro, docs/formats/nro.md): ``<name>.nro`` stands for its code, and its
 icon, NACP and RomFS become ``<name>.nro/icon.jpg``, ``<name>.nro/control.nacp`` and
@@ -55,6 +63,7 @@ CLI::
     python3 -m mtport.release tag vX.Y.Z[-rc.N]         prints the version and release|prerelease
     python3 -m mtport.release kits VERSION              the expected kit file names, one a line
     python3 -m mtport.release players VERSION           the expected player build file names
+    python3 -m mtport.release linux-packages VERSION    the Linux AppImage and Flatpak bundle
                                                         (the three kits' platforms and switch)
     python3 -m mtport.release sha256 FILE...            writes FILE.sha256 next to each FILE
     python3 -m mtport.release sums OUT FILE.sha256...   merges them into OUT (SHA256SUMS)
@@ -99,7 +108,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from mtport import nro
+from mtport import flatpak_bundle, nro, squashfs
 
 REPO = Path(__file__).resolve().parents[2]
 # The directories derived from the IPA (CLAUDE.md "What goes in git"), checked by hash.
@@ -121,6 +130,7 @@ KIT_PLATFORMS = (
 # plus the Nintendo Switch's (#243, ADR 0138), whose zip holds switch/maplethief/MapleThief.nro.
 # The release has no Switch kit: the kits are release.yml's.
 PLAYER_PLATFORMS = (*KIT_PLATFORMS, ("switch", "zip"))
+LINUX_PACKAGES = ("AppImage", "flatpak")  # beside the Linux player tarball (ADR 0193)
 MODES = ("kit", "player")
 
 # The port's own icon files (platform/icon/, drawn by tools/mtport/appicon.py, ADR 0125): the
@@ -140,7 +150,28 @@ ICON_ALLOWLIST = {
     "switch/maplethief/MapleThief.nro/icon.jpg": (
         "29463fb64a285adce4ec8d4c4e1a258513353ccb0728ab61c59fdfe704f20dff"
     ),
+    # platform/icon/icon.png again, where the AppImage and the Flatpak name it (ADR 0193,
+    # mtport.linux_package): the AppDir's top-level icon, and the Flatpak's under files/share
+    # and export/share
+    "io.github.armaatus.maplethief.png": (
+        "cf86db67e6aa23f8b24a63bf8a52da77ba4f5df9cc9c650036f6e3286cf81786"
+    ),
+    "files/icon.png": "cf86db67e6aa23f8b24a63bf8a52da77ba4f5df9cc9c650036f6e3286cf81786",
+    "files/share/icons/hicolor/256x256/apps/io.github.armaatus.maplethief.png": (
+        "cf86db67e6aa23f8b24a63bf8a52da77ba4f5df9cc9c650036f6e3286cf81786"
+    ),
+    "export/share/icons/hicolor/256x256/apps/io.github.armaatus.maplethief.png": (
+        "cf86db67e6aa23f8b24a63bf8a52da77ba4f5df9cc9c650036f6e3286cf81786"
+    ),
 }
+# The AppImage runtimes an AppImage may carry, by SHA-256: AppImage/type2-runtime's release
+# 20251108 (x86_64, aarch64), pinned in tools/containers/linux-game/Dockerfile (ADR 0193).
+APPIMAGE_RUNTIMES = {
+    "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d": "20251108 x86_64",
+    "00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444": "20251108 aarch64",
+}
+APPIMAGE_SUFFIX = ".appimage"
+FLATPAK_SUFFIX = ".flatpak"
 
 FORBIDDEN_DIRS = {"work", "assets-out", "build", "dist", "CMakeFiles", "_deps", "Testing"}
 # The one build/ directory that is ours: the Markdown pages of the build docs, which a kit carries.
@@ -309,17 +340,63 @@ def nro_members(member: Member) -> list[Member]:
     return out
 
 
+def _member_of(name: str, kind: str, mode: int, data: bytes, target: str) -> Member:
+    if kind == "dir":
+        return Member(name, "dir")
+    if kind == "symlink":
+        return Member(name, "symlink", target=target)
+    if kind == "file" and stat.S_ISREG(mode):
+        return Member(name, "file", data)
+    return Member(name, "other")
+
+
+def appimage_members(member: Member) -> list[Member]:
+    """An AppImage split into its runtime (under its own name) and its files (below it)."""
+    try:
+        runtime, entries = squashfs.appimage_parts(member.data)
+    except squashfs.SquashfsError as e:
+        raise GuardError(f"{member.name}: not an AppImage the guard can read: {e}") from e
+    out = [Member(member.name, "file", runtime)]
+    for e in entries:
+        out.append(_member_of(f"{member.name}/{e.path}", e.kind, e.mode, e.data, e.target))
+    return out
+
+
+def flatpak_members(member: Member) -> list[Member]:
+    """A Flatpak bundle as the files of its tree (below its name) and the other bytes of its
+    header (below ``<name>/.bundle/``)."""
+    try:
+        bundle = flatpak_bundle.read(member.data)
+    except flatpak_bundle.BundleError as e:
+        raise GuardError(f"{member.name}: not a Flatpak bundle the guard can read: {e}") from e
+    out = [
+        _member_of(f"{member.name}/{e.path}", e.kind, e.mode, e.data, e.target)
+        for e in bundle.entries
+    ]
+    out += [
+        Member(f"{member.name}/.bundle/{k}", "file", v) for k, v in sorted(bundle.extra.items())
+    ]
+    return out
+
+
 def _expand_nros(entries: Iterable[Member]) -> Iterator[Member]:
     for m in entries:
-        if m.kind == "file" and m.name.lower().endswith(NRO_SUFFIX):
+        name = m.name.lower()
+        if m.kind == "file" and name.endswith(NRO_SUFFIX):
             yield from nro_members(m)
+        elif m.kind == "file" and name.endswith(APPIMAGE_SUFFIX):
+            yield from appimage_members(m)
+        elif m.kind == "file" and name.endswith(FLATPAK_SUFFIX):
+            yield from flatpak_members(m)
         else:
             yield m
 
 
 def members(path: Path) -> Iterator[Member]:
-    """The entries of a kit: a directory, a ``.zip`` or a tar archive (``.tar.gz``), or an NRO
-    on its own; every NRO among them split into its parts (:func:`nro_members`)."""
+    """The entries of a kit: a directory, a ``.zip`` or a tar archive (``.tar.gz``), or an NRO,
+    AppImage or Flatpak bundle on its own; every NRO, AppImage and Flatpak bundle among them
+    split into its parts (:func:`nro_members`, :func:`appimage_members`,
+    :func:`flatpak_members`)."""
     return _expand_nros(_members(path))
 
 
@@ -328,7 +405,7 @@ def _members(path: Path) -> Iterator[Member]:
         return _dir_members(path)
     if not path.is_file():
         raise GuardError(f"{path}: no such file")
-    if path.name.lower().endswith(NRO_SUFFIX):
+    if path.name.lower().endswith((NRO_SUFFIX, APPIMAGE_SUFFIX, FLATPAK_SUFFIX)):
         with path.open("rb") as f:
             return iter([Member(path.name, "file", _read_capped(f, path.name))])
     if zipfile.is_zipfile(path):
@@ -511,6 +588,11 @@ def check_member(
         return out
     if base in BUILD_TREE_FILES:
         found("path", "a CMake build-tree file")
+    if base.lower().endswith(APPIMAGE_SUFFIX) and member.kind == "file":
+        # appimage_members put the runtime under the AppImage's own name.
+        digest = hashlib.sha256(member.data).hexdigest()
+        if digest not in APPIMAGE_RUNTIMES:
+            found("path", f"an AppImage runtime other than the pinned ones (SHA-256 {digest})")
     if base.lower().endswith(ARCHIVE_SUFFIXES):
         found("path", "an IPA or nested archive (the guard can't look inside)")
     if base.lower().endswith(MEDIA_SUFFIXES) and not (
@@ -592,6 +674,12 @@ def player_names(version: str) -> list[str]:
     """The player build file names of a release, one per platform (cmake/Packaging.cmake with
     MAPLETHIEF_PLAYER_BUILD, ADR 0125), the Nintendo Switch's last."""
     return [f"MapleThief-{version}-{plat}.{ext}" for plat, ext in PLAYER_PLATFORMS]
+
+
+def linux_package_names(version: str) -> list[str]:
+    """The Linux player AppImage and Flatpak bundle of a release (ADR 0193): the same files as
+    the Linux player tarball, repacked (mtport.linux_package). Not itch.io channels."""
+    return [f"MapleThief-{version}-linux-x86_64.{ext}" for ext in LINUX_PACKAGES]
 
 
 def sha256_file(path: Path) -> str:
@@ -874,6 +962,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("version")
     p = sub.add_parser("players", help="print the expected player build file names of VERSION")
     p.add_argument("version")
+    p = sub.add_parser(
+        "linux-packages", help="print the Linux AppImage's and Flatpak bundle's names of VERSION"
+    )
+    p.add_argument("version")
     p = sub.add_parser("sha256", help="write FILE.sha256 next to each FILE")
     p.add_argument("files", nargs="+", metavar="FILE")
     p = sub.add_parser("sums", help="merge .sha256 files into OUT")
@@ -913,9 +1005,9 @@ def main(argv: list[str] | None = None) -> int:
             version, pre = parse_tag(args.tag)
             print(version)
             print("prerelease" if pre else "release")
-        elif args.cmd in ("kits", "players"):
+        elif args.cmd in ("kits", "players", "linux-packages"):
             parse_tag("v" + args.version)
-            names = kit_names if args.cmd == "kits" else player_names
+            names = {"kits": kit_names, "players": player_names}.get(args.cmd, linux_package_names)
             print("\n".join(names(args.version)))
         elif args.cmd == "sha256":
             for f in args.files:
@@ -931,7 +1023,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1 if failures else 0
     except (ValueError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
-        return 2 if args.cmd in ("tag", "kits", "players") else 1
+        return 2 if args.cmd in ("tag", "kits", "players", "linux-packages") else 1
     return 0
 
 

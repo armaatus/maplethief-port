@@ -104,7 +104,9 @@ add_library(
     src/stubs/storekit.cpp
     src/stubs/stubs.cpp
     src/texpack/texpack.cpp
+    src/textpack/export.cpp
     src/textpack/pack_manifest.cpp
+    src/textpack/packcheck.cpp
     src/textpack/strings_file.cpp
     src/textpack/textpack.cpp
     src/uikit/app.cpp

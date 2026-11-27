@@ -1,12 +1,12 @@
 # Linux and Steam Deck
 
-How to build the game for Linux x86_64 (or aarch64) from your own IPA and play it on a Linux PC or a Steam Deck as a non-Steam game. The decisions behind it are in [ADR 0065](../adr/0065-linux-and-steam-deck-build.md) (#84). If you only want to play, the release's player download is easier: [Download and play](README.md#linux-and-steam-deck).
+How to build the game for Linux x86_64 (or aarch64) from your own IPA and play it on a Linux PC or a Steam Deck as a non-Steam game. The decisions behind it are in [ADR 0065](../adr/0065-linux-and-steam-deck-build.md) (#84), [ADR 0193](../adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md) (#349: glibc 2.35, the AppImage and the Flatpak) and [ADR 0194](../adr/0194-windows-arm64-and-linux-aarch64-builds.md) (#362: aarch64). If you only want to play, the release's player download is easier: [Download and play](README.md#linux-and-steam-deck).
 
 Three different things are called "the Linux build":
 
 | | What | Where it comes from | Shared? |
 |---|---|---|---|
-| **Player download** | `MapleThief-<version>-linux-x86_64.tar.gz` (on ARM64: `-linux-aarch64`): the game's program without any of its files; it imports your IPA on first launch ([ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md)) | `scripts/linux-game player`, released by `scripts/release` | Yes, it is a release asset |
+| **Player download** | `MapleThief-<version>-linux-x86_64.tar.gz`, `.AppImage` or `.flatpak` (on ARM64: `-linux-aarch64.tar.gz`, no AppImage or Flatpak): the game's program without any of its files; it imports your IPA on first launch ([ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md), [ADR 0193](../adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md)) | `scripts/linux-game player`, released by `scripts/release` | Yes, they are release assets |
 | **Port kit** | `MapleThief-kit-<version>-linux-x86_64.tar.gz` (on ARM64: `-linux-aarch64`): the platform shell (no game code), the runtime, the tools ([ADR 0024](../adr/0024-release-contents-and-flow.md)) | `cmake --workflow --preset linux-release`, released by `scripts/release` | Yes, it is a release asset |
 | **Game folder** | `MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz`: the game, built from your IPA | `scripts/linux-game build`, into `build/linux-game/` | **No.** It contains the game. Keep it to your own machines |
 
@@ -22,7 +22,7 @@ python3 -m recomp all      # work/gen/
 scripts/linux-game build   # build/linux-game/MapleThief-game-0.0.1-linux-x86_64{/,.tar.gz}
 ```
 
-`scripts/linux-game build` runs in Docker by default, on a Mac (OrbStack or Docker Desktop) or on Linux. It uses the image of [`tools/containers/linux-game/`](../../tools/containers/linux-game/Dockerfile): Ubuntu 24.04 with GCC 14, pinned like the CI image, so the result runs on **glibc 2.39 or newer**. On Apple silicon it runs x86_64 under Rosetta and takes about five minutes. It exports a clean copy of `HEAD` (`--worktree` includes your uncommitted changes to tracked files) and mounts `work/` read-only. Then it configures `linux-release` with the generated code, builds `MapleThief`, and runs `platform.linux_portable` (NEEDED is only glibc, no symbol newer than `GLIBC_2.39`), `platform.version` and `platform.smoke` before it stages the folder.
+`scripts/linux-game build` runs in Docker by default, on a Mac (OrbStack or Docker Desktop) or on Linux. It uses the image of [`tools/containers/linux-game/`](../../tools/containers/linux-game/Dockerfile): Ubuntu 22.04 with GCC 14, pinned like the CI image, so the result runs on **glibc 2.35 or newer**: Ubuntu 22.04, Debian 12 and anything newer, and SteamOS 3. On Apple silicon it runs x86_64 under Rosetta and takes about five minutes. It exports a clean copy of `HEAD` (`--worktree` includes your uncommitted changes to tracked files) and mounts `work/` read-only. Then it configures `linux-release` with the generated code, builds `MapleThief`, and runs `platform.linux_portable` (NEEDED is only glibc, no symbol newer than `GLIBC_2.35`), `platform.version` and `platform.smoke` before it stages the folder.
 
 On a Linux machine, `scripts/linux-game build --native` uses your own compiler and checkout instead (GCC 13+ or Clang 17+, the packages in [Build from source](../build/README.md)). The result then needs your machine's glibc or newer.
 
@@ -48,9 +48,32 @@ scripts/linux-game check                       # the newest build/linux-game/*.t
 scripts/linux-game check --image debian:13     # any other image
 ```
 
-This unpacks the tarball and runs it in a stock `ubuntu:24.04` image (pinned by digest) with no package installed. First `MapleThief.sh --version`, then the game headless with SDL's dummy video and audio drivers: a tap on Play at 3 s and 150 window frames into the first map. It must exit 0. Its read-backs land in `build/linux-game/check/capture/` (git-ignored, game art: don't commit them).
+This unpacks the tarball and runs it in a stock `ubuntu:22.04` image (pinned by digest) with no package installed. First `MapleThief.sh --version`, then the game headless with SDL's dummy video and audio drivers: a tap on Play at 3 s and 150 window frames into the first map. It must exit 0. Its read-backs land in `build/linux-game/check/capture/` (git-ignored, game art: don't commit them).
+
+### The player downloads
+
+`scripts/linux-game player` builds the release's three Linux downloads in the same image: the tarball, the AppImage and the Flatpak bundle, from the same files ([ADR 0193](../adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md)). Two checks run them:
+
+```sh
+scripts/linux-game check-player     # the tarball in stock Ubuntu 22.04 and Debian 12
+scripts/linux-game check-packages   # the AppImage and the Flatpak under Xvfb, to the import screen
+```
+
+`check-packages` installs Flathub's Freedesktop runtime into a Docker volume, about 2 GB, and removes it again (`--keep-flatpak-runtime` keeps it).
 
 ## Play it on Linux
+
+The release has three Linux downloads with the same game in them. Pick one:
+
+| Download | Start it | Data (saves, settings, the imported game) |
+|---|---|---|
+| `MapleThief-<version>-linux-x86_64.tar.gz` | unpack, `./MapleThief.sh` | `data/` in the folder |
+| `MapleThief-<version>-linux-x86_64.AppImage` | `chmod +x` it, then run it | `data/` next to the `.AppImage` file |
+| `MapleThief-<version>-linux-x86_64.flatpak` | `flatpak install --user MapleThief-<version>-linux-x86_64.flatpak`, then your menu or `flatpak run io.github.armaatus.maplethief` | `~/.var/app/io.github.armaatus.maplethief/data/MapleThief/` |
+
+The AppImage needs FUSE 3, which desktops and SteamOS have. Without it, run it with `--appimage-extract-and-run` (or `APPIMAGE_EXTRACT_AND_RUN=1`). `./MapleThief-….AppImage --install-desktop` adds a menu entry that starts the AppImage where it is. The Flatpak installs the Freedesktop runtime from Flathub on first install and adds its own menu entry. It can read your Downloads folder for the IPA when the file dialog can't open. It isn't on Flathub ([ADR 0193](../adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md)). Check any download against the release's `SHA256SUMS`.
+
+The tarball, unpacked:
 
 ```sh
 tar -xzf MapleThief-game-0.0.1-linux-x86_64.tar.gz
@@ -73,6 +96,8 @@ The Deck runs MapleThief natively, as a non-Steam game. No Proton is involved. T
 5. **Add it to Steam**: Steam → Games → *Add a Non-Steam Game to My Library…* → tick **MapleThief**. If it isn't listed, use *Browse…* and pick `MapleThief.sh`. The shortcut then shows the game's icon.
 6. In the shortcut's **Properties → Compatibility**, leave *Force the use of a specific Steam Play compatibility tool* **off**. It's a native Linux program.
 7. Back in **Game Mode**, start MapleThief from the library.
+
+The **AppImage** works the same way and is one file: put it in `~/Games/`, make it executable (Properties → Permissions in Dolphin, or `chmod +x`), run it once in Desktop Mode to import your IPA, then `--install-desktop` and add **MapleThief** to Steam. Its data is in `~/Games/data/`. Everything in your home folder survives SteamOS updates. The **Flatpak** survives them too. Install it with `flatpak install --user` in Konsole; it adds itself to the menu, so step 4 isn't needed.
 
 Your saves and settings are in `data/` in that folder. To update, unpack the new version next to the old one, move `data/` and `game/` into it, and point the Steam shortcut at the new `MapleThief.sh` (or run `--install-desktop` again from the new folder and add it again). Removing it: [Uninstall and reset](uninstall-and-reset.md#linux-and-steam-deck).
 
@@ -109,11 +134,10 @@ The back grips (L4, L5, R4, R5) have no binding by default. In the controller se
 ### If it doesn't start
 
 - Start it from Konsole in Desktop Mode (`./MapleThief.sh`) to see its log.
-- ``version `GLIBC_2.xx' not found``: the system's glibc is older than 2.39. Update SteamOS (or the distribution).
+- ``version `GLIBC_2.xx' not found``: the system's glibc is older than 2.35 (Ubuntu 20.04, Debian 11). Update the distribution, or use the Flatpak, which brings its own.
 - No sound or a black window: try `SDL_AUDIO_DRIVER=pulseaudio` or `SDL_VIDEO_DRIVER=x11` as launch options, written as `SDL_VIDEO_DRIVER=x11 %command%`.
 
 ## Not done yet
 
-- **The Deck itself** hasn't been checked yet (#84, `needs-human`). That covers Game Mode's window, the default controller layout, the touchscreen and the glibc of current SteamOS.
-- No AppImage and no Flatpak ([ADR 0065](../adr/0065-linux-and-steam-deck-build.md)).
-- aarch64 (ARM64): the release has a player download and a kit (`-linux-aarch64`, [ADR 0194](../adr/0194-windows-arm64-and-linux-aarch64-builds.md)), and `--arch arm64` builds an aarch64 game folder in the same way. The test suite runs in the arm64 container and on GitHub's ARM64 runner; the build hasn't been played on ARM64 hardware yet (an ARM64 Linux laptop or board). The Steam Deck is x86_64.
+- **The Deck itself** hasn't been checked yet (#84, `needs-human`). That covers Game Mode's window, the default controller layout, the touchscreen, the glibc of current SteamOS, and the AppImage and Flatpak there (#349).
+- aarch64 (ARM64): the release has a player tarball and a kit (`-linux-aarch64`, [ADR 0194](../adr/0194-windows-arm64-and-linux-aarch64-builds.md)), built in the same glibc 2.35 image, and `--arch arm64` builds an aarch64 game folder in the same way. There is no aarch64 AppImage or Flatpak ([ADR 0193](../adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md)). The test suite runs in the arm64 container and on GitHub's ARM64 runner; the build hasn't been played on ARM64 hardware yet (an ARM64 Linux laptop or board). The Steam Deck is x86_64.

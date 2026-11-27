@@ -246,7 +246,7 @@ An app you built yourself has no quarantine attribute, so it opens without askin
 
 ## Linux and Steam Deck
 
-`just build linux` (into `dist/linux/`), or `scripts/linux-game build` by hand (into `build/linux-game/`), builds the game in a pinned Ubuntu 24.04 container, on a Mac too, as `MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` ([ADR 0065](../adr/0065-linux-and-steam-deck-build.md)). It holds the launcher `MapleThief.sh`, the executable (static libstdc++, needs only glibc 2.39+) and a copy of your bundle. `scripts/linux-game check` runs it in a stock Ubuntu 24.04 image, and `--native` builds on your own Linux machine with your compiler. [Linux and Steam Deck](../play/linux-and-steam-deck.md) has the Steam Deck steps.
+`just build linux` (into `dist/linux/`), or `scripts/linux-game build` by hand (into `build/linux-game/`), builds the game in a pinned Ubuntu 22.04 container, on a Mac too, as `MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` ([ADR 0065](../adr/0065-linux-and-steam-deck-build.md)). It holds the launcher `MapleThief.sh`, the executable (static libstdc++, needs only glibc 2.35+) and a copy of your bundle. `scripts/linux-game check` runs it in a stock Ubuntu 22.04 image, and `--native` builds on your own Linux machine with your compiler. [Linux and Steam Deck](../play/linux-and-steam-deck.md) has the Steam Deck steps.
 
 ## Nintendo Switch
 

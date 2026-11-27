@@ -29,8 +29,11 @@
 
 #include "cg/cg_objects.h"
 #include "diag/diag_internal.h"
+#include "maplethief/packcheck.h"
 #include "maplethief/saves.h"
+#include "stubs/json.h"
 #include "texpack/texpack_internal.h"
+#include "textpack/packcheck_internal.h"
 
 namespace {
 
@@ -236,27 +239,24 @@ mt_texpack_stats g_stats{};
 u32 g_max_files = MT_TEXPACK_MAX_FILES; // the files a pack indexes (lower in a test)
 
 // Reads and checks a pack file for an image of want_w x want_h (the upload's or the UIKit
-// image's size): a PNG k times that size. Decoded into g_pixels (straight or as stored),
-// its factor into *k_out.
-bool load(File &file, u32 want_w, u32 want_h, const char *what, u32 *k_out) {
-    if (file.bad) {
-        return false;
-    }
+// image's size): a PNG k times that size. Decoded into *pixels (straight or as stored), its
+// factor into *k_out; false with *why. The check (mt_texpack_check) asks the same.
+bool read_checked(const std::string &path, u32 want_w, u32 want_h, std::vector<u8> *pixels,
+                  u32 *k_out, std::string *why) {
     std::vector<u8> bytes;
-    std::string why;
     u32 w = 0, h = 0;
-    bool ok = read_file(host_path(file.path), bytes, &why);
+    bool ok = read_file(host_path(path), bytes, why);
     if (ok && !mt_cg::png_info(bytes.data(), bytes.size(), &w, &h)) {
-        why = "is no PNG (or is cut before its image data)";
+        *why = "is no PNG (or is cut before its image data)";
         ok = false;
     }
     const u32 k = ok ? w / want_w : 0u;
     if (ok && (k < 1 || k > MT_GFX_MAX_SCALE || w != k * want_w || h != k * want_h ||
                w > MT_GFX_MAX_SIZE || h > MT_GFX_MAX_SIZE)) {
-        why = std::to_string(w) + "x" + std::to_string(h) + " is not k times " +
-              std::to_string(want_w) + "x" + std::to_string(want_h) + " (k 1.." +
-              std::to_string(MT_GFX_MAX_SCALE) + ", at most " + std::to_string(MT_GFX_MAX_SIZE) +
-              ")";
+        *why = std::to_string(w) + "x" + std::to_string(h) + " is not k times " +
+               std::to_string(want_w) + "x" + std::to_string(want_h) + " (k 1.." +
+               std::to_string(MT_GFX_MAX_SCALE) + ", at most " + std::to_string(MT_GFX_MAX_SIZE) +
+               ")";
         ok = false;
     }
     mt_cg::Decoded d;
@@ -264,17 +264,30 @@ bool load(File &file, u32 want_w, u32 want_h, const char *what, u32 *k_out) {
     if (ok &&
         (!mt_cg::png_decode(bytes.data(), bytes.size(), &d, &error) || d.width != w ||
          d.height != h || !d.pixels || d.pixels->size() != static_cast<std::size_t>(w) * h * 4u)) {
-        why = "does not decode (" + error + ")";
+        *why = "does not decode (" + error + ")";
         ok = false;
     }
     if (!ok) {
+        return false;
+    }
+    pixels->assign(d.pixels->begin(), d.pixels->end());
+    *k_out = k;
+    return true;
+}
+
+// read_checked for a file of a pack open now, into g_pixels; a rejected file is logged once
+// and never read again (the next pack is asked).
+bool load(File &file, u32 want_w, u32 want_h, const char *what, u32 *k_out) {
+    if (file.bad) {
+        return false;
+    }
+    std::string why;
+    if (!read_checked(file.path, want_w, want_h, &g_pixels, k_out, &why)) {
         file.bad = true;
         logf("texpack: %s %s %s: rejected, the game's %s kept", what, file.path.c_str(),
              why.c_str(), what);
         return false;
     }
-    g_pixels.assign(d.pixels->begin(), d.pixels->end());
-    *k_out = k;
     return true;
 }
 
@@ -460,6 +473,67 @@ bool regular_file(const fs::directory_entry &entry, Links *links) {
     return !ec && fs::is_regular_file(st);
 }
 
+// What indexing a pack passed over: names that are no pack file, files past the cap, links.
+struct Index {
+    u64 skipped = 0;
+    Links links;
+    std::vector<std::string> ignored; // UTF-8 names relative to the pack
+};
+
+// Indexes the pack in `root` into `pack` by the names it may have (at most g_max_files).
+void index_pack(const fs::path &root, Pack &pack, Index &ix) {
+    std::error_code ec;
+    // Whether one more file may be indexed (at most g_max_files; the rest counted).
+    const auto room = [&pack, &ix]() {
+        const bool ok = pack.files.size() + pack.ui.size() < g_max_files;
+        ix.skipped += ok ? 0u : 1u;
+        return ok;
+    };
+    for (fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!regular_file(*it, &ix.links)) {
+            continue;
+        }
+        const std::string name = utf8_of(it->path().filename());
+        Key key;
+        bool raw = false;
+        if (!parse_name(name, &key, &raw)) {
+            if (name != "manifest.jsonl" && name != "pack.strings") {
+                ix.ignored.push_back(name);
+            }
+            continue;
+        }
+        const auto have = pack.files.find(key);
+        if (have != pack.files.end()) {
+            if (raw) { // <hash>.png and .raw.png: the .raw.png counts
+                have->second = File{utf8_of(it->path()), raw, false};
+            }
+        } else if (room()) {
+            pack.files[key] = File{utf8_of(it->path()), raw, false};
+        }
+    }
+    const fs::path ui = root / "ui";
+    std::error_code ue;
+    const fs::file_status ui_status = fs::symlink_status(ui, ue);
+    if (fs::is_symlink(ui_status)) {
+        ix.links.add(ui);
+    } else if (fs::is_directory(ui_status)) {
+        // A link to a folder below ui/ is an entry like any other: never followed into.
+        for (fs::recursive_directory_iterator it(ui, ec), end; !ec && it != end; it.increment(ec)) {
+            if (!regular_file(*it, &ix.links)) {
+                continue;
+            }
+            const std::string rel = utf8_of(it->path().lexically_relative(ui));
+            if (!safe_rel(rel)) {
+                ix.ignored.push_back("ui/" + rel);
+                continue;
+            }
+            if (pack.ui.count(rel) != 0 || room()) {
+                pack.ui[rel] = File{utf8_of(it->path()), false, false};
+            }
+        }
+    }
+}
+
 void update_image_hook() {
     mt_cg_set_image_replace_hook(!g_packs.empty() || g_dump.open ? image_hook : nullptr, nullptr);
 }
@@ -507,56 +581,10 @@ extern "C" int mt_texpack_add(const char *dir) noexcept {
         }
         Pack pack;
         pack.dir = dir;
-        u64 ignored = 0, skipped = 0;
-        Links links;
-        // Whether one more file may be indexed (at most g_max_files; the rest counted).
-        const auto room = [&pack, &skipped]() {
-            const bool ok = pack.files.size() + pack.ui.size() < g_max_files;
-            skipped += ok ? 0u : 1u;
-            return ok;
-        };
-        for (fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
-            if (!regular_file(*it, &links)) {
-                continue;
-            }
-            const std::string name = utf8_of(it->path().filename());
-            Key key;
-            bool raw = false;
-            if (!parse_name(name, &key, &raw)) {
-                ignored += name != "manifest.jsonl" ? 1u : 0u;
-                continue;
-            }
-            const auto have = pack.files.find(key);
-            if (have != pack.files.end()) {
-                if (raw) { // <hash>.png and .raw.png: the .raw.png counts
-                    have->second = File{utf8_of(it->path()), raw, false};
-                }
-            } else if (room()) {
-                pack.files[key] = File{utf8_of(it->path()), raw, false};
-            }
-        }
-        const fs::path ui = root / "ui";
-        std::error_code ue;
-        const fs::file_status ui_status = fs::symlink_status(ui, ue);
-        if (fs::is_symlink(ui_status)) {
-            links.add(ui);
-        } else if (fs::is_directory(ui_status)) {
-            // A link to a folder below ui/ is an entry like any other: never followed into.
-            for (fs::recursive_directory_iterator it(ui, ec), end; !ec && it != end;
-                 it.increment(ec)) {
-                if (!regular_file(*it, &links)) {
-                    continue;
-                }
-                const std::string rel = utf8_of(it->path().lexically_relative(ui));
-                if (!safe_rel(rel)) {
-                    ++ignored;
-                    continue;
-                }
-                if (pack.ui.count(rel) != 0 || room()) {
-                    pack.ui[rel] = File{utf8_of(it->path()), false, false};
-                }
-            }
-        }
+        Index ix;
+        index_pack(root, pack, ix);
+        const Links &links = ix.links;
+        const u64 skipped = ix.skipped, ignored = ix.ignored.size();
         if (links.count != 0) {
             logf("texpack: pack %s: %llu symbolic links not followed (the first: %s)", dir,
                  static_cast<unsigned long long>(links.count), links.first.c_str());
@@ -674,4 +702,381 @@ extern "C" void mt_texpack_dump_close(void) noexcept {
     update_image_hook();
 }
 
+extern "C" int mt_texpack_dump_is_open(void) noexcept { return g_dump.open ? 1 : 0; }
+
 extern "C" mt_texpack_stats mt_texpack_get_stats(void) noexcept { return g_stats; }
+
+extern "C" mt_packcheck_report mt_texpack_check(const char *dir, const char *bundle,
+                                                mt_packcheck_fn fn, void *user) noexcept {
+    mt_packcheck::Reporter r(fn, user, "texture");
+    try {
+        const std::string d = dir != nullptr ? dir : "";
+        const fs::path root = host_path(d);
+        std::error_code ec;
+        if (d.empty() || !fs::is_directory(root, ec)) {
+            r.refused(d + ": is no folder");
+            return r.report;
+        }
+        std::map<std::string, std::string> manifest;
+        mt_packcheck::check_manifest(root, "texture", r, &manifest);
+        Pack pack;
+        Index ix;
+        index_pack(root, pack, ix);
+        if (ix.links.count != 0) {
+            r.ignored(std::to_string(ix.links.count) +
+                      " symbolic links not followed (the first: " + ix.links.first + ")");
+        }
+        if (ix.skipped != 0) {
+            r.ignored(std::to_string(ix.skipped) + " files past the first " +
+                      std::to_string(g_max_files) + " skipped");
+        }
+        for (const std::string &name : ix.ignored) {
+            r.ignored(name + ": not a texture's name (<hash>_<W>x<H>.png, .raw.png, or ui/ "
+                             "with letters, digits and \" _-+.@\" ending .png): ignored");
+        }
+        std::vector<u8> pixels;
+        std::string why;
+        u32 k = 0;
+        std::map<std::string, u32> factors; // k: how many files have it
+        for (const auto &[key, file] : pack.files) {
+            const std::string name = utf8_of(host_path(file.path).filename());
+            if (read_checked(file.path, key.width, key.height, &pixels, &k, &why)) {
+                ++r.report.good;
+                ++factors[std::to_string(k) + "x"];
+            } else {
+                r.rejected(name + " " + why + ": rejected, the game's texture kept");
+            }
+        }
+        const std::string b = bundle != nullptr ? bundle : "";
+        u64 unsized = 0;
+        for (const auto &[rel, file] : pack.ui) {
+            // The game's image of that bundle path gives the size; without it any size passes.
+            u32 w = 0, h = 0;
+            bool sized = false;
+            if (!b.empty()) {
+                std::vector<u8> game;
+                std::string ignore;
+                const fs::path original = host_path(b) / host_path(rel);
+                if (fs::is_regular_file(original, ec) && read_file(original, game, &ignore)) {
+                    sized = mt_cg::png_info(game.data(), game.size(), &w, &h);
+                    mt_cg::Decoded dd; // an Apple CgBI file, if stb_image's header read failed
+                    if (!sized && mt_cg::png_decode(game.data(), game.size(), &dd, &ignore)) {
+                        w = dd.width;
+                        h = dd.height;
+                        sized = true;
+                    }
+                }
+                if (!sized) {
+                    r.ignored("ui/" + rel + ": the game has no image of that name: ignored");
+                    continue;
+                }
+            }
+            if (!sized) {
+                std::vector<u8> bytes;
+                if (read_file(host_path(file.path), bytes, &why) &&
+                    mt_cg::png_info(bytes.data(), bytes.size(), &w, &h)) {
+                    ++unsized; // checked as its own size (k = 1): only the file itself
+                } else {
+                    w = h = 1; // read_checked says why
+                }
+            }
+            if (read_checked(file.path, w, h, &pixels, &k, &why)) {
+                ++r.report.good;
+                ++factors[std::to_string(k) + "x"];
+            } else {
+                r.rejected("ui/" + rel + " " + why + ": rejected, the game's image kept");
+            }
+        }
+        if (unsized != 0) {
+            r.note(std::to_string(unsized) +
+                   " ui/ images not compared with the game's (its folder not given): each must be "
+                   "a whole multiple of the game's image");
+        }
+        std::string sizes;
+        for (const auto &[f, n] : factors) {
+            sizes += (sizes.empty() ? "" : ", ") + std::to_string(n) + " at " + f;
+        }
+        r.note(std::to_string(r.report.good) + " of " +
+               std::to_string(pack.files.size() + pack.ui.size()) + " pictures usable" +
+               (sizes.empty() ? "" : " (" + sizes + ")"));
+        if (pack.files.empty() && pack.ui.empty()) {
+            r.ignored("no texture files: the pack replaces nothing");
+        }
+    } catch (const std::exception &) {
+        r.refused(std::string(dir != nullptr ? dir : "") + ": cannot be read");
+    }
+    return r.report;
+}
+
+// --- The pack builder (#371, ADR 0205): mtport.texpack build, in the game -------------------
+
+namespace {
+
+using Rows = std::vector<std::vector<u32>>; // pixels as 32-bit words: compared and copied only
+
+Rows nearest_rows(const Rows &rows, u32 k) {
+    Rows out;
+    out.reserve(rows.size() * k);
+    for (const auto &row : rows) {
+        std::vector<u32> wide;
+        wide.reserve(row.size() * k);
+        for (const u32 p : row) {
+            wide.insert(wide.end(), k, p);
+        }
+        for (u32 i = 0; i < k; ++i) {
+            out.push_back(wide);
+        }
+    }
+    return out;
+}
+
+// Scale2x (AdvMAME2x): E's four corners take D, F (left, right) where an edge meets; the
+// border repeated.
+Rows scale2x(const Rows &rows) {
+    Rows out;
+    out.reserve(rows.size() * 2);
+    const std::size_t n = rows.size();
+    for (std::size_t y = 0; y < n; ++y) {
+        const auto &row = rows[y];
+        const auto &up = y > 0 ? rows[y - 1] : row;
+        const auto &down = y + 1 < n ? rows[y + 1] : row;
+        const std::size_t w = row.size();
+        std::vector<u32> top(w * 2), bottom(w * 2);
+        for (std::size_t x = 0; x < w; ++x) {
+            const u32 b = up[x], h = down[x], e = row[x];
+            const u32 d = row[x > 0 ? x - 1 : 0], f = row[x + 1 < w ? x + 1 : x];
+            const bool edge = b != h && d != f;
+            top[2 * x] = edge && d == b ? d : e;
+            top[2 * x + 1] = edge && b == f ? f : e;
+            bottom[2 * x] = edge && d == h ? d : e;
+            bottom[2 * x + 1] = edge && h == f ? f : e;
+        }
+        out.push_back(std::move(top));
+        out.push_back(std::move(bottom));
+    }
+    return out;
+}
+
+// Scale3x (AdvMAME3x), with the diagonal neighbours A, C, G, I for the edge pixels.
+Rows scale3x(const Rows &rows) {
+    Rows out;
+    out.reserve(rows.size() * 3);
+    const std::size_t n = rows.size();
+    for (std::size_t y = 0; y < n; ++y) {
+        const auto &row = rows[y];
+        const auto &up = y > 0 ? rows[y - 1] : row;
+        const auto &down = y + 1 < n ? rows[y + 1] : row;
+        const std::size_t w = row.size();
+        std::vector<u32> r0(w * 3), r1(w * 3), r2(w * 3);
+        for (std::size_t x = 0; x < w; ++x) {
+            const std::size_t l = x > 0 ? x - 1 : 0, r = x + 1 < w ? x + 1 : x;
+            const u32 a = up[l], b = up[x], c = up[r];
+            const u32 d = row[l], e = row[x], f = row[r];
+            const u32 g = down[l], h = down[x], i = down[r];
+            u32 *o0 = &r0[3 * x], *o1 = &r1[3 * x], *o2 = &r2[3 * x];
+            if (b != h && d != f) {
+                o0[0] = d == b ? d : e;
+                o0[1] = (d == b && e != c) || (b == f && e != a) ? b : e;
+                o0[2] = b == f ? f : e;
+                o1[0] = (d == b && e != g) || (d == h && e != a) ? d : e;
+                o1[1] = e;
+                o1[2] = (b == f && e != i) || (h == f && e != c) ? f : e;
+                o2[0] = d == h ? d : e;
+                o2[1] = (d == h && e != i) || (h == f && e != g) ? h : e;
+                o2[2] = h == f ? f : e;
+            } else {
+                o0[0] = o0[1] = o0[2] = o1[0] = o1[1] = o1[2] = o2[0] = o2[1] = o2[2] = e;
+            }
+        }
+        out.push_back(std::move(r0));
+        out.push_back(std::move(r1));
+        out.push_back(std::move(r2));
+    }
+    return out;
+}
+
+// The passes for factor k: 2 and 3 for the scaler (none for k = 1); -k means nearest.
+std::vector<int> scale_steps(u32 k, int scaler) {
+    if (k <= 1) {
+        return {};
+    }
+    if (scaler == MT_TEXPACK_SCALER_SCALE) {
+        switch (k) {
+        case 2:
+            return {2};
+        case 3:
+            return {3};
+        case 4:
+            return {2, 2};
+        case 6:
+            return {2, 3};
+        case 8:
+            return {2, 2, 2};
+        default:
+            break;
+        }
+    }
+    return {-static_cast<int>(k)};
+}
+
+// One file of a dump: its path relative to the dump and its size there.
+struct DumpEntry {
+    std::string file; // "<hash>_<W>x<H>.png" or "ui/<bundle path>"
+    u32 width = 0, height = 0;
+};
+
+// A manifest object the builder can trust: a file name of the dump's own shapes whose size
+// agrees with the line's.
+bool dump_entry_of(const std::string &line, DumpEntry *out) {
+    using namespace mt_stubs_impl;
+    JsonValue v{};
+    const char *error = nullptr;
+    if (!json_parse(line.data(), line.size(), &v, &error)) {
+        return false;
+    }
+    const JsonValue *file = json_get(&v, "file"), *w = json_get(&v, "width"),
+                    *h = json_get(&v, "height");
+    bool ok = file != nullptr && file->type == JsonType::string && w != nullptr &&
+              w->type == JsonType::number && w->is_integer && h != nullptr &&
+              h->type == JsonType::number && h->is_integer && w->integer >= 1 &&
+              w->integer <= MT_GFX_MAX_SIZE && h->integer >= 1 && h->integer <= MT_GFX_MAX_SIZE;
+    if (ok) {
+        out->file = file->string;
+        out->width = static_cast<u32>(w->integer);
+        out->height = static_cast<u32>(h->integer);
+        Key key;
+        bool raw = false;
+        ok = out->file.rfind("ui/", 0) == 0
+                 ? safe_rel(out->file.substr(3))
+                 : parse_name(out->file, &key, &raw) && key.width == out->width &&
+                       key.height == out->height;
+    }
+    json_free(&v);
+    return ok;
+}
+
+// Upscales one file of the dump into the pack: "" or what went wrong.
+std::string build_one(const fs::path &dump, const fs::path &pack, const DumpEntry &e, u32 k,
+                      int scaler) {
+    std::vector<u8> bytes;
+    std::string why;
+    if (!read_file(dump / host_path(e.file), bytes, &why)) {
+        return e.file + ": " + why;
+    }
+    mt_cg::Decoded d;
+    std::string error;
+    if (!mt_cg::png_decode(bytes.data(), bytes.size(), &d, &error) || !d.pixels) {
+        return e.file + ": does not decode (" + error + ")";
+    }
+    if (d.width != e.width || d.height != e.height) {
+        return e.file + ": " + std::to_string(d.width) + "x" + std::to_string(d.height) +
+               ", the manifest says " + std::to_string(e.width) + "x" + std::to_string(e.height);
+    }
+    if (e.width * k > MT_GFX_MAX_SIZE || e.height * k > MT_GFX_MAX_SIZE) {
+        return e.file + ": " + std::to_string(e.width) + "x" + std::to_string(e.height) + " at " +
+               std::to_string(k) + "x is above " + std::to_string(MT_GFX_MAX_SIZE) +
+               " pixels a side";
+    }
+    Rows rows(e.height, std::vector<u32>(e.width));
+    for (u32 y = 0; y < e.height; ++y) {
+        std::memcpy(rows[y].data(), d.pixels->data() + static_cast<std::size_t>(y) * e.width * 4,
+                    static_cast<std::size_t>(e.width) * 4);
+    }
+    for (const int step : scale_steps(k, scaler)) {
+        rows = step < 0    ? nearest_rows(rows, static_cast<u32>(-step))
+               : step == 2 ? scale2x(rows)
+                           : scale3x(rows);
+    }
+    const u32 ow = e.width * k, oh = e.height * k;
+    std::vector<u8> rgba(static_cast<std::size_t>(ow) * oh * 4);
+    for (u32 y = 0; y < oh; ++y) {
+        std::memcpy(rgba.data() + static_cast<std::size_t>(y) * ow * 4, rows[y].data(),
+                    static_cast<std::size_t>(ow) * 4);
+    }
+    if (!write_dump_file(pack / host_path(e.file), rgba.data(), ow, oh)) {
+        return e.file + ": cannot be written";
+    }
+    return "";
+}
+
+} // namespace
+
+extern "C" int mt_texpack_build(const char *dump, const char *pack, unsigned k, int scaler, int ui,
+                                mt_packcheck_fn fn, void *user) noexcept {
+    mt_packcheck::Reporter r(fn, user, "texture");
+    try {
+        if (k < 1 || k > MT_GFX_MAX_SCALE) {
+            r.refused("scale " + std::to_string(k) + ": must be 1 to " +
+                      std::to_string(MT_GFX_MAX_SCALE));
+            return -1;
+        }
+        if (scaler != MT_TEXPACK_SCALER_SCALE && scaler != MT_TEXPACK_SCALER_NEAREST) {
+            r.refused("the scaler must be scale or nearest");
+            return -1;
+        }
+        const fs::path from = host_path(dump != nullptr ? dump : "");
+        const fs::path to = host_path(pack != nullptr ? pack : "");
+        std::error_code ec;
+        const fs::path manifest = from / "manifest.jsonl";
+        if (dump == nullptr || *dump == '\0' || !fs::is_regular_file(manifest, ec)) {
+            r.refused(std::string(dump != nullptr ? dump : "") +
+                      ": no manifest.jsonl (not a texture dump)");
+            return -1;
+        }
+        if (pack == nullptr || *pack == '\0' ||
+            fs::weakly_canonical(from, ec) == fs::weakly_canonical(to, ec)) {
+            r.refused("the pack must be another folder than the dump");
+            return -1;
+        }
+        // The manifest is the dump's own file, but a dump is a folder anyone can edit: read
+        // within a bound, line by line.
+        const std::uintmax_t size = fs::file_size(manifest, ec);
+        if (ec || size > (64u << 20)) {
+            r.refused("manifest.jsonl is larger than 64 MiB");
+            return -1;
+        }
+        std::ifstream in(manifest, std::ios::binary);
+        std::vector<DumpEntry> entries;
+        std::set<std::string> seen;
+        std::string line;
+        for (u64 number = 1; std::getline(in, line); ++number) {
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            if (line.find_first_not_of(" \t") == std::string::npos) {
+                continue;
+            }
+            DumpEntry e;
+            if (line.size() > 4096 || !dump_entry_of(line, &e)) {
+                r.ignored("manifest line " + std::to_string(number) + ": " + line.substr(0, 80) +
+                          ": skipped");
+                continue;
+            }
+            if ((ui == 0 && e.file.rfind("ui/", 0) == 0) || !seen.insert(e.file).second) {
+                continue;
+            }
+            entries.push_back(std::move(e));
+        }
+        fs::create_directories(to, ec);
+        if (!fs::is_directory(to, ec)) {
+            r.refused(std::string(pack) + ": cannot be made");
+            return -1;
+        }
+        int written = 0;
+        for (const DumpEntry &e : entries) {
+            const std::string why = build_one(from, to, e, k, scaler);
+            if (why.empty()) {
+                ++written;
+                ++r.report.good;
+            } else {
+                r.rejected(why);
+            }
+        }
+        r.note(std::to_string(written) + " of " + std::to_string(entries.size()) +
+               " pictures written at " + std::to_string(k) + "x");
+        return written;
+    } catch (const std::exception &) {
+        r.refused("the build failed");
+        return -1;
+    }
+}

@@ -43,6 +43,7 @@
 #include "maplethief/cg.h"
 #include "maplethief/gfx.h"
 #include "maplethief/pack_manifest.h"
+#include "maplethief/packcheck.h"
 
 MT_EXTERN_C_BEGIN
 
@@ -83,6 +84,8 @@ int mt_texpack_pack_use(uint32_t index, mt_pack_use *out) MT_NOEXCEPT;
  * made. */
 int mt_texpack_dump_open(const char *dir) MT_NOEXCEPT;
 void mt_texpack_dump_close(void) MT_NOEXCEPT;
+/* Whether a dump is open (the menu turns it on and off, #371). */
+int mt_texpack_dump_is_open(void) MT_NOEXCEPT;
 
 /* The counters since the first pack (for the packs') or the dump (for the dump's) opened. */
 mt_texpack_stats mt_texpack_get_stats(void) MT_NOEXCEPT;
@@ -92,6 +95,18 @@ mt_texpack_stats mt_texpack_get_stats(void) MT_NOEXCEPT;
 #define MT_TEXPACK_NAME_MAX 48
 void mt_texpack_file_name(uint64_t hash, uint32_t width, uint32_t height, int raw,
                           char *out) MT_NOEXCEPT;
+
+/* Builds a pack from a dump (#371, ADR 0205; what python3 -m mtport.texpack build does, in the
+ * game): every file of DUMP/manifest.jsonl, k (1 to MT_GFX_MAX_SCALE) times larger, under its
+ * name into `pack` (made if needed; another folder than the dump). The scaler: Scale2x and
+ * Scale3x composed for 4x, 6x and 8x (nearest for 5x and 7x), or nearest. `ui` 0 leaves the
+ * ui/ images out. Manifest lines it cannot trust (a bad name, a size that disagrees with the
+ * name, a ui/ path with "..") are skipped, each a line to `fn` (maplethief/packcheck.h).
+ * Returns the files written, or -1 (the reason to `fn`) if it cannot start. */
+#define MT_TEXPACK_SCALER_SCALE 0
+#define MT_TEXPACK_SCALER_NEAREST 1
+int mt_texpack_build(const char *dump, const char *pack, unsigned k, int scaler, int ui,
+                     mt_packcheck_fn fn, void *user) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

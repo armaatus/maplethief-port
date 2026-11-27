@@ -72,6 +72,8 @@ constexpr CensusSite kSites[] = {
     {"autosave.cpp", "mt_hook_unregister", P, nullptr, "autosave"},
     {"quick_state.cpp", "mt_saves_replace_file", P, nullptr,
      "a save state's own file, which the guest never reads"},
+    {"pack_tools.cpp", "mt_saves_replace_file", P, nullptr,
+     "the text export's Port.strings, in a pack folder the guest never reads"},
 
     // What a replay cannot do again: the recording ends with the turn before.
     {"autosave.cpp", "mt_call_guest", X, "autosave",

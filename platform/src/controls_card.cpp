@@ -86,11 +86,9 @@ std::string fit(const std::string &s, int w) {
     if (Canvas::text_width(s) <= w) {
         return s;
     }
-    std::string t = s;
-    while (!t.empty() && Canvas::text_width(t + "~") > w) {
-        t.pop_back();
-    }
-    return t + "~";
+    // Whole characters only (a translation's, #372).
+    const int cells = std::max(0, (w + 1) / 6 - 1);
+    return s.substr(0, Canvas::fit_columns(s, cells)) + "~";
 }
 
 // The action a control does in the field (MT_ACTION_NONE: nothing).
@@ -380,7 +378,15 @@ void draw_touch(Canvas &c, const KeypadLayout &layout) {
     };
     int y = 112;
     for (const char *s : notes) {
-        c.text(200 - Canvas::text_width(s) / 2, y, s, kDim);
+        // Centred on x 200, cut short of the names on either side (a translation, #372).
+        int half = 200 - kPanelX - 2;
+        for (const Box &b : names) {
+            if (b.y < y + Canvas::kGlyphHeight && y < b.y + b.h) {
+                half = std::min(half, b.x >= 200 ? b.x - 4 - 200 : 200 - (b.x + b.w) - 4);
+            }
+        }
+        const std::string t = fit(s, 2 * std::max(0, half));
+        c.text(200 - Canvas::text_width(t) / 2, y, t, kDim);
         y += 12;
     }
 }
@@ -497,7 +503,6 @@ void draw_controls_card(Canvas &c, const PromptStyle &style, const std::vector<B
     c.fill(0, 0, c.width(), c.height(), kBackdrop);
     c.fill(kPanelX, kPanelY, kPanelW, kPanelH, kPanel);
     c.frame(kPanelX, kPanelY, kPanelW, kPanelH, 1, kBorder);
-    c.text(20, 13, tr(Txt::card_title), kText, 2);
     std::string device, closes;
     switch (style.device) {
     case PromptDevice::kKeyboard:
@@ -513,6 +518,11 @@ void draw_controls_card(Canvas &c, const PromptStyle &style, const std::vector<B
         closes = tr(Txt::card_tap_closes);
         break;
     }
+    // The device and the way out keep the right half; the title gets what is left of the line.
+    device = fit(device, kRight - 240);
+    closes = fit(closes, kRight - 240);
+    const int right = kRight - std::max(Canvas::text_width(device), Canvas::text_width(closes));
+    c.text(20, 13, Canvas::fit_width(tr(Txt::card_title), right - 8 - 20, 2), kText, 2);
     c.text(kRight - Canvas::text_width(device), 12, device, kHeader);
     c.text(kRight - Canvas::text_width(closes), 22, closes, kDim);
     switch (style.device) {

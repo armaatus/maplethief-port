@@ -719,7 +719,7 @@ constexpr SettingInfo kRegistry[] = {
      .help = "English or Korean (the Korean build's screens and help), from the next start"},
     {.key = "text_pack",
      .group = SettingGroup::kOther,
-     .comment = "# a directory of translated text in UTF-8 (python3 -m mtport.textpack export "
+     .comment = "# a directory of translated text in UTF-8 (the menu's Other tab: Export text "
                 "makes one to edit); empty: none",
      .value = pack_value<2>(&parse_text_pack, &print_text_pack,
                             "a directory (empty: none), without control characters"),
@@ -742,8 +742,8 @@ constexpr SettingInfo kRegistry[] = {
     // Video: texture packs (#153, ADR 0081).
     {.key = "texture_pack",
      .group = SettingGroup::kVideo,
-     .comment = "# a directory of HD textures made from your own --dump-textures (python3 -m "
-                "mtport.texpack); empty: none",
+     .comment = "# a directory of HD textures made from your own texture dump (the menu's Other "
+                "tab: Dump textures, Make texture pack); empty: none",
      .value = pack_value<0>(&parse_texture_pack, &print_texture_pack,
                             "a directory (empty: none), without control characters"),
      .flag = "--texture-pack",

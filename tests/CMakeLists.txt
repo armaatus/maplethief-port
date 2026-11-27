@@ -211,6 +211,7 @@ maplethief_add_cpp_test(
             cpp/audio_pack_test.cpp
             cpp/texpack_test.cpp
             cpp/textpack_test.cpp
+            cpp/packcheck_test.cpp
     LIBRARIES runtime maplethief_golden maplethief::dr_mp3)
 # stubs_test.cpp (#52; #156: the offline cash shop's store, fake receipt server and counters on
 # a synthetic guest), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
@@ -223,7 +224,8 @@ maplethief_add_cpp_test(
 # tests/cpp/data/audio/, decoded by the runtime's dr_mp3, whose header it includes for the
 # reference decode) and audio_pack_test.cpp (#188, audio packs of generated tones and those
 # MP3s, sample for sample through the mixer; corrupt and oversize files) and textpack_test.cpp
-# (#189, text packs on synthetic packs and tables) reach the runtime's
+# (#189, text packs on synthetic packs and tables) and packcheck_test.cpp (#371, the pack
+# checks, the texture pack builder and the text export on synthetic packs) reach the runtime's
 # internal headers (runtime/src/); cg_test.cpp, uikit_test.cpp and gles_fixed_test.cpp check
 # golden images of synthetic drawings; host_surface_test.cpp reads the committed host-surface
 # table.
@@ -443,6 +445,8 @@ maplethief_add_cpp_test(
             cpp/keypad_haptics_test.cpp
             cpp/audio_session_test.cpp
             cpp/port_text_test.cpp
+            cpp/pack_tools_test.cpp
+            cpp/menu_glyphs_test.cpp
             cpp/thread_priority_test.cpp
             cpp/update_check_test.cpp
             cpp/ipa_import_test.cpp

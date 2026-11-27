@@ -18,7 +18,7 @@ What is open today, each with where it's tracked. An entry holds for as long as 
 | macOS blocks the download the first time, because it isn't notarised (by choice: no legal name on the binaries) | macOS 15 and later: open it once, then System Settings › Privacy & Security › **Open Anyway**. macOS 13 and 14: Control-click › **Open**. All steps in [Troubleshooting](play/troubleshooting.md#mac-apple-could-not-verify-maplethief-is-free-of-malware) | [ADR 0148](adr/0148-downloads-stay-unsigned.md) |
 | Windows SmartScreen warns about the download, again with every release, because it isn't signed | **More info**, then **Run anyway** ([Troubleshooting](play/troubleshooting.md#windows-windows-protected-your-pc)) | [ADR 0148](adr/0148-downloads-stay-unsigned.md) |
 | A freshly downloaded Mac app, or one that can't write next to itself, keeps its data in your user folder | [Troubleshooting](play/troubleshooting.md#the-game-keeps-its-data-in-the-user-folder) says how to fix each cause | [ADR 0127](adr/0127-data-folder-next-to-the-game.md) |
-| Linux needs glibc 2.39 or later (Ubuntu 24.04, Fedora 40, current SteamOS). Only x86_64 is built and checked, and there's no AppImage or Flatpak | Update your distribution | [ADR 0065](adr/0065-linux-and-steam-deck-build.md), [Linux and Steam Deck](play/linux-and-steam-deck.md#not-done-yet) |
+| Linux needs glibc 2.35 or later (Ubuntu 22.04, Debian 12, current SteamOS). Only x86_64 is built and checked | Update your distribution, or use the Flatpak | [ADR 0193](adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md), [Linux and Steam Deck](play/linux-and-steam-deck.md#not-done-yet) |
 
 ## Not checked yet
 
