@@ -23,7 +23,8 @@ The speedrun timer ([#406](https://github.com/armaatus/maplethief-port/issues/40
 | Line | Count | Meaning |
 |---|---|---|
 | `title = TEXT` | exactly one | the category's title, shown on the overlay (`Any%`) |
-| `allow VARIABLE = VALUE[, VALUE...]` | at most one per variable | the values a run variable may take in this category; `VARIABLE` is `fix_original_bugs` or `skip_intros`, each value as `settings.ini` writes it (`off`, `on`; `true`, `1` and the like read as the same) |
+| `allow VARIABLE = VALUE[, VALUE...]` | at most one per variable | the values a run variable may take in this category; `VARIABLE` is `fix_original_bugs`, `skip_intros`, `widescreen` or `texture_pack`, each value as `settings.ini` writes it (`off`, `on`; `true`, `1` and the like read as the same; `widescreen` is `off` or `auto`); `texture_pack` takes `off` (no pack) or `on` (any pack), as a run records it ([#408](https://github.com/armaatus/maplethief-port/issues/408)) |
+| `start = EVENT` | at most one | the event that starts a run while none is in progress, in place of a new character ([#408](https://github.com/armaatus/maplethief-port/issues/408)): `EVENT` is a split's event or `load_character SLOT` (`MT_GAME_EVENT_LOAD_CHARACTER`: a saved character chosen in slot 0 to 2), so `start = load_character 0` times a run from a save. Without it a run starts at a new character |
 | `split EVENT = TITLE` | 1 to 64 | a split, in the order a run reaches them |
 
 A run variable without an `allow` line may only take its Original preset value (`off`).
@@ -37,14 +38,14 @@ A run variable without an `allow` line may only take its Original preset value (
 | `boss_killed MOB` | `MT_GAME_EVENT_BOSS_KILLED` with `value` MOB (64, 66 to 69) | `split boss_killed 69 = Last boss` |
 | `map_change AREA.MAP` | `MT_GAME_EVENT_MAP_CHANGE` with `value` AREA and `more[0]` MAP (any portal) | `split map_change 4.1 = Orbis` |
 
-Refused, each with its line number (`line 4: ...`), and the file as a whole then left out: a line without `=`, nothing before `=`, an unknown line, a second `title`, a bad title, an `allow` of anything but a run variable or a value that variable cannot take, a second `allow` of one variable, an unknown event, the wrong count of values or a value outside 0 to 255, a 65th split. A file larger than 16 KiB, without a `title` or without a `split` is refused as a whole. Every bad line is reported, not only the first.
+Refused, each with its line number (`line 4: ...`), and the file as a whole then left out: a line without `=`, nothing before `=`, an unknown line, a second `title`, a bad title, an `allow` of anything but a run variable or a value that variable cannot take, a second `allow` of one variable, an unknown event (`load_character` only in a `start` line), the wrong count of values or a value outside 0 to 255, a second `start` or anything before its `=`, a 65th split. A file larger than 16 KiB, without a `title` or without a `split` is refused as a whole. Every bad line is reported, not only the first.
 
 ### The shipped categories
 
 - **`any`**, *Any%*: a new character to the death of mob 69, whose closing scene is the first ending scene. Splits: the tutorial's end, mob 64's death, chapter 1's end, chapter 2's end, mob 67's death, mob 69's death. Mob 66 is a side quest's boss and mob 68 has no fight in version 1.5 ([docs/re/mechanics.md](../re/mechanics.md)), so neither is a split.
 - **`chapter_1`**, *Chapter 1*: a new character to the trip to Orbis (chapter 1's `clearAll`). Splits: the tutorial's end, mob 64's death, chapter 1's end.
 
-Both allow `fix_original_bugs` and `skip_intros` off only, the original game's rules.
+Both allow every run variable (`fix_original_bugs`, `skip_intros`, `widescreen`, `texture_pack`) off only, the original game's rules: they name only the first two, and a run variable a category does not name may only take its Original value.
 
 ## The run log
 

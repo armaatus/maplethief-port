@@ -121,7 +121,7 @@ GitHub sees your IP address and the port's version, as it would for any visit to
 
 **Record runs** in the **Other** tab (`record_runs = on`, off by default and in every preset) keeps a replay of every session, from the start until you quit, in the `runs` folder of your data folder. A file holds the times the game read and what you pressed and touched, your settings and your own save files from the start, and nothing of the game itself; an hour is well under a megabyte.
 
-`MapleThief --play-run FILE` plays one back exactly, as fast as your computer goes, in a scratch folder of its own (your saves are never touched). It needs the same game and the same version of the port that recorded it. It says `all the same` when every checkpoint matched.
+`MapleThief --play-run FILE` plays one back exactly, as fast as your computer goes, in a scratch folder of its own (your saves are never touched). It needs the same game and the same version of the port that recorded it. It says `all the same` when every checkpoint matched. `MapleThief --verify-run FILE` does the same with no window and no sound, and prints a report of the run's splits and whether it was clean ([Recording and verifying a run](speedrun.md#recording-and-verifying-a-run)).
 
 A save state's load, a save import or backup restore, a data folder switch and `autosave` cannot be played back: the recording ends just before one, and the file says which.
 
