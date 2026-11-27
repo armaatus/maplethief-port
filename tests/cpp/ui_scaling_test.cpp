@@ -452,6 +452,34 @@ TEST_CASE("ui scaling: a text box shrinks until it fits, inside the safe area's 
     }
 }
 
+TEST_CASE("ui scaling: the speedrun timer's box at the top right (#406)") {
+    Window w(1920, 1080);
+    const auto dark = [](const std::uint8_t *p) { return p[0] < 128 && p[1] < 128; };
+    const auto white = [](const std::uint8_t *p) {
+        return p[0] == 255 && p[1] == 255 && p[2] == 255;
+    };
+    const fe::Placement p =
+        fe::place(ScaleMode::kInteger, 1920, 1080, 480, 320, fe::Insets{}, 1.0f, 1.0f);
+    const fe::TextFrame f = fe::text_frame(p, 1.0f, 1920, 1080);
+    REQUIRE(f.scale == 2);
+    SDL_SetRenderDrawColor(w.renderer, 255, 255, 255, 255);
+    SDL_RenderClear(w.renderer);
+    // "ABC": (3 x 8 + 2 x 4) x (8 + 2 x 4) font pixels, 2 in from the top right corner.
+    fe::PerfOverlay::draw_lines(w.renderer, {"ABC"}, f, fe::TextCorner::kTopRight);
+    const Readback rb(w.renderer);
+    const int x1 = 1920 - 4; // one past the box's last column
+    const int y0 = 4;
+    CHECK(dark(rb.at(x1 - 1, y0)));
+    CHECK(dark(rb.at(x1 - 64, y0 + 31)));
+    CHECK(white(rb.at(x1, y0)));
+    CHECK(white(rb.at(x1 - 65, y0)));
+    CHECK(white(rb.at(x1 - 1, y0 - 1)));
+    CHECK(white(rb.at(x1 - 1, y0 + 32)));
+    float sx = 0, sy = 0;
+    SDL_GetRenderScale(w.renderer, &sx, &sy);
+    CHECK(sx == 1);
+}
+
 TEST_CASE("ui scaling: the notice and the price line drawn at 1080p and inside a safe area") {
     Window w(1920, 1080);
     const auto dark = [](const std::uint8_t *p) { return p[0] < 128 && p[1] < 128; };

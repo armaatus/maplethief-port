@@ -80,6 +80,7 @@
 #include "remap.h"
 #include "render_scale.h"
 #include "rumble.h"
+#include "run_timer.h"
 #include "save_menu.h"
 #include "save_state_input.h"
 #include "save_tools.h"
@@ -395,6 +396,25 @@ constexpr double kAnimationSeconds = 1.0 / 60;
 // that keeps presenting without returning to the run loop ends the run without it after this.
 constexpr Uint64 kQuitGraceNs = 2000000000ull;
 
+// The speedrun timer's clocks (#406, run_timer.h): the host's monotonic clock and the game's
+// ticks; the local wall-clock time a run starts at.
+RunInstant run_clock_now() {
+    return RunInstant{static_cast<double>(SDL_GetTicksNS()) / 1e9, mt_input_get_stats().ticks};
+}
+
+std::string run_clock_stamp() {
+    const std::time_t now = std::time(nullptr);
+    std::tm tm{};
+#if defined(_WIN32)
+    localtime_s(&tm, &now);
+#else
+    localtime_r(&now, &tm);
+#endif
+    char b[32];
+    std::strftime(b, sizeof b, "%Y-%m-%d %H:%M:%S", &tm);
+    return b;
+}
+
 // The run's state, shared by the hooks (one thread).
 struct Game {
     const GameOptions *options = nullptr;
@@ -553,6 +573,11 @@ struct Game {
     FrameStats stats;              // frame telemetry (frame_stats.h, ADR 0071)
     PerfCsv csv;                   // --perf-csv
     PerfOverlay perf;              // the frame-time overlay (perf_overlay.h)
+    // The speedrun timer (#406, run_timer.h): its run, the categories it can time and the one
+    // loaded (run_category as last applied; empty: none yet).
+    RunTimer run_timer{RunClock{run_clock_now, run_clock_stamp}};
+    std::vector<RunCategory> run_categories;
+    std::string run_category_loaded;
     // --perf-session (#244, perf_session.h): a line per second; the scene and the screen as of
     // the last run-loop turn.
     PerfSession session;
@@ -2189,6 +2214,11 @@ bool present(Game &g, mt_cpu *cpu, double now) {
             g.update_rect = PerfOverlay::notice_rect(line, text);
         }
     }
+    // The speedrun timer (#406, run_timer.h): top right, the window only, like the overlay.
+    if (g.settings.run_timer) {
+        PerfOverlay::draw_lines(g.renderer, g.run_timer.overlay_lines(), text,
+                                TextCorner::kTopRight);
+    }
     // The cash shop's price line (#156, price_line.h): the window only, like the overlay.
     if (mt_cash_shop_mode() == MT_CASH_SHOP_MESO) {
         draw_price_line(g.renderer, mt_cash_shop_view(), text, g.presenter.wide_rect());
@@ -2695,6 +2725,63 @@ void release_layers(Game &g, double t) {
 // here. The notice says what happened. After a load, the frontend's own per-tick state follows
 // the restored game: the interpolated frames start over, and game_speed (the player's setting,
 // not the state's) is written again into the restored guest memory.
+// The speedrun timer's game-event listener (#406): every event, while run_timer is on.
+void run_timer_event(void *user, const mt_game_event *e) {
+    Game &g = *static_cast<Game *>(user);
+    if (g.settings.run_timer) {
+        g.run_timer.on_event(*e);
+    }
+}
+
+// The speedrun timer's finished and reset runs to <data dir>/runs/ (run_timer.h), each logged;
+// a new personal best becomes the one the timer compares with.
+void write_run_records(Game &g) {
+    for (RunRecord &r : g.run_timer.take_records()) {
+        std::string path, why;
+        bool best = false;
+        const std::optional<RunRecord> &old = g.run_timer.best();
+        if (!write_run(data_dir(), r, old ? &*old : nullptr, &path, &best, &why)) {
+            SDL_Log("run: cannot write the %s run: %s", r.category.c_str(), why.c_str());
+            continue;
+        }
+        SDL_Log("run: %s %s in %s (%llu ticks), %zu of %zu splits, %s%s: %s", r.category.c_str(),
+                r.finished ? "finished" : "reset", format_run_time(r.end.ms).c_str(),
+                static_cast<unsigned long long>(r.end.ticks), r.times.size(), r.splits.size(),
+                r.clean() ? "clean" : "assisted", best ? ", a new personal best" : "",
+                path.c_str());
+        if (best) {
+            g.run_timer.set_best(std::move(r));
+        }
+    }
+}
+
+// run_timer and run_category as in effect now (#406): another category (or the timer turned
+// off) ends a run in progress as reset; then the clean check of this turn.
+void follow_run_timer(Game &g) {
+    if (!g.settings.run_timer) {
+        if (g.run_timer.state() != RunTimer::State::kWaiting) {
+            g.run_timer.reset();
+        }
+    } else if (g.settings.run_category != g.run_category_loaded) {
+        g.run_category_loaded = g.settings.run_category;
+        const auto it =
+            std::find_if(g.run_categories.begin(), g.run_categories.end(),
+                         [&](const RunCategory &c) { return c.id == g.settings.run_category; });
+        if (it == g.run_categories.end()) {
+            SDL_Log("run: no category '%s' (shipped or in categories/): the timer waits",
+                    g.settings.run_category.c_str());
+            g.run_timer.set_category(RunCategory{}, std::nullopt);
+        } else {
+            std::optional<RunRecord> best = load_run_best(data_dir(), it->id);
+            SDL_Log("run: the timer times %s (%zu splits)%s", it->title.c_str(), it->splits.size(),
+                    best ? (", the best " + format_run_time(best->end.ms)).c_str() : "");
+            g.run_timer.set_category(*it, std::move(best));
+        }
+    }
+    g.run_timer.turn();
+    write_run_records(g);
+}
+
 bool run_quick_state(Game &g, mt_cpu *cpu, double now) {
     const QuickRequest r = g.quick.take(g.actions, g.settings.save_states);
     if (r == QuickRequest::kNone) {
@@ -2891,6 +2978,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // UIKit animations' speed (ui_animations), as in effect now.
     g.assists.turn(cpu, g.settings, g.actions, now - g.first_turn);
     g.scene_skip.turn(cpu, g.settings, now - g.first_turn); // skip_intros (#174)
+    follow_run_timer(g);                                    // run_timer (#406)
     follow_ui_animations(g);
     g.hints.turn(cpu, g.focus, mt_input_panel(), g.settings.button_prompts,
                  g.settings.focus_highlight); // prompts and markers (#146), as in effect now
@@ -3579,6 +3667,24 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
 
     int status = kExitOk;
     g.rumble.install();
+    // The speedrun timer (#406): the categories (shipped and the data folder's), the settings it
+    // checks, and its listener beside rumble's hook.
+    {
+        std::vector<std::string> problems;
+        g.run_categories = load_run_categories(data_dir(), &problems);
+        for (const std::string &p : problems) {
+            SDL_Log("run: category %s", p.c_str());
+        }
+        std::vector<std::string> names;
+        for (const RunCategory &c : g.run_categories) {
+            names.push_back(c.id);
+        }
+        set_run_category_choices(std::move(names));
+        g.run_timer.attach(&g.settings);
+        if (mt_game_events_add_listener(run_timer_event, &g) != 0) {
+            SDL_Log("run: no room for the timer's game-event listener: it never starts");
+        }
+    }
     // Guest function hooks (maplethief/hooks.h, #143): registered for the whole run, each on or
     // off as its setting says. fix_original_bugs (#155, docs/re/original-bugs.md): the portal
     // items' exit(1) and Play before the engine's main menu (#122).
@@ -3832,6 +3938,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         g.audio_start_ns != 0 ? static_cast<double>(SDL_GetTicksNS() - g.audio_start_ns) / 1e9 : 0;
     audio.close();
     g.rumble.uninstall();
+    // A run in progress ends as reset with the game (#406).
+    mt_game_events_remove_listener(run_timer_event, &g);
+    g.run_timer.reset();
+    write_run_records(g);
     g.rumble.stop();
     g.game_center.install(false); // its hook points at `g`
     mt_offline_ui_configure(0);

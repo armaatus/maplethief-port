@@ -72,3 +72,18 @@ Both are recorded, RTA is shown. Which one a leaderboard ranks by is the communi
 - The end of a full-game run, mob 69's death, has never been reached in the port. Its event can be tested on a synthetic mob and with a save moved to the boss's map; a whole run to it waits for #285's verification chain.
 - Every port write into guest memory (the Assists, `game_speed`, the cash shop's counters, auto-loot's hook) must be recorded or refused by the recorder. The recorder's child inventories them as #202 did the host states, and a test fails by name on one it misses.
 - How we'd know this was wrong: a replay that fails to verify on the build that recorded it (a guest input or clock read the tape misses: the census or the clock hook is incomplete); a guest digest that differs between two presentations of one run (a presentation setting reaches the guest, and becomes a run variable); or runners who ignore the overlay for LiveSplit's own timer everywhere (then the overlay can shrink to the split name).
+
+## Addendum (#406): the timer, categories and run logs
+
+Built in [`platform/src/run_timer.h`](../../platform/src/run_timer.h) (no SDL) with `run_timer = off | on` and `run_category = NAME` (Other, outside the presets, applied at once). The calls this child made (delegated by Joris, 2026-11-26):
+
+- **Splits in order.** Only the next split's event counts; a later split's event before it does nothing. A category is a sequence, as in LiveSplit, so #407 can send `split` without a mapping.
+- **Starts and resets.** A new character starts a run, and a new character during a run ends that run as reset first. Turning the timer off, another category and quitting also reset it. Loading a saved character does not: a runner may reload after a death.
+- **The neutral value of an Assist** is its Original preset column (every column is the same for an Assist, `check_registry`). The check walks `settings_registry()` by group, so a new Assist is covered without a change to the timer.
+- **Run variables a category does not name** may only take their Original value. A run outside its category's values is timed, logged and shown, never a personal best.
+- **The personal best** is the fastest finished run that is clean and inside its category, by real time; it is stored as a run log (`runs/<category>.best`), and the overlay compares the last split reached with the best's.
+- **The category file and the run log** are `key = value` text ([docs/formats/run-category.md](../formats/run-category.md)). The shipped categories live in `platform/categories/` and are embedded in the binary by CMake; a player's own go in `<data dir>/categories/` and replace a shipped one of the same name.
+- **Any%'s splits** are the three chapter ends and the bosses the main quests need (64, 67, 69). Mob 66 is a side quest's boss and mob 68 has no fight in version 1.5, so splitting on them would leave a run waiting.
+- **The overlay** is the frame-time overlay's box (ADR 0071) in the safe area's top right corner, drawn after every read-back, so never in a shot or a golden.
+
+The times are the host's monotonic clock (`SDL_GetTicksNS`) and the input layer's tick count (`mt_input_get_stats`). With #405's clock tape a replay can recompute both from the tape (#408); the timer takes its clock as a parameter for that.

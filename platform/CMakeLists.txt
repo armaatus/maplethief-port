@@ -87,6 +87,7 @@ add_library(
     src/render_scale.cpp
     src/replay.cpp
     src/rumble.cpp
+    src/run_timer.cpp
     src/file_dialog.cpp
     src/save_menu.cpp
     src/save_state_input.cpp
@@ -108,6 +109,29 @@ add_library(
     src/update_check.cpp
     src/update_fetch.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+# The shipped speedrun categories (#406, run_timer.h, docs/formats/run-category.md): each
+# categories/*.mtcat embedded as a raw string in a generated source, re-generated when a file
+# changes (the files are our own data, never game files).
+file(GLOB _maplethief_categories CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/categories/*.mtcat")
+list(SORT _maplethief_categories)
+set(_maplethief_category_entries "")
+foreach(_file IN LISTS _maplethief_categories)
+    get_filename_component(_name "${_file}" NAME_WE)
+    file(READ "${_file}" _text)
+    string(FIND "${_text}" ")mtcat\"" _bad)
+    if(NOT _bad EQUAL -1)
+        message(FATAL_ERROR "${_file}: holds the raw string's end )mtcat\"")
+    endif()
+    string(APPEND _maplethief_category_entries "        {\"${_name}\", R\"mtcat(${_text})mtcat\"},\n")
+endforeach()
+set(_maplethief_categories_cpp "${CMAKE_CURRENT_BINARY_DIR}/run_categories.cpp")
+file(
+    CONFIGURE
+    OUTPUT "${_maplethief_categories_cpp}"
+    CONTENT
+        "// Generated from platform/categories/*.mtcat by platform/CMakeLists.txt (#406).\n#include \"run_timer.h\"\n\nnamespace maplethief::frontend {\n\nstd::vector<std::pair<std::string, std::string>> shipped_run_category_files() {\n    return {\n${_maplethief_category_entries}    };\n}\n\n} // namespace maplethief::frontend\n"
+    @ONLY)
+target_sources(maplethief_frontend PRIVATE "${_maplethief_categories_cpp}")
 target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
 # The build type and optimisation level of the start-up log (#136, ADR 0134, build_info.h).
 if(MSVC)
