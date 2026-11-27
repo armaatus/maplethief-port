@@ -419,6 +419,7 @@ maplethief_add_cpp_test(
             cpp/desktop_test.cpp cpp/local_game_center_test.cpp cpp/menu_input_test.cpp
             cpp/prompts_test.cpp cpp/keypad_layout_test.cpp cpp/border_test.cpp
             cpp/settings_menu_test.cpp cpp/game_speed_test.cpp cpp/autosave_test.cpp
+            cpp/packs_test.cpp
             cpp/color_filter_test.cpp
             cpp/speech_test.cpp
             cpp/speech_menus_test.cpp

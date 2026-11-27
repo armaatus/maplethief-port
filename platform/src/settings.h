@@ -649,6 +649,8 @@ struct Settings {
     // none), a folder of the game's text and the port's own in UTF-8 that replace the
     // language's, by key; anything it lacks stays the original.
     std::string text_pack;
+    // #370 (ADR 0149, packs.h): each of texture_pack, audio_pack and text_pack is an ordered
+    // list of folders, '|' between them, first first; the packs screen writes it.
     // Offline polish (#154, ADR 0084, maplethief/offline.h): the title menu without its dead
     // online buttons (the banner, More Games, About's links; the Game Center button too while
     // local_game_center is off), and Game Center on this computer: the leaderboard screen and

@@ -73,6 +73,7 @@
 #include "minimap.h"
 #include "pacing.h"
 #include "pack_folders.h"
+#include "packs.h"
 #include "pad_pointer.h"
 #include "perf_overlay.h"
 #include "perf_session.h"
@@ -1535,6 +1536,12 @@ void stop_hd_text() {
     mt_cg_set_text_scale(1);
 }
 
+// A pack the runtime would not open (it logged why): shown on the title screen too.
+void pack_not_opened(const std::string &path) {
+    queue_data_notice(tr(Txt::notice_pack_refused,
+                         {pack_value_text(path, ""), "it could not be opened (the log says why)"}));
+}
+
 // Texture packs and dumps (#153, ADR 0081, maplethief/texpack.h): --dump-textures DIR writes
 // every upload once, texture_pack = DIR replaces the uploads it has files for. Both before the
 // boot, so they see the first upload; both live in the textures, so a render scale change
@@ -1546,11 +1553,13 @@ void start_texture_packs(const GameOptions &o) {
                     o.dump_textures.c_str());
         }
     }
-    const std::string &pack = o.settings.texture_pack;
+    const std::string pack = pack_to_open(o.settings, PackKind::kTexture, MT_VERSION);
     if (!pack.empty()) {
         const int files = mt_texpack_open(pack.c_str());
         if (files >= 0) {
             SDL_Log("texpack: texture_pack %s: %d files", pack.c_str(), files);
+        } else {
+            pack_not_opened(pack);
         }
     }
 }
@@ -1580,11 +1589,13 @@ void stop_texture_packs(const GameOptions &o) {
 // Audio packs (#188, ADR 0106, maplethief/audio.h): audio_pack = DIR replaces the game's sound
 // files it has files for. Before the boot, which decodes the effects and opens the players.
 void start_audio_pack(const GameOptions &o) {
-    const std::string &pack = o.settings.audio_pack;
+    const std::string pack = pack_to_open(o.settings, PackKind::kAudio, MT_VERSION);
     if (!pack.empty()) {
         const int files = mt_audio_pack_open(pack.c_str());
         if (files >= 0) {
             SDL_Log("audiopack: audio_pack %s: %d files", pack.c_str(), files);
+        } else {
+            pack_not_opened(pack);
         }
     }
 }
@@ -1655,11 +1666,13 @@ void speak_menus(Game &g, mt_cpu *cpu) {
 // Text packs (#189, ADR 0108, maplethief/textpack.h): text_pack = DIR replaces the game's text
 // and the port's own by key. Before the boot, which reads the data tables.
 void start_text_pack(const GameOptions &o) {
-    const std::string &pack = o.settings.text_pack;
+    const std::string pack = pack_to_open(o.settings, PackKind::kText, MT_VERSION);
     if (!pack.empty()) {
         const int entries = mt_textpack_open(pack.c_str());
         if (entries >= 0) {
             SDL_Log("textpack: text_pack %s: %d entries", pack.c_str(), entries);
+        } else {
+            pack_not_opened(pack);
         }
     }
     reload_port_text();
@@ -3443,6 +3456,19 @@ void start_menu(Game &g, const GameOptions &options) {
     }
     if constexpr (platform_has(kCapPackFolders)) {
         offer_pack_folders(data_location().base);
+    }
+    // The packs screen (#370, packs.h): the texture, audio and text pack rows open it, on every
+    // platform, at their kind; its changes are the menu's, saved with them.
+    const auto packs = std::make_shared<PacksScreen>(data_location().base, MT_VERSION);
+    for (const PackKind kind : kPackKinds) {
+        g.menu.set_setting_opener(pack_kind_key(kind), [&g, packs, kind] {
+            packs->scan(g.settings);
+            g.menu.open_list(packs_menu_list(
+                packs, kind, [&g](const std::string &key, const std::string &value) {
+                    return g.menu.change_setting(key, value) ? &g.settings : nullptr;
+                }));
+            return std::string();
+        });
     }
     // Text-to-speech (#390, ADR 0174): the rows say "not available" where no system voice loaded
     // (Linux without libspeechd). The Switch's menu has no speech rows (kCapSpeech).

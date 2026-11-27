@@ -9,6 +9,7 @@
 #include "canvas.h"
 #include "game.h"
 #include "pack_folders.h"
+#include "packs.h"
 #include "port_text.h"
 #include "present.h"
 #include "switch_pads.h"
@@ -326,6 +327,40 @@ void SettingsMenu::set_setting_unavailable(const std::string &key, UnavailableFn
     SDL_Log("settings: menu: no setting row '%s'", key.c_str());
 }
 
+void SettingsMenu::set_setting_opener(const std::string &key, ActionFn fn) {
+    for (const SettingInfo &row : rows_) {
+        if (key == row.key) {
+            openers_.emplace_back(&row, std::move(fn));
+            dirty_ = true;
+            return;
+        }
+    }
+    SDL_Log("settings: menu: no setting row '%s'", key.c_str());
+}
+
+const SettingsMenu::ActionFn *SettingsMenu::opener(const SettingInfo *row) const {
+    for (auto it = openers_.rbegin(); it != openers_.rend(); ++it) {
+        if (it->first == row && it->second) {
+            return &it->second;
+        }
+    }
+    return nullptr;
+}
+
+bool SettingsMenu::change_setting(const std::string &key, const std::string &value) {
+    if (live_ == nullptr) {
+        return false;
+    }
+    const Settings before = *live_;
+    std::string why;
+    if (!apply_setting(live_, key, value, &why)) {
+        SDL_Log("settings: menu: %s = %s refused: %s", key.c_str(), value.c_str(), why.c_str());
+        return false;
+    }
+    after_change(before, key, value);
+    return true;
+}
+
 std::string SettingsMenu::unavailable(const SettingInfo *row) const {
     for (auto it = unavailable_.rbegin(); it != unavailable_.rend(); ++it) {
         if (it->first == row && it->second) {
@@ -395,6 +430,10 @@ std::string SettingsMenu::row_value(std::size_t i) const {
             return tr(Txt::menu_not_available);
         }
         const std::string text = setting_text(*live_, *it.setting);
+        // A texture, audio or text pack row (#370, packs.h): its list's first pack by name.
+        if (pack_kind_of(it.setting->key)) {
+            return pack_list_summary(text, tr(Txt::menu_pack_none));
+        }
         // A pack row on a platform that offers its folders (#241, pack_folders.h): the pack's
         // name rather than its whole path.
         if (platform_has(kCapPackFolders, platform_) &&
@@ -443,7 +482,10 @@ std::string SettingsMenu::help() const {
         return action_text(*sel.action, "help", sel.action->help);
     }
     if (sel.kind == ItemKind::kListRow) {
-        return confirming_ && list_.question ? list_.question(sel.row) : list_.help;
+        if (confirming_ && list_.question) {
+            return list_.question(sel.row);
+        }
+        return list_.row_help ? list_.row_help(sel.row) : list_.help;
     }
     if (std::string why = unavailable(sel.setting); !why.empty()) {
         return why;
@@ -597,7 +639,7 @@ void SettingsMenu::open_list(MenuList list) {
     list_ = std::move(list);
     list_open_ = true;
     confirming_ = false;
-    selected_ = 1;
+    selected_ = 1 + std::min(list_.start_row, list_.rows.size() - 1);
     top_ = 0;
     build_items();
     dirty_ = true;
@@ -614,6 +656,20 @@ void SettingsMenu::close_list() {
     top_ = 0;
     build_items();
     dirty_ = true;
+}
+
+void SettingsMenu::list_changed(std::size_t row, std::string status) {
+    if (list_.refresh) {
+        list_.rows = list_.refresh();
+    }
+    if (list_.rows.empty()) {
+        close_list();
+        say(std::move(status));
+        return;
+    }
+    selected_ = 1 + std::min(row, list_.rows.size() - 1);
+    build_items();
+    say(std::move(status));
 }
 
 void SettingsMenu::page(int dir) {
@@ -736,10 +792,20 @@ void SettingsMenu::step(int delta) {
                {preset_title(p), std::to_string(changed)}));
         return;
     }
+    if (it.kind == ItemKind::kListRow && list_.step) {
+        std::size_t row = it.row;
+        std::string status = list_.step(row, delta);
+        list_changed(row, std::move(status));
+        return;
+    }
     if (it.kind != ItemKind::kSetting) {
         return;
     }
     const SettingInfo &r = *it.setting;
+    if (const ActionFn *fn = opener(&r); fn != nullptr) {
+        say((*fn)());
+        return;
+    }
     if (std::string why = unavailable(&r); !why.empty()) {
         say(std::move(why));
         return;
@@ -764,6 +830,12 @@ void SettingsMenu::step(int delta) {
 
 void SettingsMenu::choose() {
     const Item &it = items_[selected_];
+    if (it.kind == ItemKind::kListRow && list_.toggle) {
+        std::size_t row = it.row;
+        std::string status = list_.toggle(row);
+        list_changed(row, std::move(status));
+        return;
+    }
     if (it.kind == ItemKind::kListRow) {
         const std::size_t row = it.row;
         const std::string question = list_.question ? list_.question(row) : std::string();
@@ -1096,8 +1168,11 @@ void SettingsMenu::pointer(const ScreenPoint &p, bool down, bool up) {
     case 5:
         if (items_[selected_].kind == ItemKind::kAction ||
             items_[selected_].kind == ItemKind::kListRow) {
-            if (confirming_ && (zone == -1 || zone == 1)) {
-                step(zone); // "<" No, ">" Yes
+            // "<" No, ">" Yes; a staying list's "<" / ">" (#370).
+            const bool steps =
+                confirming_ || (items_[selected_].kind == ItemKind::kListRow && list_.step);
+            if (steps && (zone == -1 || zone == 1)) {
+                step(zone);
             } else {
                 choose();
             }
@@ -1257,7 +1332,7 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
             value_box(y, kRowH,
                       on && confirming_ ? tr(confirm_yes_ ? Txt::menu_yes : Txt::menu_no)
                                         : lr.value,
-                      on && confirming_, on);
+                      on && (confirming_ || list_.step), on);
             continue;
         }
         if (it.kind == ItemKind::kAction) {
@@ -1275,8 +1350,10 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
                 c.text(lx, ty, fit(cost, static_cast<std::size_t>(room)), kDim);
             }
         }
-        const std::string value = live_ != nullptr ? setting_text(*live_, row) : "";
-        value_box(y, kRowH, value, !setting_choices(row).empty(), on);
+        const bool opens = opener(&row) != nullptr; // #370: the pack rows
+        const std::string value =
+            live_ == nullptr ? "" : (opens ? row_value(i) : setting_text(*live_, row));
+        value_box(y, kRowH, value, !opens && !setting_choices(row).empty(), on);
         if (waits(row)) {
             c.text(kValueEnd + 3, ty, "*", kWarning);
         }
@@ -1329,6 +1406,20 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     key(SDLK_DOWN);
     direction(Direction::kUp);
     words(tr(Txt::hint_move));
+    if (list_open_ && list_.step) {
+        // A staying list's hints (#370: the packs screen): order, on / off, back.
+        key(SDLK_LEFT);
+        key(SDLK_RIGHT);
+        direction(Direction::kRight);
+        words(tr(Txt::hint_order));
+        key(SDLK_RETURN);
+        button(SDL_GAMEPAD_BUTTON_SOUTH);
+        words(tr(Txt::hint_on_off));
+        key(SDLK_ESCAPE);
+        button(SDL_GAMEPAD_BUTTON_EAST);
+        words(tr(Txt::hint_back));
+        return;
+    }
     if (list_open_) {
         // A list's own hints (#192): page (ADR 0114), choose, back.
         key(SDLK_LSHIFT);

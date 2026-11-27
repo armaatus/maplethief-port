@@ -138,7 +138,7 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `audio_mono` | off | - | Both channels the same mix, for one ear or one speaker: on, off |
 | `audio_device` | default | - | The sound's output device, by its name, or default (the system's; from the menu's list). Not in the Switch's menu |
 | `ios_audio` | original | - | iOS: the audio session: original (mixes with other apps' music, quiet with the Silent switch), own (plays with the switch on silent, other apps' music turned down) |
-| `audio_pack` | (empty) | - | A directory of your own music and sound files that replace the game's, by name (python3 -m mtport.audiopack init lists them); empty: none. Switch: the menu offers the folders in `sdmc:/switch/maplethief/audio-packs/` |
+| `audio_pack` | (empty) | - | A directory of your own music and sound files that replace the game's, by name (python3 -m mtport.audiopack init lists them); several, in order, with `|` between them (the packs screen sets it, #370); empty: none. The packs screen lists the folders in `<data folder>/audio-packs/` |
 | `right_touch` | off | - | The right mouse button: a touch at screen point X,Y, or off. Not in the Switch's menu |
 | `hide_keypad` | auto | never / auto / auto | Hide the on-screen key pad: auto (while a gamepad or the keyboard is used), always, never |
 | `rumble` | on | on / on / on | The gamepad rumbles on a vibration, a hit and a level-up: on, off |
@@ -155,9 +155,9 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `vsync` | on | on / on / on | Wait for the display's refresh to present a frame (no tearing): on, off |
 | `pause_unfocused` | off | off / on / on | Pause the game while the window is not focused, as when it is minimised: on, off |
 | `language` | en | - | The game's language: en, ko (MAPLETHIEF_LANGUAGE overrides it; from the next start) |
-| `text_pack` | (empty) | - | A directory of translated text in UTF-8 (python3 -m mtport.textpack export makes one to edit); empty: none. Switch: the menu offers the folders in `sdmc:/switch/maplethief/text-packs/` |
+| `text_pack` | (empty) | - | A directory of translated text in UTF-8 (python3 -m mtport.textpack export makes one to edit); several, in order, with `|` between them (the packs screen sets it, #370); empty: none. The packs screen lists the folders in `<data folder>/text-packs/` |
 | `fix_original_bugs` | off | off / off / on | Fixes the original game's crashes and dead ends ([original-bugs](../re/original-bugs.md)), never its balance: on, off |
-| `texture_pack` | (empty) | - | A directory of HD textures made from your own `--dump-textures` (python3 -m mtport.texpack); empty: none. Switch: the menu offers the folders in `sdmc:/switch/maplethief/texture-packs/` |
+| `texture_pack` | (empty) | - | A directory of HD textures made from your own `--dump-textures` (python3 -m mtport.texpack); several, in order, with `|` between them (the packs screen sets it, #370); empty: none. The packs screen lists the folders in `<data folder>/texture-packs/` |
 | `texture_filter` | game | game / game / nearest | How textures are sampled at render scale 2 and up: game (smooth, the device's look), nearest (sharp) |
 | `hide_online_ui` | off | off / on / on | Hides the title menu's buttons whose web pages are gone (Game Center too while `local_game_center` is off): on, off |
 | `local_game_center` | off | off / off / on | Game Center on this computer: the leaderboard screen and local achievements: on, off |

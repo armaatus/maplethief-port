@@ -175,6 +175,15 @@ struct MenuList {
     std::vector<MenuListRow> rows;
     std::function<std::string(std::size_t row)> question; // "" (or none): no question
     std::function<std::string(std::size_t row)> choose;   // the status line
+    // A list that stays open (#370: the packs screen). Choosing a row calls `toggle` in place of
+    // `question` and `choose`; Left / Right (and the row's "<" / ">") call `step` with -1 / +1.
+    // Each returns the status line and may move `row` (the selection follows it); the rows are
+    // then `refresh`ed. Without `step`, Left / Right do nothing in the list.
+    std::function<std::string(std::size_t &row)> toggle;
+    std::function<std::string(std::size_t &row, int delta)> step;
+    std::function<std::vector<MenuListRow>()> refresh;
+    std::function<std::string(std::size_t row)> row_help; // the help lines; none: `help`
+    std::size_t start_row = 0;                            // selected as it opens
 };
 
 class SettingsMenu {
@@ -241,6 +250,14 @@ class SettingsMenu {
     // shows "not available", its help says why, and changing it says why on the status line.
     using UnavailableFn = std::function<std::string()>;
     void set_setting_unavailable(const std::string &key, UnavailableFn fn);
+    // A setting row that opens something instead of stepping (#370: the pack rows open the
+    // packs screen): choosing it, Left / Right or a click call `fn`, whose answer is the status
+    // line.
+    void set_setting_opener(const std::string &key, ActionFn fn);
+    // Sets `key` to `value` as a step of the menu would (#370: the packs screen's changes):
+    // applied (at once if the row can), marked, and saved with the menu's changes. False if the
+    // value is refused.
+    bool change_setting(const std::string &key, const std::string &value);
     // The values this run started with (the "next start" marks compare with them).
     void set_started(const Settings &started) { started_ = started; }
     // The numbers frame_cost rows show (frame_cost_text): the game's last second, set by the
@@ -330,6 +347,8 @@ class SettingsMenu {
     void page(int dir);
     std::optional<ActionView> action_view(const MenuActionInfo *a) const;
     std::string unavailable(const SettingInfo *row) const; // "" if available
+    const ActionFn *opener(const SettingInfo *row) const;  // nullptr if none
+    void list_changed(std::size_t row, std::string status);
 
     std::span<const SettingInfo> rows_;
     SettingsPlatform platform_ = kSettingsPlatform;
@@ -338,6 +357,7 @@ class SettingsMenu {
     std::vector<std::pair<const MenuActionInfo *, QuestionFn>> questions_;
     std::vector<std::pair<SettingGroup, NoteFn>> notes_;
     std::vector<std::pair<const SettingInfo *, UnavailableFn>> unavailable_;
+    std::vector<std::pair<const SettingInfo *, ActionFn>> openers_;
     std::string confirm_question_; // a QuestionFn's question while confirming_
     Actions *actions_;
     Gamepads *gamepads_;

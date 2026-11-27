@@ -13,7 +13,7 @@ Press **F1** (or the gamepad's Guide button, or click both sticks, or the gear b
 | **Gameplay** | Save on quit, and the game's own options (sound, speed, vibration) |
 | **Assists** | Optional help that changes the game, such as the cash shop for meso. Always off unless you turn it on |
 | **Saves** | Export and import your saves, and the backups |
-| **Other** | The language, text packs, and the optional [check for new versions](#checking-for-new-versions) |
+| **Other** | The language, text packs (the [packs screen](#the-packs-screen)), and the optional [check for new versions](#checking-for-new-versions) |
 
 Move with the arrow keys, the d-pad or the mouse. **Tab**, **Q / E** or **LB / RB** switch tabs. **Esc** or **B** closes the menu. Most settings apply at once; those marked `*` apply the next time you start the game. **Quit** is at the bottom of every tab.
 
@@ -64,13 +64,37 @@ Neither shows on a computer.
 - **Cash shop for meso** (`cash_shop = meso`, an Assist, off in every preset): the original's cash shop needed real money and an online server. With this on, its items and revives cost in-game meso instead, at a price that grows with your level.
 - **Hide online buttons** (`hide_online_ui`) and **local Game Center** (`local_game_center`): hide the menu buttons whose web pages are gone, and turn Game Center's button into a leaderboard of your own save slots, with a few achievements.
 
+## The packs screen
+
+Choose **Texture pack** (Video), **Audio pack** (Audio) or **Text pack** (Other) in the menu to open the packs screen. It lists every pack in the data folder's pack folders, and any pack `settings.ini` names by its path:
+
+| Kind | Folder in the [data folder](saves.md#where-your-saves-are) |
+|---|---|
+| Texture | `texture-packs/<pack>/` |
+| Audio | `audio-packs/<pack>/` |
+| Text | `text-packs/<pack>/` |
+
+The game makes the folders the first time the screen opens. Each row shows a pack's name and version, and whether it is **on** (with its place: `on #1` comes first), **off** or **refused**. The two lines under the list show its author and description, or why the game refuses it.
+
+| To | Keyboard | Gamepad | Mouse or touch |
+|---|---|---|---|
+| Turn a pack on or off | **Enter** or **Space** | **A** (the bottom face button) | Click or tap the row |
+| Move a pack earlier or later | **Left / Right** | d-pad or stick **Left / Right** | The row's **<** / **>** |
+| Go back to the tab | **Esc** | **B** | |
+
+When two packs of a kind have the same file, the one higher in the list wins. Changes apply the next time you start the game. For now the game opens only the first pack of each kind that it accepts; several at once come in a later version.
+
+A pack can say what it is in a file `pack.strings` at its top: its kind, name, version and author, and which game and port version it needs ([ADR 0149](../adr/0149-pack-manifest-several-packs-and-what-the-project-hosts.md)). A pack without one shows by its folder's name. The game refuses a pack whose `pack.strings` is broken (the reason names the line), is of another kind, needs a newer version of the port, or was made for another version of the game; a second text pack in another language; a second pack with the same `id`; and more than 16 packs of a kind. A refused pack shows **refused** on the screen with its reason, and if `settings.ini` still names it, the title screen says at the start that it wasn't loaded and why.
+
+In `settings.ini` each kind is one line, its packs in order with `|` between them: `texture_pack = /packs/HD|/packs/UI`.
+
 ## Texture packs
 
 A texture pack is a folder of pictures that the game draws instead of its own: HD versions of the characters, monsters, maps and menus, made from your own copy, or textures you edited by hand. The game's files stay as they are. You make one in three steps ([ADR 0081](../adr/0081-texture-packs-and-nearest-texture-filter.md)):
 
 1. **Dump the textures.** Start the game with `--dump-textures` and a folder, for example `MapleThief --dump-textures ~/MapleThief-dump`, and play through the maps you want. Each picture the game draws is written once into the folder, named by its contents and size (`<hash>_<W>x<H>.png`), with the menus' images in its `ui` folder.
 2. **Make them larger.** From the project folder (a checkout of this repository and Python, as for [audio packs](#audio-packs)), run `python3 -m mtport.texpack build ~/MapleThief-dump ~/MyPack --scale 2` from its `tools/` folder. It writes every texture twice as large into `MyPack`; `--scale` takes 1 to 8, and `--scaler nearest` keeps plain blocky pixels instead of smoothing the edges. You can also edit a PNG from the dump in any image editor: keep its name, and make it the same size or a whole multiple of it (2, 3, … 8 times), or the game ignores it and logs why, once.
-3. **Play with it.** Set **Texture pack** (`texture_pack = /path/to/MyPack` in `settings.ini`, or start with `--texture-pack /path/to/MyPack`) and start the game again. When it quits, the log says how many textures the pack replaced.
+3. **Play with it.** Put the pack in the `texture-packs` folder and turn it on in the [packs screen](#the-packs-screen) (or set `texture_pack = /path/to/MyPack` in `settings.ini`, or start with `--texture-pack /path/to/MyPack`) and start the game again. When it quits, the log says how many textures the pack replaced.
 
 At a render scale above 1, **Texture filter** `nearest` (`texture_filter = nearest`, the sharp sprites of [Display](#display)) keeps a pack's pixels crisp. A texture the dump didn't see (a map you didn't visit) stays the game's own: dump again into the same folder and build again to add it. On the Nintendo Switch, copy the pack folder into `sdmc:/switch/maplethief/texture-packs/` and choose it in the menu ([below](#on-the-nintendo-switch)).
 
@@ -83,7 +107,7 @@ An audio pack is a folder of your own music and sound files that play instead of
 1. List the sounds you can replace: `python3 -m mtport.audiopack init MyPack` (from the project folder, after `scripts/bootstrap`) makes the folder `MyPack` with `audiopack.txt` in it. Each line is one of the game's 44 sounds: its file name, whether it's music (BGM) or an effect (SFX), and its length. The main menu's music is `31.mp3`; the title screen has none. The music of each map is in [the audio notes](../re/audio.md#map-music).
 2. Put your files in the folder, named like the game's, with any of these extensions: `31.flac`, `31.mp3` or `31.wav` replaces `31.mp3`, and `12.wav` or `12.mp3` replaces the effect `12.wav`. WAV (PCM), MP3 or FLAC, mono or stereo, 8,000 to 192,000 Hz, up to 128 MB a file; an effect up to 60 seconds, a track up to 30 minutes. Long tracks are best as FLAC or MP3: a WAV track stays in memory whole.
 3. Music loops by itself, as the game's does. To loop only part of a track (an intro, then a loop), add `31.loop`, a text file with two numbers, the sample frame where the loop starts and the one where it ends (the end isn't played), in your file's own frames, e.g. `441000 2646000`. A WAV with a loop saved by a sound editor (a `smpl` loop) works too.
-4. Set **Audio pack** (`audio_pack = /path/to/MyPack` in `settings.ini`, or start with `--audio-pack /path/to/MyPack`) and start the game again.
+4. Put the pack in the `audio-packs` folder and turn it on in the [packs screen](#the-packs-screen) (or set `audio_pack = /path/to/MyPack` in `settings.ini`, or start with `--audio-pack /path/to/MyPack`) and start the game again.
 
 A file the game can't use (damaged, too long, too many channels) is skipped: the game's own sound plays instead, and the log says why, once. Audio packs are your own files: the project ships none.
 
@@ -93,7 +117,7 @@ A text pack is a folder of translated text: the game's dialogue, the names and d
 
 1. Write out the text to translate: `python3 -m mtport.textpack export MyPack` (from the project folder, after `scripts/bootstrap`). It makes the folder `MyPack` with `textpack.strings` (the pack's name and language), `Scripts.strings` and `ScriptExtra.strings` (dialogue), `Tables.strings` (names and descriptions, each with the room it has) and `Port.strings` (the port's menus).
 2. Translate the values, the text on the right of each `=`, in any text editor that saves UTF-8. Keep the keys on the left as they are. Delete the lines you don't translate: anything a pack doesn't have stays in the game's own words. Check the pack with `python3 -m mtport.textpack check MyPack`.
-3. Set **Text pack** (`text_pack = /path/to/MyPack` in `settings.ini`, or start with `--text-pack /path/to/MyPack`) and start the game again.
+3. Put the pack in the `text-packs` folder and turn it on in the [packs screen](#the-packs-screen) (or set `text_pack = /path/to/MyPack` in `settings.ini`, or start with `--text-pack /path/to/MyPack`) and start the game again.
 
 The game's text is drawn with its own font, plus a second font for accented Latin, Greek and Cyrillic letters. Names and descriptions have a fixed room in the game's tables: a longer one is cut at a whole letter, and the log says so, once. The port's menus have plain letters only: their accents are dropped ("Pötion" shows as "Potion"). The format is described in [the text pack spec](../formats/text-pack.md). A text pack holds the game's text: keep packs made from it to yourself, and share only your own translations.
 
@@ -145,7 +169,7 @@ Some defaults differ on the console, in every preset. **Scale mode** is `sharp`,
 
 The keyboard shortcuts for the window (F11, Alt+Enter, Ctrl+1 to 5) and F12 for a screenshot do nothing there. **Quit** goes back to the Homebrew Menu.
 
-Packs and border pictures go in folders on the SD card, beside `game`. The menu lists what is in them: choose with Left / Right, and start the game again.
+Packs and border pictures go in folders on the SD card, beside `game`. Texture, audio and text packs are turned on, off and ordered in the [packs screen](#the-packs-screen), as on every platform; **Border image** lists the pictures: choose with Left / Right. Start the game again for a change to apply.
 
 | Row | Folder |
 |---|---|
