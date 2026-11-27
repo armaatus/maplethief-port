@@ -229,11 +229,23 @@ HOOKED: dict[int, Hooked] = {
         "checks its guards when Yes on 0x6D is confirmed, and finds the hero dead "
         "(docs/re/autosave.md)",
     ),
+    0x998D1: Hooked(
+        "ScriptNative_showMarket",
+        "(L): the script native showMarket (39), which opens the shop its argument names "
+        "through the shop screen 0x4628D; restored_content (#426) offers shops 0, 1 and 16 "
+        "beside the usual one in a list box when a merchant who sells them opens his",
+    ),
     0x9BC11: Hooked(
         "Lua::execute",
         "(L, tfunc, base): the script VM's opcode loop, which returns the first result's stack "
         "index; --native-script-vm on (#386, ADR 0226) runs it as host code over the same guest "
         "memory (runtime/src/scriptvm/)",
+    ),
+    0x9CE2D: Hooked(
+        "Lua::runCallback",
+        "(L): the dialogue box's close runs the script callback regCallBack stored at L + 8 "
+        "and returns its result; restored_content (#426) opens the shop chosen in its own list "
+        "box there",
     ),
     0xAAAB9: Hooked(
         "MainMenuView_clickPlay",
