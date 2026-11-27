@@ -247,11 +247,22 @@ HOOKED: dict[int, Hooked] = {
         "index; --native-script-vm on (#386, ADR 0226) runs it as host code over the same guest "
         "memory (runtime/src/scriptvm/)",
     ),
+    0x9B37D: Hooked(
+        "Lua::callNative",
+        "(L, index, base): runs native `index` of the script VM with the arguments above base "
+        "and returns the first result's stack index; the script corpus test (#431) puts a "
+        "recording stub there, so the recompiled and the host VM see the same answers",
+    ),
     0x9CE2D: Hooked(
         "Lua::runCallback",
         "(L): the dialogue box's close runs the script callback regCallBack stored at L + 8 "
         "and returns its result; restored_content (#426) opens the shop chosen in its own list "
         "box there",
+    ),
+    0x9EE95: Hooked(
+        "TFunc::fetchU8",
+        "(tfunc): the script VM's next code byte; the script corpus test (#431) observes the "
+        "recompiled Lua::execute's opcode fetches (the call at 0x9BC2A) and passes",
     ),
     0xAAAB9: Hooked(
         "MainMenuView_clickPlay",

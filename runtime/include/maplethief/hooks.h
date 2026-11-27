@@ -123,12 +123,18 @@ MT_EXTERN_C_BEGIN
 /* ScriptNative_showMarket (L): the script native showMarket (39), the shop its argument names; #426
  * offers a restored shop beside it (restored_content) */
 #define MT_HOOK_FN_LUA_SHOW_MARKET 0x998D1u
+/* Lua::callNative (L, index, base): the script natives' dispatch (#431: the script corpus test's
+ * recording stub) */
+#define MT_HOOK_FN_LUA_CALL_NATIVE 0x9B37Du
 /* Lua::execute (L, tfunc, base): the script VM's opcode loop (#386, ADR 0226: the host VM,
  * maplethief/scriptvm.h) */
 #define MT_HOOK_FN_LUA_EXECUTE 0x9BC11u
 /* Lua::runCallback (L): the dialogue box's close runs the script callback at L + 8; #426 opens
  * the shop chosen in its own list box there (restored_content) */
 #define MT_HOOK_FN_LUA_RUN_CALLBACK 0x9CE2Du
+/* TFunc::fetchU8 (tfunc): the script VM's next code byte (#431: the script corpus test observes
+ * Lua::execute's opcode fetches, the call at 0x9BC2A) */
+#define MT_HOOK_FN_TFUNC_FETCH_U8 0x9EE95u
 #define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u /* -[MainMenuView clickPlay:] */
 /* -[TouchKeyPadView colorAtPixel:onImage:] (self, _cmd, CGPoint in r2/r3, UIImage at sp) */
 #define MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL 0xB4DB5u
