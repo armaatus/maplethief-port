@@ -43,6 +43,8 @@ its test's name.**
 | --- | --- | --- |
 | `tests/starts/chapter_2.json`: the start of chapter 2, a level-34 Bandit on 4.1 with main 40 active | part L's save (`play.chapter_1_l`) | `tests/test_savedata_build_real.py` (local; skipped without the bundle or the chain's output, which `MT_CHAIN_OUTPUT` can name) |
 
+CTest builds it as `starts.chapter_2` for `play.compendium_npcs` ([compendium-port-check.md](compendium-port-check.md)), which is not synthetic for that reason.
+
 The synthetic starts of [skills-and-jobs.md](skills-and-jobs.md) (`tests/starts/jobs_*.json`,
 `tests/starts/skills_*.json`) and [systems-sweep-2.md](systems-sweep-2.md)
 (`tests/starts/systems2_*.json`) are built by CTest itself: `starts.<name>` writes the save into

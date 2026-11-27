@@ -14,6 +14,7 @@ Runs that check the real game: some scripted, which run as tests on your machine
 | [Skills and job advancements](skills-and-jobs.md) | Every job advancement path and all 24 skills, played from built start states and checked against the rules |
 | [Systems sweep 1](systems-sweep-1.md) | Korean, the second and third slots, a full bag, the level cap and its score, the quick slots and the trash |
 | [Systems sweep 2](systems-sweep-2.md) | The cash shop's tiles and restores, the Reverse, the ten upgrade scrolls, the Pigmy dialog and `portal620`, from built start states |
+| [The compendium in the running port](compendium-port-check.md) | Five NPCs, two shops and two crafting recipes of the compendium, played from the start of chapter 2 and checked against the knowledge base |
 
 ## By hand
 

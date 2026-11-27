@@ -1476,6 +1476,27 @@ foreach(pair IN LISTS _from_starts)
                    "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_${start}")
 endforeach()
 
+# The compendium's NPCs, shops and recipes in the running port (#220,
+# docs/testing/compendium-port-check.md): from chapter_2.json (equal to part L's save, so not
+# synthetic) five NPCs, two shops and two recipes against the knowledge base's records.
+add_test(NAME starts.chapter_2
+         COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                 "${PROJECT_SOURCE_DIR}/tests/starts/chapter_2.json"
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2/data/saves" --app
+                 "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+set_tests_properties(
+    starts.chapter_2
+    PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_SETUP start_chapter_2
+               ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+add_test(NAME play.compendium_npcs COMMAND play_real_test compendium_npcs
+                                           "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_compendium_npcs")
+set_tests_properties(
+    play.compendium_npcs
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED start_chapter_2
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_2")
+
 # The systems sweep (#303, docs/testing/systems-sweep-1.md). Korean (MAPLETHIEF_LANGUAGE=ko):
 # the terms, the tutorial and chapter 1's first part from a new game, and a quest offer in
 # chapters 2 and 3 plus the chapter-3 line ko.lproj lacks (original bug 15) from built starts.
