@@ -385,6 +385,9 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # (start, splits, end, reset, the personal best), an Assist set and reset mid-run, every Assists
 # row of the registry, the run variables, the category parser's refusals by line, the shipped
 # categories, the run log's round trip.
+# The LiveSplit link (#407, livesplit_test.cpp): a test TCP server on 127.0.0.1 receives the
+# exact lines of a synthetic run (start, splits, reset, game time); a refused or unanswered
+# connection never holds a turn and logs once.
 # The first-launch IPA import (#182, ipa_import_test.cpp): synthetic IPAs refused with each
 # reason, unsafe entries writing nothing, an interrupted import leaving no game/, a re-import,
 # the bundle lookup's order, and the import screen's input and loop on a dummy-driver window.
@@ -438,10 +441,14 @@ maplethief_add_cpp_test(
             cpp/switch_input_test.cpp
             cpp/gfx_dksh_test.cpp
             cpp/run_timer_test.cpp
+            cpp/livesplit_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
 target_include_directories(platform_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+if(WIN32)
+    target_link_libraries(platform_test PRIVATE ws2_32) # livesplit_test.cpp's server
+endif()
 target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}"
                                                  MT_TEST_OUTPUT_DIR="${MAPLETHIEF_TEST_OUTPUT_DIR}")
 # The minimap's golden image of a synthetic grid (#176, minimap_test.cpp) and the key pad's
