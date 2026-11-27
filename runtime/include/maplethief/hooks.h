@@ -224,6 +224,15 @@ void mt_hooks_install_portal620_fix(int enabled) MT_NOEXCEPT;
  * hook clears both bytes of the hero (CStateGame +0x30) and runs the original. Registers it,
  * `enabled` or not (the original). */
 void mt_hooks_install_scene_knockback_fix(int enabled) MT_NOEXCEPT;
+/* Text_Wrap 0x22EC5's runaway on a word wider than the box (#419, ADR 0228,
+ * docs/re/original-bugs.md 15). With no space on the line, the wrap stores empty lines without
+ * end until its line array overruns its own frame and Text_SubChars 0x22A1D reads off memory's
+ * end. The guard, a wrapper on Text_SubChars (a text pack's handler stays inside it), cuts
+ * such a line after the characters that fit instead; every other call is unchanged.
+ * Neutralised in every mode: the game calls it with `enabled` 1; 0 removes it. */
+void mt_hooks_install_text_wrap_guard(int enabled) MT_NOEXCEPT;
+/* Lines the guard cut, since the process started. */
+uint64_t mt_hooks_text_wrap_guarded(void) MT_NOEXCEPT;
 
 /* Every fix of an original bug (docs/re/original-bugs.md, #155), the setting fix_original_bugs
  * (on in the Enhanced preset): the portal items, the early Play guard, portal620 and the

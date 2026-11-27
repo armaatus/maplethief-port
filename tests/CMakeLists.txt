@@ -139,6 +139,7 @@ set(MAPLETHIEF_RUNTIME_TEST_SOURCES
     cpp/hooks_test.cpp
     cpp/scriptvm_test.cpp
     cpp/text_events_test.cpp
+    cpp/text_wrap_test.cpp
     cpp/widescreen_test.cpp
     cpp/trace_entry_fixture.c
     cpp/guest_trap.cpp)
@@ -1681,6 +1682,7 @@ set(_from_starts_303
     korean_offer_2:korean_chapter_2
     korean_offer_3:korean_ch3
     korean_missing_key:korean_ch3_key
+    korean_missing_key_original:korean_ch3_key
     inventory_full:systems_inventory_full
     level_cap:systems_level_99
     quick_slots_trash:systems_carry)
