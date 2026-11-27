@@ -519,12 +519,13 @@ def encode_quest(save: QuestSave) -> bytes:
 class Config:
     """``config``: 6 option bytes, kept in memory at ``*0x11A98C`` (loader 0x38611)."""
 
-    sound: int = 3  # 0x37C79: bit 0 music, bit 1 effects (probable)
-    speed: int = 1  # 0 / 1 / 2 -> 65 / 50 / 40 (table 0x108C58), probably the tick in ms
-    unknown_2: int = 0
-    unknown_3: int = 1  # 0x37BD1: 0 = off, else passed on as a level
-    unknown_4: int = 1  # cleared by 0x3EAA1 in state 0x68
-    unknown_5: int = 1  # index into {0, 1, 3} (0x37B85)
+    # The meanings: docs/formats/save.md (config); the unknown_* names are kept.
+    sound: int = 3  # 0x37C79: bit 0 effects, bit 1 music
+    speed: int = 1  # 0 / 1 / 2 -> a 65 / 50 / 40 ms tick (table 0x108C58)
+    unknown_2: int = 0  # walking: 0 while held, 1 a press starts it (0x817F1, 0x807B9)
+    unknown_3: int = 1  # vibration (0x37BD1): 0 off, else on
+    unknown_4: int = 1  # shortcut window shown: run-time state (HUD_Paint 0x5A465)
+    unknown_5: int = 1  # information lines: index into {0, 1, 3} (0x37B85)
 
 
 def parse_config(data: bytes) -> Config:

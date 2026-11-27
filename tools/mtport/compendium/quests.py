@@ -913,7 +913,7 @@ def _class_ups(ctx: _Ctx, rel: str) -> None:
                     "chapter": (c, "code"),
                     "advancement": (n, "code"),
                     "job": (job, "code"),
-                    "job_name": (job_name, "probable"),
+                    "job_name": (job_name, "code"),  # confirmed in play: play.jobs_*, play.skills_*
                     "keeps_job": (job is None, "code"),
                     "script": (script_id(rel), "code"),
                     "conditions": (conditions(alts), "code"),

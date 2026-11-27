@@ -17,7 +17,7 @@ The hero keeps six numbers that the fight rules read:
 
 Wearing an item adds all six of its stats (ATT, DEF, ACC, AVOID, HP and MP); taking it off removes them. HP and MP from equipment raise the maximums. STR, DEX, INT and LUK appear on the status tab and nothing else reads them: in this game they are for display only.
 
-The level table's attack, defense, accuracy and avoidability columns are read by the code; what each column means was worked out from that code, so the [level pages](skills/index.html) mark them probable.
+The level table's attack, defense, accuracy and avoidability columns are the hero's own ATT, DEF, ACC and AVOID at that level: a hero wearing nothing and with no skill learned has exactly them (confirmed in play, `play.skills_weapon_assassin_synthetic`). Their values are on the [level pages](skills/index.html).
 
 **Example:** a level 10 hero (level table ATT 14) wears a dagger with 8 ATT and has nothing else. The hero's ATT is 22.
 

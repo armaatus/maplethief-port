@@ -93,8 +93,8 @@ Two hits of a basic attack defeat it from level 2.
 
 ## Notes
 
-The level column of the monster table is probable, not confirmed
-([spec](../formats/data-tables.md#mobdat), field `level`).
+Its level is what the evade, miss and contact damage rules read, confirmed in play
+(`play.mechanics`; [spec](../formats/data-tables.md#mobdat), field `level`).
 ```
 
 ### Item page
@@ -371,7 +371,7 @@ Notes on the names:
 ## Evidence
 
 - Facts come from the data tables, the scripts and the port's tests. A page states read facts plainly.
-- **Inferred facts** (a column whose meaning was worked out, not read from the game) carry a "probable" note with a link to the spec field, as the data-table specs mark these: "Level 12 (probable; [spec](../formats/data-tables.md#mobdat), `mob.level`)".
+- **Inferred facts** (a column whose meaning was worked out, not read from the game) carry a "probable" note with a link to the spec field, as the data-table specs mark these: "Name: a town's (probable; [notes](../re/map-names.md), a map past its area's row)".
 - Facts from a playthrough name the test or the date: "confirmed in play (`play.chapter_1_a`)".
 - Unknown values are written "unknown", never guessed. A column the specs list as unknown is left out of the infobox.
 - Unused content (a map no portal reaches, an item no table drops) goes in an Unused content section with the evidence for "unused".
