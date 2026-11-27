@@ -228,8 +228,8 @@ jobs:
             libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl1-mesa-dev \
             libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev libdbus-1-dev libudev-dev
 
-      - name: Install the software Vulkan driver (Linux debug, the gpu tests)
-        if: runner.os == 'Linux' && matrix.config == 'debug'
+      - name: Install the software Vulkan driver (Linux x86_64 debug, the gpu tests)
+        if: matrix.os == 'ubuntu-latest' && matrix.config == 'debug'
         # Mesa's lavapipe, a Vulkan device on the CPU: the synthetic gpu-labelled tests
         # (gfx_gpu_test) run on it instead of skipping (#364, ADR 0202); their GPU-time limits
         # are not checked on a software device. libvulkan1 is the loader SDL opens.
@@ -276,10 +276,11 @@ jobs:
         if: matrix.config == 'debug' && runner.os != 'Windows'
         run: scripts/test
         env:
-          # Linux: the gpu tests on lavapipe, a missing device fails them (#364); only its ICD,
-          # so the loader never picks another driver. Elsewhere they skip on GitHub Actions.
-          MAPLETHIEF_GPU_TESTS: ${{ runner.os == 'Linux' && '1' || '' }}
-          VK_DRIVER_FILES: ${{ runner.os == 'Linux' && '/usr/share/vulkan/icd.d/lvp_icd.json' || '' }}
+          # Linux x86_64: the gpu tests on lavapipe, a missing device fails them (#364); only its
+          # ICD, so the loader never picks another driver. Elsewhere they skip on GitHub Actions,
+          # ubuntu-24.04-arm too: its older Mesa samples two golden scenes differently (ADR 0202).
+          MAPLETHIEF_GPU_TESTS: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
+          VK_DRIVER_FILES: ${{ matrix.os == 'ubuntu-latest' && '/usr/share/vulkan/icd.d/lvp_icd.json' || '' }}
 
       - name: Build and run all tests (scripts/test.ps1)
         if: matrix.config == 'debug' && runner.os == 'Windows'

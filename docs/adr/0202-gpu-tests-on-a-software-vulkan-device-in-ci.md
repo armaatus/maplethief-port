@@ -33,3 +33,11 @@ Measured on lavapipe (Mesa 26.0.8, LLVM 21, Ubuntu 26.04 arm64 container on an M
 - The time limits stay a local check on the Mac (and `scripts/timing-stress`); CI cannot catch a GPU-time regression.
 - The Linux debug job takes about two minutes more (the gpu cases share one `RESOURCE_LOCK` and run one at a time).
 - A lavapipe update can move pixels; a new failure is read from the job's uploaded `build/test-output/` diff.
+
+## Addendum: the first all-OS run (2026-11-27)
+
+Accepted (delegated by Joris, 2026-11-27). CI run 45959090979 on the sweep branch (`be5f3f25`):
+
+- **Linux x86_64** (`ubuntu-latest`, Ubuntu 24.04's Mesa): all 34 `gfx_gpu.*` cases pass on lavapipe. This is the gate.
+- **Linux aarch64** (`ubuntu-24.04-arm`, ADR 0194): 32 pass; two golden scenes fail on its lavapipe, `gfx_blend_factors` (1.33 % of pixels, at most 4 per channel) and `gfx_perspective` (0.67 %, up to 200: the floor's far texels sample differently). The gate therefore runs on `ubuntu-latest` only; the arm job skips the gpu tests as the macOS and Windows jobs do. A per-driver golden is not worth keeping for a second software device.
+- **Windows WARP try**, x64 and ARM64 debug: 23 of 34 pass on each, 11 fail (among them the grade, the widescreen passes and the shader filter's pass); the step never fails the job, so it stays a try. Making it a gate needs a look at those 11 cases on WARP, which is not this ADR's work.
