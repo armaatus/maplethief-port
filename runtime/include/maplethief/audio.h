@@ -67,6 +67,14 @@ typedef struct mt_audio_stats {
 /* This process's numbers (zeros before the first audio call). */
 mt_audio_stats mt_audio_get_stats(void) MT_NOEXCEPT;
 
+/* An audio-session interruption (#432): calls the listener the guest gave
+ * AudioSessionInitialize with `state` (1 kAudioSessionBeginInterruption, 0
+ * kAudioSessionEndInterruption) and a NULL user data (the game passes NULL: re/audio.md), on the
+ * guest thread between run-loop turns. Returns 1 if a listener was called, 0 if there is none.
+ * The platforms never call it (ADR 0045: a desktop has no phone call or alarm); the host-driven
+ * test does. */
+int mt_audio_session_interruption(mt_cpu *cpu, uint32_t state) MT_NOEXCEPT;
+
 /* --- the mixer's output (ADR 0045) ------------------------------------------------------- */
 
 #define MT_AUDIO_RATE 44100u /* Hz */

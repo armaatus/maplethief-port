@@ -29,6 +29,8 @@ ctest --preset mac-debug -R "play\.systems2_"
 | `play.systems2_restored_carnival_off_synthetic` | `restored_carnival_0_0` | `restored_content` off: 0.0's live list is `00.obj`'s record for record, shop 5 has its 7 listings, the wrapper wrote nothing |
 | `play.systems2_restored_carnival_4_synthetic` | `restored_carnival_4_0`: level-40 Rogue of chapter 2 on 4.0 with `item_etc` 48 | `Spiegelman2` at (20, 21), ticket B in shop 11; mode 1 in room 4.18 (no objects: the hero keeps the town's x, on the floor), 2,700 EXP for a score of 0 |
 | `play.systems2_restored_carnival_6_synthetic` | `restored_carnival_6_0`: level-55 Rogue of chapter 3 on 6.0 with `item_etc` 49 | `Spiegelman3` at (31, 6), ticket C in shop 15; mode 2 in room 6.3, 4,500 EXP for a score of 0 |
+| `play.systems2_restored_maps_synthetic` | `restored_maps_4_3`: level-60 Rogue of chapter 3 on 4.3 | `restored_content` on ([#428](https://github.com/armaatus/maplethief-port/issues/428), [original-bugs.md](../re/original-bugs.md#the-unreached-maps-428)): 4.3's live list starts with kind 2 `portal480` at tile (18, 7), then `43.obj`'s records; by walking, the added portal to 4.5, 4.5's portal 1 to 4.8, 4.8's portal 0 back to 4.5, 4.5's portal 0 back to 4.3 (on 4.3's own portal 2), then on to 4.8 again and its portal 1 to 4.10; each landing at the target portal's arrival point |
+| `play.systems2_restored_maps_off_synthetic` | `restored_maps_4_3` | `restored_content` off: 4.3's live list is `43.obj`'s record for record, its portal 2 leads to 4.6, the wrapper added nothing |
 
 `input.menu_shops_save_auto_potion` runs `input.menu_shops_save` with `auto_potion = 50`: the
 stall [qol.md](../re/qol.md) recorded on 2026-11-02 no longer happens.

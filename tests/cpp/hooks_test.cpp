@@ -466,6 +466,34 @@ TEST_CASE("hooks: restored_content's Monster Carnival: three towns, the wrapper 
     CHECK(stats.rounds == 0);
 }
 
+TEST_CASE("hooks: restored_content's unreached maps: one portal on 4.3, the wrapper on or off "
+          "(#428)") {
+    Fresh fresh;
+    // 4.5 and 4.8's own portals lead out to 4.3 and 4.10; the way in is portal480 (the script
+    // that warps to 4.5's portal 0) on 4.3's upper middle platform (docs/re/original-bugs.md,
+    // Unreachable content).
+    const mt_restored_portal *p = mt_restored_portal_on(4, 3);
+    REQUIRE(p != nullptr);
+    CHECK(std::string(p->script) == "portal480");
+    CHECK(p->cell == 7 * 38 + 18);
+    CHECK(p->kind == 2); // drawn, as 4.3's own 0-2
+    CHECK((p->to_area == 4 && p->to_map == 5 && p->to_portal == 0));
+    // No other map gets one: not the restored maps themselves, not 4.3's neighbours.
+    CHECK(mt_restored_portal_on(4, 5) == nullptr);
+    CHECK(mt_restored_portal_on(4, 8) == nullptr);
+    CHECK(mt_restored_portal_on(4, 10) == nullptr);
+    CHECK(mt_restored_portal_on(4, 0) == nullptr);
+    // A wrapper beside Monster Carnival's handler: installing it leaves the handler alone.
+    mt_hooks_install_restored_carnival(1);
+    mt_hooks_install_restored_maps(1);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_MAP_LOAD_OBJ) == 1);
+    mt_hooks_install_restored_maps(0);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_MAP_LOAD_OBJ) == 1);
+    mt_hooks_install_restored_carnival(0);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_MAP_LOAD_OBJ) == 0);
+    CHECK(mt_hooks_restored_maps_stats().portals == 0);
+}
+
 // --- PopupMenu_QuestTabOnKey 0x5462D: the quest page fix (#167) ------------------------------
 
 namespace {

@@ -87,7 +87,7 @@ also be compared by eye: the last line of each.
 
 `--native-script-vm on|off|shadow` sets `MAPLETHIEF_NATIVE_SCRIPT_VM` for the plays, which the
 driver applies as the game's `--native-script-vm` ([ADR 0226](../adr/0226-the-host-script-vm.md),
-#386, #430): the script VM's loop on the host, the recompiled original (the default), or the
+#386, #430): the script VM's loop on the host (the default), the recompiled original, or the
 shadow runs, which run each outermost `Lua::execute` both ways from one state and fail the play
 on any difference (`maplethief/scriptvm.h`). A shadow play's summary line (`scriptvm shadow: N
 runs, M native calls replayed, 0 with a difference`) is repeated in the runner's output; each

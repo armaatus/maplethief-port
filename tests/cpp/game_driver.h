@@ -1311,10 +1311,12 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     mt_hooks_install_original_bug_fixes(r.settings.fix_original_bugs ? 1 : 0); // as game.cpp
     fe::install_restored_shops(r.settings.restored_content);                   // as game.cpp
     fe::install_restored_carnival(r.settings.restored_content);                // as game.cpp
-    // MAPLETHIEF_NATIVE_SCRIPT_VM=on|off|shadow: game.cpp's --native-script-vm (#386, #430).
+    fe::install_restored_maps(r.settings.restored_content);                    // as game.cpp
+    // MAPLETHIEF_NATIVE_SCRIPT_VM=on|off|shadow: game.cpp's --native-script-vm (#386, #430), on
+    // by default as in the game.
     const std::string script_vm = [] {
         const char *e = std::getenv("MAPLETHIEF_NATIVE_SCRIPT_VM");
-        return std::string(e != nullptr ? e : "off");
+        return std::string(e != nullptr ? e : "on");
     }();
     check(script_vm == "on" || script_vm == "off" || script_vm == "shadow",
           "MAPLETHIEF_NATIVE_SCRIPT_VM is on, off or shadow (" + script_vm + ")");
@@ -1325,7 +1327,7 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     } else {
         mt_hooks_install_native_script_vm(script_vm == "on" ? 1 : 0);
     }
-    if (script_vm != "off") {
+    if (script_vm != "on") {
         std::printf("MAPLETHIEF_NATIVE_SCRIPT_VM: %s\n", script_vm.c_str());
     }
     if (!r.clock.install()) {

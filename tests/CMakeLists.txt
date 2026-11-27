@@ -850,6 +850,28 @@ foreach(what on off)
                          SKIP_RETURN_CODE 77 TIMEOUT 300 RUN_SERIAL TRUE)
 endforeach()
 
+# Every shipped script through both script VMs (#431, ADR 0153's second proof, ADR 0226): in the
+# main menu's turn the test loads each of the 307 .out files with the game's Lua::loadBuffer and
+# runs main and every function slot with Lua::callFunction, once in the recompiled Lua::execute
+# and once in the host VM, from the same guest memory, under 16 native answer sets; the
+# opcode sequences, the native calls (a recording stub at Lua::callNative) and guest memory must
+# be equal. Skipped (77) without the generated code, the slice or the bundle.
+add_executable(scriptvm_real_test cpp/scriptvm_real_test.cpp)
+target_link_libraries(scriptvm_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
+target_compile_definitions(
+    scriptvm_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+if(TARGET maplethief_gen)
+    target_link_libraries(scriptvm_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(scriptvm_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(scriptvm_real_test)
+add_test(NAME runtime.scriptvm_corpus COMMAND scriptvm_real_test
+                                              "${MAPLETHIEF_TEST_OUTPUT_DIR}/scriptvm_corpus")
+set_tests_properties(runtime.scriptvm_corpus PROPERTIES LABELS "cpp;real_assets"
+                     SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE)
+
 # The keyboard in the real game (#68, ADR 0048's addendum): as the gamepad's, from the turn hook
 # with synthetic SDL key events (and the held keys' repeats) through Input, Keyboard and Actions:
 # input.keyboard_play plays the first map by keys and checks the hero in guest memory;
@@ -993,6 +1015,19 @@ add_test(
 set_tests_properties(
     input.menu_shops PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
                                 TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
+# input.menu_touches (#433): the key pads' UIKit buttons and touch handlers by scripted fingers,
+# as on the device (the other flows press game keys, which never run them): an NPC touched, Mr.
+# Wang's tabs, list, Buy and Sell, the popups' buttons, a quest offer's Refuse and
+# Accept, the map's buttons and towns. On the same save.
+add_test(
+    NAME input.menu_touches
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=touches"
+            "-DSEED=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops_save/data"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_touches" -P
+            "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+set_tests_properties(
+    input.menu_touches PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
+                                  TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
 # input.menu_shop_scroll (ADR 0102): Mr. Wang's Buy and Sell lists by the d-pad, item by item,
 # the drawn list scrolled so the cursor's row stays in view; the amount set by the d-pad (and
 # held with menu_repeat, ADR 0114) and two bought; the Sell list paged with LT (ADR 0114); the
@@ -1385,6 +1420,18 @@ set_tests_properties(
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
+# The host-driven tests (#432, ADR 0242, docs/testing/run-coverage.md): after the tutorial, the
+# functions no play can enter are entered from the host: a push token, a memory warning, an
+# audio interruption, the death popup's grade revival, a coupon deleted, and the teardown (every
+# destructor and dealloc on its object, a save state restored before each). For the run coverage:
+# re/coverage-gaps.md has no `unreachable` row. TICKS 1: no play time is asked for.
+add_test(NAME play.host_events COMMAND play_real_test host_events
+                                       "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_host_events" 1)
+set_tests_properties(
+    play.host_events
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
 # Quality of life (#90, assists.h, ADR 0092), each from a new game on the tutorial's map 2.8:
 # auto_potion off drinks nothing at a fifth of max HP, = 50 drinks quick slot 1's Red Potion
 # once and none in the popup menu (play.auto_potion); X held 3 s attacks once with
@@ -1523,6 +1570,7 @@ set(_starts
     restored_carnival_0_0
     restored_carnival_4_0
     restored_carnival_6_0
+    restored_maps_4_3
     speech_notices)
 foreach(start IN LISTS _starts)
     add_test(NAME starts.${start}
@@ -1569,7 +1617,9 @@ set(_from_starts
     systems2_restored_carnival:restored_carnival_0_0
     systems2_restored_carnival_off:restored_carnival_0_0
     systems2_restored_carnival_4:restored_carnival_4_0
-    systems2_restored_carnival_6:restored_carnival_6_0)
+    systems2_restored_carnival_6:restored_carnival_6_0
+    systems2_restored_maps:restored_maps_4_3
+    systems2_restored_maps_off:restored_maps_4_3)
 # The five map pages checked in the running port (#221): from a start on each map, the hero takes
 # one portal (MT_MAP_PAGE_PORTAL, its kind) and play_real_test map_page writes where it landed;
 # tests/test_compendium_world_port.py compares that with the page's Connections row. The 2.0

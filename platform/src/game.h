@@ -219,12 +219,12 @@ struct GameOptions {
     // force_crash_at seconds after the first run-loop turn the turn never ends, as a host call
     // that never returns. It turns the watchdog on in a --fixed-step run too.
     bool force_hang = false;
-    // --native-script-vm on|off (#386, ADR 0226, a developer switch): the script VM's opcode loop,
-    // Lua::execute 0x9BC11, runs as host code over the same guest memory (maplethief/scriptvm.h)
-    // instead of the recompiled one. Off (the default): the original. shadow (#430): each
-    // outermost call runs both ways and is compared (mt_scriptvm_shadow_install); the game goes
-    // on from the original's.
-    bool native_script_vm = false;
+    // --native-script-vm on|off|shadow (#386, ADR 0226, a developer switch): the script VM's
+    // opcode loop, Lua::execute 0x9BC11, runs as host code over the same guest memory
+    // (maplethief/scriptvm.h) instead of the recompiled one. On by default since #430 and #431
+    // proved the two equal; off: the recompiled original. shadow (#430): each outermost call runs
+    // both ways and is compared (mt_scriptvm_shadow_install); the game goes on from the original's.
+    bool native_script_vm = true;
     bool native_script_vm_shadow = false;
     // --hang-seconds S (#337, hang_watchdog.h): the watchdog's limit; 0: no watchdog. Negative
     // (not given): kHangSeconds, and none in a --fixed-step run.

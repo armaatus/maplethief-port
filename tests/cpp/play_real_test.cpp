@@ -13548,6 +13548,132 @@ void systems2_restored_carnival_4(Run &r, u64) { restored_carnival_run(r, 4, tru
 void systems2_restored_carnival_6(Run &r, u64) { restored_carnival_run(r, 6, true); }
 void systems2_restored_carnival_checks(Run &, u64) {}
 
+// --- The unreached maps 4.5 and 4.8 (restored_content, #428) ----------------------------------
+//
+// docs/re/original-bugs.md "Unreachable content": 4.5 and 4.8 are a third road through Orbis's
+// garden; their own portals lead to each other and out to 4.3 and 4.10, but no reached map leads
+// in. With restored_content on, 4.3's list starts with one portal more, kind 2 portal480
+// (mt_restored_portal_on), then 43.obj's records. The hero (level 60, chapter 3, the start
+// restored_maps_4_3) walks every way in and out by the d-pad: 4.3's added portal to 4.5, up
+// 4.5 to its portal 1 and into 4.8, back through 4.8's portal 0 to 4.5 and its portal 0 to 4.3,
+// where he lands on 4.3's own portal 2 (the arrival takes the last kind-2 object, not the added
+// one); then 4.3 to 4.5 to 4.8 again and out through 4.8's portal 1 to 4.10. Each landing is the
+// target portal's arrival point (x = anchor + 16). systems2_restored_maps_off: the same start
+// with the setting off: 4.3's list is 43.obj's, record for record, and its portal 2 (portal432)
+// still leads to 4.6, as shipped.
+
+// Where a warp to portal (col, row) puts the hero: the anchor's x + 16, its y (obj.md).
+struct Landing {
+    int area, map, col, row;
+};
+struct RestoredMapsRun {
+    std::vector<std::string> landed; // "4.5 at 568,399" per warp, in order
+    bool all_ok = true;
+};
+RestoredMapsRun g_restored_maps;
+
+// Walks to the portal at tile (col, row) of (area, map) and up through it; checks that the hero
+// lands on `to` at its arrival point.
+void then_portal(Run &r, const std::string &what, int area, int map, int col, int row, Landing to) {
+    using namespace quest_bot;
+    const int x = col * 16 + 8, y = (row + 1) * 16 - 1;
+    then_go(r, what + ": to the portal", {area, map, x, y, 4}, 240);
+    then(r, what + ": up through it", 20, [&r, to](mt_cpu *cpu, double el) {
+        const Hero h = hero(cpu);
+        if (h.addr != 0 && h.on(to.area, to.map) && field(cpu)) {
+            release_all(r);
+            return true;
+        }
+        if (!field(cpu)) { // a notice the portal's script opened: A through it
+            hold(r, UP, false);
+            hold(r, A, std::fmod(el, 0.8) < 0.1);
+        } else {
+            hold(r, A, false);
+            hold(r, UP, std::fmod(el, 1.0) < 0.3);
+        }
+        return false;
+    });
+    then_do(r, what + ": the landing", [what, to](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const int ax = to.col * 16 + 8 + 16, ay = (to.row + 1) * 16 - 1;
+        const std::string at = std::to_string(h.area) + "." + std::to_string(h.map) + " at " +
+                               std::to_string(h.x) + "," + std::to_string(h.y);
+        std::printf("restored maps: %s: landed %s (portal %d,%d: %d,%d)\n", what.c_str(),
+                    at.c_str(), to.col, to.row, ax, ay);
+        g_restored_maps.landed.push_back(at);
+        const bool ok = h.on(to.area, to.map) && std::abs(h.x - ax) <= 24 &&
+                        std::abs(h.y - ay) <= 24 && h.hp > 0;
+        g_restored_maps.all_ok = g_restored_maps.all_ok && ok;
+        check(ok, what + ": on " + std::to_string(to.area) + "." + std::to_string(to.map) +
+                      " at portal (" + std::to_string(to.col) + ", " + std::to_string(to.row) +
+                      ")'s arrival point");
+    });
+}
+
+void restored_maps_run(Run &r, bool on) {
+    using namespace quest_bot;
+    r.settings.restored_content = on;
+    g_restored_maps = RestoredMapsRun{};
+    from_save(r);
+    then_wait_field(r);
+    const mt_restored_portal *p = mt_restored_portal_on(4, 3);
+    check(p != nullptr && std::string(p->script) == "portal480" && p->kind == 2,
+          "4.3's added portal is portal480, kind 2");
+    if (p == nullptr) {
+        then_finish(r);
+        return;
+    }
+    then_do(r, "4.3's object list", [on, p](mt_cpu *cpu) {
+        const std::vector<LiveObject> live = live_objects(cpu);
+        const std::vector<LiveObject> file = file_objects(4, 3);
+        const std::size_t skip = on ? 1 : 0;
+        bool same = live.size() == file.size() + skip;
+        for (std::size_t i = 0; same && i < file.size(); i++) {
+            same = live[i + skip].cell == file[i].cell && live[i + skip].kind == file[i].kind &&
+                   live[i + skip].name == file[i].name;
+        }
+        std::printf("4.3: %zu live objects, its .obj has %zu\n", live.size(), file.size());
+        if (on) {
+            check(!live.empty() && live[0].cell == p->cell && live[0].kind == p->kind &&
+                      live[0].name == p->script,
+                  "restored_content: 4.3's list starts with portal480, kind 2, at its cell");
+            check(same, "then 43.obj's records, in order");
+        } else {
+            check(same, "restored_content off: 4.3's list is 43.obj's, record for record");
+        }
+    });
+    if (!on) {
+        // portal432 (4.3's portal 2) to 4.6's portal 0, as shipped.
+        then_portal(r, "4.3 portal 2 (portal432)", 4, 3, 31, 5, {4, 6, 30, 24});
+        then_check(r, "restored_content off: no object added",
+                   [](mt_cpu *) { return mt_hooks_restored_maps_stats().portals == 0; });
+        then_finish(r);
+        return;
+    }
+    const int col = p->cell % 38, row = p->cell / 38;
+    // In, up and back: every exit of 4.5 and 4.8 by walking.
+    then_portal(r, "4.3 added portal (portal480)", 4, 3, col, row, {4, 5, 34, 24});
+    then_portal(r, "4.5 portal 1 (portal450)", 4, 5, 22, 5, {4, 8, 3, 26});
+    then_portal(r, "4.8 portal 0 (portal480)", 4, 8, 3, 26, {4, 5, 34, 24});
+    then_portal(r, "4.5 portal 0 (portal451)", 4, 5, 34, 24, {4, 3, 31, 5});
+    then_portal(r, "4.3 added portal again", 4, 3, col, row, {4, 5, 34, 24});
+    then_portal(r, "4.5 portal 1 again", 4, 5, 22, 5, {4, 8, 3, 26});
+    then_portal(r, "4.8 portal 1 (portal481)", 4, 8, 8, 5, {4, 10, 32, 33});
+    then_do(r, "the restored maps' runs", [](mt_cpu *cpu) {
+        const mt_restored_maps_stats s = mt_hooks_restored_maps_stats();
+        std::printf("restored maps: %zu warps, the portal added %llu times\n",
+                    g_restored_maps.landed.size(), static_cast<unsigned long long>(s.portals));
+        check(g_restored_maps.all_ok && g_restored_maps.landed.size() == 7,
+              "4.5 and 4.8 entered and left through each of their portals");
+        check(s.portals == 2, "the portal added on each load of 4.3 (the start, the way back)");
+        check(hero(cpu).hp > 0 && field(cpu), "the hero is alive in the field on 4.10");
+    });
+    then_finish(r);
+}
+void systems2_restored_maps(Run &r, u64) { restored_maps_run(r, true); }
+void systems2_restored_maps_off(Run &r, u64) { restored_maps_run(r, false); }
+void systems2_restored_maps_checks(Run &, u64) {}
+
 // --- the compendium's NPCs, shops and recipes in the port (#220) ---------------------------------
 //
 // compendium_npcs: from the start of chapter 2 (tests/starts/chapter_2.json, equal to part L's
@@ -15697,6 +15823,468 @@ void quick_slots_trash(Run &r, u64) {
 }
 void quick_slots_trash_checks(Run &, u64) {}
 
+// --- the host-driven tests (#432, ADR 0242, docs/testing/run-coverage.md) ------------------
+//
+// host_events: the game functions no play can enter (re/coverage-gaps.md's `unreachable` class),
+// each entered from the host with the state it needs, for the run coverage (mac-coverage,
+// MAPLETHIEF_COVERAGE). A coupon file with two coupons is written before the boot; the new game
+// and the tutorial lead to the field; then, from the turn hook:
+//   - a push token: the app delegate gets application:didRegisterForRemoteNotificationsWith
+//     DeviceToken: with 32 bytes, and CDataMgr+0x58C holds them as 64 hex digits;
+//   - a memory warning: the EAGLViewController (0x11A97C) gets didReceiveMemoryWarning and
+//     viewDidUnload, as UIKit sends them to a controller whose view is in no window;
+//   - an audio interruption (mt_audio_session_interruption): the listener the game gave
+//     AudioSessionInitialize begins one (the session goes inactive) and ends it (active again);
+//   - the death popup's grade revival: PopupKeyPadView's button action, which sends
+//     clickGradeRevivalButton: to the TouchKeyPadView; the field is back without a popup;
+//   - a coupon: CDataMgr::DeleteCoupon(0) empties the first and moves the second up;
+//   - the teardown, last: a save state of the field, then each destructor and dealloc on its
+//     object, the state restored before each: applicationWillTerminate:, every ObjC class's
+//     dealloc (the live object, or a new one where the game made none), and every destructor
+//     of the class's vtable on a live object of the class found on the heap, or on a zeroed
+//     object with the class's vtables where the field has none. Each one returns; the run then
+//     ends without another turn.
+constexpr u32 k_eagl_controller = 0x11A97C; // the EAGLViewController (objc-shell.md)
+constexpr u32 k_delete_coupon = 0x491E1;    // CDataMgr::DeleteCoupon(this, n) (formats/save.md)
+constexpr u32 k_coupon_names = 0x118;       // CDataMgr: char *text_a[50]
+constexpr u32 k_push_token = 0x58C;         // CDataMgr: the token as hex (re/network.md)
+// Ivars (work/re/objc.json): EAGLView's touchKeyPadView, mainMenuView, m_pINAPMgr,
+// m_pGameCenterManager; TouchKeyPadView's panels.
+constexpr u32 k_view_keypad = 84, k_view_main_menu = 104, k_view_inap = 140, k_view_gc = 144;
+constexpr u32 k_keypad_map = 48, k_keypad_popup = 52, k_keypad_npc = 56, k_keypad_market = 60,
+              k_keypad_cash = 64, k_keypad_help = 68;
+constexpr const char *k_coupons[2] = {"Coupon A", "Coupon B"};
+
+// A destructor: its function pointer, the class's primary vtable (address point), for a
+// secondary base's thunk the base's offset in the object and its vtable (work/re/vtables.json),
+// and the constructor (this only) that makes an object where the field has none and a zeroed
+// one will not do (the destructor follows a member pointer the constructor sets).
+struct Destructor {
+    u32 fn;
+    const char *name;
+    u32 vtable;
+    u32 base = 0, base_vtable = 0;
+    u32 ctor = 0;
+};
+constexpr u32 k_vt_state_adaptor = 0x119548, k_vt_floating_bg = 0x119918,
+              k_vt_state_game = 0x119B78, k_vt_state_main_menu = 0x119C08,
+              k_vt_state_title = 0x119C98;
+const Destructor k_destructors[] = {
+    {0xB015, "IStateAdaptor::~IStateAdaptor_deleting@thunk-4", k_vt_state_adaptor, 4, 0x1195B0},
+    {0xB031, "IStateAdaptor::~IStateAdaptor_deleting", k_vt_state_adaptor},
+    {0xB069, "IStateAdaptor::~IStateAdaptor", k_vt_state_adaptor},
+    {0xB0A1, "IStateAdaptor::~IStateAdaptor@thunk-4", k_vt_state_adaptor, 4, 0x1195B0},
+    {0xB169, "IState::~IState", 0xFC6B8},
+    {0xB195, "IState::~IState_deleting", 0xFC6B8},
+    {0xB221, "UtilAdaptor::~UtilAdaptor", 0xFC724},
+    {0xB255, "UtilAdaptor::~UtilAdaptor_deleting", 0xFC724},
+    {0xC75D, "CMMapTileSet::~CMMapTileSet", 0x119600},
+    {0xCBD5, "CMMap::~CMMap", 0x11961C},
+    {0xEAD1, "CMPopup::~CMPopup_deleting", 0x119638},
+    {0xED69, "CMPopup::~CMPopup", 0x119638},
+    {0x19689, "CMResMgr::~CMResMgr", 0x119654},
+    {0x1BB31, "CMScrollBar::~CMScrollBar", 0x119670},
+    {0x1C6B5, "CMSocket::~CMSocket_deleting", 0x11968C},
+    {0x1C7B5, "CMSocket::~CMSocket", 0x11968C},
+    {0x1DB19, "CMSoundPlayer::~CMSoundPlayer", 0x1196A4},
+    {0x1DDD9, "CMSoundPlayer::~CMSoundPlayer_deleting", 0x1196A4},
+    {0x1E6E1, "CMLayer::~CMLayer", 0x1196C0},
+    {0x1F58D, "CMFrame::~CMFrame", 0x1196DC},
+    {0x1FB89, "CMAction::~CMAction", 0x1196F8},
+    {0x20C2D, "CMSprite::~CMSprite", 0x119714},
+    {0x216D1, "CMSpriteImage::~CMSpriteImage", 0x119730},
+    {0x2210D, "CMTimer::~CMTimer_deleting", 0x11974C},
+    {0x22139, "CMTimer::~CMTimer", 0x11974C},
+    {0x24E05, "CMUtil::~CMUtil_deleting", 0x119764},
+    {0x24E39, "CMUtil::~CMUtil", 0x119764},
+    {0x264D1, "SkyCanvas::~SkyCanvas_deleting", 0x119780},
+    {0x264FD, "SkyCanvas::~SkyCanvas", 0x119780},
+    {0x26785, "Build::~Build", 0x119798},
+    {0x267B1, "Build::~Build_deleting", 0x119798},
+    {0x26DA9, "CAniManager::~CAniManager", 0x1197B0, 0, 0, 0x26F21},
+    {0x31C19, "CSelItem::~CSelItem", 0x1197C8},
+    {0x31CD9, "CMsg::~CMsg", 0x1197E0},
+    {0x361E5, "CChatBox::~CChatBox", 0x1197F8},
+    {0x367F1, "CFloating::~CFloating", 0x119814},
+    {0x36CA1, "CDamageFloatings::~CDamageFloatings", 0x119830},
+    {0x5AD61, "CDataMgr::~CDataMgr_deleting", 0x119848},
+    {0x5ADCD, "CDataMgr::~CDataMgr", 0x119848},
+    {0x5CCA1, "CDropItems::~CDropItems", 0x119864},
+    {0x5CFDD, "CFloatingEff::~CFloatingEff", 0x119888},
+    {0x5D249, "CFloatingBGAlgorithm::~CFloatingBGAlgorithm", 0x1198A8},
+    {0x5D275, "CFloatingBGAlgorithm::~CFloatingBGAlgorithm_deleting", 0x1198A8},
+    {0x5D2A1, "CFloatingBGFlowerAlgorithm::~CFloatingBGFlowerAlgorithm", 0x1198D8},
+    {0x5DA39, "CFloatingBGImage::~CFloatingBGImage", 0x119900},
+    {0x5DD51, "CFloatingBG::~CFloatingBG_deleting@thunk-36", k_vt_floating_bg, 36, 0x11992C},
+    {0x5E06D, "CFloatingBG::~CFloatingBG", k_vt_floating_bg},
+    {0x5E36D, "CFloatingBG::~CFloatingBG@thunk-36", k_vt_floating_bg, 36, 0x11992C},
+    {0x5ED7D, "CEffectFloatings::~CEffectFloatings", 0x119968},
+    {0x68575, "CHero::~CHero", 0x119988},
+    {0x69EED, "CItem::~CItem", 0x1199B8},
+    {0x6B4BD, "CLoaderThread::~CLoaderThread", 0x1199E0},
+    {0x6C5DD, "CMapArms::~CMapArms", 0x1199FC},
+    {0x6DB59, "CMapleObject::~CMapleObject_deleting", 0x119A18},
+    {0x6DB8D, "CMapleObject::~CMapleObject", 0x119A18},
+    {0x6DEA1, "CMapleWorld::~CMapleWorld", 0x119A40},
+    {0x6ED15, "CMobArms::~CMobArms", 0x119A58},
+    {0x742E9, "CMob::~CMob", 0x119A78},
+    {0x77421, "CMobs::~CMobs", 0x119AA0},
+    {0x7789D, "CNotifyText::~CNotifyText", 0x119ABC},
+    {0x78741, "CNotifyTextList::~CNotifyTextList", 0x119AD8},
+    {0x79949, "CPopup::~CPopup", 0x117874},
+    {0x7997D, "CPopup::~CPopup_deleting", 0x117874},
+    {0x79A21, "CRequire::~CRequire", 0x119AF4},
+    {0x79B99, "CReward::~CReward", 0x119B0C},
+    {0x7A5DD, "CQuest::~CQuest", 0x119B24},
+    {0x7AB81, "CQuestList::~CQuestList", 0x119B40},
+    {0x80315, "CSkill::~CSkill", 0x119B5C},
+    {0x92FF9, "CStateGame::~CStateGame_deleting@thunk-4", k_vt_state_game, 4, 0x119BE0},
+    {0x93869, "CStateGame::~CStateGame", k_vt_state_game},
+    {0x940BD, "CStateGame::~CStateGame@thunk-4", k_vt_state_game, 4, 0x119BE0},
+    {0x97455, "CStateMainMenu::~CStateMainMenu_deleting@thunk-4", k_vt_state_main_menu, 4,
+     0x119C74},
+    {0x97809, "CStateMainMenu::~CStateMainMenu", k_vt_state_main_menu},
+    {0x97BA1, "CStateMainMenu::~CStateMainMenu@thunk-4", k_vt_state_main_menu, 4, 0x119C74},
+    {0x987AD, "CStateTitle::~CStateTitle_deleting@thunk-4", k_vt_state_title, 4, 0x119D00},
+    {0x98809, "CStateTitle::~CStateTitle", k_vt_state_title},
+    {0x98849, "CStateTitle::~CStateTitle@thunk-4", k_vt_state_title, 4, 0x119D00},
+    {0x99069, "DataReader::~DataReader", 0x119D1C},
+    {0x9D415, "Lua::~Lua", 0x119D38},
+    {0x9D7A1, "Stringtable::~Stringtable", 0x119D54},
+    {0x9E0B1, "Symbol::~Symbol", 0x119D6C},
+    {0x9E79D, "Table::~Table", 0x119D84},
+    {0x9F07D, "TFunc::~TFunc", 0x119DB4},
+    {0x9F97D, "Undump::~Undump", 0x119DD0},
+    {0xC0B41, "SVectorClass::~SVectorClass", 0x119DEC},
+    {0xC0B6D, "SVectorClass::~SVectorClass_deleting", 0x119DEC},
+};
+constexpr u32 k_zeroed_object = 0x4000; // a zeroed object's bytes: more than any class's
+
+struct HostEvents {
+    std::vector<std::uint8_t> field;    // the save state the teardown restores before each step
+    int live = 0, made = 0, zeroed = 0; // destructors on a live, a constructed, a zeroed object
+    int fresh = 0;                      // deallocs on a new object (the game made none)
+};
+HostEvents g_host;
+
+int host_events_setup(Run &r) {
+    // cupon (formats/save.md): three best scores, then 50 entries of 0x77 bytes, text_a first.
+    std::vector<char> cupon(12 + 50 * 0x77, 0);
+    for (std::size_t i = 0; i < 2; i++) {
+        std::memcpy(cupon.data() + 12 + i * 0x77, k_coupons[i], std::strlen(k_coupons[i]));
+    }
+    fs::create_directories(r.data / "saves");
+    std::ofstream(r.data / "saves" / "cupon", std::ios::binary)
+        .write(cupon.data(), static_cast<std::streamsize>(cupon.size()));
+    return 0;
+}
+
+std::string guest_text(mt_cpu *cpu, u32 addr) {
+    std::string s;
+    while (addr != 0 && cpu->mem[addr] != 0 && s.size() < 256) {
+        s += static_cast<char>(cpu->mem[addr++]);
+    }
+    return s;
+}
+
+u32 send(mt_cpu *cpu, u32 self, const char *selector, u32 arg = 0) {
+    return mt_objc_send1(cpu, self, selector, arg);
+}
+u32 objc_class(const char *name) { return mt_objc_class_named(mt_objc_current(), name); }
+u32 app_delegate(mt_cpu *cpu) {
+    return mt_objc_send0(cpu, mt_objc_send0(cpu, objc_class("UIApplication"), "sharedApplication"),
+                         "delegate");
+}
+// The EAGLView, as the engine reaches it: +[EAGLView_Instance Instance].objView (the delegate's
+// glView outlet is never set: re/objc-shell.md).
+u32 gl_view(mt_cpu *cpu) {
+    return mt_objc_send0(cpu, mt_objc_send0(cpu, objc_class("EAGLView_Instance"), "Instance"),
+                         "objView");
+}
+u32 keypad(mt_cpu *cpu) { return rd(cpu, gl_view(cpu) + k_view_keypad); }
+
+void push_token(mt_cpu *cpu) {
+    mt_mem *mem = mt_mem_from_cpu(cpu);
+    const u32 bytes = mt_heap_malloc(mem, 32);
+    std::string hex;
+    for (u32 i = 0; i < 32; i++) {
+        cpu->mem[bytes + i] = static_cast<std::uint8_t>(i * 37 + 5);
+        char two[3];
+        std::snprintf(two, sizeof two, "%02x", cpu->mem[bytes + i]);
+        hex += two;
+    }
+    const u32 data = mt_objc_send2(cpu, mt_objc_send0(cpu, objc_class("NSData"), "alloc"),
+                                   "initWithBytes:length:", bytes, 32);
+    mt_heap_free(mem, bytes);
+    const u32 delegate = app_delegate(cpu);
+    const u32 app = mt_objc_send0(cpu, objc_class("UIApplication"), "sharedApplication");
+    mt_objc_send2(cpu, delegate,
+                  "application:didRegisterForRemoteNotificationsWithDeviceToken:", app, data);
+    mt_objc_release(cpu, data);
+    check(guest_text(cpu, data_mgr(cpu) + k_push_token) == hex,
+          "push token: CDataMgr+0x58C holds the 32 bytes as hex");
+}
+
+void memory_warning(mt_cpu *cpu) {
+    const u32 vc = rd(cpu, k_eagl_controller);
+    check(vc != 0, "memory warning: the EAGLViewController exists");
+    send(cpu, vc, "didReceiveMemoryWarning");
+    send(cpu, vc, "viewDidUnload");
+}
+
+void audio_interruption(mt_cpu *cpu) {
+    check(mt_audio_session_interruption(cpu, 1) == 1, "interruption: the listener is called");
+    check(mt_audio_get_stats().session_active == 0,
+          "interruption: SoundPlayer_BeginInterruption deactivated the session");
+    mt_audio_session_interruption(cpu, 0);
+    check(mt_audio_get_stats().session_active == 1,
+          "interruption: SoundPlayer_EndInterruption activated it again");
+}
+
+void delete_coupon(mt_cpu *cpu) {
+    const u32 dm = data_mgr(cpu);
+    auto name = [cpu, dm](u32 i) { return guest_text(cpu, rd(cpu, dm + k_coupon_names + 4 * i)); };
+    check(name(0) == k_coupons[0] && name(1) == k_coupons[1],
+          "coupon: LoadCupon read the two coupons");
+    const u32 args[2] = {dm, 0};
+    mt_call_guest(cpu, k_delete_coupon, args, 2, k_delete_coupon);
+    check(name(0) == k_coupons[1] && name(1).empty(),
+          "coupon: DeleteCoupon(0) moved the second coupon up and emptied its entry");
+}
+
+// A live object of `d`'s class (the newest: the highest address), or 0: a heap block whose
+// vtable words are the class's; else such words inside a live block (a member object) or in the
+// image's writable segments (a static object).
+bool has_vtables(const mt_cpu *cpu, u32 a, const Destructor &d) {
+    return rd(cpu, a) == d.vtable && (d.base == 0 || rd(cpu, a + d.base) == d.base_vtable);
+}
+u32 live_object(mt_cpu *cpu, const Destructor &d) {
+    mt_mem *mem = mt_mem_from_cpu(cpu);
+    mt_heap_stats st{};
+    mt_heap_get_stats(mem, &st);
+    u32 found = 0;
+    for (u32 a = MT_GUEST_HEAP_BASE; a + d.base + 4 <= st.top; a += MT_HEAP_ALIGN) {
+        if (has_vtables(cpu, a, d) && mt_heap_usable_size(mem, a) != 0) {
+            found = a;
+        }
+    }
+    if (found != 0) {
+        return found;
+    }
+    for (u32 a = MT_GUEST_HEAP_BASE; a + d.base + 4 <= st.top; a += 4) {
+        if (!has_vtables(cpu, a, d)) {
+            continue;
+        }
+        // The block holding it: the nearest live block start below, if it reaches past it.
+        for (u32 b = a & ~(MT_HEAP_ALIGN - 1); b >= MT_GUEST_HEAP_BASE && a - b < 0x10000;
+             b -= MT_HEAP_ALIGN) {
+            if (const u32 n = mt_heap_usable_size(mem, b); n != 0) {
+                found = a + d.base + 4 <= b + n ? a : found;
+                break;
+            }
+        }
+    }
+    if (found != 0) {
+        return found;
+    }
+    u32 count = 0;
+    const mt_segment *segs = mt_mem_segments(mem, &count);
+    for (u32 i = 0; i < count; i++) {
+        if ((segs[i].initprot & MT_PROT_WRITE) == 0) {
+            continue;
+        }
+        for (u32 a = segs[i].vmaddr; a + d.base + 4 <= segs[i].vmaddr + segs[i].vmsize; a += 4) {
+            if (has_vtables(cpu, a, d)) {
+                found = a;
+            }
+        }
+    }
+    return found;
+}
+
+void restore_field(Run &r, mt_cpu *cpu) {
+    mt_snapshot_expect ex = mt_snapshot_expect_default();
+    ex.rebase_clock = guest_rebase;
+    ex.user = &r.clock;
+    char why[512] = {};
+    if (mt_snapshot_restore(cpu, g_host.field.data(), g_host.field.size(), &ex, nullptr, why,
+                            sizeof why) != 0) {
+        check(false, std::string("teardown: the field's state restores: ") + why);
+    }
+}
+
+// The teardown's steps, one a turn (each restore takes a while: a turn stays short for the hang
+// watchdog). The first saves the field's state; each step runs its destructor or dealloc and,
+// but for the last, restores the field before the game's next turn.
+struct TeardownStep {
+    std::string what;
+    std::function<void(mt_cpu *)> run;
+};
+std::vector<TeardownStep> teardown_steps(Run &r, mt_cpu *cpu) {
+    std::vector<TeardownStep> steps;
+    // applicationWillTerminate: deletes the state and CMResMgr (re/program-flow.md).
+    steps.push_back({"applicationWillTerminate:", [](mt_cpu *c) {
+                         check(mt_uikit_lifecycle_event(c, MT_UIKIT_WILL_TERMINATE) == 1,
+                               "teardown: applicationWillTerminate: was sent");
+                     }});
+    // The ObjC objects: the game's own where it has one, else a new one.
+    const u32 view = gl_view(cpu), pad = keypad(cpu);
+    const std::vector<std::pair<const char *, u32>> objc = {
+        {"MapleThiefAppDelegate", app_delegate(cpu)},
+        {"EAGLView", view},
+        {"EAGLViewController", rd(cpu, k_eagl_controller)},
+        {"TouchKeyPadView", pad},
+        {"MainMenuView", rd(cpu, view + k_view_main_menu)},
+        {"MapKeyPadView", rd(cpu, pad + k_keypad_map)},
+        {"PopupKeyPadView", rd(cpu, pad + k_keypad_popup)},
+        {"NpcKeyPadView", rd(cpu, pad + k_keypad_npc)},
+        {"MarketKeyPadView", rd(cpu, pad + k_keypad_market)},
+        {"CashShopKeyPadView", rd(cpu, pad + k_keypad_cash)},
+        {"HelpScrollKeyPadView", rd(cpu, pad + k_keypad_help)},
+        {"InAppPurchaseManager", rd(cpu, view + k_view_inap)},
+        {"GameCenterManager", rd(cpu, view + k_view_gc)},
+        {"TermsView", 0},
+    };
+    for (const auto &[cls_name, live_obj] : objc) {
+        const std::string cls = cls_name;
+        const u32 live = live_obj;
+        steps.push_back({"-[" + cls + " dealloc]", [cls, live](mt_cpu *c) {
+                             u32 obj = live;
+                             if (obj == 0) {
+                                 obj = mt_objc_send0(c, objc_class(cls.c_str()), "alloc");
+                                 g_host.fresh++;
+                             }
+                             check(obj != 0 && mt_objc_class_of(mt_objc_current(), obj) ==
+                                                   objc_class(cls.c_str()),
+                                   "teardown: a " + cls +
+                                       (live != 0 ? " of the game's" : " (new)"));
+                             mt_objc *rt = mt_objc_current();
+                             const u32 pool = mt_objc_pool_push(rt);
+                             mt_objc_send0(c, obj, "dealloc");
+                             mt_objc_pool_pop_on(c, rt, pool);
+                         }});
+    }
+    // The C++ objects: a live one of the class on the heap, else a zeroed one with its vtables.
+    for (const Destructor &d : k_destructors) {
+        steps.push_back({d.name, [&d](mt_cpu *c) {
+                             mt_mem *mem = mt_mem_from_cpu(c);
+                             u32 obj = live_object(c, d);
+                             const bool live = obj != 0;
+                             if (live) {
+                                 g_host.live++;
+                             } else {
+                                 obj = mt_heap_calloc(mem, 1, k_zeroed_object);
+                                 if (d.ctor != 0) {
+                                     mt_call_guest(c, d.ctor, &obj, 1, d.ctor);
+                                     g_host.made++;
+                                 } else {
+                                     std::memcpy(c->mem + obj, &d.vtable, 4);
+                                     if (d.base != 0) {
+                                         std::memcpy(c->mem + obj + d.base, &d.base_vtable, 4);
+                                     }
+                                     g_host.zeroed++;
+                                 }
+                             }
+                             std::printf("teardown: %s on a %s object\n", d.name,
+                                         live          ? "live"
+                                         : d.ctor != 0 ? "new"
+                                                       : "zeroed");
+                             std::fflush(stdout);
+                             const u32 self = obj + d.base;
+                             mt_call_guest(c, d.fn, &self, 1, d.fn);
+                         }});
+    }
+    (void)r;
+    return steps;
+}
+
+// One teardown step a turn; true after the last, which ends the run without another turn.
+bool teardown(Run &r, mt_cpu *cpu) {
+    static std::vector<TeardownStep> steps;
+    static std::size_t next = 0;
+    if (g_host.field.empty()) {
+        mt_snapshot_meta meta = mt_snapshot_meta_default();
+        meta.flags = MT_SNAPSHOT_STORE;
+        std::uint8_t *bytes = nullptr;
+        std::size_t size = 0;
+        char why[512] = {};
+        if (mt_snapshot_save(cpu, &meta, &bytes, &size, why, sizeof why) != 0) {
+            check(false, std::string("teardown: the field's state saves: ") + why);
+            r.on_turn = nullptr;
+            r.done = true;
+            return true;
+        }
+        g_host.field.assign(bytes, bytes + size);
+        std::free(bytes);
+        steps = teardown_steps(r, cpu);
+        next = 0;
+        // A destructor may leave the game anywhere: restore wherever it is.
+        const mt_snapshot_config any{0, 0, 0};
+        mt_snapshot_configure(&any);
+    }
+    steps[next].run(cpu);
+    if (++next < steps.size()) {
+        restore_field(r, cpu);
+        return false;
+    }
+    check(true, "teardown: " + std::to_string(steps.size()) +
+                    " steps returned: " + std::to_string(std::size(k_destructors)) +
+                    " destructors (" + std::to_string(g_host.live) + " on live objects, " +
+                    std::to_string(g_host.made) + " on constructed ones, " +
+                    std::to_string(g_host.zeroed) + " on zeroed ones), " +
+                    std::to_string(steps.size() - 1 - std::size(k_destructors)) + " deallocs (" +
+                    std::to_string(g_host.fresh) + " on new objects)");
+    mt_snapshot_configure(nullptr);
+    release_all(r);
+    r.on_turn = nullptr;
+    r.done = true;
+    return true;
+}
+
+// A host step in its own autorelease pool, as UIKit runs every event: what the sends autorelease
+// is released before the next turn (a save state waits for an empty pool).
+void then_host(Run &r, std::string what, std::function<void(mt_cpu *)> fn) {
+    then_do(r, std::move(what), [fn](mt_cpu *cpu) {
+        mt_objc *rt = mt_objc_current();
+        const u32 pool = mt_objc_pool_push(rt);
+        fn(cpu);
+        mt_objc_pool_pop_on(cpu, rt, pool);
+    });
+}
+
+void host_events(Run &r, u64) {
+    g_host = HostEvents{};
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_new_game(r);
+    then_tutorial(r);
+    then_wait_field(r);
+    then_host(r, "a push token", push_token);
+    then_host(r, "a memory warning", memory_warning);
+    then_host(r, "an audio interruption", audio_interruption);
+    then_host(r, "the grade revival's button", [](mt_cpu *cpu) {
+        // The panel is made when a popup first needs it: a new one if the game has none yet.
+        u32 popup = rd(cpu, keypad(cpu) + k_keypad_popup);
+        if (popup == 0) {
+            popup = mt_objc_send0(cpu, objc_class("PopupKeyPadView"), "alloc");
+        }
+        send(cpu, popup, "releaseGradeRevivalButton:");
+    });
+    then_wait_for(
+        r, "the field again, no popup", 10,
+        [](mt_cpu *cpu) { return field(cpu) && popup_id(cpu) == -1; }, 1.0);
+    then_host(r, "a coupon deleted", delete_coupon);
+    then_wait(r, 0.5);
+    then(r, "the teardown", 120, [&r](mt_cpu *cpu, double) {
+        char why[256] = {};
+        if (g_host.field.empty() && mt_snapshot_safe(cpu, why, sizeof why) != 1) {
+            return false;
+        }
+        return teardown(r, cpu);
+    });
+}
+void host_events_checks(Run &, u64) {}
+
 constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
     {"regress_record", regress_record, regress_record_checks, 1, false, regress_record_setup},
@@ -15864,6 +16452,8 @@ constexpr Mode k_modes[] = {
      systems2_restored_carnival_checks, 1},
     {"systems2_restored_carnival_6", systems2_restored_carnival_6,
      systems2_restored_carnival_checks, 1},
+    {"systems2_restored_maps", systems2_restored_maps, systems2_restored_maps_checks, 1},
+    {"systems2_restored_maps_off", systems2_restored_maps_off, systems2_restored_maps_checks, 1},
     {"compendium_npcs", compendium_npcs, compendium_npcs_checks, 1},
     {"map_page", map_page, map_page_checks, 1, false, map_page_setup},
     {"korean_chapter_1_a", korean_chapter_1_a, korean_checks, 1, false, korean_setup},
@@ -15877,6 +16467,7 @@ constexpr Mode k_modes[] = {
     {"inventory_full", inventory_full, inventory_full_checks, 1},
     {"level_cap", level_cap, level_cap_checks, 1},
     {"quick_slots_trash", quick_slots_trash, quick_slots_trash_checks, 1},
+    {"host_events", host_events, host_events_checks, 1, false, host_events_setup},
 };
 
 int usage() {

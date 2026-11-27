@@ -52,9 +52,10 @@ HOOKED: dict[int, Hooked] = {
     ),
     0xD259: Hooked(
         "CMMap::LoadObj",
-        "(map, area, map): reads the map's .obj into its object list; restored_content (#427) "
-        "adds Monster Carnival's NPC (kind 42, a Spiegelman script) to Kerning City, Orbis and "
-        "Magatia's first maps after it, in memory",
+        "(map, area, map): reads the map's .obj into its object list; restored_content adds "
+        "Monster Carnival's NPC (kind 42, a Spiegelman script) to Kerning City, Orbis and "
+        "Magatia's first maps after it (#427), and a portal into the unreached 4.5 to 4.3 "
+        "(#428), in memory",
     ),
     0x23D1D: Hooked(
         "Canvas_FillRect",
@@ -241,23 +242,30 @@ HOOKED: dict[int, Hooked] = {
         "through the shop screen 0x4628D; restored_content (#426) offers shops 0, 1 and 16 "
         "beside the usual one in a list box when a merchant who sells them opens his",
     ),
-    0x9B37D: Hooked(
-        "Lua::callNative",
-        "(L, index, base): runs script native `index` with its arguments from stack index "
-        "`base`; --native-script-vm shadow (#430) records each native call of the original's "
-        "run and replays it in the host VM's (runtime/src/scriptvm/shadow.cpp)",
-    ),
     0x9BC11: Hooked(
         "Lua::execute",
         "(L, tfunc, base): the script VM's opcode loop, which returns the first result's stack "
         "index; --native-script-vm on (#386, ADR 0226) runs it as host code over the same guest "
         "memory (runtime/src/scriptvm/)",
     ),
+    0x9B37D: Hooked(
+        "Lua::callNative",
+        "(L, index, base): runs native `index` of the script VM with the arguments above base "
+        "and returns the first result's stack index; the script corpus test (#431) puts a "
+        "recording stub there, so the recompiled and the host VM see the same answers; "
+        "--native-script-vm shadow (#430) records each native call of the original's run and "
+        "replays it in the host VM's (runtime/src/scriptvm/shadow.cpp)",
+    ),
     0x9CE2D: Hooked(
         "Lua::runCallback",
         "(L): the dialogue box's close runs the script callback regCallBack stored at L + 8 "
         "and returns its result; restored_content (#426) opens the shop chosen in its own list "
         "box there",
+    ),
+    0x9EE95: Hooked(
+        "TFunc::fetchU8",
+        "(tfunc): the script VM's next code byte; the script corpus test (#431) observes the "
+        "recompiled Lua::execute's opcode fetches (the call at 0x9BC2A) and passes",
     ),
     0xAAAB9: Hooked(
         "MainMenuView_clickPlay",

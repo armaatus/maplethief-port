@@ -4187,16 +4187,17 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     mt_hooks_install_screen_shake(options.settings.screen_shake);
     // flashes (#186): the full-screen flashes' alpha scaled; off at 100 (the original).
     mt_hooks_install_flashes(options.settings.flashes);
-    // --native-script-vm (#386, ADR 0226): the script VM's opcode loop on the host; off: the
-    // recompiled original; shadow (#430): both, compared at each call.
+    // --native-script-vm (#386, ADR 0226): the script VM's opcode loop on the host (the default
+    // since #430 and #431); off: the recompiled original; shadow (#430): both, compared at each
+    // call.
     if (options.native_script_vm_shadow) {
         mt_scriptvm_shadow_install(1, nullptr);
         SDL_Log("game: the script VM runs both ways, compared (--native-script-vm shadow)");
     } else {
         mt_hooks_install_native_script_vm(options.native_script_vm ? 1 : 0);
     }
-    if (options.native_script_vm) {
-        SDL_Log("game: the script VM runs on the host (--native-script-vm on)");
+    if (!options.native_script_vm && !options.native_script_vm_shadow) {
+        SDL_Log("game: the script VM runs the recompiled loop (--native-script-vm off)");
     }
     // auto_loot (#175, assists.h): the drops' contact test widened near the hero; off: no hook.
     install_auto_loot(options.settings.auto_loot);
@@ -4205,12 +4206,14 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                                                   : "kept, as the original");
     // restored_content (#389, docs/re/original-bugs.md "Unreachable content"): off in every
     // preset. Shops 0, 1 and 16 from three merchants (#426), Monster Carnival from a Spiegelman
-    // NPC in three towns (#427); the unreached maps come in their own follow-up.
+    // NPC in three towns (#427), the unreached maps 4.5 and 4.8 from a portal on 4.3 (#428).
     install_restored_shops(options.settings.restored_content);
     install_restored_carnival(options.settings.restored_content);
-    SDL_Log("game: restored content is %s", options.settings.restored_content
-                                                ? "on (shops 0, 1 and 16, Monster Carnival)"
-                                                : "off, as the original");
+    install_restored_maps(options.settings.restored_content);
+    SDL_Log("game: restored content is %s",
+            options.settings.restored_content
+                ? "on (shops 0, 1 and 16, Monster Carnival, the maps 4.5 and 4.8)"
+                : "off, as the original");
     // The offline cash shop (#156, ADR 0072): sold for meso, or cancelled as the original
     // without a server (off, every preset).
     const bool cash_meso = options.settings.cash_shop == CashShop::kMeso;

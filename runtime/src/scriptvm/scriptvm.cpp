@@ -96,6 +96,8 @@ constexpr const char *k_names[] = {
 static_assert(sizeof k_names / sizeof k_names[0] == 0x43, "67 opcodes");
 
 std::atomic<u64> g_calls{0}, g_steps{0}, g_natives{0}, g_checks{0};
+std::atomic<mt_scriptvm_step_fn> g_step_fn{nullptr};
+std::atomic<void *> g_step_user{nullptr};
 std::vector<std::string> *g_recorder = nullptr; // mt::scriptvm::set_recorder
 constexpr std::size_t k_recorder_max = 4096u;   // lines kept; older ones are dropped
 
@@ -435,6 +437,9 @@ u32 Vm::run() {
         op_pc_ = rd(tfunc_ + k_tfunc_pc);
         const u32 op = fetch(1);
         g_steps.fetch_add(1, std::memory_order_relaxed);
+        if (const mt_scriptvm_step_fn observe = g_step_fn.load(std::memory_order_acquire)) {
+            observe(g_step_user.load(std::memory_order_relaxed), tfunc_, op_pc_, op);
+        }
         trace_step(op);
         switch (op) {
         case 0x00: { // PUSHNIL: the tag only
@@ -680,6 +685,11 @@ void mt::scriptvm::set_recorder(std::vector<std::string> *lines) noexcept { g_re
 
 extern "C" void mt_hooks_install_native_script_vm(int enabled) noexcept {
     mt_hook_register(MT_HOOK_FN_LUA_EXECUTE, execute_hook, nullptr, enabled);
+}
+
+extern "C" void mt_scriptvm_set_step_observer(mt_scriptvm_step_fn fn, void *user) noexcept {
+    g_step_user.store(user, std::memory_order_relaxed);
+    g_step_fn.store(fn, std::memory_order_release);
 }
 
 extern "C" mt_scriptvm_stats mt_scriptvm_get_stats(void) noexcept {

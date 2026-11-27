@@ -846,3 +846,25 @@ TEST_CASE("scriptvm shadow: a different rewrite is caught at its first differing
         mt_scriptvm_shadow_install(0, nullptr);
     }
 }
+
+TEST_CASE("scriptvm: the step observer sees each opcode with its TFunc and pc") {
+    // 0: JMP +1 -> 4; 3: pad; 4: PUSH1; 5: RETCODE0
+    Guest vm({0x3A, 1, 0, 0xEE, 0x02, 0x40});
+    struct Step {
+        u32 tfunc, pc, op;
+    };
+    std::vector<Step> steps;
+    mt_scriptvm_set_step_observer(
+        [](void *user, u32 tfunc, u32 pc, u32 op) {
+            static_cast<std::vector<Step> *>(user)->push_back({tfunc, pc, op});
+        },
+        &steps);
+    vm.run(0);
+    mt_scriptvm_set_step_observer(nullptr, nullptr);
+    REQUIRE(steps.size() == 3u);
+    CHECK((steps[0].tfunc == k_tfunc && steps[0].pc == 0u && steps[0].op == 0x3Au));
+    CHECK((steps[1].pc == 4u && steps[1].op == 0x02u));
+    CHECK((steps[2].pc == 5u && steps[2].op == 0x40u));
+    vm.run(0); // no observer: nothing more
+    CHECK(steps.size() == 3u);
+}

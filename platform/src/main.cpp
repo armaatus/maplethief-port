@@ -331,7 +331,7 @@
 //   --hang-seconds S  the watchdog's limit (0: no watchdog; default 15, none with --fixed-step)
 //   --force-hang      the run-loop turn never ends 2 s after the first (a test aid)
 //   --native-script-vm on|off|shadow  the script VM's opcode loop as host code (#386, ADR 0226;
-//                     a developer switch, default off: the recompiled original); with
+//                     a developer switch, default on; off: the recompiled original); with
 //                     MAPLETHIEF_TRACE=scriptvm every opcode and native call is logged. shadow
 //                     (#430): each call runs both ways and is compared, the differences on stderr
 //   --hang-dialog FILE  shows the hang question for FILE and exits 3 for Quit, else 0: what the

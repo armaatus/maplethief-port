@@ -25,19 +25,22 @@ that no run entered and gives it one class:
 - ``difftest``: live, and it passes the differential test (ADR 0017,
   ``work/recomp/difftest.json``): 1,000 random inputs with zero mismatches against Unicorn.
 - ``unreachable``: live, but only through a state the runs cannot produce (rules in
-  :data:`RULES`, each with its reason): teardown, the system's events (memory warnings,
-  audio interruptions), the App Store, Game Center. A rule can also class a live function
-  ``dead`` when the port or the shipped data never takes its path (crt1's ``start``, the
-  Monster Carnival that only unused scripts start), with the evidence.
+  :data:`RULES`, each with its reason). None is left: the host-driven test
+  ``play.host_events`` (#432, ADR 0242) enters the teardown, the system's events (memory
+  warnings, audio interruptions, the push token) and the coupon. A rule can also class a
+  live function ``dead`` when the port or the shipped data never takes its path (crt1's
+  ``start``, the Monster Carnival that only unused scripts start), with the evidence.
 - ``missed``: live, reachable by play, and no run has entered it yet (a run step is missing).
 
 Every ``unreachable`` and ``missed`` row names the follow-up issue that adds its test or run
 step (:data:`HOST_TESTS`, :data:`RUN_STEPS`).
 
 ``generate`` writes the doc from a coverage file (``mtport.runcoverage`` format, or a
-directory of them); ``check`` regenerates it from the doc's own list of unexecuted functions
-and the current ``work/`` and fails when the committed doc differs, so a change to the
-evidence (a re-analysis, a difftest change) shows up without rerunning every play test.
+directory of them); ``update`` adds what a new run entered (a host-driven test, #432) to the
+functions the doc's own list leaves out, so one test does not need the whole suite again;
+``check`` regenerates it from the doc's own list of unexecuted functions and the current
+``work/`` and fails when the committed doc differs, so a change to the evidence (a
+re-analysis, a difftest change) shows up without rerunning every play test.
 
 Inputs, all derived from your own copy of the game in git-ignored ``work/``: the function tags
 (``work/re/function-tags.json``), the Ghidra cross-references, ``work/re/objc.json``,
@@ -67,6 +70,7 @@ VTABLES = WORK / "re" / "vtables.json"
 DIFFTEST = WORK / "recomp" / "difftest.json"
 SCRIPTS = runcoverage.APP / "script"
 GENERATE = "python3 -m mtport.coveragegaps generate --coverage <coverage file or directory>"
+UPDATE = "python3 -m mtport.coveragegaps update --coverage <coverage file or directory>"
 CHECK = "python3 -m mtport.coveragegaps check"
 
 TABLE_REACH = 16  # a block descriptor's dispose helper is 12 bytes in
@@ -108,7 +112,7 @@ class Rule:
 
 
 HOST_TESTS = 432  # host-driven tests for the unreachable functions
-RUN_STEPS = 433  # run steps for the missed functions
+RUN_STEPS = 435  # run steps for the missed functions (#433, then #435)
 
 # Checked in order; the first match wins.
 RULES: tuple[Rule, ...] = (
@@ -120,22 +124,25 @@ RULES: tuple[Rule, ...] = (
          "`initMonCa` in `Spiegelman1`–`3`, scripts no map names (ANALYSIS.md, unused scripts)"),
     Rule(r"-\[(MoviePlayerController|MovieOverlayView) .*\]", "dead", "the movie player "
          "classes: nothing creates them (ANALYSIS.md)"),
-    Rule(r".*::~.*|-\[\w+ dealloc\]|SoundPlayer_ShutdownOpenAL|FUN_0000f000|FUN_000c0f30",
-         "unreachable", "teardown: no run frees the object (the game keeps it until the "
-         "process ends, and iOS ends it without unwinding)", HOST_TESTS),
-    Rule(r"-\[\w+ (didReceiveMemoryWarning|viewDidUnload)\]", "unreachable",
-         "a memory warning, which no run sends", HOST_TESTS),
-    Rule(r"SoundPlayer_(InterruptionListener|BeginInterruption|EndInterruption)", "unreachable",
-         "an audio-session interruption (a call, an alarm), which no run sends", HOST_TESTS),
-    Rule(r"-\[MapleThiefAppDelegate application:didRegisterForRemoteNotifications"
-         r"WithDeviceToken:\]", "unreachable", "a push-notification token, which the runtime "
-         "never delivers", HOST_TESTS),
-    Rule(r"-\[InAppPurchaseManager .*\]|-\[\w+ (release|click)(Exp|Meso|GradeRevival)\w*:\]",
-         "unreachable", "the cash shop's purchases: they need the App Store", HOST_TESTS),
-    Rule(r"-\[GameCenterManager .*\]", "unreachable", "Game Center, which the runtime does "
-         "not provide", HOST_TESTS),
-    Rule(r"CDataMgr::DeleteCoupon", "unreachable", "needs a coupon in the save, and nothing in "
-         "1.5 adds one (formats/save.md)", HOST_TESTS),
+    Rule(r"-\[EAGLView didReceiveMemoryWarning\]", "dead", "`EAGLView` is a `UIView`: UIKit "
+         "sends `didReceiveMemoryWarning` to view controllers only, and the one load of the "
+         "selector is the method's own send to `super`, which `UIView` does not implement (#432)"),
+    Rule(r"-\[TouchKeyPadView (release(Exp|Meso|GradeRevival)\w*):\]", "dead", "no button of "
+         "a `TouchKeyPadView` has this action: its add-button calls pass 8 others "
+         "(re/objc-shell.md); the buttons that have it are `CashShopKeyPadView`'s and "
+         "`PopupKeyPadView`'s, which target their own view (#432)"),
+    Rule(r"-\[InAppPurchaseManager restoreTransaction:\]", "dead", "a restored transaction "
+         "(state 3) comes only after `restoreCompletedTransactions`, which the game never sends "
+         "(re/cash-shop.md); the port's StoreKit, like Apple's, restores nothing unasked (#432)"),
+    Rule(r"IStateAdaptor::(PushState|PopState|PopAndRestart|PopAllStates|GetRootState)|"
+         r"CStateTitle::OnPointerEvent", "dead", "a state's virtual that no code calls through "
+         "its slot: the state stack is never pushed or popped, and no caller sends the pointer "
+         "event (re/program-flow.md, re/cpp-classes.md)"),
+    Rule(r"-\[EAGLViewController viewDidLoad\]", "dead", "the controller is given its view "
+         "by `setView:`, so UIKit never loads one and never sends `viewDidLoad`; it only "
+         "presents Game Center, which the port draws itself (re/program-flow.md, ADR 0084)"),
+    Rule(r"-\[TouchKeyPadView (release[4568]|click[58])Button:\]", "dead", "sent only by "
+         "`setKeySequence:`'s 9-key chord mode, which only ever gets −1 (controls/keypad.md)"),
     Rule(r".*", "missed", "", RUN_STEPS),
 )  # fmt: skip
 
@@ -442,8 +449,9 @@ def render(gaps: Sequence[Gap], p: Program, executed: int) -> str:
         f"- `difftest`: {counts['difftest']:,}. Live, and the differential test (ADR 0017) "
         "runs them on 1,000 random inputs each against Unicorn with zero mismatches.",
         f"- `unreachable`: {counts['unreachable']:,}. Live, but only from a state no run can "
-        "produce; the evidence says which. Host-driven tests for them: "
-        f"[#{HOST_TESTS}](https://github.com/armaatus/maplethief-port/issues/{HOST_TESTS}).",
+        "produce; the evidence says which. The host-driven test `play.host_events` enters "
+        f"such functions ([#{HOST_TESTS}](https://github.com/armaatus/maplethief-port/issues/"
+        f"{HOST_TESTS}), ADR 0242).",
         f"- `missed`: {counts['missed']:,}. Live and reachable by play; no run enters them yet. "
         f"Run steps for them: [#{RUN_STEPS}](https://github.com/armaatus/maplethief-port/issues/"
         f"{RUN_STEPS}).",
@@ -533,6 +541,11 @@ def executed_from_doc(p: Program, text: str) -> set[int]:
     return {a for a in p.functions if a not in unrun}
 
 
+def added_to_doc(p: Program, text: str, executed: Iterable[int]) -> set[int]:
+    """The functions a doc counts as executed and those of a new run (``update``)."""
+    return executed_from_doc(p, text) | {a & ~1 for a in executed}
+
+
 def document(p: Program, executed: set[int]) -> tuple[str, list[Gap]]:
     """The doc for the functions ``executed`` (plain addresses), and its rows."""
     gaps = classify(p, executed)
@@ -548,6 +561,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     g = sub.add_parser("generate", help="write the doc from a run coverage")
     g.add_argument("--coverage", type=Path, nargs="+", required=True)
     g.add_argument("--out", type=Path, default=DOC)
+    u = sub.add_parser("update", help="add a run's coverage to the doc's executed functions")
+    u.add_argument("--coverage", type=Path, nargs="+", required=True)
+    u.add_argument("--doc", type=Path, default=DOC)
     c = sub.add_parser("check", help="regenerate from the doc's own list; fail when stale")
     c.add_argument("--doc", type=Path, default=DOC)
     args = parser.parse_args(argv)
@@ -556,14 +572,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     except FileNotFoundError as e:
         print(f"error: {e.filename} is missing (scripts/re-analyze, scripts/difftest)")
         return 2
-    if args.command == "generate":
+    if args.command in ("generate", "update"):
         try:
             cov = runcoverage.load(args.coverage)
         except ValueError as e:
             print(f"error: {e}", file=sys.stderr)
             return 1
         executed = {a & ~1 for a in cov.functions}
-        out = args.out
+        out = args.out if args.command == "generate" else args.doc
+        if args.command == "update":
+            executed = added_to_doc(p, out.read_text(encoding="utf-8"), executed)
     else:
         out = args.doc
         executed = executed_from_doc(p, out.read_text(encoding="utf-8"))

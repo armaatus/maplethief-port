@@ -80,7 +80,9 @@ add_library(
     src/hooks/builtin.cpp
     src/hooks/flashes.cpp
     src/hooks/hooks.cpp
+    src/hooks/map_objects.cpp
     src/hooks/restored_carnival.cpp
+    src/hooks/restored_maps.cpp
     src/hooks/restored_shops.cpp
     src/hooks/text_wrap.cpp
     src/hooks/widescreen.cpp

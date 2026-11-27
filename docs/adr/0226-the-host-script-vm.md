@@ -46,6 +46,22 @@ For the checks: the host checks an operand read against the function's code size
 - **Not proved here:** equality on the real game. That is #430 and #431; until they pass, the switch is a developer's tool and the trace is its use.
 - How we'd know this was wrong: #430's shadow runs find differences inside the loop that come from the helper boundary (a helper that reads the original's frame, for example), which would mean the boundary has to move.
 
+## Addendum: every shipped script through both (#431, 2026-11-27)
+
+ADR 0153's second proof holds: every function of the 307 shipped scripts runs the same in the recompiled `Lua::execute` and in the host VM. `scriptvm_real_test` (ctest `runtime.scriptvm_corpus`, real assets, local only) boots the recompiled game to the main menu and, in one turn of the run loop's turn hook, makes its own `Lua` (operator new of 0x18 bytes and `Lua::Lua` `0x9D5C5`, as `CStateGame::LoadGame` does). For each file it loads the bytes with the game's `Lua::loadBuffer` `0x9D0A9`, keeps guest memory (the image's writable segments, the heap up to its committed end, the guest stack from 64 KiB below sp to its top), and runs main, and each slot function both right after the load and after main, through `Lua::callFunction` `0x9CD65` under 16 native answer sets: once with the hook off, once with it on, memory put back before each.
+
+What it compares, and how it sees it:
+
+- **The opcode sequence.** Two more functions join `HOOKED`: `TFunc::fetchU8` `0x9EE95` (`MT_HOOK_FN_TFUNC_FETCH_U8`), where a pass-through observer records (TFunc, pc, opcode) for each call from the recompiled loop's opcode fetch at `0x9BC2A`; and the host loop reports the same triple through `mt_scriptvm_set_step_observer` (`maplethief/scriptvm.h`), called before each opcode it runs.
+- **The native calls.** `Lua::callNative` `0x9B37D` (`MT_HOOK_FN_LUA_CALL_NATIVE`) is replaced by a recording stub. It does what the original's frame code around its switch does (the arguments are the slots above `base`; it returns the index after them and leaves `L+0x10`/`+0x14` as they were), records the native's index and argument slots, and pushes one result for a native that returns one: a number from the run's answer set, or a string slot for `getQuestTitle`. Answer sets: all 0, 1, 2, −1 or 3, and eleven seeded mixes of −1…5, 10, 20, 30, 50, 70, 100, 200 and 1000.
+- **The result and memory.** `callFunction`'s result, and every byte of the kept memory except the stack below the call's sp (the frames, which differ by design). The heap's numbers must not move in a run: none does, so putting memory back undoes a run completely.
+
+Result (2026-11-27, Apple M4, Debug): 307 files, 1,086 functions, 59,680 runs, 761,478 opcodes and 119,796 native calls compared, **zero differences**, zero checks logged by the host loop; 33,033 distinct (function, pc) reached of the 38,102 instructions (87%), in 18 s. The instructions not reached sit behind answers no set gives (a particular list value of `getEvtIndex`, a quest id). Two deliberate changes to the host loop (PUSH2 pushing 3; RETCODE0 touching the TFunc's line word) each made the test fail at once, the first on the records, the second on memory.
+
+Found on the way: `Lua::loadBuffer` frees the buffer it is given before it returns (the heap no longer has the block afterwards). A caller that keeps the buffer for the next load hands freed memory to that load's undump, which then stops after main with the PUSHFUNCTION operands unfixed.
+
+The switch stays off: #430 (shadow runs in play, the regress digest on and off) is the remaining proof.
+
 ## Addendum (#430): the shadow runs and the regress digest
 
 ADR 0153's proofs 1 and 3, decided and measured on 2026-11-27 (delegated by Joris).
@@ -68,6 +84,6 @@ The 38 parts are the whole played chain, every route that talks to NPCs: 4,199 o
 
 `scripts/regress` gives `8a2f05733c8d4603` with `--native-script-vm on`, `off` and `shadow`. That is the default's digest since 2026-11-05. With `on`, the host loop ran 66 calls, 1,620 opcodes and 224 native calls with 0 checks. No original fault had to be listed: the host loop refuses nothing the shipped scripts do.
 
-**The default.** It stays **off**. ADR 0153 asks for three proofs and #431's (every function of the 307 shipped scripts through both) is still open. The shadow harness is what #431 can run them through. When #431 holds, its addendum here turns the switch on by default.
+**The default: on** (delegated by Joris, 2026-11-27). ADR 0153's three proofs hold: #431's addendum above (every function of the 307 shipped scripts, zero differences) and this one (the shadow runs in play and the regress digest). `GameOptions::native_script_vm` and the scripted runs' `MAPLETHIEF_NATIVE_SCRIPT_VM` now default to `on`, so the game runs its scripts in the host loop. `--native-script-vm off` (or the variable) runs the recompiled loop, and `shadow` runs both. The two scripted harnesses are kept so a later change to the loop is checked the same way. Both #430 and #431 hook `Lua::callNative` `0x9B37D` (#431 for its corpus test's recording stub, #430 for the shadow runs): one `HOOKED` entry serves both, since a test or a run registers only one of them.
 
 **CI.** `runtime_test`'s `scriptvm shadow:` cases run the harness on a synthetic guest whose `execute` body is the host loop and whose `doCall` reaches a hooked `callNative`. The host loop against itself, with scratch below the entry sp, shows no difference, and the native runs once. Deliberately different rewrites are caught at their first differing write: a late write at its address and both words at the end, an early one at the native call after it (though a lower address differs later), a wrong r0. Every case leaves the original's state behind.
