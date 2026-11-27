@@ -1521,6 +1521,53 @@ set(_from_starts
     systems2_scrolls_failure:systems2_scrolls_failure
     systems2_pigmy:systems2_pigmy
     systems2_portal620:systems2_portal620)
+# The five map pages checked in the running port (#221): from a start on each map, the hero takes
+# one portal (MT_MAP_PAGE_PORTAL, its kind) and play_real_test map_page writes where it landed;
+# tests/test_compendium_world_port.py compares that with the page's Connections row. The 2.0
+# and 2.4 starts come twice: chapter 1 with the gate's quest done (open) and not (shut).
+set(_map_page_runs
+    0_0:0
+    0_0:1
+    2_0_open:0
+    2_0_open:1
+    2_0_shut:1
+    2_4_open:0
+    2_4_open:1
+    2_4_open:2
+    2_4_open:3
+    2_4_shut:2
+    3_8:3
+    9_3:0
+    9_3:1
+    9_3_top:3)
+set(_map_page_starts)
+foreach(pair IN LISTS _map_page_runs)
+    string(REPLACE ":" ";" pair "${pair}")
+    list(GET pair 0 start)
+    list(GET pair 1 kind)
+    if(NOT start IN_LIST _map_page_starts)
+        list(APPEND _map_page_starts ${start})
+        add_test(NAME starts.map_page_${start}
+                 COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                         "${PROJECT_SOURCE_DIR}/tests/starts/map_page_${start}.json"
+                         "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_map_page_${start}/data/saves" --app
+                         "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+        set_tests_properties(
+            starts.map_page_${start}
+            PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_SETUP
+                       start_map_page_${start} ENVIRONMENT
+                       "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+    endif()
+    add_test(NAME play.map_page_${start}_${kind}_synthetic
+             COMMAND play_real_test map_page
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_map_page_${start}_${kind}")
+    set_tests_properties(
+        play.map_page_${start}_${kind}_synthetic
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 900 RUN_SERIAL TRUE
+                   FIXTURES_REQUIRED start_map_page_${start}
+                   ENVIRONMENT
+                   "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_map_page_${start};MT_MAP_PAGE_PORTAL=${kind}")
+endforeach()
 foreach(pair IN LISTS _from_starts)
     string(REPLACE ":" ";" pair "${pair}")
     list(GET pair 0 mode)
