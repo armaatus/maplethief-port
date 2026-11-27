@@ -19,7 +19,8 @@ renders and stay local (``work/regress/``, never committed).
 ``--native-script-vm on|off|shadow`` sets ``MAPLETHIEF_NATIVE_SCRIPT_VM`` for the runs, the
 driver's ``--native-script-vm`` (#386, #430): the script VM's loop on the host (the default),
 the recompiled original, or both at every call, compared (a run with a difference fails; its
-``scriptvm shadow:`` line is repeated here). ``on`` and ``off`` must give the same digest (ADR 0226).
+``scriptvm shadow:`` line is repeated here). ``on`` and ``off`` must give the same digest
+(ADR 0226).
 
 The last line is ``regress: digest <16 hex>``: the run in one word, for two builds to compare.
 Exit status: 0 passed, 1 failed, 77 skipped (no generated code, no game files), 2 bad usage.
