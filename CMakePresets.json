@@ -228,7 +228,7 @@
     {
       "name": "linux-player",
       "displayName": "Linux player download: the game with the recompiled code, no bundle",
-      "description": "Needs work/gen; built in the linux-game container for glibc 2.39 (scripts/linux-game player), packaged as MapleThief-<version>-linux-x86_64.tar.gz (ADR 0125)",
+      "description": "Needs work/gen; built in the linux-game container for glibc 2.35 (scripts/linux-game player), packaged as MapleThief-<version>-linux-x86_64.tar.gz (ADR 0125) and repacked as .AppImage and .flatpak (ADR 0193)",
       "inherits": "linux-base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",

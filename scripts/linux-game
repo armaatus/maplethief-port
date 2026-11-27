@@ -10,14 +10,14 @@
 #         checks (platform.linux_portable, .version, .smoke) and write
 #         build/linux-game/MapleThief-game-<version>-linux-<arch>/ and its .tar.gz
 #         (mtport.linux_game). By default (and always on a Mac) in the portable build image of
-#         tools/containers/linux-game/ (Ubuntu 24.04, so the result runs on glibc 2.39 and
+#         tools/containers/linux-game/ (Ubuntu 22.04, so the result runs on glibc 2.35 and
 #         later; x86_64 under Rosetta on Apple silicon), from a clean export of REV (default
 #         HEAD; --worktree: tracked changes included) with work/ mounted read-only.
 #         --native (Linux only) builds in this checkout with the host's compiler instead; the
 #         result then needs the host's glibc or newer.
 #   check [TARBALL] [--image IMAGE] [--frames N]
 #         unpack TARBALL (default: the newest build/linux-game/MapleThief-game-*.tar.gz) and run
-#         it in a plain distribution image without any extra package (default: Ubuntu 24.04 by
+#         it in a plain distribution image without any extra package (default: Ubuntu 22.04 by
 #         digest): MapleThief.sh --version, then the game headless (SDL's dummy drivers) with a
 #         tap on Play at 3 s for N window frames (default 150, into the first map), which must
 #         exit 0; its read-backs go to build/linux-game/check/capture/.
@@ -30,6 +30,24 @@
 #         build/linux-game/MapleThief-<version>-linux-<arch>.tar.gz. It holds none of the
 #         game's assets: scripts/release guards it in player mode and uploads it.
 #
+#   check-player [TARBALL] [--image IMAGE]...
+#         unpack a player tarball (default: the newest build/linux-game/MapleThief-<version>-
+#         linux-*.tar.gz) and start it in plain distribution images without any extra package
+#         (default: Ubuntu 22.04 and Debian 12, by digest; ADR 0193): MapleThief.sh --version,
+#         --print-data-dir, then a headless run that must stop with exit 4, no bundle yet (an
+#         interactive run shows the import screen there).
+#   check-packages [DIR] [--keep-flatpak-runtime]
+#         run the player AppImage and Flatpak bundle of DIR (default build/linux-game; the
+#         newest of each) under Xvfb in the build image, as a player starts them, and pass when
+#         each reaches the import screen (its log line) and keeps its data where ADR 0193 says:
+#         the AppImage in data/ next to the .AppImage file (APPIMAGE_EXTRACT_AND_RUN=1: no FUSE
+#         in a container), the Flatpak in its sandbox's folder. The Flatpak runs in a privileged
+#         container (bwrap needs namespaces), on the Freedesktop runtime installed from Flathub
+#         into the Docker volume maplethief-flatpak-check (about 2 GB, removed afterwards unless
+#         --keep-flatpak-runtime). Under x86_64 emulation on Apple silicon the sandbox runs
+#         without Flatpak's seccomp filter, which Rosetta can't load; the rest of the sandbox
+#         stays.
+#
 # Needs work/ipa/ (scripts/bootstrap; not for player) and work/gen/ (python3 -m recomp all),
 # and Docker except for --native (OrbStack or Docker Desktop on a Mac). Environment:
 # MAPLETHIEF_VERSION names the build (default 0.0.1); PYTHON=<interpreter> (3.10+).
@@ -38,11 +56,15 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
-# Ubuntu 24.04 LTS (glibc 2.39), multi-arch index digest of 2026-10-30; the same base as
-# tools/containers/linux-game/Dockerfile.
-DEFAULT_CHECK_IMAGE="ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852"
-# The glibc of that image: the newest GLIBC symbol version a container build may need.
-CONTAINER_GLIBC_FLOOR=2.39
+# Ubuntu 22.04 LTS (glibc 2.35), multi-arch index digest of 2026-11-27; the same base as
+# tools/containers/linux-game/Dockerfile (ADR 0193).
+DEFAULT_CHECK_IMAGE="ubuntu:22.04@sha256:b000e69a50ff940390233025e7a337fb8469b509e2334fa4d018ac30f3e18cdb"
+# Debian 12 (glibc 2.36), digest of 2026-11-27: the other distribution check-player runs in.
+DEBIAN_CHECK_IMAGE="debian:12@sha256:1d04200c2ece1d4d75a2a6f8e11ebce7d86a2ae28b34bb2c9cbb3ee9f4953e75"
+# The glibc of the build image: the newest GLIBC symbol version a container build may need.
+CONTAINER_GLIBC_FLOOR=2.35
+# The pinned AppImage runtime inside the build image (its Dockerfile).
+APPIMAGE_RUNTIME="${APPIMAGE_RUNTIME:-/opt/appimage/runtime}"
 
 usage() {
     cat >&2 <<'EOF'
@@ -50,15 +72,20 @@ Usage: scripts/linux-game build [REV] [--worktree] [--arch amd64|arm64] [--conta
                                 [--debug] [--glibc-floor V] [--build-arg NAME=VALUE]... [--out DIR]
        scripts/linux-game check [TARBALL] [--image IMAGE] [--frames N]
        scripts/linux-game player [REV] [build's options]
+       scripts/linux-game check-player [TARBALL] [--image IMAGE]...
+       scripts/linux-game check-packages [DIR] [--keep-flatpak-runtime]
 
   build           compile MapleThief with the generated code (linux-release), check it and
                   write the game folder and tarball to build/linux-game/; in the portable
-                  build image (Ubuntu 24.04, runs on glibc 2.39+) from a clean export of REV
+                  build image (Ubuntu 22.04, runs on glibc 2.35+) from a clean export of REV
                   (default HEAD), unless --native
-  check           run a game tarball in a plain distribution image (default Ubuntu 24.04):
+  check           run a game tarball in a plain distribution image (default Ubuntu 22.04):
                   --version, then the game headless into the first map
   player          like build, but the release's player tarball (linux-player preset):
-                  the game without its bundle, MapleThief-<version>-linux-<arch>.tar.gz
+                  the game without its bundle, MapleThief-<version>-linux-<arch>.tar.gz,
+                  and its .AppImage and .flatpak
+  check-player    start a player tarball in Ubuntu 22.04 and Debian 12 (no package added)
+  check-packages  run the player AppImage and Flatpak bundle under Xvfb to the import screen
 
   --worktree      build, player: export the working tree's tracked files, changes included
   --arch ARCH     build in the container: amd64 (default) or arm64
@@ -66,10 +93,12 @@ Usage: scripts/linux-game build [REV] [--worktree] [--arch amd64|arm64] [--conta
   --native        build (Linux only) in this checkout with the host's compiler; the result
                   needs the host's glibc or newer
   --debug         build: the Debug build (linux-debug preset), for debugging only
-  --glibc-floor V build: fail unless the executable needs at most GLIBC_V (container: 2.39)
+  --glibc-floor V build: fail unless the executable needs at most GLIBC_V (container: 2.35)
   --build-arg A=B build in the container: passed to docker build of its image
   --out DIR       build, player: where the output goes (default build/linux-game)
-  --image IMAGE   check: the image to run in (default Ubuntu 24.04, pinned by digest)
+  --image IMAGE   check, check-player: the image to run in (default Ubuntu 22.04, and for
+                  check-player also Debian 12, pinned by digest); check-player takes several
+  --keep-flatpak-runtime  check-packages: keep the Docker volume with the Flatpak runtime
   --frames N      check: window frames to run (default 150)
 
 The build folder holds the game built from your own IPA: keep it to your own machines. The
@@ -96,6 +125,8 @@ docker() { MSYS_NO_PATHCONV=1 command docker "$@"; }
 player=0
 case "$1" in
     build | check) cmd="$1"; shift ;;
+    check-player) cmd=check_player; shift ;;
+    check-packages) cmd=check_packages; shift ;;
     player) cmd=build; player=1; shift ;;
     -h | --help) usage 0 ;;
     *) echo "scripts/linux-game: unknown command: $1" >&2; usage ;;
@@ -109,6 +140,8 @@ debug=0
 floor=""
 out="build/linux-game"
 image="$DEFAULT_CHECK_IMAGE"
+images=()
+keep_runtime=0
 frames=150
 tarball=""
 build_args=()
@@ -118,12 +151,13 @@ while [ "$#" -gt 0 ]; do
         --native) native=1; shift ;;
         --debug) debug=1; shift ;;
         --container) native=0; shift ;;
+        --keep-flatpak-runtime) keep_runtime=1; shift ;;
         --arch | --out | --image | --frames | --glibc-floor | --build-arg)
             [ "$#" -ge 2 ] || usage
             case "$1" in
                 --arch) arch="$2" ;;
                 --out) out="$2" ;;
-                --image) image="$2" ;;
+                --image) image="$2"; images+=("$2") ;;
                 --frames) frames="$2" ;;
                 --glibc-floor) floor="$2" ;;
                 --build-arg) build_args+=(--build-arg "$2") ;;
@@ -147,7 +181,7 @@ case "$frames" in
 esac
 case "$floor" in
     '' | [0-9]*.[0-9]*) ;;
-    *) echo "scripts/linux-game: --glibc-floor must be a version like 2.39, not $floor" >&2; exit 2 ;;
+    *) echo "scripts/linux-game: --glibc-floor must be a version like 2.35, not $floor" >&2; exit 2 ;;
 esac
 
 PY="${PYTHON:-python3}"
@@ -155,6 +189,7 @@ command -v "$PY" >/dev/null 2>&1 || die "need Python 3.10+, but '$PY' was not fo
 "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null ||
     die "need Python 3.10+, but '$PY' is older (set PYTHON=/path/to/python3)"
 linux_game() { PYTHONPATH="$REPO/tools" "$PY" -B -m mtport.linux_game "$@"; }
+linux_package() { PYTHONPATH="$REPO/tools" "$PY" -B -m mtport.linux_package "$@"; }
 
 bundle=work/ipa/Payload/MapleThief.app
 need_inputs() {
@@ -178,6 +213,16 @@ build_player_native() {
     mkdir -p "$out"
     cp "build/$preset/$name" "$out/$name"
     echo "== $out/$name ($(wc -c <"$out/$name" | tr -d ' ') bytes)"
+    # The AppImage and the Flatpak bundle of the same files (ADR 0193), where the build image's
+    # packers are: mksquashfs, the pinned runtime and flatpak.
+    if [ -f "$APPIMAGE_RUNTIME" ] && command -v mksquashfs >/dev/null && command -v flatpak >/dev/null; then
+        echo "== AppImage and Flatpak bundle (mtport.linux_package)"
+        linux_package appimage "$out/$name" --runtime "$APPIMAGE_RUNTIME"
+        linux_package flatpak "$out/$name"
+    else
+        echo "== no AppImage or Flatpak bundle: mksquashfs, flatpak or $APPIMAGE_RUNTIME missing" \
+            "(the build image has them)"
+    fi
 }
 
 build_native() {
@@ -203,23 +248,15 @@ build_native() {
         --arch "$(uname -m)" --out "$out"
 }
 
-build_container() {
-    type -P docker >/dev/null || die "docker not found (on a Mac: OrbStack or Docker Desktop)"
-    need_inputs
-    local commit label dockerfile image_hash build_image downloads host_out
-    if [ "$worktree" -eq 1 ]; then
-        commit="$(git stash create)"
-        commit="${commit:-$(git rev-parse HEAD)}"
-        label="working tree of $(git rev-parse --short HEAD)"
-    else
-        commit="$(git rev-parse --verify "$rev^{commit}")"
-        label="$(git rev-parse --short "$commit")"
-    fi
-    # Tagged by a hash of the Dockerfile and the build arguments, as scripts/test-linux does.
-    dockerfile=tools/containers/linux-game/Dockerfile
+# The build image (tools/containers/linux-game/), built from COMMIT's files if it is missing:
+# sets build_image. Tagged by a hash of the Dockerfile, the PPA key it copies and the build
+# arguments, as scripts/test-linux does.
+ensure_build_image() {
+    local commit="$1" dockerfile=tools/containers/linux-game/Dockerfile image_hash
     image_hash="$(
         {
             tr -d '\r' < "$dockerfile"
+            tr -d '\r' < tools/containers/linux-game/ubuntu-toolchain-r.asc
             printf '%s\n' ${build_args[@]+"${build_args[@]}"}
         } | sha256 | cut -c1-12
     )"
@@ -237,6 +274,21 @@ build_container() {
         docker build --platform "linux/$arch" ${build_args[@]+"${build_args[@]}"} \
             -t "$build_image" "$context"
     fi
+}
+
+build_container() {
+    type -P docker >/dev/null || die "docker not found (on a Mac: OrbStack or Docker Desktop)"
+    need_inputs
+    local commit label downloads host_out
+    if [ "$worktree" -eq 1 ]; then
+        commit="$(git stash create)"
+        commit="${commit:-$(git rev-parse HEAD)}"
+        label="working tree of $(git rev-parse --short HEAD)"
+    else
+        commit="$(git rev-parse --verify "$rev^{commit}")"
+        label="$(git rev-parse --short "$commit")"
+    fi
+    ensure_build_image "$commit"
     mkdir -p build/_downloads "$out"
     downloads="$(host_dir build/_downloads)"
     host_out="$(host_dir "$out")"
@@ -319,6 +371,133 @@ echo "game: exit 0 after $2 frames"
 ' sh "$name" "$frames"
     echo "== check passed; read-backs in $check/capture/:"
     ls "$check/capture"
+}
+
+# The newest file of directory $1 matching the glob $2; dies with $3 if there is none.
+newest() {
+    local found
+    # shellcheck disable=SC2012,SC2086 # names are ours; $2 is a glob, unquoted on purpose
+    found="$(ls -t "$1"/$2 2>/dev/null | head -n 1 || true)"
+    [ -n "$found" ] || die "no $1/$2: $3"
+    printf '%s\n' "$found"
+}
+
+cmd_check_player() {
+    type -P docker >/dev/null || die "docker not found (on a Mac: OrbStack or Docker Desktop)"
+    [ -n "$tarball" ] || tarball="$(newest build/linux-game 'MapleThief-[0-9]*-linux-*.tar.gz' \
+        "run scripts/linux-game player")"
+    [ -f "$tarball" ] || die "no $tarball"
+    [ "${#images[@]}" -gt 0 ] || images=("$DEFAULT_CHECK_IMAGE" "$DEBIAN_CHECK_IMAGE")
+    local check=build/linux-game/check-player top name platform img
+    rm -rf "$check"
+    mkdir -p "$check"
+    top="$(linux_game unpack "$tarball" "$check/unpacked")"
+    name="$(basename "$top")"
+    [ ! -e "$top/game" ] || die "$tarball has a game/ folder: a game tarball, not a player tarball"
+    case "$name" in
+        *-linux-x86_64) platform=linux/amd64 ;;
+        *-linux-aarch64) platform=linux/arm64 ;;
+        *) die "$tarball: no -linux-x86_64 or -linux-aarch64 in its folder's name $name" ;;
+    esac
+    for img in "${images[@]}"; do
+        echo "== $tarball in $img ($platform)"
+        # A plain image: nothing installed, root, HOME=/tmp/home; the folder is read-only, so
+        # the data folder falls back to the per-user one (ADR 0127).
+        docker run --rm --platform "$platform" \
+            -v "$(host_dir "$check/unpacked"):/game:ro" \
+            -e HOME=/tmp/home -e SDL_VIDEO_DRIVER=dummy -e SDL_AUDIO_DRIVER=dummy \
+            "$img" sh -c '
+set -eu
+. /etc/os-release
+echo "image: $PRETTY_NAME, $(ldd --version | head -n 1), arch $(uname -m)"
+mkdir -p "$HOME"
+game="/game/$1"
+"$game/MapleThief.sh" --version
+"$game/MapleThief.sh" --print-data-dir
+status=0
+"$game/MapleThief.sh" --frames 30 || status=$?
+if [ "$status" -ne 4 ]; then
+    echo "game: exit $status, not 4 (started, no bundle yet)" >&2
+    exit 1
+fi
+echo "game: exit 4: started, no bundle yet (an interactive run shows the import screen here)"
+' sh "$name"
+    done
+    echo "== check-player passed in ${#images[@]} image(s)"
+}
+
+cmd_check_packages() {
+    type -P docker >/dev/null || die "docker not found (on a Mac: OrbStack or Docker Desktop)"
+    local dir="${tarball:-build/linux-game}" appimage flatpak check volume=maplethief-flatpak-check
+    appimage="$(newest "$dir" 'MapleThief-[0-9]*-linux-*.AppImage' "run scripts/linux-game player")"
+    flatpak="$(newest "$dir" 'MapleThief-[0-9]*-linux-*.flatpak' "run scripts/linux-game player")"
+    case "$appimage" in
+        *-linux-aarch64.AppImage) arch=arm64 ;;
+        *) arch=amd64 ;;
+    esac
+    ensure_build_image HEAD
+    check=build/linux-game/check-packages
+    rm -rf "$check"
+    mkdir -p "$check/games" "$check/pkg"
+    cp "$appimage" "$check/games/"
+    cp "$flatpak" "$check/pkg/"
+    # x86_64 emulated on an arm64 kernel (Rosetta) can't load Flatpak's seccomp filter:
+    # tools/containers/linux-game/bwrap-no-seccomp runs bwrap without it there.
+    local emulated=0
+    if [ "$arch" = amd64 ]; then
+        case "$(uname -m)" in arm64 | aarch64) emulated=1 ;; esac
+    fi
+    docker volume create "$volume" >/dev/null
+    echo "== $(basename "$appimage") and $(basename "$flatpak") under Xvfb in $build_image"
+    local status=0
+    docker run --rm --privileged --user root --platform "linux/$arch" \
+        -v "$volume:/root/.local/share/flatpak" \
+        -v "$(host_dir "$check/games"):/games" -v "$(host_dir "$check/pkg"):/pkg:ro" \
+        -v "$(host_dir tools/containers/linux-game):/check:ro" \
+        -e SDL_AUDIO_DRIVER=dummy -e HOME=/root -e XDG_RUNTIME_DIR=/tmp/xdg \
+        "$build_image" bash -c '
+set -euo pipefail
+appimage="/games/$1"
+flatpak_file="/pkg/$2"
+[ "$3" -eq 0 ] || export FLATPAK_BWRAP=/check/bwrap-no-seccomp
+mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+screen() {  # run "$@" under Xvfb until the import screen is up; the log in /tmp/<name>.log
+    local name="$1"; shift
+    timeout 90 xvfb-run -a -s "-screen 0 1280x800x24" "$@" >"/tmp/$name.log" 2>&1 || true
+    grep -E "^(data|gfx|import): " "/tmp/$name.log" || true
+    if ! grep -q "^import: no game bundle yet: the import screen asks for" "/tmp/$name.log"; then
+        echo "$name: no import screen; its log:" >&2
+        tail -n 40 "/tmp/$name.log" >&2
+        exit 1
+    fi
+    echo "$name: reached the import screen"
+}
+
+echo "-- AppImage (no FUSE here: APPIMAGE_EXTRACT_AND_RUN=1)"
+export APPIMAGE_EXTRACT_AND_RUN=1
+"$appimage" --version
+"$appimage" --print-data-dir | tee /tmp/appimage-data
+grep -qx "data: /games/data" /tmp/appimage-data || { echo "AppImage: data not next to it" >&2; exit 1; }
+screen appimage "$appimage"
+unset APPIMAGE_EXTRACT_AND_RUN
+
+echo "-- Flatpak bundle"
+mkdir -p /run/dbus
+dbus-daemon --system --fork
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user -y --noninteractive --reinstall "$flatpak_file" 2>&1 | tail -n 3
+app=io.github.armaatus.maplethief
+run() { dbus-run-session -- flatpak run "$app" "$@" 2>&1 | grep -v "^dbus-daemon"; }
+run --version
+run --print-data-dir | tee /tmp/flatpak-data
+grep -qx "reason: flatpak" /tmp/flatpak-data || { echo "Flatpak: not the sandbox folder" >&2; exit 1; }
+screen flatpak dbus-run-session -- flatpak run --env=SDL_AUDIO_DRIVER=dummy "$app"
+' bash "$(basename "$appimage")" "$(basename "$flatpak")" "$emulated" || status=$?
+    if [ "$keep_runtime" -eq 0 ]; then
+        docker volume rm "$volume" >/dev/null
+    fi
+    [ "$status" -eq 0 ] || die "check-packages failed"
+    echo "== check-packages passed"
 }
 
 "cmd_$cmd"

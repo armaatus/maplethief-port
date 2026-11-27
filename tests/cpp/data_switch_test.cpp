@@ -251,6 +251,8 @@ TEST_CASE("data switch: the Saves tab's row for a normal folder and for every fa
         {user_at(user, base, Reason::kMarker), "User folder", "user-data.txt", true},
         {user_at(user, base, Reason::kFlag), "User folder", "--data-location user", true},
         {user_at(user, base, Reason::kApplicationsFolder), "User folder", "in Applications", false},
+        {user_at(user, base, Reason::kFlatpak), "User folder", "The Flatpak keeps your data",
+         false},
         {user_at(user, base, Reason::kFallbackNotWritable, "Permission denied"), "User folder",
          "Can't write next to the game (Permission denied)", false},
         {user_at(user, base, Reason::kFallbackTranslocated), "User folder", "App Translocation",
@@ -430,6 +432,8 @@ TEST_CASE("data switch: refused with a character loaded, under the env, the fall
     CHECK(fe::plan_data_switch(user_at(user, base, Reason::kApplicationsFolder), Place::kGame,
                                inputs(user))
               .refused.find("Applications") != std::string::npos);
+    CHECK(fe::plan_data_switch(user_at(user, base, Reason::kFlatpak), Place::kGame, inputs(user))
+              .refused.find("Flatpak") != std::string::npos);
     CHECK(fe::plan_data_switch(user_at(user, base, Reason::kFallbackTranslocated), Place::kGame,
                                inputs(user))
               .refused.find("App Translocation") != std::string::npos);

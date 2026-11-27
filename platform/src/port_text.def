@@ -352,6 +352,9 @@ MT_TEXT(data_help_flag_user, "Your user folder for this run (--data-location use
 MT_TEXT(data_help_applications,
         "MapleThief.app is in Applications, so your data is in your user folder. To keep it next "
         "to the game, put the app in a folder of its own.")
+MT_TEXT(data_help_flatpak,
+        "The Flatpak keeps your data in its own folder, ~/.var/app/io.github.armaatus.maplethief. "
+        "To keep it next to the game, use the AppImage or the tarball.")
 MT_TEXT(data_help_not_writable,
         "Can't write next to the game ({0}). To keep your data there, move the game's folder "
         "somewhere you can write, such as Documents.")
@@ -377,6 +380,8 @@ MT_TEXT(data_refused_platform, "The data folder can't be switched on this platfo
 MT_TEXT(data_refused_no_base, "The game's own folder is unknown")
 MT_TEXT(data_refused_applications,
         "MapleThief.app is in Applications: put it in a folder of its own to keep data next to it")
+MT_TEXT(data_refused_flatpak, "The Flatpak's own folder can't be written: use the AppImage or the "
+                              "tarball to keep data next to the game")
 MT_TEXT(data_refused_fallback, "The game folder can't be used: {0}")
 MT_TEXT(data_refused_no_user, "There is no user folder")
 MT_TEXT(data_refused_not_writable, "Can't write {0}: {1}")

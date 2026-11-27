@@ -4,7 +4,7 @@
 #   - needs no GLIBCXX, CXXABI or GCC symbol version (a dynamic libstdc++ or libgcc_s), and
 #   - when GLIBC_FLOOR is not empty, no GLIBC symbol version newer than GLIBC_FLOOR.
 #
-#   cmake -DPROGRAM=<MapleThief> -DREADELF=<readelf> [-DGLIBC_FLOOR=2.39] -P portable_test.cmake
+#   cmake -DPROGRAM=<MapleThief> -DREADELF=<readelf> [-DGLIBC_FLOOR=2.35] -P portable_test.cmake
 
 set(allowed_needed
     libc.so.6

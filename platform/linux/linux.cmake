@@ -11,13 +11,13 @@
 # when MAPLETHIEF_LINUX_GLIBC_FLOOR is set, no GLIBC symbol version newer than it. glibc only
 # runs programs linked against it or an older one, so the floor holds only for a build on a
 # distribution with that glibc or an older one: scripts/linux-game builds the game folder in
-# the Ubuntu 24.04 image of tools/containers/linux-game/ with the floor 2.39. The CI image
+# the Ubuntu 22.04 image of tools/containers/linux-game/ with the floor 2.35 (ADR 0193). The CI image
 # (Ubuntu 26.04, glibc 2.43) leaves it empty.
 
 set(MAPLETHIEF_LINUX_GLIBC_FLOOR
     ""
     CACHE STRING
-          "Newest GLIBC symbol version MapleThief may need on Linux, e.g. 2.39; empty: unchecked (ADR 0065)")
+          "Newest GLIBC symbol version MapleThief may need on Linux, e.g. 2.35; empty: unchecked (ADR 0065)")
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_link_options(MapleThief PRIVATE -static-libstdc++ -static-libgcc)

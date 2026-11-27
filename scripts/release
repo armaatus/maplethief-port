@@ -350,10 +350,12 @@ build_mac_player() {
     players+=("$out/$name")
 }
 
-# build_linux_player: the Linux player tarball in the linux-game container (glibc 2.39 floor,
-# ADR 0065) from a clean export of the tag; --version checked in the CI container.
+# build_linux_player: the Linux player tarball, AppImage and Flatpak bundle in the linux-game
+# container (glibc 2.35 floor, ADR 0065, ADR 0193) from a clean export of the tag; the tarball's
+# --version checked in the CI container, then the tarball started in Ubuntu 22.04 and Debian 12
+# and the AppImage and bundle run under Xvfb to the import screen.
 build_linux_player() {
-    local dir="$out/linux-player" name="MapleThief-$version-linux-x86_64.tar.gz"
+    local dir="$out/linux-player" name="MapleThief-$version-linux-x86_64.tar.gz" pkg
     rm -rf "$dir"
     MAPLETHIEF_VERSION="$version" scripts/linux-game player "$tag" --arch amd64 --out "$dir" ||
         die "scripts/linux-game player failed on $tag"
@@ -361,7 +363,15 @@ build_linux_player() {
     cp "$dir/$name" "$out/$name"
     echo "-- $out/$name ($(wc -c <"$out/$name" | tr -d ' ') bytes)"
     check_linux_kit "$out/$name"
+    scripts/linux-game check-player "$out/$name" || die "$name does not start in Ubuntu 22.04 or Debian 12"
     players+=("$out/$name")
+    for pkg in $(mtrelease linux-packages "$version"); do
+        [ -f "$dir/$pkg" ] || die "scripts/linux-game player wrote no $dir/$pkg"
+        cp "$dir/$pkg" "$out/$pkg"
+        echo "-- $out/$pkg ($(wc -c <"$out/$pkg" | tr -d ' ') bytes)"
+        players+=("$out/$pkg")
+    done
+    scripts/linux-game check-packages "$dir" || die "the AppImage or Flatpak bundle does not reach the import screen"
 }
 
 # build_switch_player: the Nintendo Switch's player zip (#243, ADR 0138) in the devkitA64
@@ -498,6 +508,9 @@ cmd_publish() {
         esac
         [ "$p" = switch ] || kits+=("$(grep -- "$key" <<<"$kit_all")")
         players+=("$(grep -- "$key" <<<"$player_all")")
+        if [ "$p" = linux ]; then
+            while IFS= read -r name; do players+=("$name"); done < <(mtrelease linux-packages "$version")
+        fi
     done
     names=("${kits[@]}" "${players[@]}")
 
