@@ -18,6 +18,9 @@
 //
 // Both are fixes of original bugs (docs/re/original-bugs.md, #155): on with fix_original_bugs.
 //
+// CMapleWorld::changeMap 0x81369 (#388, docs/re/original-bugs.md 14): a content defect.
+// common/portal620 warps to a portal 6.1 lacks. On with fix_original_bugs.
+//
 // PopupMenu_QuestTabOnKey 0x5462D (#167, docs/re/original-bugs.md 11): OK on a quest opens its
 // page without storing the quest in CDataMgr +0x530, which the page's paint reads. The wrapper
 // stores it. The trigger is a key the device never sends to that tab, so it is on in every
@@ -172,6 +175,25 @@ int quest_page_fix(mt_cpu *cpu, const mt_hook_call *call) {
     return MT_HOOK_HANDLED;
 }
 
+// CMapleWorld::changeMap's target (r1 area, r2 map, r3 portal): common/portal620's, and the
+// portal of map 6.1 that leads back to 6.2 (portal611, kind 1).
+constexpr u32 k_portal620_area = 6u;
+constexpr u32 k_portal620_map = 1u;
+constexpr u32 k_portal620_portal = 2u;
+constexpr u32 k_portal611_portal = 1u;
+
+int portal620_fix(mt_cpu *cpu, const mt_hook_call *call) {
+    if (cpu->r[1] != k_portal620_area || cpu->r[2] != k_portal620_map ||
+        cpu->r[3] != k_portal620_portal) {
+        return MT_HOOK_PASS;
+    }
+    cpu->r[3] = k_portal611_portal;
+    mt_tracef("hooks", "CMapleWorld::changeMap(0x%08X, 6, 1, 2) from 0x%08X: to portal 1",
+              static_cast<unsigned>(cpu->r[0]), static_cast<unsigned>(cpu->r[MT_LR]));
+    call->original(cpu);
+    return MT_HOOK_HANDLED;
+}
+
 // CStateGame::Paint 0x87501 (#158, docs/re/screen-shake.md): the scene's camera shake. The
 // fields of CStateGame (`this`, r0 at the entry):
 constexpr u32 k_shake_on = 0x47Eu;  // byte: command 19 sets 1, command 20 clears it
@@ -297,7 +319,12 @@ extern "C" void mt_hooks_install_quest_page_fix(int enabled) noexcept {
     mt_hook_register(MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY, quest_page_fix, nullptr, enabled);
 }
 
+extern "C" void mt_hooks_install_portal620_fix(int enabled) noexcept {
+    mt_hook_register(MT_HOOK_FN_CHANGE_MAP, portal620_fix, nullptr, enabled);
+}
+
 extern "C" void mt_hooks_install_original_bug_fixes(int enabled) noexcept {
     mt_hooks_install_portal_no_exit(enabled);
     mt_hooks_install_early_play_guard(enabled);
+    mt_hooks_install_portal620_fix(enabled);
 }
