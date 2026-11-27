@@ -32,8 +32,13 @@ std::string join(const std::string &a, const char *b) {
     return a.empty() ? std::string() : path_utf8(utf8_path(a) / b);
 }
 
+// Each line, counted by its level (a check's report replaces the counts with the runtime's).
 void collect(void *user, int level, const char *line) {
-    static_cast<PackToolResult *>(user)->lines.push_back({level, line});
+    auto *r = static_cast<PackToolResult *>(user);
+    r->lines.push_back({level, line});
+    ++(level == MT_PACKCHECK_REJECTED  ? r->report.rejected
+       : level == MT_PACKCHECK_IGNORED ? r->report.ignored
+                                       : r->report.notes);
 }
 
 const char *level_word(int level) {
@@ -149,7 +154,10 @@ PackToolResult check_pack(const std::string &dir, const std::string &bundle, con
 PackToolResult build_texture_pack(const std::string &dump, const std::string &pack, unsigned k,
                                   int scaler, bool ui) {
     PackToolResult r;
+    r.report.kind = "texture";
     r.count = mt_texpack_build(dump.c_str(), pack.c_str(), k, scaler, ui ? 1 : 0, collect, &r);
+    r.report.opens = r.count >= 0 ? 1 : 0;
+    r.report.good = r.count > 0 ? static_cast<std::uint32_t>(r.count) : 0u;
     return r;
 }
 

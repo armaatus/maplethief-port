@@ -282,7 +282,7 @@ TEST_CASE("textpack: a pack without a good manifest is not opened") {
         PackDir p;
         p.write("Scripts.strings", "\"k\" = \"v\";");
         CHECK(mt_textpack_open(p.path().c_str()) == -1);
-        CHECK(logged("has no textpack.strings (the manifest): no text pack"));
+        CHECK(logged("has no pack.strings or textpack.strings (the manifest): no text pack"));
         CHECK(mt_textpack_is_open() == 0);
     }
     const char *bad[][2] = {
@@ -398,7 +398,7 @@ TEST_CASE("textpack: a symbolic link in a pack is not followed, logged once (#41
     fs::create_symlink(outside.dir / "manifest.strings", p.dir / "textpack.strings", ec);
     REQUIRE(!ec);
     CHECK(mt_textpack_open(p.path().c_str()) == -1);
-    CHECK(logged("has no textpack.strings (the manifest): no text pack"));
+    CHECK(logged("has no pack.strings or textpack.strings (the manifest): no text pack"));
     CHECK(mt_textpack_is_open() == 0);
 }
 

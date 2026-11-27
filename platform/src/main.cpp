@@ -1431,7 +1431,17 @@ int run_pack_tool(const Options &options, const GameProgram &program) {
         const PackToolResult r =
             build_texture_pack(options.pack_path, options.pack_out, options.pack_scale,
                                options.pack_scaler, options.pack_ui);
-        text = pack_tool_text(options.pack_out, r);
+        for (const PackToolLine &l : r.lines) {
+            text += std::string(l.level == MT_PACKCHECK_REJECTED  ? "error: "
+                                : l.level == MT_PACKCHECK_IGNORED ? "skipped: "
+                                                                  : "note: ") +
+                    l.text + "\n";
+        }
+        if (r.count >= 0) {
+            text += options.pack_out + ": " + std::to_string(r.count) + " pictures at " +
+                    std::to_string(options.pack_scale) +
+                    "x. Made from the game's art: keep this folder to yourself.\n";
+        }
         status = r.count >= 0 && r.report.rejected == 0 ? kExitOk : kExitCheckMismatch;
         break;
     }
