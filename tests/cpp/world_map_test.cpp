@@ -334,8 +334,8 @@ TEST_CASE("a rope with no top is caught from a ledge and hopped off") {
         }
         if (ladder) { // a ladder from the ledge's surface to the high platform: x 136
             for (int r = 12; r <= 21; r++) {
-                const auto v = static_cast<wm::u8>(r == 12 ? wm::k_ladder | wm::k_foothold
-                                                           : wm::k_ladder);
+                const auto v =
+                    static_cast<wm::u8>(r == 12 ? wm::k_ladder | wm::k_foothold : wm::k_ladder);
                 set(16, r, v);
                 set(17, r, v);
             }

@@ -363,7 +363,8 @@ inline void build(Map &m) {
                             continue;
                         }
                         const int cost = (q.y() - t.y()) / k_cell * 3 + 60;
-                        Edge e{static_cast<int>(ti), Move::rope_jump, end + qdir * 3, dir,
+                        Edge e{static_cast<int>(ti), Move::rope_jump,
+                               end + qdir * 3,       dir,
                                static_cast<int>(li), cost};
                         e.caught = true;
                         add(static_cast<int>(qi), e);
