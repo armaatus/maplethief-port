@@ -76,7 +76,9 @@ void write_bytes(const fs::path &p, const Bytes &b) {
     f.write(reinterpret_cast<const char *>(b.data()), static_cast<std::streamsize>(b.size()));
 }
 
-void write_text(const fs::path &p, const std::string &s) { write_bytes(p, Bytes(s.begin(), s.end())); }
+void write_text(const fs::path &p, const std::string &s) {
+    write_bytes(p, Bytes(s.begin(), s.end()));
+}
 
 Tree tree(const fs::path &dir) {
     Tree t;
@@ -181,9 +183,9 @@ Bytes sqlite_db(const std::string &table, const std::string &sql,
                 const std::vector<std::vector<Value>> &rows) {
     constexpr std::size_t u = kPage;
     struct Cell {
-        Bytes head;   // payload size and rowid
-        Bytes local;  // the payload's local part
-        Bytes rest;   // what overflows
+        Bytes head;  // payload size and rowid
+        Bytes local; // the payload's local part
+        Bytes rest;  // what overflows
         std::int64_t rowid = 0;
         std::uint32_t first_overflow = 0;
         std::size_t size() const { return head.size() + local.size() + (rest.empty() ? 0 : 4); }
@@ -262,8 +264,8 @@ Bytes sqlite_db(const std::string &table, const std::string &sql,
     {
         std::vector<Cell> keep;
         keep.swap(cells);
-        cells.push_back(make_cell(
-            1, record({std::string("table"), table, table, std::int64_t{2}, sql})));
+        cells.push_back(
+            make_cell(1, record({std::string("table"), table, table, std::int64_t{2}, sql})));
         Bytes pg = leaf_page({0}, 100);
         keep.swap(cells);
         std::memcpy(pg.data(), "SQLite format 3", 16);
@@ -338,10 +340,10 @@ std::string xml_plist(const std::string &body) {
 }
 
 void write_plists(const fs::path &dir, bool encrypted, const std::string &device) {
-    write_text(dir / "Manifest.plist",
-               xml_plist(std::string("  <key>IsEncrypted</key>\n  ") +
-                         (encrypted ? "<true/>" : "<false/>") + "\n  <key>Version</key>\n  "
-                                                                "<string>10.0</string>\n"));
+    write_text(dir / "Manifest.plist", xml_plist(std::string("  <key>IsEncrypted</key>\n  ") +
+                                                 (encrypted ? "<true/>" : "<false/>") +
+                                                 "\n  <key>Version</key>\n  "
+                                                 "<string>10.0</string>\n"));
     write_text(dir / "Info.plist",
                xml_plist("  <key>Device Name</key>\n  <string>" + device +
                          "</string>\n  <key>Product Version</key>\n  <string>12.5.7</string>\n"));
@@ -393,7 +395,8 @@ void write_mbdb_backup(const fs::path &dir, const std::vector<Entry> &entries, b
         put_str(m, e.data ? std::string(20, 'h') : "");
         put_str(m, key && e.data ? std::string(40, 'k') : "");
         const std::uint16_t mode = e.link ? 0xA1ED : e.data ? 0x81A4 : 0x41ED;
-        m.push_back(static_cast<std::uint8_t>(mode >> 8)), m.push_back(static_cast<std::uint8_t>(mode));
+        m.push_back(static_cast<std::uint8_t>(mode >> 8)),
+            m.push_back(static_cast<std::uint8_t>(mode));
         m.insert(m.end(), 8 + 4 + 4 + 12, 0); // inode, uid, gid, times
         const std::uint64_t size = e.data ? e.data->size() + static_cast<std::size_t>(size_off) : 0;
         for (int i = 7; i >= 0; i--) {
@@ -470,7 +473,7 @@ TEST_CASE("sqlite: records, CREATE TABLE columns, and a table over several pages
     CHECK(row[4].bytes == "hé");
     CHECK(row[5].type == fe::SqliteValue::Type::kBlob);
     CHECK(row[5].bytes == std::string("\x01\x02", 2));
-    CHECK_FALSE(fe::sqlite_record(Bytes{5, 13}, &row)); // the header runs past the record
+    CHECK_FALSE(fe::sqlite_record(Bytes{5, 13}, &row));   // the header runs past the record
     CHECK_FALSE(fe::sqlite_record(Bytes{2, 0x21}, &row)); // a text past the record
 
     CHECK(fe::sqlite_create_columns(kFilesSql) ==
@@ -498,17 +501,18 @@ TEST_CASE("sqlite: records, CREATE TABLE columns, and a table over several pages
     CHECK(root == 2);
     CHECK(columns == std::vector<std::string>{"name", "n", "data"});
     std::vector<std::int64_t> seen;
-    REQUIRE_MESSAGE(r.scan(root,
-                           [&](std::int64_t rowid, const fe::SqliteRow &v) {
-                               const auto i = static_cast<std::size_t>(rowid - 1);
-                               CHECK(v[0].bytes == std::get<std::string>(rows[i][0]));
-                               CHECK(v[1].integer == static_cast<std::int64_t>(i));
-                               const Bytes &want = std::get<Bytes>(rows[i][2]);
-                               CHECK(v[2].bytes == std::string(want.begin(), want.end()));
-                               seen.push_back(rowid);
-                               return true;
-                           },
-                           &why),
+    REQUIRE_MESSAGE(r.scan(
+                        root,
+                        [&](std::int64_t rowid, const fe::SqliteRow &v) {
+                            const auto i = static_cast<std::size_t>(rowid - 1);
+                            CHECK(v[0].bytes == std::get<std::string>(rows[i][0]));
+                            CHECK(v[1].integer == static_cast<std::int64_t>(i));
+                            const Bytes &want = std::get<Bytes>(rows[i][2]);
+                            CHECK(v[2].bytes == std::string(want.begin(), want.end()));
+                            seen.push_back(rowid);
+                            return true;
+                        },
+                        &why),
                     why);
     REQUIRE(seen.size() == 300);
     CHECK(std::is_sorted(seen.begin(), seen.end()));
@@ -523,8 +527,8 @@ TEST_CASE("sqlite: records, CREATE TABLE columns, and a table over several pages
 TEST_CASE("sqlite: damaged databases are refused with a reason, never read past") {
     std::vector<std::vector<Value>> rows;
     for (int i = 0; i < 60; i++) {
-        rows.push_back({std::string(30, static_cast<char>('a' + i % 26)),
-                        Bytes(i == 7 ? 2000 : 5, 1)});
+        rows.push_back(
+            {std::string(30, static_cast<char>('a' + i % 26)), Bytes(i == 7 ? 2000 : 5, 1)});
     }
     const Bytes good = sqlite_db("T", "CREATE TABLE T (a TEXT, b BLOB)", rows);
     const auto scan_error = [](const Bytes &db) {
@@ -791,8 +795,8 @@ TEST_CASE("save menu: an iPhone backup is imported from the Saves tab with only 
     CHECK(tree(loc.documents_dir) == before); // No is focused
     press(menu, SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
     press(menu, SDL_GAMEPAD_BUTTON_SOUTH);
-    CHECK(menu.status() == "Imported " + std::to_string(set.size()) +
-                               " files from Test iPod, iOS 12.5.7");
+    CHECK(menu.status() ==
+          "Imported " + std::to_string(set.size()) + " files from Test iPod, iOS 12.5.7");
     CHECK_FALSE(menu.in_list());
     CHECK(tree(loc.documents_dir) == set);
     CHECK(tree(fs::path(loc.backups_dir) / "import" / stamp(1)) == before);
@@ -889,9 +893,8 @@ TEST_CASE("save menu: saves from another folder: the other data folder and impor
     const auto others = fe::other_data_dirs(in_game, [&user] { return user.string(); });
     REQUIRE(others.size() == 1);
     CHECK(others[0].second == "user folder");
-    fe::DataLocation in_user = fe::data_location_at(user.string(), fe::DataPlace::kUser,
-                                                    fe::DataReason::kFlag,
-                                                    (tmp.path / "game").string());
+    fe::DataLocation in_user = fe::data_location_at(
+        user.string(), fe::DataPlace::kUser, fe::DataReason::kFlag, (tmp.path / "game").string());
     const auto back = fe::other_data_dirs(in_user, [] { return std::string(); });
     REQUIRE(back.size() == 1);
     CHECK(fs::path(back[0].first) == tmp.path / "game" / "data");
@@ -903,7 +906,8 @@ TEST_CASE("save menu: saves from another folder: the other data folder and impor
     CHECK(fs::path(folders[0].source) == user / "saves");
     CHECK(folders[1].name == "old kit");
     CHECK(folders[1].where == "import/");
-    CHECK(fs::path(folders[1].source) == fs::path(loc.data_dir) / "import" / "old kit" / "Documents");
+    CHECK(fs::path(folders[1].source) ==
+          fs::path(loc.data_dir) / "import" / "old kit" / "Documents");
 
     std::int32_t panel = -1;
     fe::Settings live;

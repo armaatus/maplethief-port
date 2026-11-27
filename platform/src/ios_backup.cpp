@@ -29,8 +29,7 @@ using u32 = std::uint32_t;
 constexpr std::string_view kDocuments = "Documents/";
 // Manifest.db Files.flags; mbdb modes' type bits.
 constexpr std::int64_t kFlagFile = 1, kFlagDirectory = 2, kFlagLink = 4;
-constexpr u32 kTypeMask = 0xF000, kTypeFile = 0x8000, kTypeDirectory = 0x4000,
-              kTypeLink = 0xA000;
+constexpr u32 kTypeMask = 0xF000, kTypeFile = 0x8000, kTypeDirectory = 0x4000, kTypeLink = 0xA000;
 
 fs::path utf8_path(const std::string &s) { return fs::path(std::u8string(s.begin(), s.end())); }
 std::string path_utf8(const fs::path &p) {
@@ -58,8 +57,8 @@ std::string permission_text(const fs::path &p) {
 }
 
 // A regular file's bytes, refusing links, other kinds of file and files over `cap`.
-bool read_capped(const fs::path &p, std::size_t cap, const std::string &what,
-                 std::vector<u8> *out, std::string *why) {
+bool read_capped(const fs::path &p, std::size_t cap, const std::string &what, std::vector<u8> *out,
+                 std::string *why) {
     std::error_code ec;
     const fs::file_status st = fs::symlink_status(p, ec);
     if (ec || st.type() == fs::file_type::not_found) {
@@ -192,8 +191,8 @@ bool db_entries(const fs::path &dir, const std::string &domain, std::vector<Entr
         }
         return -1;
     };
-    const int c_id = column("fileID"), c_domain = column("domain"),
-              c_path = column("relativePath"), c_flags = column("flags");
+    const int c_id = column("fileID"), c_domain = column("domain"), c_path = column("relativePath"),
+              c_flags = column("flags");
     if (c_id < 0 || c_domain < 0 || c_path < 0 || c_flags < 0) {
         return fail(why, "Manifest.db's table Files lacks fileID, domain, relativePath or flags");
     }
@@ -202,7 +201,8 @@ bool db_entries(const fs::path &dir, const std::string &domain, std::vector<Entr
         root,
         [&](std::int64_t, const SqliteRow &r) {
             const auto at = [&r](int c) -> const SqliteValue * {
-                return static_cast<std::size_t>(c) < r.size() ? &r[static_cast<std::size_t>(c)] : nullptr;
+                return static_cast<std::size_t>(c) < r.size() ? &r[static_cast<std::size_t>(c)]
+                                                              : nullptr;
             };
             const SqliteValue *d = at(c_domain);
             if (d == nullptr || !d->is_text() || d->bytes != domain) {
@@ -408,8 +408,8 @@ std::string ios_file_id(std::string_view domain, std::string_view relative_path)
     std::string text;
     text.reserve(domain.size() + 1 + relative_path.size());
     text.append(domain).append("-").append(relative_path);
-    const auto digest = sha1_of(std::span<const u8>(reinterpret_cast<const u8 *>(text.data()),
-                                                    text.size()));
+    const auto digest =
+        sha1_of(std::span<const u8>(reinterpret_cast<const u8 *>(text.data()), text.size()));
     static constexpr char kHex[] = "0123456789abcdef";
     std::string out;
     for (const u8 b : digest) {
@@ -473,8 +473,8 @@ IosBackupInfo ios_backup_info(const std::string &dir) {
             const auto sys = std::chrono::system_clock::now() +
                              std::chrono::duration_cast<std::chrono::system_clock::duration>(
                                  when - fs::file_time_type::clock::now());
-            info.time = std::chrono::duration_cast<std::chrono::seconds>(sys.time_since_epoch())
-                            .count();
+            info.time =
+                std::chrono::duration_cast<std::chrono::seconds>(sys.time_since_epoch()).count();
         }
     }
     if (!problem.empty()) {
@@ -531,8 +531,8 @@ std::vector<std::string> default_ios_backup_roots(const std::string &home,
     (void)appdata;
     const char *h = home.empty() ? SDL_getenv("HOME") : home.c_str();
     if (h != nullptr && *h != '\0') {
-        out.push_back(path_utf8(utf8_path(h) / "Library" / "Application Support" / "MobileSync" /
-                                "Backup"));
+        out.push_back(
+            path_utf8(utf8_path(h) / "Library" / "Application Support" / "MobileSync" / "Backup"));
     }
 #else
     (void)home;
@@ -619,8 +619,7 @@ bool read_ios_backup(const std::string &dir, IosBackupFiles *out, std::string *w
         SaveFile f;
         f.name = name;
         if (!read_capped(where, kMaxSaveSourceFileBytes,
-                         "Documents/" + name + "'s data (file " + e.file_id + ")", &f.bytes,
-                         why)) {
+                         "Documents/" + name + "'s data (file " + e.file_id + ")", &f.bytes, why)) {
             return false;
         }
         if (e.size && *e.size != f.bytes.size()) {

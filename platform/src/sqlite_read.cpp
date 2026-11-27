@@ -322,7 +322,8 @@ bool SqliteReader::payload(const std::vector<u8> &pg, std::size_t at, std::uint3
             return false;
         }
         const u64 take = std::min<u64>(size - out->size(), u - 4);
-        out->insert(out->end(), over.begin() + 4, over.begin() + 4 + static_cast<std::ptrdiff_t>(take));
+        out->insert(out->end(), over.begin() + 4,
+                    over.begin() + 4 + static_cast<std::ptrdiff_t>(take));
         next = static_cast<std::uint32_t>(be(over.data(), 4));
     }
     return true;

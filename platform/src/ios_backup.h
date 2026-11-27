@@ -41,11 +41,11 @@ struct IosBackupInfo {
     std::string path;
     std::string manifest; // "db", "mbdb" or "" (not a backup this reads)
     bool encrypted = false;
-    std::string device;   // Info.plist's Device Name ("" if none)
-    std::string ios;      // Info.plist's Product Version
+    std::string device;      // Info.plist's Device Name ("" if none)
+    std::string ios;         // Info.plist's Product Version
     bool unfinished = false; // Status.plist's SnapshotState is there and not "finished"
-    std::string problem;  // why it cannot be read, when known up front
-    std::int64_t time = 0; // the manifest's modification time, seconds since 1970 (0: unknown)
+    std::string problem;     // why it cannot be read, when known up front
+    std::int64_t time = 0;   // the manifest's modification time, seconds since 1970 (0: unknown)
 };
 
 // The game's files found in a backup.
