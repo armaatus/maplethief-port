@@ -20,7 +20,14 @@ The GPU backend can already time a frame: with timing on, every flush with draws
 ## Evidence
 
 - **CI** (`tests/cpp/render_scale_test.cpp`): `render_scale: the GPU timer times one GL frame in four and keeps a second's median` (the cadence, no re-arming while a timed frame is to come, the median, a stalled frame, samples expiring, unknown with one sample); `render_scale: auto steps down on a slow injected GPU clock (#365)` (the frontend's loop with made-up times: a GPU taking 30 ms a GL frame at 4x with cheap CPU numbers steps auto down to 3x after two seconds; the same CPU numbers without a GPU time stay at 4x; 70 ms goes to 2x); `render_scale: the GPU's time keeps auto from climbing, and a fixed scale warns`.
-- **Real assets, local**: see #365's pull request for the run (`--render-scale auto` and a fixed 4x on the GPU backend, the `render:` lines and `game: ticks:`).
+- **Real assets, local** (Release, universal, Apple M4, a 1920 × 1080 display at density 1, load 13 to 17 from four other builds): the device golden list's fresh-run taps, `--quit 62`, `--gfx-backend gpu`, `--window 1920x1280` (the screen limits it to a 1920 × 1018 drawable: cap 3x):
+
+  | run | the `render:` lines | GPU time (exit log, timed frames) | `game: ticks:` |
+  |---|---|---|---|
+  | `auto` | 1x → 2x (frontend 1.60 ms, GPU 0.66 ms); 2x → 3x (frontend 1.02 ms, GPU 0.57 ms); the cap | 0.849 ms median over 318 frames | 1278 GL frames, 20.61 a second; p99 51.66 ms, 1 over 55 ms |
+  | fixed 4x | warned: `Render scale 4x is too slow here (23 ms a frame)` (frontend 22.54 ms, GPU 0.70 ms: a second of the main menu's compositing under load) | 0.971 ms median over 318 frames | 1278 GL frames, 20.62 a second; p99 52.01 ms, 1 over 55 ms |
+
+  318 timed frames of 1278 is one in four. The timed frames' waits cost no ticks (20.61 to 20.62 a second, as ADR 0080's 1x runs). On Apple silicon the GPU at 4x takes under 1 ms a GL frame, so the GPU never limits auto here; the CPU's frontend does, as before. The slow-GPU case is the CI test's.
 
 ## Consequences
 
