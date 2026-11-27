@@ -121,7 +121,8 @@ RUNS: dict[str, str] = {
     "quest:3-sub-14": _CH3 + "side_14",
     # From a raised save (levels 73-99).
     **{f"quest:3-sub-{n}": _CH3 + "sides_10_a_synthetic" for n in (20, 22, 23, 24)},
-    **{f"quest:3-sub-{n}": _CH3 + "sides_10_b_synthetic" for n in (26, 27, 28, 29, 30, 31)},
+    **{f"quest:3-sub-{n}": _CH3 + "sides_10_b_synthetic" for n in (26, 27, 28, 29, 30)},
+    "quest:3-sub-31": _CH3 + "sides_10_c_synthetic",
     "quest:3-sub-1": "play.jobs_3_1_synthetic",  # the Dark Lord's path; BrokerHan's: sides_a
     "quest:3-sub-42": "play.jobs_3_4_assassin_synthetic",
     # From built start states (#302, docs/testing/skills-and-jobs.md).

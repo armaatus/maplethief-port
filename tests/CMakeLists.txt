@@ -1971,8 +1971,8 @@ foreach(part IN ITEMS sides_a sides_b sides_c climb side_14)
     set(_previous_fixture play_chapter_3_${part})
     set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_${part}")
 endforeach()
-_chapter_3_raise(side_14_assassin play_chapter_3_climb
-                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_climb")
+_chapter_3_raise(side_14_assassin play_chapter_3_sides_c
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_sides_c")
 _chapter_3_part(side_14_assassin play.chapter_3_side_14_assassin_synthetic
                 start_chapter_3_side_14_assassin
                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_3_side_14_assassin")
@@ -1981,6 +1981,8 @@ _chapter_3_part(sides_10_a play.chapter_3_sides_10_a_synthetic start_chapter_3_s
                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_3_sides_10")
 _chapter_3_part(sides_10_b play.chapter_3_sides_10_b_synthetic play_chapter_3_sides_10_a
                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_sides_10_a")
+_chapter_3_part(sides_10_c play.chapter_3_sides_10_c_synthetic play_chapter_3_sides_10_b
+                "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_sides_10_b")
 _chapter_3_raise(crafts play_chapter_3_d "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_d")
 _chapter_3_part(crafts play.chapter_3_crafts_synthetic start_chapter_3_crafts
                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_3_crafts")

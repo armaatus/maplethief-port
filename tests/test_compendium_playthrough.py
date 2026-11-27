@@ -164,6 +164,11 @@ def _ctest_names() -> set[str]:
         names.add(f"play.chapter_3_{p}{tail}")
         if p == "e":
             names.add(f"play.chapter_3_e_skipped{tail}")
+    # Chapter 3's side parts (#301): `_chapter_3_part(<part> <test> ...)`, and a loop of them.
+    names |= set(re.findall(r"_chapter_3_part\(\w+ (play\.[\w.]+)", text))
+    sides = re.search(r"foreach\(part IN ITEMS ([a-z_0-9 ]+)\)\s+_chapter_3_part\(", text)
+    assert sides, "tests/CMakeLists.txt has no loop of _chapter_3_part"
+    names |= {f"play.chapter_3_{p}" for p in sides.group(1).split()}
     starts = re.search(r"set\(_from_starts([\w:\s]+)\)", text)
     assert starts, "tests/CMakeLists.txt has no _from_starts"
     names |= {f"play.{pair.split(':')[0]}_synthetic" for pair in starts.group(1).split()}
