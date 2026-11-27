@@ -27,7 +27,7 @@ By hand: configure and build `mac-coverage` (`cmake --preset mac-coverage && cma
 
 ## The coverage gaps
 
-[re/coverage-gaps.md](../re/coverage-gaps.md) gives every game function no run enters a class and the evidence (ADR 0232). To make it, collect the coverage of the whole real-asset suite into one directory (`MAPLETHIEF_COVERAGE=<dir>/coverage-%p.txt`; the suite takes about 1.5 h on the coverage build split into three fixture-connected partitions run in parallel, `ctest -R <partition> -FA '.*'`), then `python3 -m mtport.coveragegaps generate --coverage <dir>`. A new run step's coverage alone can be added to the doc's: `generate --add --coverage <dir>` counts what the doc already counts as executed plus what the new runs entered (#433). `python3 -m mtport.coveragegaps check` (and `tests/test_coveragegaps_real.py`) regenerates the doc from its own list and the current `work/`, so it fails when a re-analysis or a difftest change moved a class.
+[re/coverage-gaps.md](../re/coverage-gaps.md) gives every game function no run enters a class and the evidence (ADR 0232). To make it, collect the coverage of the whole real-asset suite into one directory (`MAPLETHIEF_COVERAGE=<dir>/coverage-%p.txt`; the suite takes about 1.5 h on the coverage build split into three fixture-connected partitions run in parallel, `ctest -R <partition> -FA '.*'`), then `python3 -m mtport.coveragegaps generate --coverage <dir>`. `python3 -m mtport.coveragegaps check` (and `tests/test_coveragegaps_real.py`) regenerates the doc from its own list and the current `work/`, so it fails when a re-analysis or a difftest change moved a class.
 
 ### Host-driven tests
 
