@@ -54,6 +54,7 @@ constexpr u32 k_hookable[] = {
     MT_HOOK_FN_STATE_GAME_PAINT,            // 0x87501
     MT_HOOK_FN_STATE_GAME_ON_KEY,           // 0x8D4C9
     MT_HOOK_FN_LUA_SHOW_MARKET,             // 0x998D1
+    MT_HOOK_FN_LUA_CALL_NATIVE,             // 0x9B37D
     MT_HOOK_FN_LUA_EXECUTE,                 // 0x9BC11
     MT_HOOK_FN_LUA_RUN_CALLBACK,            // 0x9CE2D
     MT_HOOK_FN_MAIN_MENU_CLICK_PLAY,        // 0xAAAB9

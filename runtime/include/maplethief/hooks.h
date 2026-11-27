@@ -123,6 +123,9 @@ MT_EXTERN_C_BEGIN
 /* ScriptNative_showMarket (L): the script native showMarket (39), the shop its argument names; #426
  * offers a restored shop beside it (restored_content) */
 #define MT_HOOK_FN_LUA_SHOW_MARKET 0x998D1u
+/* Lua::callNative (L, index, base): script native `index`, its arguments from stack index `base`
+ * (#430: the shadow runs record and replay each native call, maplethief/scriptvm.h) */
+#define MT_HOOK_FN_LUA_CALL_NATIVE 0x9B37Du
 /* Lua::execute (L, tfunc, base): the script VM's opcode loop (#386, ADR 0226: the host VM,
  * maplethief/scriptvm.h) */
 #define MT_HOOK_FN_LUA_EXECUTE 0x9BC11u

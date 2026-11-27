@@ -37,6 +37,9 @@ count = os.path.join(os.path.dirname(out), "count")
 n = int(open(count).read()) if os.path.exists(count) else 0
 open(count, "w").write(str(n + 1))
 settings = os.environ.get("MAPLETHIEF_SETTINGS", "none").replace(",", ";").replace("=", ":")
+vm = os.environ.get("MAPLETHIEF_NATIVE_SCRIPT_VM", "")
+if vm == "shadow":
+    print("PASS   scriptvm shadow: 12 runs, 30 native calls replayed, 0 with a difference")
 frame = "0123456789abcdef"
 if mode == "differs" and n == 2:
     frame = "0123456789abcdee"
@@ -87,6 +90,7 @@ def run(fake: Path, tmp_path: Path, mode: str = "", **kw) -> int:
         kw.pop("baseline", None),
         kw.pop("save_baseline", None),
         environ=env,
+        script_vm=kw.pop("script_vm", ""),
     )
 
 
@@ -179,6 +183,22 @@ def test_settings_reach_the_run(fake: Path, tmp_path: Path) -> None:
     assert run(fake, tmp_path) == 0
     log2 = (tmp_path / "out" / "run_01" / "checkpoints.txt").read_text(encoding="utf-8")
     assert "s=none" in log2 and rg.digest(log2) != rg.digest(log)
+
+
+def test_the_script_vm_reaches_the_run(
+    fake: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    # --native-script-vm sets MAPLETHIEF_NATIVE_SCRIPT_VM; a shadow run's line is repeated.
+    assert run(fake, tmp_path, script_vm="shadow") == 0
+    out = capsys.readouterr().out
+    assert "MAPLETHIEF_NATIVE_SCRIPT_VM=shadow" in out
+    assert "       scriptvm shadow: 12 runs, 30 native calls replayed, 0 with a difference" in out
+    # The variable is the run's: on and off are not in the stand-in's state, one digest.
+    assert run(fake, tmp_path, script_vm="on") == 0
+    on = (tmp_path / "out" / "run_01" / "checkpoints.txt").read_text(encoding="utf-8")
+    assert run(fake, tmp_path, script_vm="off") == 0
+    off = (tmp_path / "out" / "run_01" / "checkpoints.txt").read_text(encoding="utf-8")
+    assert on == off
 
 
 def test_baselines(fake: Path, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:

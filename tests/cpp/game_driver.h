@@ -62,6 +62,7 @@
 #include "maplethief/input.h"
 #include "maplethief/memory.h"
 #include "maplethief/saves.h"
+#include "maplethief/scriptvm.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
 #include "maplethief/widescreen.h"
@@ -1310,6 +1311,23 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     mt_hooks_install_original_bug_fixes(r.settings.fix_original_bugs ? 1 : 0); // as game.cpp
     fe::install_restored_shops(r.settings.restored_content);                   // as game.cpp
     fe::install_restored_carnival(r.settings.restored_content);                // as game.cpp
+    // MAPLETHIEF_NATIVE_SCRIPT_VM=on|off|shadow: game.cpp's --native-script-vm (#386, #430).
+    const std::string script_vm = [] {
+        const char *e = std::getenv("MAPLETHIEF_NATIVE_SCRIPT_VM");
+        return std::string(e != nullptr ? e : "off");
+    }();
+    check(script_vm == "on" || script_vm == "off" || script_vm == "shadow",
+          "MAPLETHIEF_NATIVE_SCRIPT_VM is on, off or shadow (" + script_vm + ")");
+    mt_scriptvm_shadow_reset();
+    mt_scriptvm_reset_stats();
+    if (script_vm == "shadow") {
+        mt_scriptvm_shadow_install(1, nullptr);
+    } else {
+        mt_hooks_install_native_script_vm(script_vm == "on" ? 1 : 0);
+    }
+    if (script_vm != "off") {
+        std::printf("MAPLETHIEF_NATIVE_SCRIPT_VM: %s\n", script_vm.c_str());
+    }
     if (!r.clock.install()) {
         check(false, "the virtual clock is installed");
         return 1;
@@ -1350,6 +1368,30 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
                       "no hang report: the longest run-loop turn took %.2f s (the limit %g s)",
                       hang.longest_gap, hang.seconds);
         check(hang.hangs == 0u, line);
+    }
+    if (script_vm == "shadow") {
+        // The shadow runs (#430): every outermost Lua::execute run both ways, none different.
+        const mt_scriptvm_shadow_stats sh = mt_scriptvm_shadow_get_stats();
+        mt_scriptvm_shadow_difference d{};
+        const bool differs = mt_scriptvm_shadow_first_difference(&d) != 0;
+        char line[320];
+        std::snprintf(line, sizeof line,
+                      "scriptvm shadow: %llu runs, %llu native calls replayed, %llu with a "
+                      "difference%s%s",
+                      static_cast<unsigned long long>(sh.runs),
+                      static_cast<unsigned long long>(sh.natives),
+                      static_cast<unsigned long long>(sh.differences), differs ? "; the first: " : "",
+                      differs ? d.what : "");
+        check(sh.differences == 0u, line);
+        mt_scriptvm_shadow_install(0, nullptr);
+    } else if (script_vm == "on") {
+        const mt_scriptvm_stats st = mt_scriptvm_get_stats();
+        std::printf("scriptvm: %llu calls, %llu opcodes, %llu native calls, %llu checks\n",
+                    static_cast<unsigned long long>(st.calls),
+                    static_cast<unsigned long long>(st.steps),
+                    static_cast<unsigned long long>(st.natives),
+                    static_cast<unsigned long long>(st.checks));
+        mt_hooks_install_native_script_vm(0);
     }
     const mt_process_result *res = mt_process_result_of(p);
     r.outcome = outcome;

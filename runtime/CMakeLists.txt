@@ -99,6 +99,7 @@ add_library(
     src/offline/achievements.cpp
     src/offline/offline_ui.cpp
     src/scriptvm/scriptvm.cpp
+    src/scriptvm/shadow.cpp
     src/snapshot/hashes.cpp
     src/snapshot/registry.cpp
     src/snapshot/snapshot.cpp

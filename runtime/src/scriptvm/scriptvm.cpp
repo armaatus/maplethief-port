@@ -7,13 +7,17 @@
 #include "maplethief/scriptvm.h"
 
 #include <atomic>
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include "maplethief/diag.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/hooks.h"
+#include "scriptvm/scriptvm_internal.h"
 
 namespace {
 
@@ -92,6 +96,34 @@ constexpr const char *k_names[] = {
 static_assert(sizeof k_names / sizeof k_names[0] == 0x43, "67 opcodes");
 
 std::atomic<u64> g_calls{0}, g_steps{0}, g_natives{0}, g_checks{0};
+std::vector<std::string> *g_recorder = nullptr; // mt::scriptvm::set_recorder
+constexpr std::size_t k_recorder_max = 4096u;    // lines kept; older ones are dropped
+
+// A trace line: to the scriptvm channel when it is on, to the recorder when one is set.
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((format(printf, 1, 2)))
+#endif
+void note(const char *fmt, ...) {
+    const bool trace = mt_trace_enabled("scriptvm") != 0;
+    if (!trace && g_recorder == nullptr) {
+        return;
+    }
+    char line[256];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    if (trace) {
+        mt_tracef("scriptvm", "%s", line);
+    }
+    if (g_recorder != nullptr) {
+        if (g_recorder->size() >= k_recorder_max) {
+            g_recorder->erase(g_recorder->begin(),
+                              g_recorder->begin() + static_cast<long>(k_recorder_max / 4u));
+        }
+        g_recorder->emplace_back(line);
+    }
+}
 
 // The guest's signed division as the HLE's __divsi3 does it (0 for a zero divisor).
 u32 sdiv(u32 a, u32 b) {
@@ -105,7 +137,7 @@ class Vm {
   public:
     Vm(mt_cpu *cpu, u32 lua, u32 tfunc, u32 base)
         : cpu_(cpu), lua_(lua), tfunc_(tfunc), base_(base), frame_(cpu->r[MT_SP] - k_frame),
-          trace_(mt_trace_enabled("scriptvm") != 0) {}
+          trace_(mt_trace_enabled("scriptvm") != 0 || g_recorder != nullptr) {}
 
     u32 run();
 
@@ -152,9 +184,8 @@ class Vm {
     // A problem the original would not notice: logged and counted, then the original's way.
     void check(const char *what, u32 value) {
         g_checks.fetch_add(1, std::memory_order_relaxed);
-        mt_tracef("scriptvm", "check: tfunc 0x%08X pc %u: %s (0x%08X)",
-                  static_cast<unsigned>(tfunc_), static_cast<unsigned>(op_pc_), what,
-                  static_cast<unsigned>(value));
+        note("check: tfunc 0x%08X pc %u: %s (0x%08X)", static_cast<unsigned>(tfunc_),
+             static_cast<unsigned>(op_pc_), what, static_cast<unsigned>(value));
     }
     u32 peek8(u32 addr) const { return reach(addr, 1) ? cpu_->mem[addr] : 0u; } // for the trace
 
@@ -250,7 +281,7 @@ void Vm::trace_step(u32 op) {
     // The operand bytes, peeked without moving the reader.
     const u32 reader = rd(tfunc_ + k_tfunc_reader);
     const u32 at = rd(reader + k_reader_buf) + rd(reader + k_reader_pos);
-    mt_tracef("scriptvm", "tfunc 0x%08X pc %u: %s [%02X %02X %02X %02X] base %u depth %u",
+    note("tfunc 0x%08X pc %u: %s [%02X %02X %02X %02X] base %u depth %u",
               static_cast<unsigned>(tfunc_), static_cast<unsigned>(op_pc_),
               op < 0x43u ? k_names[op] : "(none: skipped)", static_cast<unsigned>(peek8(at)),
               static_cast<unsigned>(peek8(at + 1)), static_cast<unsigned>(peek8(at + 2)),
@@ -380,8 +411,8 @@ void Vm::call_function(u32 nargs, u32 nresults) {
                                   static_cast<int>(rd(a)), static_cast<int>(rd(a + 4)));
                 used += n > 0 ? static_cast<std::size_t>(n) : 0u;
             }
-            mt_tracef("scriptvm", "native %u %s (%s) -> %u results", static_cast<unsigned>(index),
-                      text, args, static_cast<unsigned>(nresults));
+            note("native %u %s (%s) -> %u results", static_cast<unsigned>(index), text, args,
+                 static_cast<unsigned>(nresults));
         }
     }
     call(k_do_call, lua_, first, nresults, 0, 3);
@@ -644,6 +675,8 @@ extern "C" std::uint32_t mt_scriptvm_execute(mt_cpu *cpu, std::uint32_t lua, std
     cpu->r[MT_SP] = sp;
     return result;
 }
+
+void mt::scriptvm::set_recorder(std::vector<std::string> *lines) noexcept { g_recorder = lines; }
 
 extern "C" void mt_hooks_install_native_script_vm(int enabled) noexcept {
     mt_hook_register(MT_HOOK_FN_LUA_EXECUTE, execute_hook, nullptr, enabled);

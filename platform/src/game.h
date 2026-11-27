@@ -221,8 +221,11 @@ struct GameOptions {
     bool force_hang = false;
     // --native-script-vm on|off (#386, ADR 0226, a developer switch): the script VM's opcode loop,
     // Lua::execute 0x9BC11, runs as host code over the same guest memory (maplethief/scriptvm.h)
-    // instead of the recompiled one. Off (the default): the original.
+    // instead of the recompiled one. Off (the default): the original. shadow (#430): each
+    // outermost call runs both ways and is compared (mt_scriptvm_shadow_install); the game goes
+    // on from the original's.
     bool native_script_vm = false;
+    bool native_script_vm_shadow = false;
     // --hang-seconds S (#337, hang_watchdog.h): the watchdog's limit; 0: no watchdog. Negative
     // (not given): kHangSeconds, and none in a --fixed-step run.
     double hang_seconds = -1;

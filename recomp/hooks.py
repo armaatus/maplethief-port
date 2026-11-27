@@ -241,6 +241,12 @@ HOOKED: dict[int, Hooked] = {
         "through the shop screen 0x4628D; restored_content (#426) offers shops 0, 1 and 16 "
         "beside the usual one in a list box when a merchant who sells them opens his",
     ),
+    0x9B37D: Hooked(
+        "Lua::callNative",
+        "(L, index, base): runs script native `index` with its arguments from stack index "
+        "`base`; --native-script-vm shadow (#430) records each native call of the original's "
+        "run and replays it in the host VM's (runtime/src/scriptvm/shadow.cpp)",
+    ),
     0x9BC11: Hooked(
         "Lua::execute",
         "(L, tfunc, base): the script VM's opcode loop, which returns the first result's stack "

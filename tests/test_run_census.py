@@ -18,7 +18,7 @@ CENSUS = SRC / "run_census.cpp"
 CALLS = re.compile(
     r"\b(mt_call_guest|mt_objc_send\w*|mt_input_press|mt_input_release_all|mt_input_release"
     r"|mt_uikit_touch|mt_uikit_lifecycle_event|mt_uikit_set_host_\w+|mt_uikit_set_animation_scale"
-    r"|mt_runloop_set_fire_tolerance|mt_widescreen_turn|mt_hooks_install_\w+|mt_hook_register"
+    r"|mt_runloop_set_fire_tolerance|mt_widescreen_turn|mt_hooks_install_\w+|mt_scriptvm_shadow_install|mt_hook_register"
     r"|mt_hook_unregister|mt_hook_wrap|mt_hook_unwrap|mt_hook_set_enabled|mt_saves_replace_file"
     r"|mt_snapshot_restore|mt_runtape_poke)\s*\("
 )
