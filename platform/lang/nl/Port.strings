@@ -590,6 +590,10 @@
 "setting.skip_intros.help" = "Scènes lopen 8 keer zo snel en hun tekstballonnen sluiten vanzelf";
 "setting.minimap.label" = "Minikaart";
 "setting.minimap.help" = "De platforms van de kaart en waar je bent: naast het beeld, of bovenin eroverheen";
+"setting.minimap_mobs.label" = "Minikaart: mobs";
+"setting.minimap_mobs.help" = "De minikaart toont ook de levende mobs van de kaart, als roze stippen";
+"setting.minimap_name.label" = "Minikaart: naam";
+"setting.minimap_name.help" = "De minikaart toont ook de naam van de kaart, in de taal van het spel, bovenaan";
 "setting.exp_percent.label" = "EXP-percentage";
 "setting.exp_percent.help" = "Je EXP tot het volgende level, als \"EXP 42.17%\" naast de balk van de HUD";
 "setting.auto_run.label" = "Automatisch lopen";

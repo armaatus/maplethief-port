@@ -592,6 +592,10 @@
 "setting.skip_intros.help" = "장면이 8배 빠르게 진행되고 대화 상자가 저절로 닫힙니다";
 "setting.minimap.label" = "미니맵";
 "setting.minimap.help" = "맵의 발판과 내 위치: 화면 옆이나 위쪽에 겹쳐서";
+"setting.minimap_mobs.label" = "미니맵 몹";
+"setting.minimap_mobs.help" = "미니맵에 맵의 살아 있는 몹도 분홍 점으로 표시";
+"setting.minimap_name.label" = "미니맵 이름";
+"setting.minimap_name.help" = "미니맵 위쪽에 맵 이름도 게임 언어로 표시";
 "setting.exp_percent.label" = "경험치 퍼센트";
 "setting.exp_percent.help" = "다음 레벨까지의 경험치를 HUD 막대 옆에 \"EXP 42.17%\"처럼 표시";
 "setting.auto_run.label" = "자동 달리기";
