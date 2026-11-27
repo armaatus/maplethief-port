@@ -69,10 +69,11 @@ MT_TEXT(speech_unavailable,
 MT_TEXT(speech_accept_refuse, "Accept or refuse.")
 MT_TEXT(speech_rows, "Choose: {0}.")
 MT_TEXT(speech_speaker, "{0}: {1}")
-// What the speech says of a popup (#392, speech_text.h): its buttons ({0} / {1}: the game's
-// labels), and the death popup, whose message and four choices are images.
-MT_TEXT(speech_popup_button, "{0}.")
-MT_TEXT(speech_popup_buttons, "{0} or {1}.")
+// What the speech says of a popup's buttons by its kind (#392, speech_text.h; the buttons are
+// images), and of the death popup, whose four choices are images too.
+MT_TEXT(speech_popup_yes_no, "Yes or No.")
+MT_TEXT(speech_popup_ok, "OK.")
+MT_TEXT(speech_popup_ok_cancel, "OK or Cancel.")
 MT_TEXT(speech_death_popup,
         "You died. Grade revival, Revival, Return to town, or Go to main menu.")
 MT_TEXT(menu_preset_help,

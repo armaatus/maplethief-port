@@ -8,9 +8,9 @@
 //                  in the same utterance (an answer of its own would cut the page off)
 //   a scene box    "speaker: two lines", kDialogue, when a box opens and each time OK shows its
 //                  next two lines
-//   a popup        its message, then its buttons ("Yes or No.", "OK."), kDialogue: it interrupts
-//                  like a page. The death popup (0x68) has no message and image buttons: the
-//                  port's words (port_text.def's speech_death_popup)
+//   a popup        its message, then its buttons by its kind ("Yes or No.", "OK."), kDialogue:
+//                  it interrupts like a page. The death popup (0x68) has no message and image
+//                  buttons: the port's words (port_text.def's speech_death_popup)
 //   notify lines   the lines of one turn merged into one kNotice ("Meso obtained.(+70). EXP
 //                  obtained.(+7)."), said after that turn's dialogue and queued behind what is
 //                  being said (the speech keeps at most 4 waiting, the oldest dropped): a fight's

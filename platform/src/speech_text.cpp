@@ -18,21 +18,21 @@ void listener(void *user, const mt_text_event *e) {
 
 std::string_view text_of(const char *s) { return s != nullptr ? s : ""; }
 
-// A popup's buttons: its labels, one per line.
-std::string popup_buttons(std::string_view labels) {
-    std::vector<std::string> l;
-    for (std::size_t a = 0; a <= labels.size();) {
-        std::size_t b = labels.find('\n', a);
-        b = b == std::string_view::npos ? labels.size() : b;
-        if (b > a) {
-            l.emplace_back(labels.substr(a, b - a));
-        }
-        a = b + 1;
+// A popup's buttons, by its kind (Popup_PlaceShellButtons 0x78E91); kind 0 has none.
+std::string popup_buttons(std::int32_t kind) {
+    switch (kind) {
+    case 1:
+    case 2:
+    case 5:
+        return tr(Txt::speech_popup_yes_no);
+    case 3:
+    case 6:
+        return tr(Txt::speech_popup_ok);
+    case 4:
+        return tr(Txt::speech_popup_ok_cancel);
+    default:
+        return std::string();
     }
-    if (l.size() == 1) {
-        return tr(Txt::speech_popup_button, {l[0]});
-    }
-    return l.size() >= 2 ? tr(Txt::speech_popup_buttons, {l[0], l[1]}) : std::string();
 }
 
 bool sentence_end(char c) { return c == '.' || c == '!' || c == '?'; }
@@ -60,7 +60,7 @@ std::string speech_line(const mt_text_event &e) {
         if (e.index == MT_TEXT_POPUP_DEATH && text.empty()) {
             return tr(Txt::speech_death_popup);
         }
-        const std::string buttons = popup_buttons(text_of(e.speaker));
+        const std::string buttons = popup_buttons(e.value);
         if (text.empty() || buttons.empty()) {
             return text.empty() ? buttons : std::string(text);
         }

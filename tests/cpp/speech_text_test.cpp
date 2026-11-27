@@ -125,8 +125,8 @@ TEST_CASE("speech text: speech off says nothing, not even later (#391)") {
 
 namespace {
 
-mt_text_event popup(int id, int kind, const char *labels, const char *text) {
-    mt_text_event e = event(MT_TEXT_EVENT_POPUP, labels, text, kind);
+mt_text_event popup(int id, int kind, const char *text) {
+    mt_text_event e = event(MT_TEXT_EVENT_POPUP, "", text, kind);
     e.speaker_kind = MT_TEXT_SPEAKER_NONE;
     e.index = id;
     return e;
@@ -144,15 +144,16 @@ std::vector<std::pair<fe::SpeechKind, std::string>> all_said(const Fixture &f) {
 } // namespace
 
 TEST_CASE("speech text: what a popup says, the death popup's own words (#392)") {
-    CHECK(fe::speech_line(popup(0x69, 1, "Yes\nNo", "Move to the nearest safe village.")) ==
+    CHECK(fe::speech_line(popup(0x69, 1, "Move to the nearest safe village.")) ==
           "Move to the nearest safe village. Yes or No.");
-    CHECK(fe::speech_line(popup(600, 3, "OK", "You can't gain EXP anymore.")) ==
+    CHECK(fe::speech_line(popup(600, 3, "You can't gain EXP anymore.")) ==
           "You can't gain EXP anymore. OK.");
-    CHECK(fe::speech_line(popup(8, 0, "", "Quest complete.")) == "Quest complete.");
-    CHECK(fe::speech_line(popup(MT_TEXT_POPUP_DEATH, 0, "", "")) ==
+    CHECK(fe::speech_line(popup(8, 0, "Quest complete.")) == "Quest complete.");
+    CHECK(fe::speech_line(popup(MT_TEXT_POPUP_DEATH, 0, "")) ==
           "You died. Grade revival, Revival, Return to town, or Go to main menu.");
-    CHECK(fe::speech_line(popup(0x20, 3, "OK", "")) == "OK.");
-    CHECK(fe::speech_line(popup(0x21, 0, "", "")).empty());
+    CHECK(fe::speech_line(popup(0x20, 3, "")) == "OK.");
+    CHECK(fe::speech_line(popup(0x21, 0, "")).empty());
+    CHECK(fe::speech_line(popup(5, 4, "How many?")) == "How many? OK or Cancel.");
     CHECK(fe::merged_notices({"Meso obtained.(+70)", "", "EXP obtained.(+7)", "Done!"}) ==
           "Meso obtained.(+70). EXP obtained.(+7). Done!");
     CHECK(fe::merged_notices({}).empty());
@@ -185,9 +186,9 @@ TEST_CASE(
     f.speech.turn(20.0);
     CHECK(all_said(f).back() == std::pair<K, std::string>{K::kNotice, "EXP obtained.(+8)."});
     // The death popup, then its confirmation: dialogue, each interrupting the last.
-    text.on_event(popup(MT_TEXT_POPUP_DEATH, 0, "", ""));
+    text.on_event(popup(MT_TEXT_POPUP_DEATH, 0, ""));
     text.turn(f.speech, f.settings, 30.0);
-    text.on_event(popup(0x69, 1, "Yes\nNo", "Move to the nearest safe village. EXP: 5 Decrease"));
+    text.on_event(popup(0x69, 1, "Move to the nearest safe village. EXP: 5 Decrease"));
     text.turn(f.speech, f.settings, 30.5);
     const Said s = all_said(f);
     REQUIRE(s.size() == 5);
@@ -232,7 +233,7 @@ TEST_CASE("speech text: speech_notices = off says no notify line, still the popu
     f.settings.speech_notices = false;
     text.turn(f.speech, f.settings, 0.0);
     text.on_event(event(MT_TEXT_EVENT_NOTICE, "", "Meso obtained.(+70)"));
-    text.on_event(popup(600, 3, "OK", "You can't gain EXP anymore."));
+    text.on_event(popup(600, 3, "You can't gain EXP anymore."));
     text.turn(f.speech, f.settings, 1.0);
     f.speech.turn(50.0);
     CHECK(f.said() == std::vector<std::string>{"You can't gain EXP anymore. OK."});
