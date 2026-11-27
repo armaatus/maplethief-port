@@ -59,12 +59,12 @@ struct RunCheckpoint {
 };
 
 // A split (#406 fills them): its name and both times.
-struct RunSplit {
+struct RunFileSplit {
     std::string name;
     std::uint64_t turn = 0;
     std::uint64_t rta_us = 0; // real time from the run's start
     std::uint64_t ticks = 0;  // game ticks from the run's start
-    bool operator==(const RunSplit &) const = default;
+    bool operator==(const RunFileSplit &) const = default;
 };
 
 // Why a recording ended.
@@ -83,7 +83,7 @@ struct RunFile {
     std::vector<RunBootFile> files;
     std::array<std::vector<mt_runtape_run>, MT_RUNTAPE_STREAMS> streams;
     std::vector<mt_runtape_event> events;
-    std::vector<RunSplit> splits;
+    std::vector<RunFileSplit> splits;
     std::vector<RunCheckpoint> checkpoints;
     RunEnd end = RunEnd::kQuit;
     std::string end_detail;

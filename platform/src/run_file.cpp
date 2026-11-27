@@ -410,7 +410,7 @@ bool read_body(const u8 *p, std::size_t n, RunFile *out, std::string *why) {
             u64 count = 0;
             if (r.count(&count, 4, "splits")) {
                 out->splits.resize(count);
-                for (RunSplit &s : out->splits) {
+                for (RunFileSplit &s : out->splits) {
                     if (!r.text(&s.name, 256) || !r.var(&s.turn) || !r.var(&s.rta_us) ||
                         !r.var(&s.ticks)) {
                         break;
@@ -562,7 +562,7 @@ std::vector<std::uint8_t> write_run_file(const RunFile &run) {
     {
         Writer w;
         w.var(run.splits.size());
-        for (const RunSplit &s : run.splits) {
+        for (const RunFileSplit &s : run.splits) {
             w.text(s.name);
             w.var(s.turn);
             w.var(s.rta_us);
