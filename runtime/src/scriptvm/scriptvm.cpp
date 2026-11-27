@@ -104,15 +104,15 @@ u32 sdiv(u32 a, u32 b) {
 class Vm {
   public:
     Vm(mt_cpu *cpu, u32 lua, u32 tfunc, u32 base)
-        : cpu_(cpu), lua_(lua), tfunc_(tfunc), base_(base), entry_sp_(cpu->r[MT_SP]),
-          frame_(cpu->r[MT_SP] - k_frame), trace_(mt_trace_enabled("scriptvm") != 0) {}
+        : cpu_(cpu), lua_(lua), tfunc_(tfunc), base_(base), frame_(cpu->r[MT_SP] - k_frame),
+          trace_(mt_trace_enabled("scriptvm") != 0) {}
 
     u32 run();
 
   private:
     mt_cpu *cpu_;
     u32 lua_, tfunc_, base_;
-    u32 entry_sp_, frame_;
+    u32 frame_;
     bool trace_;
     u32 aux_ = 0; // the last operand kept by the original's case (STORELOCALn reads it)
     u32 op_pc_ = 0;
