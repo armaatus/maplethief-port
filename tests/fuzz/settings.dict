@@ -67,6 +67,8 @@
 "auto_potion"
 "skip_intros"
 "minimap"
+"minimap_mobs"
+"minimap_name"
 "exp_percent"
 "auto_run"
 "hold_toggle"

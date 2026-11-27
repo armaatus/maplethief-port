@@ -217,7 +217,7 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
                             "fast_forward",        "autosave",       "frame_rate",
                             "widescreen_hud",      "ui_animations",  "turbo_attack",
                             "auto_potion",         "skip_intros",    "minimap",
-                            "exp_percent",         "auto_run",       "hold_toggle",
+                            "minimap_mobs",        "minimap_name",   "exp_percent",         "auto_run",       "hold_toggle",
                             "pause_on_disconnect", "keypad_haptics", "pad_pointer",
                             "save_states",         "stick_mode",     "direction_priority",
                             "crash_recovery",      "run_timer",      "run_category",

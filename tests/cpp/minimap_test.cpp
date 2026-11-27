@@ -140,6 +140,70 @@ FakeGuest field_map() {
     return g;
 }
 
+// The extras (#397) on top of field_map: the mob list (kMinimapMobList) with `n` mobs, the first
+// four a live mob on the ground (x 60), a dead one, a null entry and a live one on the ledge
+// (x 120), the rest live on the ground; the name tables (g_mapSpotIndex, g_middleSpotNames) with
+// a name "G<group> N<index>" in every slot of rows 0, 4 and 7 (row 0: indices 0, 1, 2, 14, 13 as
+// the game's), and the state in area 0, map 1 ("G0 N1").
+constexpr u32 kMobListObj = 0x01020000, kMobItems = 0x01021000, kMobs = 0x01022000;
+constexpr u32 kMobSize = 0x100;
+void add_mobs(FakeGuest &g, u32 n) {
+    g.add(fe::kMinimapMobList, 4);
+    g.add(kMobListObj, 12);
+    g.add(kMobItems, 4 * n);
+    g.add(kMobs, kMobSize * n);
+    g.put32(fe::kMinimapMobList, kMobListObj);
+    g.put32(kMobListObj + 4, n);
+    g.put32(kMobListObj + 8, kMobItems);
+    for (u32 i = 0; i < n; i++) {
+        const u32 m = kMobs + kMobSize * i;
+        g.put32(kMobItems + 4 * i, i == 2 ? 0 : m);
+        g.put32(m + 0x04, i == 3 ? 120 : 60 + i);
+        g.put32(m + 0x08, i == 3 ? 12 * 8 - 1 : 22 * 8 - 1);
+        g.put32(m + 0x0C, i == 1 ? fe::kMinimapMobDead | 0x01 : 0x01);
+        g.put32(m + 0xA0, 3);
+    }
+}
+void put_name(FakeGuest &g, int group, int index, const std::string &name) {
+    u8 *p = g.at(fe::kMinimapSpotNames + static_cast<u32>(group) * fe::kMinimapNameGroupSize +
+                     static_cast<u32>(index) * fe::kMinimapNameSize,
+                 fe::kMinimapNameSize);
+    REQUIRE(p != nullptr);
+    std::memset(p, 0, fe::kMinimapNameSize);
+    std::memcpy(p, name.data(), std::min<std::size_t>(name.size(), fe::kMinimapNameSize));
+}
+void put_spot(FakeGuest &g, int area, int map, std::int32_t index) {
+    g.put32(fe::kMinimapSpotIndex + 4 * static_cast<u32>(area * fe::kMinimapMapsPerArea + map),
+            static_cast<u32>(index));
+}
+void add_names(FakeGuest &g) {
+    g.add(fe::kMinimapSpotIndex, 4 * fe::kMinimapAreas * fe::kMinimapMapsPerArea);
+    g.add(fe::kMinimapSpotNames, fe::kMinimapNameGroupSize * fe::kMinimapNameGroups);
+    for (int group = 0; group < fe::kMinimapNameGroups; group++) {
+        for (int i = 0; i < fe::kMinimapNamesPerGroup; i++) {
+            put_name(g, group, i, "G" + std::to_string(group) + " N" + std::to_string(i));
+        }
+    }
+    const int row0[] = {0, 1, 2, 14, 13};
+    for (int m = 0; m < 5; m++) {
+        put_spot(g, 0, m, row0[m]);
+    }
+    for (int m = 0; m < 18; m++) {
+        put_spot(g, 4, m, m + 1);
+    }
+    for (int m = 0; m < 6; m++) {
+        put_spot(g, 7, m, m + 2);
+    }
+    g.put32(kState + fe::kMinimapStateArea, 0);
+    g.put32(kState + fe::kMinimapStateMapNo, 1);
+}
+FakeGuest field_map_extras(u32 mobs = 6) {
+    FakeGuest g = field_map();
+    add_mobs(g, mobs);
+    add_names(g);
+    return g;
+}
+
 fe::Placement placed(int w, int h) { return fe::place(fe::ScaleMode::kInteger, w, h, 480, 320); }
 
 } // namespace
@@ -161,6 +225,147 @@ TEST_CASE("minimap: the game's grid, hero, portals and NPCs read from a syntheti
     REQUIRE(v.markers.size() == 2);
     CHECK(v.markers[0] == fe::MinimapMarker{fe::MinimapMarker::kPortal, 2 * 16 + 8, 11 * 16 - 1});
     CHECK(v.markers[1] == fe::MinimapMarker{fe::MinimapMarker::kNpc, 8 * 16 + 8, 6 * 16 - 1});
+}
+
+TEST_CASE("minimap: the mobs from a synthetic guest, dead skipped, count and pointers capped") {
+    FakeGuest g = field_map_extras();
+    // Off: no mobs, no name (the view before #397).
+    fe::MinimapView off = fe::read_minimap(g.span());
+    REQUIRE(off.shown);
+    CHECK(off.markers.size() == 2);
+    CHECK(off.name.empty());
+    const fe::MinimapView v = fe::read_minimap(g.span(), {true, false});
+    REQUIRE(v.shown);
+    CHECK(v.name.empty());
+    // The portal and the NPC, then the live mobs: not the dead one (1) or the null entry (2).
+    REQUIRE(v.markers.size() == 2 + 4);
+    CHECK(v.markers[2] == fe::MinimapMarker{fe::MinimapMarker::kMob, 60, 175});
+    CHECK(v.markers[3] == fe::MinimapMarker{fe::MinimapMarker::kMob, 120, 95});
+    CHECK(v.markers[4] == fe::MinimapMarker{fe::MinimapMarker::kMob, 64, 175});
+    CHECK(v.markers[5] == fe::MinimapMarker{fe::MinimapMarker::kMob, 65, 175});
+    // The dots: the mobs in their colour, before the hero's edge and fill (under them).
+    const fe::Placement p = placed(960, 640);
+    const fe::MinimapLayout l =
+        fe::minimap_layout(Minimap::kOverlay, p, p.rect, v.map_w(), v.map_h());
+    const std::vector<fe::MinimapDot> dots = fe::minimap_dots(v, l);
+    REQUIRE(dots.size() == 6 + 2);
+    for (std::size_t i = 2; i < 6; i++) {
+        CHECK(dots[i].color.r == fe::kMinimapMob.r);
+        CHECK(dots[i].color.b == fe::kMinimapMob.b);
+    }
+    CHECK(dots[7].color.r == fe::kMinimapHero.r);
+    CHECK(dots[7].color.g == fe::kMinimapHero.g);
+
+    SUBCASE("a huge count: at most kMinimapMaxMobs read") {
+        FakeGuest h = field_map_extras(80);
+        h.put32(kMobListObj + 4, 0x7FFFFFFF); // the items past 80 are not memory
+        const fe::MinimapView w = fe::read_minimap(h.span(), {true, false});
+        REQUIRE(w.shown);
+        // 64 read, of which one dead and one null.
+        CHECK(w.markers.size() == 2 + fe::kMinimapMaxMobs - 2);
+    }
+    SUBCASE("hostile values: no marker, the rest of the minimap kept") {
+        auto mobs = [](FakeGuest &h) {
+            const fe::MinimapView w = fe::read_minimap(h.span(), {true, false});
+            REQUIRE(w.shown);
+            return static_cast<int>(w.markers.size()) - 2;
+        };
+        FakeGuest h = field_map_extras();
+        h.put32(kMobListObj + 4, 0xFFFFFFFF); // a count of -1
+        CHECK(mobs(h) == 0);
+        h = field_map_extras();
+        h.put32(kMobListObj + 8, 0x05000000); // the items not memory
+        CHECK(mobs(h) == 0);
+        h = field_map_extras();
+        h.put32(fe::kMinimapMobList, 0x05000000); // the list not memory
+        CHECK(mobs(h) == 0);
+        h = field_map_extras();
+        h.put32(fe::kMinimapMobList, 0);
+        CHECK(mobs(h) == 0);
+        h = field_map_extras();
+        h.put32(kMobItems, 0x05000000);           // a mob that is not memory
+        h.put32(kMobItems + 12, kMobs + 6 * kMobSize - 8); // one that runs past it
+        CHECK(mobs(h) == 2);
+        h = field_map_extras();
+        h.put32(kMobs + 0x04, 0xFFFFFF00);             // feet left of the map
+        h.put32(kMobs + 3 * kMobSize + 0x08, 100000);  // and below it
+        h.put32(kMobs + 4 * kMobSize + 0x04, 320 + 1); // just right of it
+        h.put32(kMobs + 5 * kMobSize + 0x04, 320);     // on its edge: kept
+        CHECK(mobs(h) == 1);
+    }
+}
+
+TEST_CASE("minimap: the map's name from a synthetic guest, every group and past a row's end") {
+    FakeGuest g = field_map_extras();
+    const fe::MinimapView v = fe::read_minimap(g.span(), {false, true});
+    REQUIRE(v.shown);
+    CHECK(v.name == "G0 N1");
+    CHECK(v.markers.size() == 2); // no mobs without minimap_mobs
+    const fe::GuestSpan mem = g.span();
+    // The switches as docs/re/map-names.md (mtport.compendium.world's AREA_WORLD_SPOT and
+    // WORLD_SPOT_GROUP).
+    const int spots[] = {0, 1, 3, 2, 4, 4, 6, 6, 6, 5, 5};
+    for (int a = 0; a < 11; a++) {
+        CHECK(fe::minimap_area_world_spot(a) == spots[a]);
+    }
+    CHECK(fe::minimap_area_world_spot(-1) == -1);
+    CHECK(fe::minimap_area_world_spot(11) == -1);
+    const int groups[] = {0, 0, 0, 0, 1, 1, 2};
+    for (int sp = 0; sp < 7; sp++) {
+        CHECK(fe::minimap_world_spot_group(sp) == groups[sp]);
+    }
+    CHECK(fe::minimap_world_spot_group(7) == -1);
+    CHECK(fe::minimap_world_spot_group(-1) == -1);
+    // Every group: area 0 (Kerning City, group 0), 4 (Orbis, group 1), 7 (Magatia, group 2);
+    // area 9 (El Nath) is group 1 too, its row here all 0.
+    CHECK(fe::minimap_map_name(mem, 0, 3) == "G0 N14");
+    CHECK(fe::minimap_map_name(mem, 4, 17) == "G1 N18");
+    CHECK(fe::minimap_map_name(mem, 7, 5) == "G2 N7");
+    CHECK(fe::minimap_map_name(mem, 9, 0) == "G1 N0");
+    // A map past its row's end: slot 0, entry 0 of the group (a town), as the game.
+    CHECK(fe::minimap_map_name(mem, 0, 5) == "G0 N0");
+    CHECK(fe::minimap_map_name(mem, 4, 18) == "G1 N0");
+    CHECK(fe::minimap_map_name(mem, 7, 6) == "G2 N0");
+    // UTF-8 as the game keeps it (Hangul, U+AC00 U+B098).
+    put_name(g, 2, 7, "\xEA\xB0\x80\xEB\x82\x98");
+    CHECK(fe::minimap_map_name(mem, 7, 5) == "\xEA\xB0\x80\xEB\x82\x98");
+
+    SUBCASE("out of range: no name") {
+        CHECK(fe::minimap_map_name(mem, -1, 0).empty());
+        CHECK(fe::minimap_map_name(mem, 11, 0).empty());
+        CHECK(fe::minimap_map_name(mem, 0, -1).empty());
+        CHECK(fe::minimap_map_name(mem, 0, 30).empty());
+        put_spot(g, 0, 1, 50);
+        CHECK(fe::minimap_map_name(mem, 0, 1).empty());
+        put_spot(g, 0, 1, -1);
+        CHECK(fe::minimap_map_name(mem, 0, 1).empty());
+        put_spot(g, 0, 1, 49);
+        CHECK(fe::minimap_map_name(mem, 0, 1) == "G0 N49");
+        // The state's area out of range: the minimap still shows, without a name.
+        g.put32(kState + fe::kMinimapStateArea, 0x7FFFFFFF);
+        const fe::MinimapView w = fe::read_minimap(mem, {true, true});
+        CHECK(w.shown);
+        CHECK(w.name.empty());
+    }
+    SUBCASE("no NUL in the 50 bytes, not UTF-8, empty: no name") {
+        u8 *p = g.at(fe::kMinimapSpotNames + 1 * fe::kMinimapNameSize, fe::kMinimapNameSize);
+        std::memset(p, 'A', fe::kMinimapNameSize);
+        CHECK(fe::minimap_map_name(mem, 0, 1).empty());
+        p[49] = 0;
+        CHECK(fe::minimap_map_name(mem, 0, 1) == std::string(49, 'A'));
+        put_name(g, 0, 1, "Bad \xC3(");
+        CHECK(fe::minimap_map_name(mem, 0, 1).empty());
+        put_name(g, 0, 1, "\xED\xA0\x80"); // a surrogate
+        CHECK(fe::minimap_map_name(mem, 0, 1).empty());
+        put_name(g, 0, 1, "");
+        CHECK(fe::minimap_map_name(mem, 0, 1).empty());
+    }
+    SUBCASE("the tables not memory: no name") {
+        FakeGuest h = field_map();
+        CHECK(fe::minimap_map_name(h.span(), 0, 1).empty());
+        CHECK(fe::read_minimap(h.span(), {true, true}).name.empty());
+        CHECK(fe::read_minimap(h.span(), {true, true}).shown);
+    }
 }
 
 TEST_CASE("minimap: only in the field, and nothing from hostile guest values") {
@@ -509,6 +714,53 @@ TEST_CASE("minimap: a synthetic grid drawn (golden), thin floors kept when reduc
         img, std::filesystem::path(MT_GOLDEN_DATA_DIR) / "minimap_synthetic.png",
         "minimap_synthetic");
     CHECK_MESSAGE(r.passed, r.message);
+    // With both extras off, a guest that has mobs and names draws the same image.
+    FakeGuest gx = field_map_extras();
+    CHECK(fe::render_minimap(fe::read_minimap(gx.span()), l) == px);
+    // Both on: the mobs' dots and the name's strip (a synthetic name, the bundled font). The
+    // glyphs' edges may round differently across compilers: a channel tolerance of 8 on 1% of
+    // the pixels.
+    const fe::MinimapView vx = fe::read_minimap(gx.span(), {true, true});
+    REQUIRE(vx.name == "G0 N1");
+    const std::vector<u8> pxx = fe::render_minimap(vx, l);
+    REQUIRE(pxx.size() == px.size());
+    golden::Image imgx(160, 96);
+    imgx.bytes() = pxx;
+    const auto rx = golden::check_golden(
+        imgx, std::filesystem::path(MT_GOLDEN_DATA_DIR) / "minimap_synthetic_extras.png",
+        "minimap_synthetic_extras", golden::Tolerance{8, 0.01});
+    CHECK_MESSAGE(rx.passed, rx.message);
+    const fe::MinimapNameStrip strip = fe::minimap_name_strip(vx, l);
+    REQUIRE(strip.shown);
+    CHECK(strip.strip.y == l.box.y);
+    CHECK(strip.strip.w == l.box.w);
+    // A 40 x 24 point box: the strip at most 40% of it (9.6 points), its em 7 points.
+    CHECK(strip.strip.h <= std::ceil(l.box.h * 0.4f));
+    CHECK(strip.em == 28);
+    // Under the strip: the grid and the dots, plus the mobs' dots.
+    const std::size_t below = static_cast<std::size_t>(strip.strip.h) * 160 * 4;
+    CHECK_FALSE(std::equal(px.begin() + static_cast<std::ptrdiff_t>(below), px.end(),
+                           pxx.begin() + static_cast<std::ptrdiff_t>(below)));
+    // In the strip: darker than the grid's back, with white ink.
+    int ink = 0;
+    for (std::size_t i = 0; i < below; i += 4) {
+        ink += pxx[i] > 200 && pxx[i + 1] > 200 && pxx[i + 2] > 200 ? 1 : 0;
+    }
+    CHECK(ink > 50);
+    // A low box: the em shrinks to fit; too low: no strip.
+    fe::MinimapLayout low = l;
+    low.box.h = 40; // 10 points: the em at its smallest, 6 points, the strip over 40%
+    const fe::MinimapNameStrip sl = fe::minimap_name_strip(vx, low);
+    CHECK(sl.shown);
+    CHECK(sl.em == 24);
+    CHECK(sl.strip.h <= 40);
+    low.box.h = 20; // 5 points: smaller still, inside the box
+    const fe::MinimapNameStrip sm = fe::minimap_name_strip(vx, low);
+    CHECK(sm.shown);
+    CHECK(sm.em < 24);
+    CHECK(sm.strip.h <= 20);
+    low.box.h = 4;
+    CHECK_FALSE(fe::minimap_name_strip(vx, low).shown);
     // Spot checks: the ground (row 22: y 88-91) and the ladder (columns 10-11: x 40-47, rows
     // 13-21) and the wall (column 30: x 120-123).
     auto rgba = [&](int x, int y) {
@@ -595,6 +847,50 @@ TEST_CASE("minimap: the layer on a software renderer, off draws nothing") {
     SDL_DestroySurface(surface);
 }
 
+TEST_CASE("minimap: the extras on the layer: off byte for byte as before, the name cached") {
+    // The window's pixels after a draw of `v` on a fresh software renderer.
+    auto window = [](const fe::MinimapView &v, const fe::MinimapLayout &l, fe::MinimapLayer &layer,
+                     int frames) {
+        SDL_Surface *surface = SDL_CreateSurface(960, 640, SDL_PIXELFORMAT_ABGR8888);
+        REQUIRE(surface != nullptr);
+        SDL_Renderer *renderer = SDL_CreateSoftwareRenderer(surface);
+        REQUIRE(renderer != nullptr);
+        SDL_SetRenderDrawColor(renderer, 10, 20, 30, 255);
+        SDL_RenderClear(renderer);
+        for (int i = 0; i < frames; i++) {
+            REQUIRE(layer.draw(renderer, v, l));
+        }
+        SDL_Surface *s = SDL_RenderReadPixels(renderer, nullptr);
+        REQUIRE(s != nullptr);
+        SDL_Surface *c = SDL_ConvertSurface(s, SDL_PIXELFORMAT_ABGR8888);
+        SDL_DestroySurface(s);
+        std::vector<u8> out(static_cast<u8 *>(c->pixels),
+                            static_cast<u8 *>(c->pixels) +
+                                static_cast<std::size_t>(c->pitch) * c->h);
+        SDL_DestroySurface(c);
+        layer.stop();
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroySurface(surface);
+        return out;
+    };
+    FakeGuest plain = field_map();
+    FakeGuest extras = field_map_extras();
+    const fe::Placement p = placed(960, 640);
+    const fe::MinimapView before = fe::read_minimap(plain.span());
+    const fe::MinimapLayout l =
+        fe::minimap_layout(Minimap::kOverlay, p, p.rect, before.map_w(), before.map_h());
+    fe::MinimapLayer a, b, c;
+    // Both off on a guest with mobs and names: the window as before #397, byte for byte.
+    const std::vector<u8> base = window(before, l, a, 1);
+    CHECK(window(fe::read_minimap(extras.span()), l, b, 1) == base);
+    CHECK(b.stats().name_uploads == 0);
+    // Both on: different pixels; the name's texture made once over three frames.
+    const fe::MinimapView on = fe::read_minimap(extras.span(), {true, true});
+    CHECK(window(on, l, c, 3) != base);
+    CHECK(c.stats().draws == 3);
+    CHECK(c.stats().name_uploads == 1);
+}
+
 TEST_CASE("minimap: the setting, off by default and in every preset") {
     const fe::Settings defaults;
     CHECK(defaults.minimap == Minimap::kOff);
@@ -612,4 +908,20 @@ TEST_CASE("minimap: the setting, off by default and in every preset") {
     REQUIRE(fe::apply_setting_list(&s, "minimap = overlay", &why));
     CHECK(s.minimap == Minimap::kOverlay);
     CHECK_FALSE(fe::apply_setting_list(&s, "minimap = big", &why));
+    // The extras (#397): on | off, off by default and in every preset, live.
+    for (const char *key : {"minimap_mobs", "minimap_name"}) {
+        const fe::SettingInfo *x = fe::find_setting(key);
+        REQUIRE(x != nullptr);
+        CHECK(x->group == fe::SettingGroup::kVideo);
+        CHECK(std::string(x->presets.original) == "off");
+        CHECK(std::string(x->presets.original_controller) == "off");
+        CHECK(std::string(x->presets.enhanced) == "off");
+        CHECK(x->applies == fe::Applies::kAtOnce);
+    }
+    CHECK_FALSE(defaults.minimap_mobs);
+    CHECK_FALSE(defaults.minimap_name);
+    REQUIRE(fe::apply_setting_list(&s, "minimap_mobs = on; minimap_name = on", &why));
+    CHECK(s.minimap_mobs);
+    CHECK(s.minimap_name);
+    CHECK_FALSE(fe::apply_setting_list(&s, "minimap_mobs = maybe", &why));
 }

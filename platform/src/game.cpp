@@ -2273,7 +2273,8 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     // The minimap (#176, minimap.h): the window only, after the read-back and captures, under
     // the port's other window furniture; not over the settings menu or the remap overlay.
     if (g.settings.minimap != Minimap::kOff && !overlay_open(g)) {
-        const MinimapView view = read_minimap(guest_span(cpu));
+        const MinimapView view = read_minimap(
+            guest_span(cpu), MinimapExtras{g.settings.minimap_mobs, g.settings.minimap_name});
         g.minimap.draw(g.renderer, view, minimap_place(g, view));
     }
     // The EXP percentage beside the HUD's bar (#191, exp_percent.h): the window only, likewise;

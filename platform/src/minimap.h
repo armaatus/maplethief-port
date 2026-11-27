@@ -14,6 +14,18 @@
 //                        and their count (docs/formats/obj.md, CMMap::LoadObj 0xD259)
 //   CStateGame +0x30     the hero (CHero): x +0x04, y +0x08 (its feet, in map pixels)
 //
+// Two extras, each behind its own key (#397, ADR 0098's second addendum), read only when on:
+//
+//   minimap_mobs  the map's mobs: the list CMobs::CMobs 0x775DD stores at 0x11A9EC (a PtrArray:
+//                 count +0x04, items +0x08; CStateGame +0x34 is the same CMobs), each CMob's
+//                 feet +0x04 / +0x08 (map pixels) and flags +0x0C (0x10: dead), at most
+//                 kMinimapMaxMobs read (docs/re/hud-extras.md#the-mobs-and-their-hp)
+//   minimap_name  the map's name as the game shows it, in the device's language and after a
+//                 text pack: CStateGame +0x84 / +0x88 the area and map, AreaWorldSpot 0x36E65
+//                 and WorldSpotGroup 0x36EE5 (transcribed: mtport.compendium.world's tables),
+//                 g_mapSpotIndex 0x1077E0 (int[11][30], read from guest memory) and
+//                 g_middleSpotNames 0x111A50 (3 x 50 x char[50], UTF-8), docs/re/map-names.md
+//
 // Guest memory is untrusted data here: every read is range-checked against the image segments
 // and the committed heap (GuestSpan), the grid's sides are capped (kMinimapMaxSide), it must fit
 // in its buffer, and at most kMinimapMaxObjects objects are read. Anything out of range: no
@@ -50,7 +62,8 @@
 //
 // How it draws: the grid is reduced to the box (minimap_grid_pixels: each box pixel takes the
 // most important flag of the cells it covers: foothold, then ladder, then wall), then the
-// markers (minimap_dots) over it. render_minimap does both on the CPU (the golden image);
+// markers (minimap_dots) over it, then the name's strip (minimap_name_strip) inside the box's
+// top edge, so the box keeps its size. render_minimap does both on the CPU (the golden image);
 // MinimapLayer uploads the grid only when it changes and fills the dots with the renderer.
 // Drawn after the read-backs, like the frame-time overlay: never in a shot, a golden or a
 // capture (Presenter step 5, border.h).
@@ -59,6 +72,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <vector>
 
 #include "input.h"
@@ -87,6 +101,19 @@ inline constexpr std::uint8_t kAttFoothold = 0x02, kAttLadder = 0x04, kAttWall =
 inline constexpr std::int32_t kMinimapMaxSide = 1024;  // cells (shipped: at most 400)
 inline constexpr std::int32_t kMinimapMaxObjects = 64; // shipped: at most 23 records
 inline constexpr std::int32_t kMinimapMaxCellSide = 64;
+inline constexpr std::int32_t kMinimapMaxMobs = 64; // shipped: at most about 20 on a map
+
+// The extras' guest facts (#397; see above).
+inline constexpr std::uint32_t kMinimapMobList = 0x11A9EC;      // PtrArray* of CMob*
+inline constexpr std::uint32_t kMinimapMobDead = 0x10;          // CMob +0x0C
+inline constexpr std::uint32_t kMinimapStateArea = 0x84;        // CStateGame: the area
+inline constexpr std::uint32_t kMinimapStateMapNo = 0x88;       // CStateGame: the map in it
+inline constexpr std::uint32_t kMinimapSpotIndex = 0x1077E0;    // g_mapSpotIndex, int[11][30]
+inline constexpr std::uint32_t kMinimapSpotNames = 0x111A50;    // g_middleSpotNames
+inline constexpr std::int32_t kMinimapAreas = 11, kMinimapMapsPerArea = 30;
+inline constexpr std::int32_t kMinimapNameGroups = 3, kMinimapNamesPerGroup = 50;
+inline constexpr std::uint32_t kMinimapNameSize = 50;           // char[50], NUL-terminated
+inline constexpr std::uint32_t kMinimapNameGroupSize = 0x9C4;   // 50 x 50 bytes
 
 // `n` bytes of guest memory at `addr`, or nullptr if any of them is not game memory.
 using GuestSpan = std::function<const std::uint8_t *(std::uint32_t addr, std::uint32_t n)>;
@@ -94,9 +121,9 @@ using GuestSpan = std::function<const std::uint8_t *(std::uint32_t addr, std::ui
 GuestSpan guest_span(const mt_cpu *cpu);
 
 struct MinimapMarker {
-    enum Kind : std::uint8_t { kPortal, kNpc };
+    enum Kind : std::uint8_t { kPortal, kNpc, kMob };
     Kind kind = kPortal;
-    std::int32_t x = 0, y = 0; // the object's anchor (its tile's bottom centre), map pixels
+    std::int32_t x = 0, y = 0; // the object's anchor (its tile's bottom centre; a mob's feet)
     bool operator==(const MinimapMarker &) const = default;
 };
 
@@ -107,11 +134,26 @@ struct MinimapView {
     std::int32_t cell_w = 8, cell_h = 8; // a cell in map pixels
     std::vector<std::uint8_t> grid;      // cols x rows flags, top row first
     std::int32_t hero_x = 0, hero_y = 0; // the hero's feet, map pixels
-    std::vector<MinimapMarker> markers;  // portals (kinds 0-2) and visible NPCs (4-59)
+    std::vector<MinimapMarker> markers;  // portals (kinds 0-2) and visible NPCs (4-59), then
+                                         // the live mobs (with MinimapExtras::mobs)
+    std::string name;                    // the map's name, UTF-8 (with MinimapExtras::name)
     std::int32_t map_w() const { return cols * cell_w; } // map pixels
     std::int32_t map_h() const { return rows * cell_h; }
 };
-MinimapView read_minimap(const GuestSpan &mem);
+// What is read besides the grid, the hero, portals and NPCs: the minimap_mobs and minimap_name
+// settings. Both off: the view is the one before #397.
+struct MinimapExtras {
+    bool mobs = false, name = false;
+};
+MinimapView read_minimap(const GuestSpan &mem, const MinimapExtras &extras = {});
+
+// The map's name from guest memory for `area` and `map` (AreaWorldSpot, WorldSpotGroup,
+// g_mapSpotIndex, g_middleSpotNames); empty when the area has no name group, the table or the
+// name is out of range or unmapped, or the name has no NUL in its 50 bytes or is not UTF-8.
+std::string minimap_map_name(const GuestSpan &mem, std::int32_t area, std::int32_t map);
+// The transcribed switches (docs/re/map-names.md): -1 when there is none.
+std::int32_t minimap_area_world_spot(std::int32_t area);
+std::int32_t minimap_world_spot_group(std::int32_t spot);
 
 // The overlay's anchor (the table above): the corner with widescreen = auto and
 // widescreen_hud = edges, else the compass.
@@ -189,9 +231,15 @@ inline constexpr MinimapColor kMinimapLadder{232, 182, 72, 255};
 inline constexpr MinimapColor kMinimapWall{124, 134, 146, 255};
 inline constexpr MinimapColor kMinimapPortal{84, 164, 255, 255};
 inline constexpr MinimapColor kMinimapNpc{112, 222, 112, 255};
+inline constexpr MinimapColor kMinimapMob{236, 96, 200, 255};
 inline constexpr MinimapColor kMinimapHero{255, 72, 56, 255};
 inline constexpr MinimapColor kMinimapHeroEdge{255, 255, 255, 255};
 inline constexpr MinimapColor kMinimapEdge{236, 236, 226, 112}; // the frame
+inline constexpr MinimapColor kMinimapNameBack{0, 0, 0, 144};     // the name's strip
+inline constexpr MinimapColor kMinimapNameText{255, 255, 255, 255};
+inline constexpr float kMinimapNameEm = 9;      // the name's size in screen points (the em)
+inline constexpr float kMinimapNameMinEm = 6;   // its smallest, while the box holds it
+inline constexpr float kMinimapNameShare = 0.4f; // the strip's share of the box's height
 
 // A filled rectangle in drawable pixels, whole pixels, inside the box.
 struct MinimapDot {
@@ -205,9 +253,28 @@ std::vector<MinimapDot> minimap_dots(const MinimapView &v, const MinimapLayout &
 // The hero's dot (its fill), for the tests.
 Rect minimap_hero_dot(const MinimapView &v, const MinimapLayout &l);
 
+// The name's strip: the box's full width at its top, a line of the name's text high; its text
+// kMinimapNameEm points, smaller (to kMinimapNameMinEm) to keep the strip within
+// kMinimapNameShare of the box's height, a point from its left edge, clipped at its right. Not shown without a name or a layout.
+struct MinimapNameStrip {
+    bool shown = false;
+    Rect strip;              // drawable pixels, whole, inside the box
+    std::int32_t em = 0;     // the text's em in drawable pixels
+    float text_x = 0;        // the text's left edge, drawable pixels
+    std::int32_t max_w = 0;  // the text's widest, pixels (to the strip's right edge)
+};
+MinimapNameStrip minimap_name_strip(const MinimapView &v, const MinimapLayout &l);
+
+// The name's text as straight RGBA8 (mt_cg_bundled_line in kMinimapNameText), `*w` x `*h` pixels;
+// empty if it draws nothing.
+std::vector<std::uint8_t> minimap_name_pixels(const std::string &name, std::int32_t em,
+                                              std::int32_t max_w, std::int32_t *w,
+                                              std::int32_t *h);
+
 // The grid reduced to the box: box.w x box.h straight RGBA8, top row first.
 std::vector<std::uint8_t> minimap_grid_pixels(const MinimapView &v, const MinimapLayout &l);
-// The grid and the dots, over a transparent image of the box's size (the dots relative to it).
+// The grid, the dots and the name's strip, over a transparent image of the box's size (the dots
+// relative to it).
 std::vector<std::uint8_t> render_minimap(const MinimapView &v, const MinimapLayout &l);
 
 // The minimap on the window's renderer.
@@ -225,9 +292,10 @@ class MinimapLayer {
     void stop();
 
     struct Stats {
-        std::uint64_t draws = 0;   // frames it was drawn
-        std::uint64_t uploads = 0; // grid uploads (a new map or box)
-        bool last_border = false;  // the last draw was in a bar
+        std::uint64_t draws = 0;        // frames it was drawn
+        std::uint64_t uploads = 0;      // grid uploads (a new map or box)
+        std::uint64_t name_uploads = 0; // the name's texture made (a name or size not cached)
+        bool last_border = false;       // the last draw was in a bar
     };
     const Stats &stats() const { return stats_; }
 
@@ -237,6 +305,18 @@ class MinimapLayer {
     int tex_w_ = 0, tex_h_ = 0;
     std::vector<std::uint8_t> grid_; // the uploaded grid's flags and size
     std::int32_t cols_ = 0, rows_ = 0;
+    // The names' textures, by text and em (a map change or a resize); the oldest of
+    // kNameCacheSize goes first.
+    struct NameTexture {
+        std::string text;
+        std::int32_t em = 0, max_w = 0;
+        SDL_Texture *texture = nullptr;
+        int w = 0, h = 0;
+    };
+    static constexpr std::size_t kNameCacheSize = 4;
+    std::vector<NameTexture> names_;
+    const NameTexture *name_texture(SDL_Renderer *renderer, const std::string &text,
+                                    std::int32_t em, std::int32_t max_w);
     bool failed_logged_ = false;
     Stats stats_;
 };
