@@ -11,9 +11,10 @@
 # ADR 0045; the rest silent, ADR 0038; audio packs, ADR 0106), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039), game
 # actions into the key pad and Clet_HandleEvent (runtime/src/input/, ADR 0048), game events seen at
 # observed guest functions (runtime/src/events/, ADR 0053), guest function hooks
-# (runtime/src/hooks/, ADR 0069), texture packs and dumps (runtime/src/texpack/, ADR 0081), the
-# offline polish: the dead online UI hidden and the local achievements (runtime/src/offline/, ADR
-# 0084), save states (runtime/src/snapshot/, ADR 0105); M4 grows it into the full runtime.
+# (runtime/src/hooks/, ADR 0069), the host script VM (runtime/src/scriptvm/, ADR 0226), texture
+# packs and dumps (runtime/src/texpack/, ADR 0081), the offline polish: the dead online UI hidden
+# and the local achievements (runtime/src/offline/, ADR 0084), save states (runtime/src/snapshot/,
+# ADR 0105); M4 grows it into the full runtime.
 
 add_library(
     runtime STATIC
@@ -94,6 +95,7 @@ add_library(
     src/objc/objc.cpp
     src/offline/achievements.cpp
     src/offline/offline_ui.cpp
+    src/scriptvm/scriptvm.cpp
     src/snapshot/hashes.cpp
     src/snapshot/registry.cpp
     src/snapshot/snapshot.cpp

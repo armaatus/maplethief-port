@@ -51,6 +51,7 @@ constexpr u32 k_hookable[] = {
     MT_HOOK_FN_SCENE_RUNNER,                // 0x83C71
     MT_HOOK_FN_STATE_GAME_PAINT,            // 0x87501
     MT_HOOK_FN_STATE_GAME_ON_KEY,           // 0x8D4C9
+    MT_HOOK_FN_LUA_EXECUTE,                 // 0x9BC11
     MT_HOOK_FN_MAIN_MENU_CLICK_PLAY,        // 0xAAAB9
     MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL,       // 0xB4DB5
 };

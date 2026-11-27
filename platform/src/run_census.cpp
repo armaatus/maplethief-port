@@ -34,6 +34,8 @@ constexpr CensusSite kSites[] = {
     {"game.cpp", "mt_hooks_install_quest_page_fix", P, nullptr, "always on"},
     {"game.cpp", "mt_hooks_install_screen_shake", P, nullptr, "screen_shake"},
     {"game.cpp", "mt_hooks_install_flashes", P, nullptr, "flashes"},
+    {"game.cpp", "mt_hooks_install_native_script_vm", P, nullptr,
+     "--native-script-vm: the same opcode loop on the host (ADR 0226), a developer switch"},
     {"live_settings.cpp", "mt_hooks_install_screen_shake", P, nullptr, "screen_shake, live"},
     {"live_settings.cpp", "mt_hooks_install_flashes", P, nullptr, "flashes, live"},
     {"game.cpp", "mt_uikit_set_animation_scale", P, nullptr, "ui_animations"},

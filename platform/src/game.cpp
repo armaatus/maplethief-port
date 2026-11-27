@@ -64,6 +64,7 @@
 #include "maplethief/offline.h"
 #include "maplethief/runtape.h"
 #include "maplethief/saves.h"
+#include "maplethief/scriptvm.h"
 #include "maplethief/snapshot.h"
 #include "maplethief/stubs.h"
 #include "maplethief/texpack.h"
@@ -4143,6 +4144,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     mt_hooks_install_screen_shake(options.settings.screen_shake);
     // flashes (#186): the full-screen flashes' alpha scaled; off at 100 (the original).
     mt_hooks_install_flashes(options.settings.flashes);
+    // --native-script-vm (#386, ADR 0226): the script VM's opcode loop on the host; off: the
+    // recompiled original.
+    mt_hooks_install_native_script_vm(options.native_script_vm ? 1 : 0);
+    if (options.native_script_vm) {
+        SDL_Log("game: the script VM runs on the host (--native-script-vm on)");
+    }
     // auto_loot (#175, assists.h): the drops' contact test widened near the hero; off: no hook.
     install_auto_loot(options.settings.auto_loot);
     SDL_Log("game: the original bugs are %s", options.settings.fix_original_bugs
