@@ -1609,3 +1609,101 @@ TEST_CASE("CG: a texture pack's ui/ files and the dump of the shell's images (#1
     std::filesystem::remove_all(dump);
     std::filesystem::remove_all(pack);
 }
+
+TEST_CASE("CG: one line in the bundled fonts as an RGBA8 bitmap, ASCII and Hangul (#397)") {
+    const std::uint8_t white[4] = {255, 255, 255, 255};
+    const std::uint8_t teal[4] = {20, 200, 180, 128};
+    // Draws `text` and returns its line; the pixels in *px.
+    auto draw = [](const std::string &text, std::int32_t em, std::int32_t max_w,
+                   const std::uint8_t color[4], std::vector<std::uint8_t> *px) {
+        mt_cg_line measured{};
+        REQUIRE(mt_cg_bundled_line(text.data(), text.size(), em, max_w, color, &measured, nullptr,
+                                   0) == 1);
+        px->assign(static_cast<std::size_t>(measured.width) *
+                       static_cast<std::size_t>(measured.height) * 4,
+                   0xEE);
+        mt_cg_line line{};
+        REQUIRE(mt_cg_bundled_line(text.data(), text.size(), em, max_w, color, &line, px->data(),
+                                   px->size()) == 1);
+        CHECK(line.width == measured.width);
+        CHECK(line.height == measured.height);
+        return line;
+    };
+    // Columns with ink (alpha > 0), and the pixels' colours where there is ink.
+    auto ink_columns = [](const mt_cg_line &l, const std::vector<std::uint8_t> &px,
+                          const std::uint8_t color[4], bool *colour_ok) {
+        int cols = 0;
+        *colour_ok = true;
+        for (int x = 0; x < l.width; x++) {
+            bool ink = false;
+            for (int y = 0; y < l.height; y++) {
+                const std::uint8_t *p = &px[(static_cast<std::size_t>(y) * l.width + x) * 4];
+                if (p[3] != 0) {
+                    ink = true;
+                    *colour_ok = *colour_ok && p[0] == color[0] && p[1] == color[1] &&
+                                 p[2] == color[2] && p[3] <= color[3];
+                } else {
+                    *colour_ok = *colour_ok && p[0] == 0 && p[1] == 0 && p[2] == 0;
+                }
+            }
+            cols += ink ? 1 : 0;
+        }
+        return cols;
+    };
+
+    std::vector<std::uint8_t> ascii, hangul, half;
+    const mt_cg_line a = draw("Field 2.3", 18, 400, white, &ascii);
+    CHECK(a.missing == 0);
+    CHECK(a.height >= 18);
+    CHECK(a.height <= 26);
+    CHECK(a.baseline > a.height / 2);
+    CHECK(a.baseline < a.height);
+    CHECK(a.width > 50);
+    CHECK(a.width < 120);
+    bool ok = false;
+    CHECK(ink_columns(a, ascii, white, &ok) > a.width / 2);
+    CHECK(ok);
+    // Full or nearly full coverage on the stems.
+    int solid = 0;
+    for (std::size_t i = 3; i < ascii.size(); i += 4) {
+        solid += ascii[i] >= 192 ? 1 : 0;
+    }
+    CHECK(solid > 20);
+
+    // Hangul (U+AC00 U+B098 U+B2E4: three syllables of NanumGothic), in a translucent colour:
+    // each syllable about an em wide, ink across most of the line.
+    const mt_cg_line h = draw("\xEA\xB0\x80\xEB\x82\x98\xEB\x8B\xA4", 18, 400, teal, &hangul);
+    CHECK(h.missing == 0);
+    CHECK(h.height == a.height);
+    CHECK(h.width >= 3 * 14);
+    CHECK(h.width <= 3 * 20);
+    CHECK(ink_columns(h, hangul, teal, &ok) > h.width * 2 / 3);
+    CHECK(ok);
+
+    // Clipped at max_width; the ink stays inside it.
+    const mt_cg_line c = draw("Field 2.3", 18, 30, white, &half);
+    CHECK(c.width == 30);
+    CHECK(c.height == a.height);
+    // Its pixels are the full line's first 30 columns.
+    bool same = true;
+    for (int y = 0; y < c.height; y++) {
+        same = same && std::memcmp(&half[static_cast<std::size_t>(y) * 30 * 4],
+                                   &ascii[static_cast<std::size_t>(y) * a.width * 4], 30 * 4) == 0;
+    }
+    CHECK(same);
+
+    // Invalid UTF-8 and controls draw what they can; nothing to draw, a bad size or too small a
+    // buffer: no pixels written.
+    mt_cg_line l{};
+    const std::string bad = "A\xC3(\x01\xF0\x9F";
+    CHECK(mt_cg_bundled_line(bad.data(), bad.size(), 18, 400, white, &l, nullptr, 0) == 1);
+    CHECK(l.width > 0);
+    CHECK(mt_cg_bundled_line("", 0, 18, 400, white, &l, nullptr, 0) == 0);
+    CHECK(l.width == 0);
+    CHECK(mt_cg_bundled_line("\n\t", 2, 18, 400, white, &l, nullptr, 0) == 0);
+    CHECK(mt_cg_bundled_line("A", 1, 0, 400, white, &l, nullptr, 0) == 0);
+    CHECK(mt_cg_bundled_line("A", 1, 1000, 400, white, &l, nullptr, 0) == 0);
+    std::vector<std::uint8_t> tiny(8, 0xEE);
+    CHECK(mt_cg_bundled_line("A", 1, 18, 400, white, &l, tiny.data(), tiny.size()) == 1);
+    CHECK(std::all_of(tiny.begin(), tiny.end(), [](std::uint8_t b) { return b == 0xEE; }));
+}

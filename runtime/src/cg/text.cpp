@@ -457,22 +457,82 @@ extern "C" void mt_cg_set_text_observer(mt_cg_text_observer_fn fn, void *user) n
 
 // The bundled fonts for the frontend's overlays (#372, ADR 0206): their own FontFiles, behind a
 // lock, so the frontend's thread never touches the game's.
+namespace {
+
+std::mutex g_bundled_lock;
+mt_cg::FontFile g_bundled_font, g_bundled_fallback;
+
+// The face and glyph that draw `c`: NanumGothic, else the fallback; glyph 0 if neither has one.
+// Under g_bundled_lock.
+const mt_cg::FontFile *bundled_face(int c, int *glyph) {
+    const mt_cg::FontFile *face = mt_cg::load(g_bundled_font, mt_cg_font_data, mt_cg_font_size);
+    *glyph = face != nullptr ? stbtt_FindGlyphIndex(&face->info, c) : 0;
+    if (*glyph == 0) {
+        const mt_cg::FontFile *fb =
+            mt_cg::load(g_bundled_fallback, mt_cg_fallback_font_data, mt_cg_fallback_font_size);
+        const int fg = fb != nullptr ? stbtt_FindGlyphIndex(&fb->info, c) : 0;
+        if (fg != 0) {
+            *glyph = fg;
+            return fb;
+        }
+    }
+    return face;
+}
+
+// The next code point of `s` from `*i` (advanced past it): an invalid or truncated sequence, an
+// overlong form or a surrogate is U+FFFD, one byte consumed.
+int next_code_point(const unsigned char *s, std::size_t n, std::size_t *i) {
+    const unsigned char b = s[*i];
+    int len = 0, cp = 0, min = 0;
+    if (b < 0x80) {
+        *i += 1;
+        return b;
+    }
+    if ((b & 0xE0) == 0xC0) {
+        len = 2;
+        cp = b & 0x1F;
+        min = 0x80;
+    } else if ((b & 0xF0) == 0xE0) {
+        len = 3;
+        cp = b & 0x0F;
+        min = 0x800;
+    } else if ((b & 0xF8) == 0xF0) {
+        len = 4;
+        cp = b & 0x07;
+        min = 0x10000;
+    }
+    if (len == 0 || *i + static_cast<std::size_t>(len) > n) {
+        *i += 1;
+        return 0xFFFD;
+    }
+    for (int k = 1; k < len; k++) {
+        const unsigned char c = s[*i + static_cast<std::size_t>(k)];
+        if ((c & 0xC0) != 0x80) {
+            *i += 1;
+            return 0xFFFD;
+        }
+        cp = (cp << 6) | (c & 0x3F);
+    }
+    if (cp < min || cp > 0x10FFFF || (cp >= 0xD800 && cp < 0xE000)) {
+        *i += 1;
+        return 0xFFFD;
+    }
+    *i += static_cast<std::size_t>(len);
+    return cp;
+}
+
+} // namespace
+
 extern "C" int mt_cg_bundled_glyph(uint32_t cp, int32_t em_pixels, int32_t max_width,
                                    mt_cg_glyph *g, uint8_t *coverage, size_t capacity) noexcept {
-    static std::mutex lock;
-    static mt_cg::FontFile font, fallback;
     *g = mt_cg_glyph{};
     const int c = static_cast<int>(std::min<uint32_t>(cp, 0x10FFFF));
     if (mt_cg::is_control(c) || em_pixels <= 0) {
         return 0;
     }
-    const std::lock_guard<std::mutex> hold(lock);
-    const mt_cg::FontFile *face = mt_cg::load(font, mt_cg_font_data, mt_cg_font_size);
-    int glyph = face != nullptr ? stbtt_FindGlyphIndex(&face->info, c) : 0;
-    if (glyph == 0) {
-        face = mt_cg::load(fallback, mt_cg_fallback_font_data, mt_cg_fallback_font_size);
-        glyph = face != nullptr ? stbtt_FindGlyphIndex(&face->info, c) : 0;
-    }
+    const std::lock_guard<std::mutex> hold(g_bundled_lock);
+    int glyph = 0;
+    const mt_cg::FontFile *face = bundled_face(c, &glyph);
     if (glyph == 0) {
         return 0;
     }
@@ -496,6 +556,109 @@ extern "C" int mt_cg_bundled_glyph(uint32_t cp, int32_t em_pixels, int32_t max_w
     if (coverage != nullptr && capacity >= need && need > 0) {
         stbtt_MakeGlyphBitmap(&face->info, coverage, g->width, g->height, g->width, sx, scale,
                               glyph);
+    }
+    return 1;
+}
+
+extern "C" int mt_cg_bundled_line(const char *utf8, size_t size, int32_t em_pixels,
+                                  int32_t max_width, const uint8_t color[4], mt_cg_line *line,
+                                  uint8_t *rgba, size_t capacity) noexcept {
+    *line = mt_cg_line{};
+    if (utf8 == nullptr || size == 0 || em_pixels < 1 || em_pixels > 256) {
+        return 0;
+    }
+    const int32_t limit = std::clamp<int32_t>(max_width, 1, 4096);
+    const std::lock_guard<std::mutex> hold(g_bundled_lock);
+    const mt_cg::FontFile *primary =
+        mt_cg::load(g_bundled_font, mt_cg_font_data, mt_cg_font_size);
+    if (primary == nullptr) {
+        return 0;
+    }
+    // The line's metrics are NanumGothic's, as the game's text (draw_text).
+    const float em = static_cast<float>(em_pixels);
+    const float ps = stbtt_ScaleForMappingEmToPixels(&primary->info, em);
+    const int32_t ascent = static_cast<int32_t>(std::ceil(static_cast<float>(primary->ascent) * ps));
+    const int32_t descent =
+        static_cast<int32_t>(std::ceil(static_cast<float>(-primary->descent) * ps));
+    struct Placed {
+        const mt_cg::FontFile *face;
+        int glyph;
+        float scale;
+        int32_t x;
+    };
+    std::vector<Placed> placed;
+    const auto *s = reinterpret_cast<const unsigned char *>(utf8);
+    float pen = 0;
+    int32_t right = 0;
+    for (std::size_t i = 0; i < size && pen < static_cast<float>(limit);) {
+        const int cp = next_code_point(s, size, &i);
+        if (mt_cg::is_control(cp)) {
+            continue;
+        }
+        int glyph = 0;
+        const mt_cg::FontFile *face = bundled_face(cp, &glyph);
+        if (glyph == 0) {
+            line->missing++;
+            continue;
+        }
+        const float scale = stbtt_ScaleForMappingEmToPixels(&face->info, em);
+        int adv = 0, lsb = 0;
+        stbtt_GetGlyphHMetrics(&face->info, glyph, &adv, &lsb);
+        const auto x = static_cast<int32_t>(std::lround(pen));
+        if (stbtt_IsGlyphEmpty(&face->info, glyph) == 0) {
+            int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+            stbtt_GetGlyphBitmapBox(&face->info, glyph, scale, scale, &x0, &y0, &x1, &y1);
+            right = std::max(right, x + x1);
+            placed.push_back({face, glyph, scale, x});
+        }
+        pen += static_cast<float>(adv) * scale;
+    }
+    line->width = std::min(limit, std::max(right, static_cast<int32_t>(std::lround(pen))));
+    line->height = ascent + descent;
+    line->baseline = ascent;
+    if (line->width <= 0 || line->height <= 0) {
+        *line = mt_cg_line{};
+        return 0;
+    }
+    const std::size_t w = static_cast<std::size_t>(line->width);
+    const std::size_t h = static_cast<std::size_t>(line->height);
+    if (rgba == nullptr || color == nullptr || capacity < w * h * 4) {
+        return 1;
+    }
+    std::vector<uint8_t> cover(w * h, 0);
+    std::vector<uint8_t> glyph_px;
+    for (const Placed &p : placed) {
+        int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        stbtt_GetGlyphBitmapBox(&p.face->info, p.glyph, p.scale, p.scale, &x0, &y0, &x1, &y1);
+        const int gw = x1 - x0, gh = y1 - y0;
+        if (gw <= 0 || gh <= 0) {
+            continue;
+        }
+        glyph_px.assign(static_cast<std::size_t>(gw) * static_cast<std::size_t>(gh), 0);
+        stbtt_MakeGlyphBitmap(&p.face->info, glyph_px.data(), gw, gh, gw, p.scale, p.scale,
+                              p.glyph);
+        for (int gy = 0; gy < gh; gy++) {
+            const int y = line->baseline + y0 + gy;
+            if (y < 0 || y >= line->height) {
+                continue;
+            }
+            for (int gx = 0; gx < gw; gx++) {
+                const int x = p.x + x0 + gx;
+                if (x < 0 || x >= line->width) {
+                    continue;
+                }
+                uint8_t &c = cover[static_cast<std::size_t>(y) * w + static_cast<std::size_t>(x)];
+                c = std::max(c, glyph_px[static_cast<std::size_t>(gy) * gw + gx]);
+            }
+        }
+    }
+    for (std::size_t i = 0; i < w * h; i++) {
+        uint8_t *px = rgba + i * 4;
+        const bool ink = cover[i] != 0;
+        px[0] = ink ? color[0] : 0;
+        px[1] = ink ? color[1] : 0;
+        px[2] = ink ? color[2] : 0;
+        px[3] = static_cast<uint8_t>((cover[i] * color[3] + 127) / 255);
     }
     return 1;
 }
