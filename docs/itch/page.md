@@ -35,8 +35,10 @@ On the first start the game asks for this file (on the Switch: finds it on the S
 | Your system | Download |
 |---|---|
 | Windows 10 or 11, 64-bit | `MapleThief-<version>-windows-x64.zip` |
+| Windows 11 on an ARM64 PC | `MapleThief-<version>-windows-arm64.zip` |
 | Mac, macOS 13 or later (Apple silicon or Intel) | `MapleThief-<version>-macos-universal.zip` |
 | Linux x86_64 with glibc 2.39 or later, Steam Deck | `MapleThief-<version>-linux-x86_64.tar.gz` |
+| Linux aarch64 (ARM64) with glibc 2.39 or later | `MapleThief-<version>-linux-aarch64.tar.gz` |
 | Nintendo Switch that runs homebrew from the Homebrew Menu | `MapleThief-<version>-switch.zip` |
 
 On a computer, the itch app installs and updates the right one for you. The Switch zip is copied to the SD card by hand (below). Each file is the same as on the project's [GitHub Releases page](https://github.com/armaatus/maplethief-port/releases), where `SHA256SUMS` lists its checksum.
