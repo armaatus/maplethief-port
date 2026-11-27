@@ -49,7 +49,7 @@ The game keeps your saves and settings in a `data` folder next to itself ([Saves
 
 **The music pauses each time it loops.** The original did that too. Turn on gapless music (settings menu → Audio).
 
-**The menus have buttons that do nothing (More Games, the banner).** Those opened Nexon's web pages, which are gone. `hide_online_ui = on` hides them (part of the Original + controller and Enhanced presets).
+**The menus have buttons that do nothing (More Games, the banner).** Those opened Nexon's web pages, which are gone. `hide_online_ui = on` hides them (part of the Original + controller and Enhanced presets), and with the cash shop off it hides the Cash button and the death popup's two revive buttons too.
 
 ## On the iPhone
 

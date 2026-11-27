@@ -62,7 +62,7 @@ Where it goes: inside the box's top edge on a translucent strip, so the corner l
 
 **Call** (delegated by Joris, 2026-11-13; to veto on #400's PR): no new key. `hide_online_ui = on` hides them while `cash_shop = off`, the same rule by which it hides Game Center's button while `local_game_center = off` leaves it dead. So Enhanced and Original + controller hide them; Original shows them; `cash_shop = meso` shows them everywhere. The death popup's two remaining buttons stay in place unless a shot of the popup shows the empty top half reads as broken; then they move up with a host transform and touch redirects (the compass's mechanism, ADR 0098's addendum). #400 records which.
 
-**Verdict: go** (#400, S).
+**Verdict: go** (#400, S). Done in #400: the death popup keeps its layout ([ADR 0084's addendum](../adr/0084-offline-polish-hidden-online-ui-local-game-center.md#addendum-the-dead-cash-buttons-2026-11-27)).
 
 ## Larger text
 

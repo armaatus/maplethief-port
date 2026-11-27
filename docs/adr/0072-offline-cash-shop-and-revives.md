@@ -153,3 +153,4 @@ The game has nothing to hook for it: the tiles and the revive buttons are images
   - **The prices break the game's pacing.** Then the knobs change; nothing in the game's save depends on them.
   - **The price line is missed or in the way.** Then it moves, or the game's own popup text gets the price through a text hook.
   - **Players never turn it on.** Then option 1's dead ends could instead be hidden, as a presentation choice.
+- **The dead ends are hidden** (#400, [ADR 0084's addendum](0084-offline-polish-hidden-online-ui-local-game-center.md#addendum-the-dead-cash-buttons-2026-11-27)): with `hide_online_ui = on` and `cash_shop = off`, the Cash button and the death popup's two revive buttons are hidden and their keys send nothing. With `cash_shop = meso` they show and sell as above.

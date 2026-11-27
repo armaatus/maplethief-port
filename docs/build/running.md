@@ -161,7 +161,7 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `restored_content` | off | off / off / off | Makes content the game ships but never reaches reachable ([original-bugs → Unreachable content](../re/original-bugs.md#unreachable-content)); never a bug fix, so no preset turns it on. Nothing is restored yet: shops 0, 1 and 16, Monster Carnival and the unreached maps each come in their own follow-up: on, off |
 | `texture_pack` | (empty) | - | A directory of HD textures made from your own texture dump (the menu's Other tab: Dump textures, Make texture pack); several, in order, with `|` between them (the packs screen sets it, #370); empty: none. The packs screen lists the folders in `<data folder>/texture-packs/` |
 | `texture_filter` | game | game / game / nearest | How textures are sampled at render scale 2 and up: game (smooth, the device's look), nearest (sharp) |
-| `hide_online_ui` | off | off / on / on | Hides the title menu's buttons whose web pages are gone (Game Center too while `local_game_center` is off): on, off |
+| `hide_online_ui` | off | off / on / on | Hides the title menu's buttons whose web pages are gone (Game Center too while `local_game_center` is off), and the field's Cash button and the death popup's two revive buttons while `cash_shop` is off: on, off |
 | `local_game_center` | off | off / off / on | Game Center on this computer: the leaderboard screen and local achievements: on, off |
 | `menu_repeat` | off | off / on / on | A held direction repeats in the popup menu, NPC chat, the shop (its amount too) and the map (after 0.4 s, then every 0.15 s): on, off |
 | `confirm_guard` | off | off / on / on | A popup that just opened ignores confirm and back for 0.3 s, and while a button pressed in the field is still held: on, off |
@@ -256,7 +256,7 @@ Minimising the window pauses the game as leaving it did on the iPhone: nothing i
 
 Offline, the cash shop and the paid revives sell nothing, as on a phone with purchases switched off. The Assist `cash_shop = meso` sells the items and revives for the hero's meso instead, at a price that follows the hero's level and rises with each fall and purchase until the next level-up ([ADR 0072](../adr/0072-offline-cash-shop-and-revives.md)).
 
-`hide_online_ui` hides the title menu's buttons whose web pages are gone. `local_game_center` turns Game Center's button into a leaderboard of your save slots on this computer and unlocks a few achievements of the port's own, kept in `gamecenter.json` in `saves/` ([ADR 0084](../adr/0084-offline-polish-hidden-online-ui-local-game-center.md)).
+`hide_online_ui` hides the title menu's buttons whose web pages are gone, and, while `cash_shop` is off, the field's Cash button and the death popup's two revive buttons, whose keys then do nothing either ([ADR 0084's addendum](../adr/0084-offline-polish-hidden-online-ui-local-game-center.md#addendum-the-dead-cash-buttons-2026-11-27)). `local_game_center` turns Game Center's button into a leaderboard of your save slots on this computer and unlocks a few achievements of the port's own, kept in `gamecenter.json` in `saves/` ([ADR 0084](../adr/0084-offline-polish-hidden-online-ui-local-game-center.md)).
 
 ### Frame telemetry
 
