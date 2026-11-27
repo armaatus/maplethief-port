@@ -1310,6 +1310,7 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     mt_hooks_install_original_bug_fixes(r.settings.fix_original_bugs ? 1 : 0); // as game.cpp
     fe::install_restored_shops(r.settings.restored_content);                   // as game.cpp
     fe::install_restored_carnival(r.settings.restored_content);                // as game.cpp
+    fe::install_restored_maps(r.settings.restored_content);                    // as game.cpp
     if (!r.clock.install()) {
         check(false, "the virtual clock is installed");
         return 1;

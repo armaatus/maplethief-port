@@ -50,8 +50,8 @@ MT_EXTERN_C_BEGIN
 /* The map's camera (#86, ADR 0090): clamp (map), follow (map, x, y, smooth) */
 #define MT_HOOK_FN_CAMERA_CLAMP 0xC069u
 #define MT_HOOK_FN_CAMERA_FOLLOW 0xC175u
-/* CMMap::LoadObj (map, area, map): the map's .obj into its object list (#427: restored_content
- * adds Monster Carnival's NPC after it) */
+/* CMMap::LoadObj (map, area, map): the map's .obj into its object list (restored_content adds
+ * Monster Carnival's NPC after it, #427, and the unreached maps' portal before it, #428) */
 #define MT_HOOK_FN_MAP_LOAD_OBJ 0xD259u
 #define MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT 0x22955u /* (owner, url) */
 /* The canvas's fills through FillRect (#186): Canvas_FillRect (x, y, w, h) in the canvas's
@@ -304,6 +304,31 @@ typedef struct mt_restored_carnival_stats {
 } mt_restored_carnival_stats;
 /* The numbers since the process started. */
 mt_restored_carnival_stats mt_hooks_restored_carnival_stats(void) MT_NOEXCEPT;
+
+/* The unreached maps 4.5 and 4.8 (#428, the setting restored_content;
+ * docs/re/original-bugs.md "Unreachable content"). Their portal scripts (common/portal450,
+ * 451, 480, 481) lead to each other and out to 4.3 and 4.10, which the game reaches, but no
+ * reached map has a portal into them. A wrapper on CMMap::LoadObj 0xD259 (mt_hook_wrap, beside
+ * Monster Carnival's handler) adds, after the original, one portal object to the start of 4.3's
+ * list (mt_restored_portal_on): kind 2, named portal480, the shipped script that warps to 4.5's
+ * portal 0. First in the list, so the warps to 4.3's own portal 2 still land on it (the arrival
+ * takes the last match). No script, map or data file changes. Registered `enabled` or not (off:
+ * every object list is its file's). */
+void mt_hooks_install_restored_maps(int enabled) MT_NOEXCEPT;
+typedef struct mt_restored_portal {
+    int32_t area, map;                  /* the reached map it stands on */
+    int32_t cell;                       /* its tile, y * width + x of the map */
+    int32_t kind;                       /* the portal number (0-2 drawn, 3 hidden) */
+    const char *script;                 /* a shipped script in script/common/ */
+    int32_t to_area, to_map, to_portal; /* where the script's changeMap warps */
+} mt_restored_portal;
+/* The portal the wrapper adds on (area, map), or NULL. */
+const mt_restored_portal *mt_restored_portal_on(int32_t area, int32_t map) MT_NOEXCEPT;
+typedef struct mt_restored_maps_stats {
+    uint64_t portals; /* objects added (one per load of 4.3) */
+} mt_restored_maps_stats;
+/* The numbers since the process started. */
+mt_restored_maps_stats mt_hooks_restored_maps_stats(void) MT_NOEXCEPT;
 
 /* Every fix of an original bug (docs/re/original-bugs.md, #155), the setting fix_original_bugs
  * (on in the Enhanced preset): the portal items, the early Play guard, portal620 and the
