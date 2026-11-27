@@ -60,6 +60,15 @@
       }
     },
     {
+      "name": "mac-release",
+      "displayName": "macOS Release (host architecture)",
+      "description": "The playthrough's build: scripts/playthrough plays the chain in it (#306)",
+      "inherits": "mac-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
       "name": "mac-release-universal",
       "displayName": "macOS Release, universal (arm64 + x86_64)",
       "inherits": "mac-base",
@@ -382,6 +391,7 @@
     { "name": "mac-debug", "configurePreset": "mac-debug" },
     { "name": "mac-asan", "configurePreset": "mac-asan" },
     { "name": "mac-coverage", "configurePreset": "mac-coverage" },
+    { "name": "mac-release", "configurePreset": "mac-release" },
     { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
     { "name": "mac-app", "configurePreset": "mac-app" },
     { "name": "mac-player", "configurePreset": "mac-player", "targets": ["MapleThief"] },
@@ -436,6 +446,7 @@
     { "name": "mac-debug", "inherits": "test-base", "configurePreset": "mac-debug" },
     { "name": "mac-asan", "inherits": "asan-base", "configurePreset": "mac-asan" },
     { "name": "mac-coverage", "inherits": "test-base", "configurePreset": "mac-coverage" },
+    { "name": "mac-release", "inherits": "test-base", "configurePreset": "mac-release" },
     { "name": "mac-release-universal", "inherits": "test-base", "configurePreset": "mac-release-universal" },
     { "name": "mac-app", "inherits": "test-base", "configurePreset": "mac-app" },
     { "name": "mac-player", "inherits": "player-base", "configurePreset": "mac-player" },
