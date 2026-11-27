@@ -2,7 +2,7 @@
 
 The hand-offs that need the Mac, then the checks from closed issues (#59 to #204, [Checks from closed issues](README.md#checks-from-closed-issues)). Two builds cover all of them: the game app (`scripts/build mac`) for the first sections, then the player kit (`mac-player`) for the data folder sections at the end. [How to report](README.md#how-to-report) says what to post.
 
-Every issue's older comments name branches that are merged now (`192-saves-menu`, `196-window-size-display`, `epic-201`, `epic-259`) or `main`: build from the epic branch `epic-106-itch-handoffs`, or `dev` once it is merged.
+Every issue's older comments name branches that are merged now (`192-saves-menu`, `196-window-size-display`, `epic-201`, `epic-259`) or `main`: build from `dev`.
 
 ## Setup
 

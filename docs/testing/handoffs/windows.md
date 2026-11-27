@@ -2,7 +2,7 @@
 
 The hand-offs that need the Windows PC. The order builds each tree once: the test builds first (`win-debug`, `win-release`), then the game folder from `scripts\build.ps1 win`, then the player zip, then the clean-machine and fresh-clone checks, then the newer hand-offs (#314 to #368, most waiting on the agent's part first), and last the check from closed #145 ([Checks from closed issues](README.md#checks-from-closed-issues)). [How to report](README.md#how-to-report) says what to post.
 
-Older comments name branches that are merged and gone (`epic-201`, `epic-259-data-folder`, `epic-269-builds-docs`, `113-demo-msvc-only-warning`) or `main`: use `dev` (or the epic branch `epic-106-itch-handoffs` until it is merged). The v0.1.0 release (2026-11-07) predates the data folder and crash report work, so its Windows zip is only used to make older saves for #264.
+Older comments name branches that are merged and gone (`epic-201`, `epic-259-data-folder`, `epic-269-builds-docs`, `113-demo-msvc-only-warning`) or `main`: use `dev`. The v0.1.0 release (2026-11-07) predates the data folder and crash report work, so its Windows zip is only used to make older saves for #264.
 
 ## Setup
 

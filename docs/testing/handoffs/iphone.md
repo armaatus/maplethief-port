@@ -17,7 +17,7 @@ The baseline is done: #83 (closed 2026-11-10) built the app with Xcode and reach
 
 **For the old device:** a 32-bit iPhone or iPod touch (iOS 3.1.2 to 10.3.3) with the game 1.5 installed and the system language English, its cable, and Terminal allowed Full Disk Access (or copy the backup to the Desktop).
 
-**The build** (from the epic branch `epic-106-itch-handoffs`, or `dev` once it is merged):
+**The build** (from `dev`):
 
 ```sh
 MAPLETHIEF_IOS_TEAM=<team id> scripts/build ios 2>&1 | tee build/ios-build.log   # dist/ios/MapleThief.app

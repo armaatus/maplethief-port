@@ -12,7 +12,7 @@ If Joris names no epic, take the epic of the earliest open milestone. If he name
 
 ### 1. Scope
 
-Read the epic and every child (`gh issue view N`). Build the dependency graph from each child's *Blocked by* and group the children into **waves**: wave 1 has no open blockers; each later wave is blocked only by earlier waves. A blocker outside the epic that is still open joins this run as an extra child (it is pulled forward, even from a later milestone). Closed children drop out.
+Read the epic and every child (`gh issue view N`). Build the dependency graph from each child's *Blocked by* and group the children into **waves**: wave 1 has no open blockers; each later wave is blocked only by earlier waves. A blocker outside the epic that is still open joins this run as an extra child (it is pulled forward, even from a later milestone): add it to the epic's task list and a line `Also in Epic: #<epic>.` to its body, so every epic's list equals the issues that name it. Closed children drop out.
 
 Done when: every open child sits in exactly one wave and every blocker is closed or in an earlier wave.
 
