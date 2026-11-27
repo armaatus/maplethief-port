@@ -71,6 +71,29 @@ def entities():
         },
         {"id": "0", "opened_by": [], "sells": [{"id": "equip:0", "price": 170}]},
     ]
+    npcs = {
+        "2": {
+            "id": "2",
+            "stands_on": [
+                {"kind": "map", "id": "2-0", "script": "Etc20", "tile": [27, 10]},
+                {"kind": "map", "id": "2-11", "script": None, "tile": [5, 5]},
+            ],
+        },
+        "12": {
+            "id": "12",
+            "stands_on": [{"kind": "map", "id": "0-0", "script": "smith", "tile": [6, 6]}],
+        },
+    }
+    recipes = [
+        {
+            "id": "2-equip:51",
+            "chapter": 2,
+            "materials": [{"id": "etc:99", "count": 7}, {"id": "etc:93", "count": 2}],
+            "meso": 700,
+            "result": [{"kind": "item", "id": "equip:51", "count": 1}],
+            "crafted_by": [{"kind": "npc", "id": "12", "map": "0-0"}],
+        }
+    ]
     scripts = {
         "common-Etc20": {"id": "common-Etc20", "base_name": "Etc20"},
         "common-Equip30": {"id": "common-Equip30", "base_name": "Equip30"},
@@ -79,6 +102,8 @@ def entities():
         "warp": {w["id"]: w for w in warps},
         "shop": {s["id"]: s for s in shops},
         "script": scripts,
+        "npc": npcs,
+        "recipe": {rc["id"]: rc for rc in recipes},
     }
 
 
@@ -105,13 +130,39 @@ def test_shops_per_item():
     ]
 
 
+def test_npcs_where_a_map_places_them():
+    assert [n.line() for n in bw.npcs(entities())] == [
+        "npc 2 2 0 Etc20 27 10",
+        "npc 12 0 0 smith 6 6",
+    ]
+
+
+def test_recipes_at_their_crafter():
+    assert [rc.line() for rc in bw.recipes(entities())] == [
+        "recipe 2 0 0 smith 0 51 1 700 1:93:2 1:99:7",
+    ]
+
+
+def test_a_recipe_without_a_placed_crafter_is_an_error():
+    ents = entities()
+    ents["recipe"]["2-equip:51"]["crafted_by"][0]["map"] = "1-0"
+    try:
+        bw.recipes(ents)
+    except bw.BotWorldError as e:
+        assert "no crafter object on 1-0" in str(e)
+    else:
+        raise AssertionError("accepted a recipe whose crafter stands nowhere")
+
+
 def test_render_parse_round_trip():
     ents = entities()
     text = bw.generate(ents)
     assert text.startswith("#")
-    links, shops = bw.parse(text)
-    assert links == bw.links(ents)
-    assert shops == bw.shops(ents)
+    t = bw.parse(text)
+    assert t.links == bw.links(ents)
+    assert t.shops == bw.shops(ents)
+    assert t.npcs == bw.npcs(ents)
+    assert t.recipes == bw.recipes(ents)
     assert bw.generate(ents) == text  # deterministic
 
 
@@ -137,7 +188,15 @@ def test_every_operator_parses():
 
 
 def test_parse_rejects_bad_lines():
-    for bad in ("link 1 2", "shop 1 2 0 Etc20 3 1 3", "warp 1 2 3", "link 1 0 0 0 0 1 q0.9~2"):
+    for bad in (
+        "link 1 2",
+        "shop 1 2 0 Etc20 3 1 3",
+        "warp 1 2 3",
+        "link 1 0 0 0 0 1 q0.9~2",
+        "npc 2 2 0 Etc20 27",
+        "recipe 2 0 0 smith 0 51 1 700",
+        "recipe 2 0 0 smith 0 51 1 700 1:93",
+    ):
         try:
             bw.parse(bad + "\n")
         except bw.BotWorldError as e:
@@ -170,7 +229,7 @@ def test_cli_from_a_kb(tmp_path, capsys):
     out = tmp_path / "out" / "bot_world.txt"
     assert bw.main(["--kb", str(kb), "--out", str(out)]) == 0
     assert out.read_text(encoding="utf-8") == bw.generate(entities())
-    assert "8 links, 3 shop items" in capsys.readouterr().out
+    assert "8 links, 3 shop items, 2 npcs, 1 recipes" in capsys.readouterr().out
 
 
 def test_cli_skips_without_the_bundle(tmp_path):

@@ -14,7 +14,7 @@ def tables(real_kb):
 
 
 def test_chapter_1_links_and_gates(tables):
-    links, _ = tables
+    links = tables.links
     chapter_1 = [lk for lk in links if lk.chapter == 1]
     # The 53 links and 4 gates the chapter-1 bot had by hand before #297.
     assert len(chapter_1) == 53
@@ -28,7 +28,7 @@ def test_chapter_1_links_and_gates(tables):
 
 
 def test_every_link_leaves_from_a_portal_object(tables, ipa_dir):
-    links, _ = tables
+    links = tables.links
     maps = ipa_dir / "Payload" / "MapleThief.app" / "map"
     for lk in links:
         obj = objfile.load(maps / f"{lk.area}{lk.map}.obj")
@@ -38,7 +38,7 @@ def test_every_link_leaves_from_a_portal_object(tables, ipa_dir):
 
 
 def test_every_shop_npc_stands_on_its_map(tables, ipa_dir):
-    _, shops = tables
+    shops = tables.shops
     maps = ipa_dir / "Payload" / "MapleThief.app" / "map"
     assert shops
     for s in shops:
@@ -48,3 +48,16 @@ def test_every_shop_npc_stands_on_its_map(tables, ipa_dir):
     for area, npc in ((0, "Etc00"), (1, "Etc10"), (2, "Etc20"), (3, "Etc30")):
         sold = {s.item for s in shops if (s.chapter, s.area, s.npc, s.table) == (1, area, npc, 1)}
         assert {3, 6} <= sold, npc
+
+
+def test_every_npc_object_and_recipe_crafter_stands_where_the_obj_file_puts_it(tables, ipa_dir):
+    maps = ipa_dir / "Payload" / "MapleThief.app" / "map"
+    assert len({n.id for n in tables.npcs}) >= 30
+    for n in tables.npcs:
+        obj = objfile.load(maps / f"{n.area}{n.map}.obj")
+        assert n.object in {o.name for o in obj.objects}, n
+    placed = {(n.area, n.map, n.object) for n in tables.npcs}
+    # The 48 recipes of the compendium (#220), each at its crafter.
+    assert len(tables.recipes) == 48
+    for rc in tables.recipes:
+        assert (rc.area, rc.map, rc.npc) in placed, rc
