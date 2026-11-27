@@ -790,14 +790,16 @@ constexpr SettingInfo kRegistry[] = {
     // Offline polish (#154, ADR 0084).
     {.key = "hide_online_ui",
      .group = SettingGroup::kGameplay,
-     .comment = "# hide the title menu's dead online buttons (the banner, More Games, About's "
-                "links;\n# Game Center too while local_game_center is off): on | off",
+     .comment = "# hide the dead online buttons (the banner, More Games, About's links; Game "
+                "Center\n# too while local_game_center is off; Cash and the two revives too "
+                "while cash_shop is off): on | off",
      .value = on_off<&Settings::hide_online_ui>(),
      .presets = {"off", "on", "on"},
      .flag = "--hide-online-ui",
      .game_only = true,
      .label = "Hide dead online buttons",
-     .help = "Hides the banner, More Games and the About links, whose pages are gone"},
+     .help = "Hides the banner, More Games and the About links, whose pages are gone, and "
+             "Cash and the revives while the cash shop is off"},
     {.key = "local_game_center",
      .group = SettingGroup::kGameplay,
      .comment = "# Game Center on this computer: the leaderboard screen and local achievements: "
