@@ -44,7 +44,9 @@
 //                                             mechanics: CTest play.mechanics, #214,
 //                                             docs/re/mechanics.md;
 //                                             systems2_*: CTests play.systems2_*_synthetic,
-//                                             #304, docs/testing/systems-sweep-2.md)
+//                                             #304, docs/testing/systems-sweep-2.md;
+//                                             map_page: CTests play.map_page_*_synthetic,
+//                                             #221)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -11261,6 +11263,124 @@ void systems2_portal620(Run &r, u64) {
     then_finish(r);
 }
 void systems2_portal620_checks(Run &, u64) {}
+
+// --- map pages in the running port (#221, docs/compendium/kb.md) --------------------------------
+//
+// map_page: the compendium's map pages say where each portal leads, and when (the Connections
+// table). From a built start state (MT_FROM_SAVE, tests/starts/map_page_*.json) the hero walks
+// to the portal object of kind MT_MAP_PAGE_PORTAL (0-3: 3 is a hidden portal, docs/formats/
+// obj.md) on the save's map and holds Up there for 8 s. OUT_DIR/map_page.txt gets one line:
+//   from <area>.<map> chapter <c> portal <kind> <name> landed <area>.<map> at <x> <y>
+// or "... landed none" when no map change came. tests/test_compendium_world_port.py compares
+// it with the page's row for that portal: an "always" row names the map the port went to; a
+// conditional row either names it or the run stayed put (its condition unmet in the start).
+struct MapPageRun {
+    int area = -1, map = -1, chapter = -1, kind = -1;
+    std::string name;
+    int x = 0, y = 0;
+    bool placed = false; // the start puts the hero beside the portal: no route there
+    bool left = false;
+    int to_area = -1, to_map = -1, to_x = 0, to_y = 0;
+};
+std::shared_ptr<MapPageRun> g_map_page;
+
+int map_page_setup(Run &r) {
+    g_map_page = std::make_shared<MapPageRun>();
+    MapPageRun &k = *g_map_page;
+    const char *env = std::getenv("MT_MAP_PAGE_PORTAL");
+    if (env == nullptr || std::sscanf(env, "%d", &k.kind) != 1 || k.kind < 0 || k.kind > 3) {
+        std::printf("FAIL: MT_MAP_PAGE_PORTAL must name a portal kind, 0 to 3\n");
+        return 1;
+    }
+    const std::vector<std::uint8_t> theif = read_save(r, "theif0");
+    const std::vector<std::uint8_t> quest = read_save(r, "quest0");
+    if (theif.size() != 1124 || quest.empty()) {
+        std::printf("FAIL: MT_FROM_SAVE gave no theif0 and quest0\n");
+        return 1;
+    }
+    k.area = theif[0x41C]; // docs/formats/save.md
+    k.map = theif[0x41D];
+    k.chapter = quest[0];
+    k.placed = theif[0x41E] != 0xFF || theif[0x41F] != 0xFF; // x -1: the map's default spawn
+    // The last object of that kind, as the map change 0x868D5 picks an arrival point.
+    for (const world_map::Object &o : world_map::get(k.area, k.map).objects) {
+        if (o.kind == k.kind) {
+            k.name = o.name.empty() ? "-" : o.name;
+            k.x = o.x;
+            k.y = o.y;
+        }
+    }
+    if (k.name.empty()) {
+        std::printf("FAIL: map %d.%d has no portal of kind %d\n", k.area, k.map, k.kind);
+        return 1;
+    }
+    std::printf("map_page: %d.%d chapter %d, portal %d (%s) at (%d, %d)\n", k.area, k.map,
+                k.chapter, k.kind, k.name.c_str(), k.x, k.y);
+    return 0;
+}
+
+void map_page(Run &r, u64) {
+    const MapPageRun &k = *g_map_page;
+    from_save(r);
+    then_wait_field(r);
+    if (!k.placed) {
+        quest_bot::then_go(r, "portal " + std::to_string(k.kind) + " (" + k.name + ")",
+                           {k.area, k.map, k.x, k.y, 4}, 180);
+    }
+    then(r, "Up at the portal (8 s)", 30, [&r](mt_cpu *cpu, double el) {
+        MapPageRun &m = *g_map_page;
+        const Hero h = hero(cpu);
+        if (!m.left && h.addr != 0 && !h.on(m.area, m.map) && h.area >= 0) {
+            m.left = true; // the first turn on the new map: where the warp put the hero
+            m.to_area = h.area;
+            m.to_map = h.map;
+            m.to_x = h.x;
+            m.to_y = h.y;
+        }
+        if (m.left) {
+            release_all(r);
+            return true;
+        }
+        if (!field(cpu)) { // a notice or a chat the portal's script opened: A through it
+            hold(r, UP, false);
+            hold(r, A, std::fmod(el, 0.8) < 0.1);
+        } else {
+            // A placed start steps the last pixels on its own platform (the portal's tile is
+            // within 8 px: obj.md); Up once there.
+            const int d = m.x - h.x;
+            hold(r, A, false);
+            hold(r, RIGHT, m.placed && d > 4);
+            hold(r, LEFT, m.placed && d < -4);
+            hold(r, UP, std::abs(d) <= 6 && std::fmod(el, 1.5) < 0.4);
+        }
+        if (el >= 8) {
+            release_all(r);
+            return true;
+        }
+        return false;
+    });
+    // A shut portal's script can leave a notice open (popup 17): A closes it.
+    then(r, "the field (A through any notice)", 20,
+         [&r](mt_cpu *cpu, double el) { return !quest_bot::interrupted(r, cpu, el); });
+    then_do(r, "the portal's outcome", [&r](mt_cpu *cpu) {
+        const MapPageRun &m = *g_map_page;
+        char line[256];
+        if (m.left) {
+            std::snprintf(line, sizeof line,
+                          "from %d.%d chapter %d portal %d %s landed %d.%d at %d %d\n", m.area,
+                          m.map, m.chapter, m.kind, m.name.c_str(), m.to_area, m.to_map, m.to_x,
+                          m.to_y);
+        } else {
+            std::snprintf(line, sizeof line, "from %d.%d chapter %d portal %d %s landed none\n",
+                          m.area, m.map, m.chapter, m.kind, m.name.c_str());
+        }
+        std::printf("map_page: %s", line);
+        std::ofstream(r.out / "map_page.txt", std::ios::trunc) << line;
+        check(field(cpu) && hero(cpu).hp > 0, "the hero is alive in the field afterwards");
+    });
+    then_finish(r);
+}
+void map_page_checks(Run &, u64) {}
 // --- Korean (#303, docs/testing/systems-sweep-1.md) ----------------------------------------------
 //
 // korean_*: MAPLETHIEF_LANGUAGE=ko. The terms are agreed by the pad (the data directory has no
@@ -12235,6 +12355,7 @@ constexpr Mode k_modes[] = {
     {"systems2_scrolls_failure", systems2_scrolls_failure, systems2_scrolls_checks, 1},
     {"systems2_pigmy", systems2_pigmy, systems2_pigmy_checks, 1},
     {"systems2_portal620", systems2_portal620, systems2_portal620_checks, 1},
+    {"map_page", map_page, map_page_checks, 1, false, map_page_setup},
     {"korean_chapter_1_a", korean_chapter_1_a, korean_checks, 1, false, korean_setup},
     {"korean_offer_2", korean_offer_2, korean_checks, 1, false, korean_setup},
     {"korean_offer_3", korean_offer_3, korean_checks, 1, false, korean_setup},

@@ -51,7 +51,12 @@ So are systems sweep 1's ([systems-sweep-1.md](systems-sweep-1.md)): `korean_ch3
 `korean_ch3_key.json` (built with `--language ko`), `chapter_2.json` again as
 `starts.korean_chapter_2`, and `systems_slot0.json`, `systems_inventory_full.json`,
 `systems_level_99.json` and `systems_carry.json`. `speech_notices.json` (a level-10 Beginner with
-a knife on 2.3) starts `play.speech_notices_synthetic` and its base run (#392).
+a knife on 2.3) starts `play.speech_notices_synthetic` and its base run (#392). The
+`map_page_*.json` starts put a hero on each of the five compendium map pages checked in the
+running port (#221): `play.map_page_<start>_<kind>_synthetic` takes one portal and
+`tests/test_compendium_world_port.py` compares where the game put the hero with that page's
+Connections row. The 2.0 and 2.4 starts come twice, with the chapter-1 gate's quest done
+(`_open`) and not (`_shut`); `map_page_9_3_top.json` stands the hero beside 9.3's hidden portal.
 
 ## The bot's world
 
