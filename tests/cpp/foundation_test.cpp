@@ -294,8 +294,9 @@ struct Bundle {
                                          {"Count", num(-7)},
                                          {"UIDeviceFamily", arr({num(1), num(2)})}})));
         write("en.lproj/InfoPlist.strings", bplist(dict({{"CFBundleDisplayName", str("Maple")}})));
-        write("en.lproj/Scripts.strings",
-              bplist(dict({{"Bruce.dialog.1", str("I'm Bruce.")}, {"empty", str("")}})));
+        write("en.lproj/Scripts.strings", bplist(dict({{"Bruce.dialog.1", str("I'm Bruce.")},
+                                                       {"empty", str("")},
+                                                       {"Chief.dialog.1", str("Welcome.")}})));
         write("ko.lproj/Scripts.strings", bplist(dict({{"Bruce.dialog.1", ustr(u"브루스")}})));
         write("sound/bgm01.mp3", "mp3");
         write("broken.strings", "not a plist");
@@ -827,6 +828,31 @@ TEST_CASE("Foundation: a text pack's Scripts.strings answers first; a key it lac
     CHECK(w.text(loc("Bruce.dialog.1", "Scripts")) == "I'm Bruce.");
     std::error_code ec;
     fs::remove_all(pack, ec);
+}
+
+// Original bug 15 (docs/re/original-bugs.md): a key ko.lproj lacks is the key itself as on the
+// device, or with the fallback on (fix_original_bugs) the English table's string.
+TEST_CASE("Foundation: a key the language's table lacks, with and without the English fallback") {
+    for (const char *language : {"ko", "en"}) {
+        Bundle b(language);
+        Ns w;
+        const u32 bundle = w.send(w.cls("NSBundle"), "mainBundle");
+        auto loc = [&w, bundle](const char *key) {
+            return w.text(w.send(bundle, "localizedStringForKey:value:table:",
+                                 {w.nsstr(key), 0u, w.nsstr("Scripts")}));
+        };
+        const bool ko = std::string(language) == "ko";
+        for (const int on : {0, 1}) {
+            CAPTURE(language);
+            CAPTURE(on);
+            mt_cf_set_missing_key_fallback(on);
+            CHECK(loc("Chief.dialog.1") == (ko && on == 0 ? "Chief.dialog.1" : "Welcome."));
+            CHECK(loc("Bruce.dialog.1") ==
+                  (ko ? "\xEB\xB8\x8C\xEB\xA3\xA8\xEC\x8A\xA4" : "I'm Bruce."));
+            CHECK(loc("missing") == "missing");
+        }
+        mt_cf_set_missing_key_fallback(0);
+    }
 }
 
 TEST_CASE("Foundation: NSBundle and NSLocale follow the language") {

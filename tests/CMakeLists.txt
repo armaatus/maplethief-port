@@ -1409,7 +1409,7 @@ set_tests_properties(
 # mtport.savedata (skipped, 77, without your own copy); each play test loads it (MT_FROM_SAVE).
 # The jobs_* modes talk to the Dark Lord by play at each of the knowledge base's advancement
 # points, the skills_* modes learn and use every skill of a branch with its rule checked. The
-# systems2_* modes (#304, docs/testing/systems-sweep.md) buy every cash shop tile, restore the
+# systems2_* modes (#304, docs/testing/systems-sweep-2.md) buy every cash shop tile, restore the
 # four receipt lists, use the 10 scrolls, open the Pigmy dialog and take portal620. Their starts
 # equal no chained state yet, so the tests are named synthetic (start-states.md).
 set(_starts
@@ -1475,6 +1475,91 @@ foreach(pair IN LISTS _from_starts)
                    ENVIRONMENT
                    "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_${start}")
 endforeach()
+
+# The systems sweep (#303, docs/testing/systems-sweep-1.md). Korean (MAPLETHIEF_LANGUAGE=ko):
+# the terms, the tutorial and chapter 1's first part from a new game, and a quest offer in
+# chapters 2 and 3 plus the chapter-3 line ko.lproj lacks (original bug 15) from built starts.
+# Every drawn text has its glyphs and fits its line; every checkpoint's screen equals our own
+# recorded render, kept in korean_base/<mode> beside the outputs and recorded by the first run.
+# Then slots 2 and 3 (created and saved, reloaded in a fresh process, deleted), a full bag, the
+# level cap and its Game Center score, and a skill and the trash by pick up and drop.
+set(_starts_ko korean_ch3 korean_ch3_key)
+set(_starts_en systems_slot0 systems_inventory_full systems_level_99 systems_carry)
+foreach(start IN LISTS _starts_ko _starts_en)
+    set(_lang)
+    if(start IN_LIST _starts_ko)
+        set(_lang --language ko)
+    endif()
+    add_test(NAME starts.${start}
+             COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                     "${PROJECT_SOURCE_DIR}/tests/starts/${start}.json"
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_${start}/data/saves" --app
+                     "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app" ${_lang})
+    set_tests_properties(
+        starts.${start}
+        PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_SETUP
+                   start_${start} ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+endforeach()
+# chapter_2.json's state with the Korean bundle's names (#297's start, its own name here).
+add_test(NAME starts.korean_chapter_2
+         COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                 "${PROJECT_SOURCE_DIR}/tests/starts/chapter_2.json"
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_korean_chapter_2/data/saves" --app
+                 "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app" --language ko)
+set_tests_properties(
+    starts.korean_chapter_2
+    PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_SETUP
+               start_korean_chapter_2 ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+set(_ko_env "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=ko")
+add_test(NAME play.korean_chapter_1_a
+         COMMAND play_real_test korean_chapter_1_a
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_korean_chapter_1_a")
+set_tests_properties(
+    play.korean_chapter_1_a
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+               ENVIRONMENT
+               "${_ko_env};MT_KOREAN_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/korean_base/korean_chapter_1_a")
+# mode:start
+set(_from_starts_303
+    korean_offer_2:korean_chapter_2
+    korean_offer_3:korean_ch3
+    korean_missing_key:korean_ch3_key
+    inventory_full:systems_inventory_full
+    level_cap:systems_level_99
+    quick_slots_trash:systems_carry)
+foreach(pair IN LISTS _from_starts_303)
+    string(REPLACE ":" ";" pair "${pair}")
+    list(GET pair 0 mode)
+    list(GET pair 1 start)
+    if(mode MATCHES "^korean_")
+        set(_env "${_ko_env};MT_KOREAN_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/korean_base/${mode}")
+    else()
+        set(_env "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+    endif()
+    add_test(NAME play.${mode}_synthetic COMMAND play_real_test ${mode}
+                                                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_${mode}")
+    set_tests_properties(
+        play.${mode}_synthetic
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+                   FIXTURES_REQUIRED start_${start}
+                   ENVIRONMENT "${_env};MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_${start}")
+endforeach()
+# Slots 2 and 3: created and saved in one process, reloaded and deleted in a fresh one.
+add_test(NAME play.slots_create_synthetic
+         COMMAND play_real_test slots_create "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_slots")
+set_tests_properties(
+    play.slots_create_synthetic
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED start_systems_slot0 FIXTURES_SETUP play_slots
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/start_systems_slot0")
+add_test(NAME play.slots_reload_synthetic
+         COMMAND play_real_test slots_reload "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_slots")
+set_tests_properties(
+    play.slots_reload_synthetic
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_slots
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
 # Text packs (#189, ADR 0108): a pack made at run time in the test output directory from your
 # own copy (Hénésys in the dialogue, Pötion in item_etc), through the intro and the item tab:
