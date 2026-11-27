@@ -1782,6 +1782,7 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"skip_intros", true, ""},
     {"minimap", true, ""},
     {"exp_percent", true, ""},
+    {"input_display", true, ""},
     {"auto_run", true, ""},
     {"hold_toggle", true, ""},
     {"auto_loot", true, ""},

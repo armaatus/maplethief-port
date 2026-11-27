@@ -221,7 +221,8 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
                             "pause_on_disconnect", "keypad_haptics", "pad_pointer",
                             "save_states",         "stick_mode",     "direction_priority",
                             "crash_recovery",      "run_timer",      "run_category",
-                            "speech_notices",      "livesplit",      "livesplit_game_time"}) {
+                            "speech_notices",      "livesplit",      "livesplit_game_time",
+                            "input_display"}) {
         if (is(row, key)) {
             return t.turn_reads_settings;
         }

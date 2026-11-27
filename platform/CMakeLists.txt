@@ -64,6 +64,7 @@ add_library(
     src/hud_labels.cpp
     src/import_screen.cpp
     src/input.cpp
+    src/input_display.cpp
     src/ipa_import.cpp
     src/keyboard.cpp
     src/keypad_haptics.cpp
