@@ -19,7 +19,7 @@
 //              [--effects-volume N] [--mute-unfocused on|off] [--gapless-music on|off]
 //              [--audio-mono on|off] [--audio-device default|NAME]
 //              [--right-touch X,Y|off] [--hide-keypad auto|always|never] [--shot-gl]
-//              [--rumble on|off] [--rumble-strength N]
+//              [--rumble on|off] [--rumble-strength N] [--rumble-events game|all]
 //              [--minimise T,S]... [--background T,S]... [--unfocus T,S]... [--quit T]
 //              [--save-settings]
 //              [--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]
@@ -83,6 +83,8 @@
 //   --rumble on|off        the active gamepad rumbles on the game's vibration, a hit and a
 //                          level-up (default on; rumble.h, #72)
 //   --rumble-strength N    how strongly, 0 to 100 percent (default 100)
+//   --rumble-events game|all  game: the game's vibration only; all: also a hit and a level-up
+//                          (default all; #399)
 //   --cash-shop off|meso   an Assist: the cash shop's items and the paid revives sold for the
 //                          hero's meso at rising prices (default off; maplethief/cashshop.h,
 //                          ADR 0072)
@@ -120,13 +122,13 @@
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
 // gapless_music, audio_mono, audio_device, audio_pack, ios_audio, text_pack, right_touch,
-// hide_keypad, rumble, rumble_strength, perf_overlay, pacing, fullscreen, vsync, pause_unfocused,
-// language, menu_repeat, confirm_guard, focus_highlight, button_prompts, button_labels,
-// pad_pointer, border, border_image, game_speed, fast_forward, autosave, ui_animations,
-// turbo_attack, auto_potion, skip_intros, minimap, exp_percent, auto_run, hold_toggle, auto_loot,
-// save_states, pause_on_disconnect); the command line overrides it. Every setting's flag is its
-// registry row's (settings.h), checked as its file line would be. The placeholder and the prototype
-// (tests) read no settings file.
+// hide_keypad, rumble, rumble_strength, rumble_events, perf_overlay, pacing, fullscreen, vsync,
+// pause_unfocused, language, menu_repeat, confirm_guard, focus_highlight, button_prompts,
+// button_labels, pad_pointer, border, border_image, game_speed, fast_forward, autosave,
+// ui_animations, turbo_attack, auto_potion, skip_intros, minimap, exp_percent, auto_run,
+// hold_toggle, auto_loot, save_states, pause_on_disconnect); the command line overrides it. Every
+// setting's flag is its registry row's (settings.h), checked as its file line would be. The
+// placeholder and the prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
 //                     ADR 0070): applies the preset over the file before the other flags (which
 //                     then make it custom if they change a key it controls), and skips the
@@ -655,7 +657,7 @@ void print_usage() {
             "[--gapless-music on|off] [--audio-mono on|off] [--audio-device default|NAME] "
             "[--audio-pack DIR]... "
             "[--right-touch X,Y|off] [--hide-keypad auto|always|never] "
-            "[--shot-gl] [--rumble on|off] [--rumble-strength N] "
+            "[--shot-gl] [--rumble on|off] [--rumble-strength N] [--rumble-events game|all] "
             "[--minimise T,S]... [--background T,S]... [--unfocus T,S]... [--quit T] "
             "[--save-settings] "
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "

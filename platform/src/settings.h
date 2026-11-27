@@ -56,10 +56,14 @@
 //   right_touch = off
 //   # hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always | never
 //   hide_keypad = never
-//   # the gamepad rumbles on a vibration, a hit and a level-up: on | off
+//   # the gamepad rumbles on the game's vibration and, with rumble_events = all, a hit and a
+//   # level-up: on | off
 //   rumble = on
 //   # how strongly, 0 to 100 (percent)
 //   rumble_strength = 100
+//   # what rumbles: game (the game's own vibration only, as the phone) | all (also every hit
+//   # and a level-up)
+//   rumble_events = all
 //   # iOS: a light tap of the phone at each press of a touch key pad key: off | light | medium
 //   keypad_haptics = off  (light on iOS)
 //   # the frame-time overlay (F3 shows or hides it while the game runs): on | off
@@ -248,6 +252,13 @@ inline constexpr const char *kStickModeNames[] = {"4way", "8way"};
 //                             back the one held before it
 enum class DirectionPriority { kGame, kLast };
 inline constexpr const char *kDirectionPriorityNames[] = {"game", "last"};
+
+// rumble_events (#399, ADR 0053's addendum, rumble.h): which sources rumble the gamepad.
+//   RumbleEvents::kGame  the game's own vibration only (CMSoundPlayer::Vibrate, gated by the
+//                        game's vibration option), as the phone vibrated
+//   RumbleEvents::kAll   also the observed hit (CHero::TakeDamage) and level-up (CHero::LevelUp)
+enum class RumbleEvents { kGame, kAll };
+inline constexpr const char *kRumbleEventsNames[] = {"game", "all"};
 
 // keypad_haptics (#194, ADR 0055's addendum, keypad_haptics.h): on iOS, a haptic tap at each
 // press of a touch key pad key, by UIImpactFeedbackGenerator's light or medium style. The row
@@ -604,6 +615,8 @@ struct Settings {
     // Rumble (#72, rumble.h): the active gamepad on a vibration, a hit and a level-up.
     bool rumble = true;                  // rumble, --rumble (on | off)
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
+    // #399: rumble_events, --rumble-events (game | all); all without a settings file.
+    RumbleEvents rumble_events = RumbleEvents::kAll;
     // #194: keypad_haptics, --keypad-haptics (off | light | medium; iOS only).
     KeypadHaptics keypad_haptics = kKeypadHapticsDefault;
     // #184 (disconnect.h): the active pad going away pauses the game until a pad or a key.

@@ -19,6 +19,7 @@
 "hide_keypad"
 "rumble"
 "rumble_strength"
+"rumble_events"
 "keypad_haptics"
 "perf_overlay"
 "cash_shop"

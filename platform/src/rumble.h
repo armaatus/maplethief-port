@@ -7,7 +7,11 @@
 //               milliseconds are ignored there too), so the rumble is one fixed effect.
 //   hero damage the runtime's MT_GAME_EVENT_HERO_DAMAGE (maplethief/events.h), whatever the
 //               game's option says
-//   level-up    MT_GAME_EVENT_LEVEL_UP
+//   level-up    MT_GAME_EVENT_LEVEL_UP (the phone never vibrated for one)
+//
+// rumble_events (#399) picks the sources: game passes only the vibrate hook, as the phone
+// vibrated (Original and Original + controller); all adds the hero damage and the level-up
+// (Enhanced, and the default without a settings file). The events dropped by game are counted.
 //
 // The requests of one frontend turn are merged (the strongest amplitude per motor, the longest
 // duration) and sent as one SDL_RumbleGamepad at the next turn() (a hit with the game's
@@ -15,8 +19,9 @@
 // rumble_strength / 100. Nothing is sent while rumble is off, at strength 0, or without an
 // active pad; a pad without rumble just answers false (counted).
 //
-// settings.ini: `rumble = on | off` (default on), `rumble_strength = 0..100` (default 100);
-// the command line: --rumble on|off, --rumble-strength N.
+// settings.ini: `rumble = on | off` (default on), `rumble_strength = 0..100` (default 100),
+// `rumble_events = game | all` (default all); the command line: --rumble on|off,
+// --rumble-strength N, --rumble-events game|all.
 //
 // Single thread: the hooks run on the guest thread, which is the frontend's.
 #ifndef MAPLETHIEF_PLATFORM_RUMBLE_H
@@ -27,6 +32,7 @@
 #include <cstdint>
 
 #include "maplethief/events.h"
+#include "settings.h"
 
 namespace maplethief::frontend {
 
@@ -47,6 +53,7 @@ inline constexpr RumbleEffect kRumbleLevelUp{0.35f, 0.85f, 700}; // a level-up
 struct RumbleStats {
     std::uint64_t requests = 0; // vibrate, damage and level-up requests while on
     std::uint64_t ignored = 0;  // requests while off or at strength 0
+    std::uint64_t filtered = 0; // hit and level-up events dropped by rumble_events = game
     std::uint64_t sent = 0;     // SDL_RumbleGamepad calls that started a rumble
     std::uint64_t no_pad = 0;   // turns with requests and no active pad
     std::uint64_t failed = 0;   // SDL_RumbleGamepad answered false (no rumble on that pad)
@@ -59,10 +66,11 @@ class Rumble {
     Rumble(const Rumble &) = delete;
     Rumble &operator=(const Rumble &) = delete;
 
-    // rumble and rumble_strength (clamped to 0..100). Off drops what is pending.
-    void configure(bool on, std::uint32_t strength);
+    // rumble, rumble_strength (clamped to 0..100) and rumble_events. Off drops what is pending.
+    void configure(bool on, std::uint32_t strength, RumbleEvents events = RumbleEvents::kAll);
     bool on() const { return on_; }
     std::uint32_t strength() const { return strength_; }
+    RumbleEvents events() const { return events_; }
 
     // Installs the runtime's vibrate and game-event hooks (to this object), or removes them.
     void install();
@@ -84,6 +92,7 @@ class Rumble {
     const Gamepads *pads_;
     bool on_ = true;
     std::uint32_t strength_ = 100;
+    RumbleEvents events_ = RumbleEvents::kAll;
     bool pending_ = false;
     RumbleEffect merged_;
     SDL_JoystickID rumbling_ = 0; // the pad the last rumble went to (it may be gone by now)

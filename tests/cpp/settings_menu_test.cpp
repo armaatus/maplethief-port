@@ -558,8 +558,9 @@ TEST_CASE("settings menu: the preset line; a change makes it custom; what waits 
     drv.key(SDLK_RIGHT);
     CHECK(live.preset == fe::Preset::kOriginal);
     CHECK(live.hide_keypad == fe::KeypadMode::kNever);
-    CHECK(applied == std::vector<std::string>{"hide_keypad"}); // the one row Original changes
-    CHECK(menu.status() == "Original: 1 setting changed");
+    // The rows Original changes from the defaults (rumble_events since #399).
+    CHECK(applied == std::vector<std::string>{"hide_keypad", "rumble_events"});
+    CHECK(menu.status() == "Original: 2 settings changed");
     drv.key(SDLK_RIGHT);
     CHECK(live.preset == fe::Preset::kOriginalController);
     drv.key(SDLK_D);
@@ -1311,6 +1312,7 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
     s.hide_keypad = fe::KeypadMode::kNever;
     s.rumble = false;
     s.rumble_strength = 30;
+    s.rumble_events = fe::RumbleEvents::kGame;
     s.perf_overlay = true;
     s.filter = fe::ShaderFilter::kCrt;
     s.border = fe::BorderMode::kImage;
@@ -1344,6 +1346,7 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
     CHECK(keypad.mode() == fe::KeypadMode::kNever);
     CHECK_FALSE(rumble.on());
     CHECK(rumble.strength() == 30);
+    CHECK(rumble.events() == fe::RumbleEvents::kGame);
     CHECK(perf.on());
     // vsync off reached the window and, through follow_vsync, Game::vsync and the telemetry
     // (the paced clock's plan reads them); fullscreen's case applies the same Desktop::apply.
@@ -1514,7 +1517,7 @@ TEST_CASE("settings menu: the drawing, by hash; every label and help fits") {
     // #179: Video has fullscreen_mode; every tab ends with Quit.
     const Case cases[] = {
         {"video", false, 0, 2, 0x376f9f95dc01ab3dull},
-        {"controls", false, 2, 4, 0x57b84f95d110e575ull},
+        {"controls", false, 2, 4, 0x165f11713efdfebbull}, // #399: rumble_events
         {"assists", true, 4, 0, 0x13f1e0d844400b8aull},
     };
     fe::RecentStats recent;
@@ -1726,6 +1729,7 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"hide_keypad", true, "the handheld's touch screen"},
     {"rumble", true, ""},
     {"rumble_strength", true, ""},
+    {"rumble_events", true, ""},
     {"keypad_haptics", false, "iOS only"},
     {"perf_overlay", true, ""},
     {"cash_shop", true, ""},
