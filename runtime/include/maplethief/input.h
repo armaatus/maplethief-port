@@ -119,6 +119,10 @@ void mt_input_release_all(void) MT_NOEXCEPT;
 int32_t mt_input_panel(void) MT_NOEXCEPT;
 /* 1 if the pad was live at the last turn (TouchKeyPadView.touchKeyPadEnable). */
 int mt_input_pad_live(void) MT_NOEXCEPT;
+/* The live pad's ten key BOOLs (onLeftKey ... onShort4Key) as bits 1 << action, read at the
+ * last turn and after its touches, 0 while the pad is off: the keys a finger on the touch key
+ * pad holds, and the pad actions delivered through them. Read only (the input display, #404). */
+uint32_t mt_input_pad_keys(void) MT_NOEXCEPT;
 
 /* The key pad's panel container `index` (TouchKeyPadView.subviews[index], 0 the game pad ...
  * 10 help: docs/controls/keypad.md) of the pad seen at the last turn, or 0. The platform's
