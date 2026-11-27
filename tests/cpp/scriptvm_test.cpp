@@ -358,9 +358,9 @@ TEST_CASE("scriptvm: locals, and STORELOCALn storing to the last operand - 23 (d
     // PUSHLOCAL 3, PUSHBYTE 0x18, STORELOCAL 1 (pops 0x18 into local 1), PUSH2, STORELOCAL5
     // (aux is 1 from STORELOCAL's operand: local 1 - 23, below the stack), PUSHBYTE 0x19, PUSH0,
     // STORELOCAL0 (aux 0x19: local 2), POP, RETCODE0.
-    for (std::uint8_t b :
+    for (const int b :
          {0x13, 3, 0x04, 0x18, 0x21, 1, 0x03, 0x1C, 0x04, 0x19, 0x01, 0x17, 0x3E, 0x40}) {
-        code.push_back(b);
+        code.push_back(static_cast<std::uint8_t>(b));
     }
     Guest vm(code);
     slot(0, NUM, 0xA0);
