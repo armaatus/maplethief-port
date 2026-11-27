@@ -59,7 +59,11 @@ MT_EXTERN_C_BEGIN
  * Text_SubChars (owner, text, from, to); a text pack steps them by UTF-8 lengths */
 #define MT_HOOK_FN_TEXT_CHAR_COUNT 0x22989u
 #define MT_HOOK_FN_TEXT_SUB_CHARS 0x22A1Du
-#define MT_HOOK_FN_DRAW_IMAGE 0x24DC9u      /* (image, x, y): draws a CMImage at its top left */
+#define MT_HOOK_FN_DRAW_IMAGE 0x24DC9u /* (image, x, y): draws a CMImage at its top left */
+/* CChatBox::NextPage and CChatBox::FirstPage (box): an NPC dialogue page set, wrapped whole
+ * (#391: the text events read it after them, maplethief/text_events.h) */
+#define MT_HOOK_FN_CHAT_BOX_NEXT_PAGE 0x34A05u
+#define MT_HOOK_FN_CHAT_BOX_FIRST_PAGE 0x34CD1u
 #define MT_HOOK_FN_SAVE_QUEST_DATA 0x38F55u /* CDataMgr::SaveQuestData (data manager, hero) */
 /* Shop_OnKey (shop, key, game): the NPC shop's keys (game mode 2); the platform moves the list's
  * cursor by item and scrolls the drawn list to it (docs/re/original-bugs.md) */
