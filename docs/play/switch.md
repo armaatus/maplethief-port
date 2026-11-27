@@ -45,7 +45,7 @@ If the import screen says **No IPA found**, the file isn't in that folder: copy 
 - not an IPA, or not MapleThief's;
 - another version than 1.5;
 - an encrypted copy: the port can't run an encrypted game executable;
-- version 1.5, but damaged or changed: copy the file again, and check its SHA-256 on a computer ([Your game file](your-ipa.md)).
+- version 1.5, but damaged or changed: copy the file again, and check its SHA-256 on a computer ([Your game file](your-ipa.md)). A repacked copy is fine; if a file inside it differs, the message names that file.
 
 Nothing is kept from a file that is refused. To import again later (another copy, or after deleting `game/`), delete `sdmc:/switch/maplethief/game/`, put the IPA back and start MapleThief. Your saves and settings are kept.
 

@@ -30,8 +30,9 @@ The long string it prints must match exactly.
 
 - **Different size and fingerprint**: probably another version of the game, or an encrypted copy. The port only supports 1.5.
 - **Right game, different fingerprint**: the file may have been repacked. An IPA is a zip file, so repacking changes its fingerprint, and usually its size, even when the game inside is the same.
-  - If you **build it yourself**, a repacked copy is fine: the build accepts any copy whose game program matches the known one, and says so if it doesn't. A re-signed copy doesn't pass, because signing changes the program.
-  - The **download** imports only the exact file above. [Open an issue](https://github.com/armaatus/maplethief-port/issues) with the fingerprint you got, and we'll see whether we can support it.
+  - The **download** accepts a repacked copy: it checks the game program and each of the game's files inside the IPA instead of the IPA as a whole. If one of them differs or is missing, the game names that file. Other files in the IPA are left out.
+  - If you **build it yourself**, a repacked copy is fine too: the build accepts any copy whose game program matches the known one, and says so if it doesn't.
+  - A **re-signed** copy doesn't pass either way, because signing changes the program. If your copy is refused and you think it shouldn't be, [open an issue](https://github.com/armaatus/maplethief-port/issues) with the message you got.
 
 ## Where to put it
 

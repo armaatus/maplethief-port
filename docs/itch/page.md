@@ -103,7 +103,6 @@ The full list: [Controls](https://github.com/armaatus/maplethief-port/blob/main/
 
 - Text uses an open font instead of Apple's, so it looks a little plainer.
 - The cash shop can't take real money. A setting lets it pay in the game's meso instead.
-- The download accepts only the exact game file above; a repacked copy is refused. Building from source accepts it.
 - It hasn't been checked on a real Steam Deck yet.
 - The Switch build hasn't been checked on a console yet.
 - macOS and Windows warn the first time, because the port isn't signed or notarised with paid certificates.
