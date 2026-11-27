@@ -569,6 +569,10 @@ TEST_CASE("audio: a render thread beside the guest's calls (thread-safety smoke)
                 }
             }
             blocks++;
+            // A real render thread wakes once per block; without the yield it can hold the
+            // mixer's lock nearly all the time and starve the guest's calls (60 s timeouts on
+            // the two-core Windows ARM debug runner).
+            std::this_thread::yield();
         }
     });
     const u32 names = e.alloc(4);
