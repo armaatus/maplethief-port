@@ -106,6 +106,8 @@ constexpr bool action_shown(const MenuActionInfo &a,
 //                            needs kCapUpdateFetch: not on the Switch)
 //   achievements   Gameplay  #154: the summary, then each local achievement in turn
 //   keypad_layout_edit  Controls  #159: the touch key pad editor (keypad_editor.h)
+//   dump_textures, build_texture_pack, export_text, check_packs  Other  #371: the pack tools
+//                            (pack_tools.h), writing beside game/ in the pack folders
 //   quit           every tab #179: "Quit MapleThief?" then the same quit as Cmd-Q
 //                            (SDL_EVENT_QUIT: applicationWillTerminate:, autosave = on_quit
 //                            first; on the Switch back to the Homebrew Menu). Needs kCapQuit:

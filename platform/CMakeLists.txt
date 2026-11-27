@@ -112,6 +112,7 @@ add_library(
     src/start_question.cpp
     src/switch_pads.cpp
     src/pack_folders.cpp
+    src/pack_tools.cpp
     src/list_keys.cpp
     src/thread_priority.cpp
     src/update_check.cpp
