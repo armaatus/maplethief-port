@@ -80,7 +80,10 @@ struct Walk {
     u32 max;
     u32 count = 0;
     u32 order = 0;
+    ControlsWalkTrace trace{};
 };
+
+ControlsWalkTrace g_last_walk;
 
 void consider(Walk &w, const View &v, const ScreenBox &visible) {
     const bool control =
@@ -89,6 +92,7 @@ void consider(Walk &w, const View &v, const ScreenBox &visible) {
     if (!control && !scroll) {
         return;
     }
+    w.trace.controls++;
     double mx = 0, my = 0;
     const TargetAction *action = nullptr;
     if (control) {
@@ -96,6 +100,7 @@ void consider(Walk &w, const View &v, const ScreenBox &visible) {
         if (action == nullptr) {
             return; // nothing a tap would do
         }
+        w.trace.with_action++;
     } else {
         if (!v.scroll_enabled) {
             return;
@@ -120,6 +125,7 @@ void consider(Walk &w, const View &v, const ScreenBox &visible) {
     if (!found) {
         return; // covered
     }
+    w.trace.reached++;
     if (w.count < w.max && w.out != nullptr) {
         mt_uikit_control &c = w.out[w.count];
         std::memset(&c, 0, sizeof c);
@@ -164,6 +170,10 @@ void walk(Walk &w, u32 obj, const ScreenBox &clip, int depth) {
     }
     const ScreenBox visible = intersect(clip, screen_box(w.cpu, *v));
     w.order++;
+    w.trace.views++;
+    if (!visible.empty()) {
+        w.trace.visible++;
+    }
     if (!visible.empty()) {
         consider(w, *v, visible);
     }
@@ -230,6 +240,8 @@ void walk_labels(LabelWalk &w, u32 obj, int depth) {
 
 } // namespace
 
+ControlsWalkTrace last_controls_walk() { return g_last_walk; }
+
 } // namespace mt_ui
 
 uint32_t mt_uikit_labels(mt_cpu *cpu, mt_uikit_label *out, uint32_t max) noexcept {
@@ -256,5 +268,8 @@ uint32_t mt_uikit_controls(mt_cpu *cpu, mt_uikit_control *out, uint32_t max) noe
     for (const u32 window : windows) {
         walk(w, window, screen, 0);
     }
+    w.trace.windows = static_cast<u32>(windows.size());
+    w.trace.listed = w.count;
+    g_last_walk = w.trace;
     return w.count;
 }
