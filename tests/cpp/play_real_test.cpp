@@ -110,6 +110,7 @@
 #include "maplethief/saves.h"
 #include "maplethief/snapshot.h"
 #include "maplethief/texpack.h"
+#include "maplethief/text_events.h"
 #include "maplethief/textpack.h"
 #include "maplethief/widescreen.h"
 #include "minimap.h"
@@ -122,6 +123,8 @@
 #include "save_tools.h"
 #include "settings.h"
 #include "skill_rules.h"
+#include "speech.h"
+#include "speech_text.h"
 
 namespace {
 
@@ -4867,7 +4870,8 @@ struct ChatRun {
 };
 ChatRun g_chat;
 
-void chat_text(Run &r, u64) {
+// chat_text's flow up to the field after MacArthur's dialog (speech_dialogue's too).
+void queue_chat_text(Run &r) {
     attach_pad(r);
     g_chat = ChatRun{};
     r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
@@ -4940,6 +4944,10 @@ void chat_text(Run &r, u64) {
         return field(cpu) && hero(cpu).on(2, 8) && quest_state(cpu, hero(cpu), 0, 0) >= 1;
     });
     then_wait_field(r);
+}
+
+void chat_text(Run &r, u64) {
+    queue_chat_text(r);
     then_finish(r);
 }
 
@@ -9562,6 +9570,209 @@ void skills_bandit_checks(Run &, u64) {
     check(g_skills->stats[22].guard_ok > 0, "Meso Guard: blows paid in meso");
 }
 
+// --- Speech: dialogue and the scenes' speech boxes (#391, ADR 0187, speech_text.h) -------------
+//
+// speech_dialogue: chat_text's flow (a new game through the intro's speech boxes and MacArthur's
+// first dialog on 2.8, A as soon as each box shows) with the speech on the log backend
+// (MT_SPEECH=on) or off (unset: the base run). The flow's own monitor reads every box from guest
+// memory each tick; the run records each text event (maplethief/text_events.h) and each
+// utterance the log backend is asked to say. In the field after the dialog the state is written
+// to OUT_DIR/speech_state.txt: the game's rand() state (0x11A510), the tick, and the hero, the
+// quests and the mobs as scene_state reads them. Checks, with the speech on:
+//   - every box the monitor saw is one event, in the same order, of the same kind, with the same
+//     text (white space aside); each event has a speaker and valid UTF-8 text;
+//   - each page and each scene box is one utterance, in the same order, "speaker: text";
+//   - MT_SPEECH_BASE=<the off run's OUT_DIR>: every state line equals the off run's.
+// With it off: no event and no utterance (the wrappers are off). Only counts and hashes are
+// printed and compared, never the game's text.
+struct SpeechRun {
+    bool on = false;
+    std::unique_ptr<fe::Speech> speech;
+    std::unique_ptr<fe::SpeechText> text;
+    struct Event {
+        std::uint32_t kind = 0, speaker_kind = 0;
+        std::string speaker, text;
+    };
+    std::vector<Event> events;
+    fe::LogSpeechBackend *log = nullptr;                    // the speech's backend
+    std::vector<std::string> said;                          // what it was asked to say
+    std::vector<std::pair<std::string, std::string>> boxes; // the monitor's: kind, lines
+    ChatBoxView last;
+    u64 last_tick = 0;
+    std::vector<std::pair<std::string, std::string>> state;
+} g_sd;
+
+void record_text_event(void *, const mt_text_event *e) {
+    g_sd.events.push_back(SpeechRun::Event{e->kind, e->speaker_kind, e->speaker, e->text});
+}
+
+// The text without its white space (the scene boxes' lines end in "\r") and the monitor's
+// line ends ('|').
+std::string bare(const std::string &s) {
+    std::string out;
+    for (const char c : s) {
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '|') {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+bool valid_utf8(const std::string &s) {
+    for (std::size_t i = 0; i < s.size();) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        const std::size_t n = c < 0x80                 ? 1
+                              : c >= 0xC2 && c <= 0xDF ? 2
+                              : c >= 0xE0 && c <= 0xEF ? 3
+                              : c >= 0xF0 && c <= 0xF4 ? 4
+                                                       : 0;
+        if (n == 0 || i + n > s.size()) {
+            return false;
+        }
+        for (std::size_t k = 1; k < n; k++) {
+            if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) {
+                return false;
+            }
+        }
+        i += n;
+    }
+    return true;
+}
+
+void speech_dialogue(Run &r, u64) {
+    r.settings_from_env = false; // the on and off runs alike, whatever MAPLETHIEF_SETTINGS says
+    g_sd.on = std::getenv("MT_SPEECH") != nullptr && std::string(std::getenv("MT_SPEECH")) == "on";
+    auto backend = std::make_unique<fe::LogSpeechBackend>([](const std::string &) {});
+    g_sd.log = backend.get();
+    g_sd.speech = std::make_unique<fe::Speech>(std::move(backend));
+    g_sd.speech->set_enabled(g_sd.on);
+    g_sd.text = std::make_unique<fe::SpeechText>();
+    mt_text_events_add_listener(record_text_event, nullptr);
+    queue_chat_text(r);
+    const std::function<void(mt_cpu *)> monitor_turn = r.on_turn;
+    r.on_turn = [&r, monitor_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        // As game.cpp's turn: the events since the last turn said, then the speech's own turn.
+        g_sd.text->turn(*g_sd.speech, r.settings, r.t);
+        g_sd.speech->turn(r.t);
+        if (r.ticks == g_sd.last_tick) {
+            return;
+        }
+        g_sd.last_tick = r.ticks;
+        const ChatBoxView v = chat_box_view(cpu);
+        if (!v.kind.empty() && (!v.same_box(g_sd.last) || v.text != g_sd.last.text)) {
+            g_sd.boxes.emplace_back(v.kind, v.text);
+        }
+        g_sd.last = v;
+    };
+    then_do(r, "the state in the field after the dialog", [&r](mt_cpu *cpu) {
+        g_sd.state = scene_state(cpu);
+        g_sd.state.emplace_back("ticks", std::to_string(r.ticks));
+        std::ofstream f(r.out / "speech_state.txt", std::ios::trunc);
+        for (const auto &[k, v] : g_sd.state) {
+            f << k << " = " << v << "\n";
+        }
+    });
+    then_finish(r);
+}
+
+void speech_dialogue_checks(Run &, u64) {
+    SpeechRun &s = g_sd;
+    mt_text_events_remove_listener(record_text_event, nullptr);
+    for (const fe::Utterance &u : s.log->said()) {
+        s.said.push_back(u.text);
+    }
+    u64 pages = 0, answers = 0, scene_boxes = 0;
+    for (const SpeechRun::Event &e : s.events) {
+        pages += e.kind == MT_TEXT_EVENT_PAGE ? 1 : 0;
+        answers += e.kind == MT_TEXT_EVENT_ANSWER ? 1 : 0;
+        scene_boxes += e.kind == MT_TEXT_EVENT_SCENE_BOX ? 1 : 0;
+    }
+    std::string all;
+    for (const std::string &u : s.said) {
+        all += u + "\n";
+    }
+    const fe::SpeechStats st = s.speech->stats();
+    // Released here: left to the process's exit, the destructors aborted it.
+    s.text.reset();
+    s.speech.reset();
+    std::printf("speech_dialogue (speech %s): %zu boxes seen; events: %llu pages, %llu answers, "
+                "%llu scene boxes; %zu utterances (hash %s); said %llu, interrupted %llu\n",
+                s.on ? "on" : "off", s.boxes.size(), static_cast<unsigned long long>(pages),
+                static_cast<unsigned long long>(answers),
+                static_cast<unsigned long long>(scene_boxes), s.said.size(),
+                fe::hex64(fe::fnv1a64(all.data(), all.size())).c_str(),
+                static_cast<unsigned long long>(st.spoken),
+                static_cast<unsigned long long>(st.interrupted));
+    check(!s.state.empty(), "the run reached the field after MacArthur's dialog");
+    if (!s.on) {
+        check(s.events.empty() && s.said.empty(),
+              "speech off: no text event and nothing said (" + std::to_string(s.events.size()) +
+                  " events, " + std::to_string(s.said.size()) + " utterances)");
+    } else {
+        // The events but the answers, against the boxes the monitor saw.
+        std::vector<const SpeechRun::Event *> shown;
+        for (const SpeechRun::Event &e : s.events) {
+            if (e.kind != MT_TEXT_EVENT_ANSWER) {
+                shown.push_back(&e);
+            }
+        }
+        u64 npc = 0, speech = 0;
+        bool same = shown.size() == s.boxes.size();
+        for (std::size_t i = 0; i < s.boxes.size(); i++) {
+            const bool is_npc = s.boxes[i].first == "npc";
+            (is_npc ? npc : speech)++;
+            same = same && i < shown.size() &&
+                   shown[i]->kind == (is_npc ? MT_TEXT_EVENT_PAGE : MT_TEXT_EVENT_SCENE_BOX) &&
+                   bare(shown[i]->text) == bare(s.boxes[i].second);
+        }
+        check(npc >= 2 && speech >= 1, "the run shows NPC pages and scene speech boxes (" +
+                                           std::to_string(npc) + " pages, " +
+                                           std::to_string(speech) + " speech boxes)");
+        check(same, "every box shown is one text event, in order, of its kind, with its text (" +
+                        std::to_string(shown.size()) + " events, " +
+                        std::to_string(s.boxes.size()) + " boxes)");
+        bool whole = true, named = true;
+        for (const SpeechRun::Event &e : s.events) {
+            whole = whole && valid_utf8(e.text) && valid_utf8(e.speaker) &&
+                    (e.kind == MT_TEXT_EVENT_ANSWER || !e.text.empty());
+            named = named && !e.speaker.empty() && e.speaker_kind != MT_TEXT_SPEAKER_NONE;
+        }
+        check(whole, "every event's text and speaker are whole UTF-8");
+        check(named, "every event has a speaker");
+        bool lines = s.said.size() == shown.size();
+        for (std::size_t i = 0; lines && i < s.said.size(); i++) {
+            lines = valid_utf8(s.said[i]) &&
+                    s.said[i].rfind(shown[i]->speaker + ": " + shown[i]->text, 0) == 0;
+        }
+        check(lines, "each page and scene box is said once, in order, as \"speaker: text\" (" +
+                         std::to_string(s.said.size()) + " utterances)");
+    }
+    const char *base_dir = std::getenv("MT_SPEECH_BASE");
+    if (base_dir == nullptr || *base_dir == 0) {
+        return;
+    }
+    std::ifstream in(fs::path(base_dir) / "speech_state.txt", std::ios::binary);
+    std::vector<std::pair<std::string, std::string>> base;
+    for (std::string line; std::getline(in, line);) {
+        const std::size_t eq = line.find(" = ");
+        if (eq != std::string::npos) {
+            base.emplace_back(line.substr(0, eq), line.substr(eq + 3));
+        }
+    }
+    std::size_t differ = 0;
+    for (std::size_t i = 0; i < s.state.size() && i < base.size(); i++) {
+        if (s.state[i] != base[i]) {
+            differ++;
+            std::printf("speech_dialogue: %s differs from the off run's\n",
+                        s.state[i].first.c_str());
+        }
+    }
+    check(!base.empty() && base.size() == s.state.size() && differ == 0,
+          "the rand() state, the tick, the hero, the quests and the mobs equal the off run's (" +
+              std::to_string(s.state.size()) + " lines, " + std::to_string(differ) + " differ)");
+}
+
 constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
     {"regress_record", regress_record, regress_record_checks, 1, false, regress_record_setup},
@@ -9622,6 +9833,7 @@ constexpr Mode k_modes[] = {
     {"ui_animations_fast", ui_animations_fast, ui_animations_checks, 1},
     {"ui_animations_instant", ui_animations_instant, ui_animations_checks, 1},
     {"chat_text", chat_text, chat_text_checks, 1},
+    {"speech_dialogue", speech_dialogue, speech_dialogue_checks, 1},
     {"text_pack", text_pack_play, text_pack_checks, 1, false, text_pack_setup},
     {"skip_intros_watched", skip_intros_watched, skip_intros_checks, 1},
     {"skip_intros_skipped", skip_intros_skipped, skip_intros_checks, 1},

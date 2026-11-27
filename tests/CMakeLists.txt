@@ -1327,6 +1327,27 @@ set_tests_properties(
     play.chat_text
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+# Speech of the dialogue (#391, ADR 0187): chat_text's flow with the speech off
+# (play.speech_dialogue_off, the base) and on the log backend (play.speech_dialogue): every page
+# and speech box the game shows is one text event and one utterance, in order, whole UTF-8,
+# with a speaker; the rand() state, the hero, the quests and the mobs equal the off run's.
+add_test(NAME play.speech_dialogue_off
+         COMMAND play_real_test speech_dialogue "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_speech_off" 1)
+add_test(NAME play.speech_dialogue
+         COMMAND play_real_test speech_dialogue "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_speech_on" 1)
+set_tests_properties(
+    play.speech_dialogue_off
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+               FIXTURES_SETUP play_speech
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+set_tests_properties(
+    play.speech_dialogue
+    PROPERTIES
+        LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+        FIXTURES_REQUIRED play_speech
+        ENVIRONMENT
+        "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_SPEECH=on;MT_SPEECH_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_speech_off"
+)
 
 # The HUD extras (#191, ADR 0109, docs/re/hud-extras.md): first_map's route to 2.3 with
 # exp_percent = on and a hunt until a Red Potion and a level: the figure equal to the hero's
