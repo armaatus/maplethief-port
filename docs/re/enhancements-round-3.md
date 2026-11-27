@@ -40,7 +40,7 @@ Addresses are armv7 VM addresses; function pointers carry the Thumb bit. The fac
 
 Where it goes: inside the box's top edge on a translucent strip, so the corner layout (at most 150 × 48 points, ending above y = 52 where the game's messages start) keeps its size.
 
-**Verdict: go, both in one issue** (#397, M), each behind its own key (`minimap_mobs`, `minimap_name`, off in every preset like `minimap`). Both read only.
+**Verdict: go, both in one issue** (#397, M), each behind its own key (`minimap_mobs`, `minimap_name`, off in every preset like `minimap`). Both read only. Built: [ADR 0098's last addendum](../adr/0098-port-drawn-minimap.md#addendum-the-maps-mobs-and-name-opt-in-2026-11-27). The mobs are read from the list at `0x11A9EC`, the one the runtime's text events read (`CStateGame +0x34` is the same `CMobs`).
 
 ## Rumble per event
 

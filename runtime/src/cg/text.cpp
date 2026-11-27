@@ -569,15 +569,15 @@ extern "C" int mt_cg_bundled_line(const char *utf8, size_t size, int32_t em_pixe
     }
     const int32_t limit = std::clamp<int32_t>(max_width, 1, 4096);
     const std::lock_guard<std::mutex> hold(g_bundled_lock);
-    const mt_cg::FontFile *primary =
-        mt_cg::load(g_bundled_font, mt_cg_font_data, mt_cg_font_size);
+    const mt_cg::FontFile *primary = mt_cg::load(g_bundled_font, mt_cg_font_data, mt_cg_font_size);
     if (primary == nullptr) {
         return 0;
     }
     // The line's metrics are NanumGothic's, as the game's text (draw_text).
     const float em = static_cast<float>(em_pixels);
     const float ps = stbtt_ScaleForMappingEmToPixels(&primary->info, em);
-    const int32_t ascent = static_cast<int32_t>(std::ceil(static_cast<float>(primary->ascent) * ps));
+    const int32_t ascent =
+        static_cast<int32_t>(std::ceil(static_cast<float>(primary->ascent) * ps));
     const int32_t descent =
         static_cast<int32_t>(std::ceil(static_cast<float>(-primary->descent) * ps));
     struct Placed {

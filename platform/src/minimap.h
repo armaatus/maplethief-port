@@ -104,16 +104,16 @@ inline constexpr std::int32_t kMinimapMaxCellSide = 64;
 inline constexpr std::int32_t kMinimapMaxMobs = 64; // shipped: at most about 20 on a map
 
 // The extras' guest facts (#397; see above).
-inline constexpr std::uint32_t kMinimapMobList = 0x11A9EC;      // PtrArray* of CMob*
-inline constexpr std::uint32_t kMinimapMobDead = 0x10;          // CMob +0x0C
-inline constexpr std::uint32_t kMinimapStateArea = 0x84;        // CStateGame: the area
-inline constexpr std::uint32_t kMinimapStateMapNo = 0x88;       // CStateGame: the map in it
-inline constexpr std::uint32_t kMinimapSpotIndex = 0x1077E0;    // g_mapSpotIndex, int[11][30]
-inline constexpr std::uint32_t kMinimapSpotNames = 0x111A50;    // g_middleSpotNames
+inline constexpr std::uint32_t kMinimapMobList = 0x11A9EC;   // PtrArray* of CMob*
+inline constexpr std::uint32_t kMinimapMobDead = 0x10;       // CMob +0x0C
+inline constexpr std::uint32_t kMinimapStateArea = 0x84;     // CStateGame: the area
+inline constexpr std::uint32_t kMinimapStateMapNo = 0x88;    // CStateGame: the map in it
+inline constexpr std::uint32_t kMinimapSpotIndex = 0x1077E0; // g_mapSpotIndex, int[11][30]
+inline constexpr std::uint32_t kMinimapSpotNames = 0x111A50; // g_middleSpotNames
 inline constexpr std::int32_t kMinimapAreas = 11, kMinimapMapsPerArea = 30;
 inline constexpr std::int32_t kMinimapNameGroups = 3, kMinimapNamesPerGroup = 50;
-inline constexpr std::uint32_t kMinimapNameSize = 50;           // char[50], NUL-terminated
-inline constexpr std::uint32_t kMinimapNameGroupSize = 0x9C4;   // 50 x 50 bytes
+inline constexpr std::uint32_t kMinimapNameSize = 50;         // char[50], NUL-terminated
+inline constexpr std::uint32_t kMinimapNameGroupSize = 0x9C4; // 50 x 50 bytes
 
 // `n` bytes of guest memory at `addr`, or nullptr if any of them is not game memory.
 using GuestSpan = std::function<const std::uint8_t *(std::uint32_t addr, std::uint32_t n)>;
@@ -235,10 +235,10 @@ inline constexpr MinimapColor kMinimapMob{236, 96, 200, 255};
 inline constexpr MinimapColor kMinimapHero{255, 72, 56, 255};
 inline constexpr MinimapColor kMinimapHeroEdge{255, 255, 255, 255};
 inline constexpr MinimapColor kMinimapEdge{236, 236, 226, 112}; // the frame
-inline constexpr MinimapColor kMinimapNameBack{0, 0, 0, 144};     // the name's strip
+inline constexpr MinimapColor kMinimapNameBack{0, 0, 0, 144};   // the name's strip
 inline constexpr MinimapColor kMinimapNameText{255, 255, 255, 255};
-inline constexpr float kMinimapNameEm = 9;      // the name's size in screen points (the em)
-inline constexpr float kMinimapNameMinEm = 6;   // its smallest, while the box holds it
+inline constexpr float kMinimapNameEm = 9;       // the name's size in screen points (the em)
+inline constexpr float kMinimapNameMinEm = 6;    // its smallest, while the box holds it
 inline constexpr float kMinimapNameShare = 0.4f; // the strip's share of the box's height
 
 // A filled rectangle in drawable pixels, whole pixels, inside the box.
@@ -255,21 +255,21 @@ Rect minimap_hero_dot(const MinimapView &v, const MinimapLayout &l);
 
 // The name's strip: the box's full width at its top, a line of the name's text high; its text
 // kMinimapNameEm points, smaller (to kMinimapNameMinEm) to keep the strip within
-// kMinimapNameShare of the box's height, a point from its left edge, clipped at its right. Not shown without a name or a layout.
+// kMinimapNameShare of the box's height, a point from its left edge, clipped at its right. Not
+// shown without a name or a layout.
 struct MinimapNameStrip {
     bool shown = false;
-    Rect strip;              // drawable pixels, whole, inside the box
-    std::int32_t em = 0;     // the text's em in drawable pixels
-    float text_x = 0;        // the text's left edge, drawable pixels
-    std::int32_t max_w = 0;  // the text's widest, pixels (to the strip's right edge)
+    Rect strip;             // drawable pixels, whole, inside the box
+    std::int32_t em = 0;    // the text's em in drawable pixels
+    float text_x = 0;       // the text's left edge, drawable pixels
+    std::int32_t max_w = 0; // the text's widest, pixels (to the strip's right edge)
 };
 MinimapNameStrip minimap_name_strip(const MinimapView &v, const MinimapLayout &l);
 
 // The name's text as straight RGBA8 (mt_cg_bundled_line in kMinimapNameText), `*w` x `*h` pixels;
 // empty if it draws nothing.
 std::vector<std::uint8_t> minimap_name_pixels(const std::string &name, std::int32_t em,
-                                              std::int32_t max_w, std::int32_t *w,
-                                              std::int32_t *h);
+                                              std::int32_t max_w, std::int32_t *w, std::int32_t *h);
 
 // The grid reduced to the box: box.w x box.h straight RGBA8, top row first.
 std::vector<std::uint8_t> minimap_grid_pixels(const MinimapView &v, const MinimapLayout &l);

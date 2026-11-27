@@ -1712,13 +1712,36 @@ set_tests_properties(
 
 # The minimap (#176, minimap.h, ADR 0098): first_map's route to 2.3 with minimap = overlay and
 # 600 ticks of the hunt there; the guest's grid equal to map/23.att, the hero's dot following
-# the hero (play.minimap). Shots (minimap_NN.png) stay in the test output directory.
+# the hero (play.minimap). Shots (minimap_NN.png) stay in the test output directory. With its
+# extras on (#397, minimap_mobs and minimap_name): a dot for every live mob in every turn on 2.3,
+# and the name equal to the knowledge base's name of 2.3 (minimap.kb_name_2_3 writes it from the
+# bundle into the build tree; nothing derived is committed), in English and in Korean
+# (play.minimap_ko).
+add_test(NAME minimap.kb_name_2_3
+         COMMAND "${Python3_EXECUTABLE}" -B -m mtport.compendium.world map-name --app
+                 "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app" 2 3
+                 "${CMAKE_CURRENT_BINARY_DIR}/minimap_name_2_3.txt")
+set_tests_properties(
+    minimap.kb_name_2_3
+    PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_SETUP play_minimap_name
+               ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+set(_minimap_env
+    "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MT_MINIMAP_NAME=${CMAKE_CURRENT_BINARY_DIR}/minimap_name_2_3.txt"
+)
 add_test(NAME play.minimap COMMAND play_real_test minimap
                                    "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_minimap")
 set_tests_properties(
     play.minimap
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
-               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+               FIXTURES_REQUIRED play_minimap_name
+               ENVIRONMENT "${_minimap_env};MAPLETHIEF_LANGUAGE=en")
+add_test(NAME play.minimap_ko COMMAND play_real_test minimap
+                                      "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_minimap_ko")
+set_tests_properties(
+    play.minimap_ko
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_minimap_name
+               ENVIRONMENT "${_minimap_env};MAPLETHIEF_LANGUAGE=ko")
 # The minimap's corner (ADR 0098's addendum): the same route with widescreen (568 points), the
 # key pad at the view's edges and minimap = overlay; the box at the visible view's top left in
 # every wide field turn, the game pad composited alone (the moved compass, Bag, Cash, the keys)

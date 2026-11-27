@@ -283,7 +283,7 @@ TEST_CASE("minimap: the mobs from a synthetic guest, dead skipped, count and poi
         h.put32(fe::kMinimapMobList, 0);
         CHECK(mobs(h) == 0);
         h = field_map_extras();
-        h.put32(kMobItems, 0x05000000);           // a mob that is not memory
+        h.put32(kMobItems, 0x05000000);                    // a mob that is not memory
         h.put32(kMobItems + 12, kMobs + 6 * kMobSize - 8); // one that runs past it
         CHECK(mobs(h) == 2);
         h = field_map_extras();

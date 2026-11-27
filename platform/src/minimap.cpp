@@ -87,8 +87,8 @@ void read_mobs(const GuestSpan &mem, MinimapView *v) {
     u32 list = 0, items = 0;
     i32 count = 0;
     if (!read_u32(mem, kMinimapMobList, &list) || list == 0 ||
-        !read_i32(mem, list + 0x04, &count) || count <= 0 ||
-        !read_u32(mem, list + 0x08, &items) || items == 0) {
+        !read_i32(mem, list + 0x04, &count) || count <= 0 || !read_u32(mem, list + 0x08, &items) ||
+        items == 0) {
         return;
     }
     const i32 n = std::min(count, kMinimapMaxMobs);
@@ -277,9 +277,7 @@ std::string minimap_map_name(const GuestSpan &mem, std::int32_t area, std::int32
     i32 index = -1;
     if (group < 0 || !in_range(area, 0, kMinimapAreas - 1) ||
         !in_range(map, 0, kMinimapMapsPerArea - 1) ||
-        !read_i32(mem,
-                  kMinimapSpotIndex +
-                      4 * static_cast<u32>(area * kMinimapMapsPerArea + map),
+        !read_i32(mem, kMinimapSpotIndex + 4 * static_cast<u32>(area * kMinimapMapsPerArea + map),
                   &index) ||
         !in_range(index, 0, kMinimapNamesPerGroup - 1)) {
         return {};
@@ -562,8 +560,8 @@ std::vector<std::uint8_t> minimap_name_pixels(const std::string &name, std::int3
     const u8 color[4] = {kMinimapNameText.r, kMinimapNameText.g, kMinimapNameText.b,
                          kMinimapNameText.a};
     mt_cg_line line{};
-    if (name.empty() || mt_cg_bundled_line(name.data(), name.size(), em, max_w, color, &line,
-                                           nullptr, 0) == 0) {
+    if (name.empty() ||
+        mt_cg_bundled_line(name.data(), name.size(), em, max_w, color, &line, nullptr, 0) == 0) {
         return {};
     }
     std::vector<std::uint8_t> px(static_cast<std::size_t>(line.width) *
@@ -646,7 +644,8 @@ std::vector<std::uint8_t> render_minimap(const MinimapView &v, const MinimapLayo
     };
     const u8 back[4] = {kMinimapNameBack.r, kMinimapNameBack.g, kMinimapNameBack.b,
                         kMinimapNameBack.a};
-    const i32 sx = static_cast<i32>(n.strip.x - l.box.x), sy = static_cast<i32>(n.strip.y - l.box.y);
+    const i32 sx = static_cast<i32>(n.strip.x - l.box.x),
+              sy = static_cast<i32>(n.strip.y - l.box.y);
     for (i32 y = sy; y < sy + static_cast<i32>(n.strip.h); y++) {
         for (i32 x = sx; x < sx + static_cast<i32>(n.strip.w); x++) {
             over(x, y, back);
@@ -720,8 +719,8 @@ bool MinimapLayer::draw(SDL_Renderer *renderer, const MinimapView &v, const Mini
     const MinimapNameStrip n = minimap_name_strip(v, l);
     if (n.shown) {
         const SDL_FRect strip{n.strip.x, n.strip.y, n.strip.w, n.strip.h};
-        SDL_SetRenderDrawColor(renderer, kMinimapNameBack.r, kMinimapNameBack.g,
-                               kMinimapNameBack.b, kMinimapNameBack.a);
+        SDL_SetRenderDrawColor(renderer, kMinimapNameBack.r, kMinimapNameBack.g, kMinimapNameBack.b,
+                               kMinimapNameBack.a);
         ok = SDL_RenderFillRect(renderer, &strip) && ok;
         if (const NameTexture *t = name_texture(renderer, v.name, n.em, n.max_w)) {
             const SDL_FRect text{n.text_x,
@@ -757,8 +756,8 @@ const MinimapLayer::NameTexture *MinimapLayer::name_texture(SDL_Renderer *render
     NameTexture t{text, em, max_w, nullptr, 0, 0};
     const std::vector<std::uint8_t> px = minimap_name_pixels(text, em, max_w, &t.w, &t.h);
     if (!px.empty()) {
-        t.texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888,
-                                      SDL_TEXTUREACCESS_STATIC, t.w, t.h);
+        t.texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC,
+                                      t.w, t.h);
         if (t.texture != nullptr && !SDL_UpdateTexture(t.texture, nullptr, px.data(), t.w * 4)) {
             SDL_DestroyTexture(t.texture);
             t.texture = nullptr;
