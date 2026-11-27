@@ -51,6 +51,10 @@
             "integration_id": 15368
           },
           {
+            "context": "guest image (macOS, clang + Apple ld)",
+            "integration_id": 15368
+          },
+          {
             "context": "release title",
             "integration_id": 15368
           },
