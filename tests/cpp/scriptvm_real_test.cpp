@@ -41,9 +41,9 @@
 //
 // Printed: files, functions, runs, opcodes and native calls compared, the distinct (TFunc, pc)
 // reached. MT_SCRIPTVM_ONLY=<text> runs only the files whose path has it (for finding a
-// difference; the totals' check then fails). Local only: it needs work/gen (python -m recomp all), the slice and the extracted
-// bundle, and exits 77 (skipped) without them. Output (the data directory) goes to the test
-// output directory (build/, never committed).
+// difference; the totals' check then fails). Local only: it needs work/gen (python -m recomp all),
+// the slice and the extracted bundle, and exits 77 (skipped) without them. Output (the data
+// directory) goes to the test output directory (build/, never committed).
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -98,7 +98,7 @@ constexpr u32 k_stack = 0x1178EC, k_top = 0x1178F0, k_limit = 0x1178F4;
 constexpr u32 k_tfunc_pc = 0x1C, k_tfunc_reader = 0x20, k_reader_buf = 0x4, k_reader_pos = 0x8;
 constexpr u32 k_fetch_return = 0x9BC2E; // after Lua::execute's opcode fetch (bl at 0x9BC2A)
 constexpr u32 k_number = 0xFFFFFFFEu, k_string = 0xFFFFFFFDu;
-constexpr u32 k_below_sp = 0x10000;    // stack kept below sp: the calls' frames
+constexpr u32 k_below_sp = 0x10000; // stack kept below sp: the calls' frames
 constexpr u32 k_chunk = 0x1000;
 constexpr int k_answer_sets = 16;
 
@@ -154,9 +154,9 @@ struct Record {
 
 struct Recorder {
     Record *record = nullptr;
-    int answers = 0;   // the answer set
-    u32 answered = 0;  // natives answered in this run
-    u64 rng = 0;       // the mixed sets' state
+    int answers = 0;  // the answer set
+    u32 answered = 0; // natives answered in this run
+    u64 rng = 0;      // the mixed sets' state
     mt_cpu *cpu = nullptr;
 } g_rec;
 
@@ -281,7 +281,8 @@ Kept keep(mt_cpu *cpu, u32 stack_top) {
 }
 
 // Puts kept memory back; the compared chunks that had changed go to `changed` (if not null).
-void restore(mt_cpu *cpu, const Kept &k, std::vector<std::pair<u32, std::vector<std::uint8_t>>> *changed) {
+void restore(mt_cpu *cpu, const Kept &k,
+             std::vector<std::pair<u32, std::vector<std::uint8_t>>> *changed) {
     for (const Range &r : k.ranges) {
         for (u32 at = r.lo; at < r.hi; at += k_chunk) {
             const u32 n = std::min(k_chunk, r.hi - at);
@@ -349,8 +350,8 @@ void compare(mt_cpu *cpu, const Kept &k, u32 lua, u32 tfunc, int answers, const 
                std::to_string(rec[1].events.size()) + " words; steps " +
                std::to_string(rec[0].steps) + " and " + std::to_string(rec[1].steps) + ")";
     } else if (rec[0].result != rec[1].result) {
-        diff = "callFunction's results differ: " + hex(rec[0].result) + " and " +
-               hex(rec[1].result);
+        diff =
+            "callFunction's results differ: " + hex(rec[0].result) + " and " + hex(rec[1].result);
     } else if (!heap_same(rec[0].heap) || !heap_same(rec[1].heap)) {
         diff = "a run moved the heap (" + std::to_string(rec[0].heap.live_blocks) + "/" +
                std::to_string(rec[1].heap.live_blocks) + " blocks, kept " +
@@ -394,12 +395,8 @@ struct Run {
 Run *g_run = nullptr;
 
 // The function slots' count and table, read as FunctionSlots::add reads them.
-u32 slot_count(const mt_cpu *cpu) {
-    return rd(cpu, rd(cpu, k_slot_count_lit) + k_slot_count_pc);
-}
-u32 slot_table(const mt_cpu *cpu) {
-    return rd(cpu, rd(cpu, k_slot_table_lit) + k_slot_table_pc);
-}
+u32 slot_count(const mt_cpu *cpu) { return rd(cpu, rd(cpu, k_slot_count_lit) + k_slot_count_pc); }
+u32 slot_table(const mt_cpu *cpu) { return rd(cpu, rd(cpu, k_slot_table_lit) + k_slot_table_pc); }
 
 void corpus(mt_cpu *cpu) {
     Run &r = *g_run;
@@ -488,17 +485,15 @@ void corpus(mt_cpu *cpu) {
     mt_hook_unregister(MT_HOOK_FN_LUA_CALL_NATIVE);
     mt_hook_unregister(MT_HOOK_FN_LUA_EXECUTE);
     const mt_scriptvm_stats vm = mt_scriptvm_get_stats();
-    std::printf("scriptvm corpus: %llu files, %llu functions (at most %llu slots in one), %llu "
-                "runs, %llu opcodes and %llu native calls compared, %zu distinct (function, pc) "
-                "reached; the host loop ran %llu calls, %llu opcodes, %llu checks\n",
-                static_cast<unsigned long long>(t.files),
-                static_cast<unsigned long long>(t.functions),
-                static_cast<unsigned long long>(max_slots),
-                static_cast<unsigned long long>(t.runs), static_cast<unsigned long long>(t.steps),
-                static_cast<unsigned long long>(t.natives), t.reached.size(),
-                static_cast<unsigned long long>(vm.calls),
-                static_cast<unsigned long long>(vm.steps),
-                static_cast<unsigned long long>(vm.checks));
+    std::printf(
+        "scriptvm corpus: %llu files, %llu functions (at most %llu slots in one), %llu "
+        "runs, %llu opcodes and %llu native calls compared, %zu distinct (function, pc) "
+        "reached; the host loop ran %llu calls, %llu opcodes, %llu checks\n",
+        static_cast<unsigned long long>(t.files), static_cast<unsigned long long>(t.functions),
+        static_cast<unsigned long long>(max_slots), static_cast<unsigned long long>(t.runs),
+        static_cast<unsigned long long>(t.steps), static_cast<unsigned long long>(t.natives),
+        t.reached.size(), static_cast<unsigned long long>(vm.calls),
+        static_cast<unsigned long long>(vm.steps), static_cast<unsigned long long>(vm.checks));
     check(t.files == r.files.size() && t.files == 307 && t.functions == 1086,
           "all " + std::to_string(r.files.size()) + " files loaded: " + std::to_string(t.files) +
               " files, " + std::to_string(t.functions) +
