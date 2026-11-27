@@ -2,7 +2,9 @@
 // on synthetic packs written at run time: the manifest's rules and reasons, the list's own rules,
 // the start's choice and its notices, and the settings menu's packs screen driven with a
 // controller alone: two packs turned on, reordered, one turned off; a pack with a bad file
-// saying why.
+// saying why. Several packs open at once (#421): the exit log's line per pack with what it
+// replaced and what an earlier pack hid, the same on the packs screen, and the pack flags given
+// more than once.
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
@@ -18,6 +20,7 @@
 
 #include "data_notice.h"
 #include "maplethief/pack_manifest.h"
+#include "maplethief/textpack.h"
 #include "packs.h"
 #include "settings.h"
 #include "settings_menu.h"
@@ -247,7 +250,7 @@ TEST_CASE("pack manifest: pack.strings fields, the fallbacks, and every refusal'
     }
 }
 
-TEST_CASE("packs: the list's own rules; the start opens the first it takes and says why not") {
+TEST_CASE("packs: the list's own rules; the start opens every one it takes and says why not") {
     Base b;
     CHECK(fe::split_pack_list("") == std::vector<std::string>{});
     CHECK(fe::split_pack_list("/a") == std::vector<std::string>{"/a"});
@@ -284,11 +287,11 @@ TEST_CASE("packs: the list's own rules; the start opens the first it takes and s
     CHECK(read(b.pack("texture-packs", "a|b", ""), PackKind::kTexture).refused ==
           "its folder's path holds '|', which a list of packs cannot");
 
-    // The start: the refused pack is a notice with its reason; the first accepted opens.
+    // The start: the refused pack is a notice with its reason; every accepted one opens (#421).
     Settings s;
     s.text_pack = fe::join_pack_list({bad, a, fr});
     fe::take_data_notices();
-    CHECK(fe::pack_to_open(s, PackKind::kText, "1.4.0") == a);
+    CHECK(fe::packs_to_open(s, PackKind::kText, "1.4.0") == std::vector<std::string>{a});
     const std::vector<std::string> notices = fe::take_data_notices();
     REQUIRE(notices.size() == 2);
     CHECK(notices[0] ==
@@ -296,7 +299,7 @@ TEST_CASE("packs: the list's own rules; the start opens the first it takes and s
     CHECK(notices[1] ==
           "The pack F was not loaded: language fr differs from the first text pack's de");
     s.text_pack.clear();
-    CHECK(fe::pack_to_open(s, PackKind::kText, "1.4.0").empty());
+    CHECK(fe::packs_to_open(s, PackKind::kText, "1.4.0").empty());
     CHECK(fe::take_data_notices().empty());
 }
 
@@ -414,8 +417,89 @@ TEST_CASE("packs: the Original preset has no pack (#370)") {
     for (const PackKind kind : fe::kPackKinds) {
         CAPTURE(fe::pack_kind_key(kind));
         CHECK(fe::pack_kind_value(s, kind).empty());
-        CHECK(fe::pack_to_open(s, kind, "1.4.0").empty());
+        CHECK(fe::packs_to_open(s, kind, "1.4.0").empty());
         CHECK(fe::pack_kind_of(fe::pack_kind_key(kind)) == kind);
     }
     CHECK_FALSE(fe::pack_kind_of("border_image"));
+}
+
+TEST_CASE("packs: the exit log names each open pack's replaced and hidden counts (#421)") {
+    Base b;
+    const auto text_pack = [&b](const std::string &name, const std::string &more,
+                                const std::string &port) {
+        const std::string p = b.pack("text-packs", name,
+                                     manifest("text", name == "Menus" ? "menus" : "dialogue", name,
+                                              "\"language\" = \"de\";" + more));
+        std::ofstream(fs::path(p) / "Port.strings", std::ios::binary) << port;
+        return p;
+    };
+    const std::string first =
+        text_pack("Menus", "\"version\" = \"1.2\";",
+                  "\"hint_move\" = \"bewegen\";\n\"hint_back\" = \"zurueck\";\n");
+    const std::string second =
+        text_pack("Dialogue", "", "\"hint_move\" = \"gehen\";\n\"hint_page\" = \"Seite\";\n");
+    Settings s;
+    s.text_pack = fe::join_pack_list({first, second});
+    const std::vector<std::string> paths = fe::packs_to_open(s, PackKind::kText, "1.4.0");
+    REQUIRE(paths == std::vector<std::string>{first, second});
+    REQUIRE(fe::open_packs(PackKind::kText, paths).empty());
+    CHECK(std::strcmp(mt_textpack_lookup("Port", "hint_move"), "bewegen") == 0); // the first's
+    CHECK(std::strcmp(mt_textpack_lookup("Port", "hint_back"), "zurueck") == 0);
+    CHECK(std::strcmp(mt_textpack_lookup("Port", "hint_page"), "Seite") == 0); // the second's
+    CHECK(std::strcmp(mt_textpack_lookup("Port", "hint_move"), "bewegen") == 0);
+
+    const std::vector<fe::PackUse> uses = fe::open_pack_uses(PackKind::kText, "1.4.0");
+    REQUIRE(uses.size() == 2);
+    CHECK(fe::pack_use_line(PackKind::kText, uses[0]) ==
+          "textpack: Menus 1.2: 3 replaced, 0 hidden");
+    CHECK(fe::pack_use_line(PackKind::kText, uses[1]) ==
+          "textpack: Dialogue: 1 replaced, 2 hidden by Menus 1.2");
+
+    // The packs screen's help line says the same while the packs are open.
+    fe::PacksScreen screen(b.str(), "1.4.0");
+    screen.scan(s);
+    const std::size_t row = screen.first_row(PackKind::kText);
+    CHECK(screen.row_help(row + 1).find("This run: 1 replaced, 2 hidden by an earlier pack.") !=
+          std::string::npos);
+    screen.set_uses([](PackKind) { return std::vector<fe::PackUse>{}; });
+    CHECK(screen.row_help(row + 1).find("This run") == std::string::npos);
+    mt_textpack_close();
+    CHECK(fe::open_pack_uses(PackKind::kText, "1.4.0").empty());
+
+    // Several earlier packs hid entries; rejected files are named when there are some.
+    fe::PackUse u;
+    u.title = "HD Sprites 1.2";
+    u.replaced = 812;
+    u.hidden = 40;
+    u.rejected = 2;
+    u.hidden_by = {{"UI Redraw", 32}, {"Fonts", 8}};
+    CHECK(fe::pack_use_line(PackKind::kTexture, u) ==
+          "texpack: HD Sprites 1.2: 812 replaced, 40 hidden (32 by UI Redraw, 8 by Fonts), 2 "
+          "rejected");
+    u.hidden_by.pop_back();
+    u.rejected = 0;
+    CHECK(fe::pack_use_line(PackKind::kAudio, u) ==
+          "audiopack: HD Sprites 1.2: 812 replaced, 40 hidden by UI Redraw");
+}
+
+TEST_CASE("packs: a pack flag given more than once lists its packs in order (#421)") {
+    std::vector<std::pair<std::string, std::string>> flags;
+    fe::add_setting_flag(flags, "texture_pack", "/p/HD");
+    fe::add_setting_flag(flags, "music_volume", "50");
+    fe::add_setting_flag(flags, "texture_pack", "/p/UI");
+    fe::add_setting_flag(flags, "audio_pack", "/a/Music");
+    fe::add_setting_flag(flags, "music_volume", "60"); // not a pack: the later one counts
+    fe::add_setting_flag(flags, "texture_pack", "/p/X");
+    REQUIRE(flags.size() == 4);
+    CHECK(flags[0] == std::pair<std::string, std::string>{"texture_pack", "/p/HD|/p/UI|/p/X"});
+    CHECK(flags[1] == std::pair<std::string, std::string>{"music_volume", "50"});
+    CHECK(flags[2] == std::pair<std::string, std::string>{"audio_pack", "/a/Music"});
+    CHECK(flags[3] == std::pair<std::string, std::string>{"music_volume", "60"});
+    Settings s;
+    for (const auto &[key, value] : flags) {
+        REQUIRE(fe::apply_setting(&s, key, value, nullptr));
+    }
+    CHECK(fe::split_pack_list(s.texture_pack) ==
+          std::vector<std::string>{"/p/HD", "/p/UI", "/p/X"});
+    CHECK(s.music_volume == 60);
 }

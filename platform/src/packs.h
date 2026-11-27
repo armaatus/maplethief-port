@@ -10,6 +10,8 @@
 //             one row that says where they go.
 //   order     enabled packs first, in their setting's order (the first wins, entry by entry:
 //             ADR 0149), then the others by name
+//   help      while the game runs with the pack open: what it replaced and what an earlier pack
+//             hid this run (#421)
 //   choose    (South, Enter, Space, a click or tap) turns a pack on (last in its kind's order)
 //             or off; a refused pack is not turned on, and the status line says why
 //   Left / Right (the d-pad, the stick, the arrows, the row's "<" / ">")
@@ -22,9 +24,12 @@
 // path holds '|', when an earlier pack of the list has its id, past the 16th of a kind, and when
 // a text pack's language differs from the first text pack's.
 //
-// Until #421 the runtime opens one pack of a kind: the start (game.cpp) opens the first
-// accepted pack of each list and logs the others as waiting; refused ones are logged and shown
-// on the title screen (data_notice.h). Single thread: the frontend's.
+// The start (game.cpp) opens every accepted pack of each list in its order (#421: the runtime
+// asks them entry by entry, the first wins); refused ones are logged and shown on the title
+// screen (data_notice.h). At the end, the exit log has a line per open pack with what it
+// replaced and what an earlier pack hid (log_pack_uses). The command-line flags of the three
+// settings may be given more than once (add_setting_flag): their values join into one list, in
+// order. Single thread: the frontend's.
 #ifndef MAPLETHIEF_PLATFORM_PACKS_H
 #define MAPLETHIEF_PLATFORM_PACKS_H
 
@@ -35,6 +40,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "settings.h"
@@ -72,11 +78,36 @@ PackInfo read_pack(const std::string &path, PackKind kind, const std::string &po
 std::vector<PackInfo> check_pack_list(const std::vector<std::string> &paths, PackKind kind,
                                       const std::string &port_version);
 
-// The pack of `kind` the start opens: the first of its setting's list that check_pack_list
-// accepts, "" if none. Each refused pack is logged and queued for the title screen with its
-// reason (data_notice.h); the later accepted ones are logged as not opened (one pack of a kind
-// opens until #421).
-std::string pack_to_open(const Settings &s, PackKind kind, const std::string &port_version);
+// The packs of `kind` the start opens, in order: those of its setting's list that
+// check_pack_list accepts. Each refused pack is logged and queued for the title screen with its
+// reason (data_notice.h).
+std::vector<std::string> packs_to_open(const Settings &s, PackKind kind,
+                                       const std::string &port_version);
+// Opens `paths` of `kind` in the runtime in order (mt_texpack_add, mt_audio_pack_add,
+// mt_textpack_add), after closing the packs open before. Returns the paths that did not open
+// (the runtime logged why).
+std::vector<std::string> open_packs(PackKind kind, const std::vector<std::string> &paths);
+
+// What one open pack did this run (maplethief/pack_manifest.h's mt_pack_use), with titles.
+struct PackUse {
+    std::string path, title;
+    std::uint64_t replaced = 0, rejected = 0, hidden = 0;
+    std::vector<std::pair<std::string, std::uint64_t>> hidden_by; // earlier packs' titles, > 0
+};
+// The packs of `kind` open in the runtime now, in order, titled by their manifests.
+std::vector<PackUse> open_pack_uses(PackKind kind, const std::string &port_version);
+// "812 replaced, 40 hidden by UI Redraw" (several: "40 hidden (32 by A, 8 by B)"), then
+// ", 2 rejected" when some were.
+std::string pack_use_counts(const PackUse &u);
+// The exit log's line: "texpack: HD Sprites 1.2: 812 replaced, 40 hidden by UI Redraw".
+std::string pack_use_line(PackKind kind, const PackUse &u);
+// Logs pack_use_line for every pack of `kind` open now.
+void log_pack_uses(PackKind kind, const std::string &port_version);
+
+// A setting's command-line flag into `flags` (key, value); a pack setting's flag given again
+// adds its value to the same entry's list ('|'), so --texture-pack A --texture-pack B is A|B.
+void add_setting_flag(std::vector<std::pair<std::string, std::string>> &flags,
+                      const std::string &key, const std::string &value);
 
 // "HD Sprites 1.2": the name, then the version if any.
 std::string pack_title(const PackInfo &p);
@@ -88,6 +119,10 @@ class PacksScreen {
   public:
     // `base`: the data folder (data_location().base; "" lists only the settings' paths).
     PacksScreen(std::string base, std::string port_version);
+
+    // Where the help lines read what the open packs did this run (open_pack_uses unless set).
+    using Uses = std::function<std::vector<PackUse>(PackKind)>;
+    void set_uses(Uses uses) { uses_ = std::move(uses); }
 
     // Lists the pack folders and the settings' lists again.
     void scan(const Settings &s);
@@ -125,6 +160,7 @@ class PacksScreen {
 
   private:
     std::string base_, port_;
+    Uses uses_;
     std::vector<Entry> kinds_[3];
     std::vector<Row> rows_;
 };

@@ -1542,10 +1542,24 @@ void pack_not_opened(const std::string &path) {
                          {pack_value_text(path, ""), "it could not be opened (the log says why)"}));
 }
 
+// Opens the accepted packs of `kind`'s list in order (#421, ADR 0149: the first wins, entry by
+// entry); one that does not open is shown on the title screen.
+void start_packs(const GameOptions &o, PackKind kind) {
+    const std::vector<std::string> paths = packs_to_open(o.settings, kind, MT_VERSION);
+    const std::vector<std::string> failed = open_packs(kind, paths);
+    for (const std::string &path : failed) {
+        pack_not_opened(path);
+    }
+    if (paths.size() > failed.size()) {
+        SDL_Log("packs: %zu %s packs open, the first wins", paths.size() - failed.size(),
+                pack_kind_name(kind));
+    }
+}
+
 // Texture packs and dumps (#153, ADR 0081, maplethief/texpack.h): --dump-textures DIR writes
-// every upload once, texture_pack = DIR replaces the uploads it has files for. Both before the
-// boot, so they see the first upload; both live in the textures, so a render scale change
-// (#152) keeps them.
+// every upload once, texture_pack = DIR|DIR2... replaces the uploads they have files for. Both
+// before the boot, so they see the first upload; both live in the textures, so a render scale
+// change (#152) keeps them.
 void start_texture_packs(const GameOptions &o) {
     if (!o.dump_textures.empty()) {
         if (mt_texpack_dump_open(o.dump_textures.c_str()) == 0) {
@@ -1553,15 +1567,7 @@ void start_texture_packs(const GameOptions &o) {
                     o.dump_textures.c_str());
         }
     }
-    const std::string pack = pack_to_open(o.settings, PackKind::kTexture, MT_VERSION);
-    if (!pack.empty()) {
-        const int files = mt_texpack_open(pack.c_str());
-        if (files >= 0) {
-            SDL_Log("texpack: texture_pack %s: %d files", pack.c_str(), files);
-        } else {
-            pack_not_opened(pack);
-        }
-    }
+    start_packs(o, PackKind::kTexture);
 }
 
 void stop_texture_packs(const GameOptions &o) {
@@ -1581,24 +1587,16 @@ void stop_texture_packs(const GameOptions &o) {
             static_cast<unsigned long long>(s.ui_images),
             static_cast<unsigned long long>(s.ui_replaced),
             static_cast<unsigned long long>(s.ui_rejected));
+        log_pack_uses(PackKind::kTexture, MT_VERSION);
     }
     mt_texpack_close();
     mt_texpack_dump_close();
 }
 
-// Audio packs (#188, ADR 0106, maplethief/audio.h): audio_pack = DIR replaces the game's sound
-// files it has files for. Before the boot, which decodes the effects and opens the players.
-void start_audio_pack(const GameOptions &o) {
-    const std::string pack = pack_to_open(o.settings, PackKind::kAudio, MT_VERSION);
-    if (!pack.empty()) {
-        const int files = mt_audio_pack_open(pack.c_str());
-        if (files >= 0) {
-            SDL_Log("audiopack: audio_pack %s: %d files", pack.c_str(), files);
-        } else {
-            pack_not_opened(pack);
-        }
-    }
-}
+// Audio packs (#188, ADR 0106, maplethief/audio.h): audio_pack = DIR|DIR2... replaces the
+// game's sound files they have files for. Before the boot, which decodes the effects and opens
+// the players.
+void start_audio_pack(const GameOptions &o) { start_packs(o, PackKind::kAudio); }
 
 // Text-to-speech (#390, ADR 0174, speech.h): the backend MAPLETHIEF_SPEECH names (the system
 // voice by default; none where the platform has no kCapSpeech), the voice in the game's language
@@ -1663,18 +1661,10 @@ void speak_menus(Game &g, mt_cpu *cpu) {
     g.speech_menus.spot_turn(spot, spot_text(cpu, spot), g.speech, now);
 }
 
-// Text packs (#189, ADR 0108, maplethief/textpack.h): text_pack = DIR replaces the game's text
-// and the port's own by key. Before the boot, which reads the data tables.
+// Text packs (#189, ADR 0108, maplethief/textpack.h): text_pack = DIR|DIR2... replaces the
+// game's text and the port's own by key. Before the boot, which reads the data tables.
 void start_text_pack(const GameOptions &o) {
-    const std::string pack = pack_to_open(o.settings, PackKind::kText, MT_VERSION);
-    if (!pack.empty()) {
-        const int entries = mt_textpack_open(pack.c_str());
-        if (entries >= 0) {
-            SDL_Log("textpack: text_pack %s: %d entries", pack.c_str(), entries);
-        } else {
-            pack_not_opened(pack);
-        }
-    }
+    start_packs(o, PackKind::kText);
     reload_port_text();
 }
 
@@ -1685,6 +1675,7 @@ void stop_text_pack(const GameOptions &o) {
                 static_cast<unsigned long long>(s.lookups),
                 static_cast<unsigned long long>(s.replaced), static_cast<unsigned>(s.fields),
                 static_cast<unsigned>(s.overflows));
+        log_pack_uses(PackKind::kText, MT_VERSION);
     }
     mt_textpack_close();
     reload_port_text();
@@ -1697,6 +1688,7 @@ void stop_audio_pack(const GameOptions &o) {
                 static_cast<unsigned>(s.effects), static_cast<unsigned>(s.effects_replaced),
                 static_cast<unsigned>(s.music), static_cast<unsigned>(s.music_replaced),
                 static_cast<unsigned>(s.rejected));
+        log_pack_uses(PackKind::kAudio, MT_VERSION);
     }
     mt_audio_pack_close();
 }
