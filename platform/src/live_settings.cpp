@@ -220,7 +220,8 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
                             "exp_percent",         "auto_run",       "hold_toggle",
                             "pause_on_disconnect", "keypad_haptics", "pad_pointer",
                             "save_states",         "stick_mode",     "direction_priority",
-                            "crash_recovery",      "run_timer",      "run_category"}) {
+                            "crash_recovery",      "run_timer",      "run_category",
+                            "speech_notices"}) {
         if (is(row, key)) {
             return t.turn_reads_settings;
         }
