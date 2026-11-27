@@ -120,13 +120,15 @@ struct Run {
         c.state_path = state.string();
         c.running_version = "1.0.0";
         c.now = now;
-        c.make_fetcher = [counts = counts, body = std::move(body), gate = std::move(gate)]() {
-            counts->made++;
-            return std::unique_ptr<fe::UpdateFetcher>(new FakeFetcher(counts, body, gate));
+        // Captured by copy under another name: Clang 17 counts an init-capture named like a
+        // member as shadowing it (-Wshadow, #341).
+        c.make_fetcher = [shared = counts, body = std::move(body), gate = std::move(gate)]() {
+            shared->made++;
+            return std::unique_ptr<fe::UpdateFetcher>(new FakeFetcher(shared, body, gate));
         };
-        c.log = [counts = counts](const std::string &line) {
-            const std::lock_guard<std::mutex> lock(counts->mutex);
-            counts->logs.push_back(line);
+        c.log = [shared = counts](const std::string &line) {
+            const std::lock_guard<std::mutex> lock(shared->mutex);
+            shared->logs.push_back(line);
         };
         return c;
     }

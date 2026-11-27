@@ -21,6 +21,9 @@
 #              area, map and (within a few points) position, not the second's.
 # Prints "skipped:" (the test's SKIP_REGULAR_EXPRESSION) when play.save_quit left no save.
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 if(NOT EXISTS "${SAVE}/data/saves/theif0")
     message(STATUS "skipped: no save in ${SAVE} (run play.save_quit first)")
     return()

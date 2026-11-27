@@ -211,9 +211,9 @@ struct Rig {
             },
             this);
         focus.set_menu_source(
-            [](void *user, mt_cpu *, std::int32_t *tab, std::int32_t *open) {
-                *tab = static_cast<Rig *>(user)->tab;
-                *open = static_cast<Rig *>(user)->open;
+            [](void *user, mt_cpu *, std::int32_t *tab_out, std::int32_t *open_out) {
+                *tab_out = static_cast<Rig *>(user)->tab;
+                *open_out = static_cast<Rig *>(user)->open;
                 return true;
             },
             this);

@@ -109,8 +109,9 @@ def host_cc() -> CCompiler:
     for env in ("MAPLETHIEF_CC", "CC"):
         if os.environ.get(env):
             path = os.environ[env]
-            name = Path(path).name.lower()
-            return CCompiler(path, name.startswith("cl"), "clang" in name)
+            name = Path(path).stem.lower()
+            # MSVC-style flags for cl and clang-cl only, not clang or clang-17 (#341).
+            return CCompiler(path, name in ("cl", "clang-cl"), "clang" in name)
     if sys.platform == "win32" and shutil.which("cl"):
         return CCompiler(shutil.which("cl"), True, False)
     for name in ("clang", "cc", "gcc"):
