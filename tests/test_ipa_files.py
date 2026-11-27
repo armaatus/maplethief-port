@@ -4,6 +4,7 @@ what it lists and leaves out, its include-file form, and that it is rewritten on
 from __future__ import annotations
 
 import hashlib
+import sys
 from pathlib import Path
 
 import pytest
@@ -70,12 +71,17 @@ def test_write_only_on_change(tmp_path):
     assert not list(out.parent.glob(".*.tmp"))
 
 
-def test_refuses_no_bundle_an_empty_one_and_unlistable_names(tmp_path):
+def test_refuses_no_bundle_and_an_empty_one(tmp_path):
     with pytest.raises(ipa_files.IpaFilesError, match="not a folder"):
         ipa_files.file_hashes(tmp_path / "absent")
     app = make_bundle(tmp_path / "a.app", {"MapleThief": b"x", "PkgInfo": b"x"})
     with pytest.raises(ipa_files.IpaFilesError, match="no file the game reads"):
         ipa_files.file_hashes(app)
+
+
+# Windows cannot create a name with a quote, a backslash or a control character at all.
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows forbids these names in a file")
+def test_refuses_unlistable_names(tmp_path):
     app = make_bundle(tmp_path / "b.app", {'say "hi".txt': b"x"})
     with pytest.raises(ipa_files.IpaFilesError, match="cannot hold"):
         ipa_files.file_hashes(app)
