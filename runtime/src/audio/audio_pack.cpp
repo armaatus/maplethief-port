@@ -23,6 +23,8 @@
 #include "audio/wav.h"
 #include "diag/diag_internal.h"
 #include "maplethief/audio.h"
+#include "maplethief/packcheck.h"
+#include "textpack/packcheck_internal.h"
 
 namespace mt_audio::pack {
 namespace {
@@ -189,19 +191,15 @@ std::string wav_pcm(const std::vector<std::uint8_t> &bytes, u32 max_seconds, wav
     return "";
 }
 
-// <stem>.loop: "start end" (frames, end excluded), lines starting with '#' ignored.
-bool read_loop(const std::string &stem_name, Mp3Stream::Loop *out) {
-    const auto it = g_pack.loops.find(stem_name);
-    if (it == g_pack.loops.end() || it->second.bad) {
-        return false;
-    }
-    File &f = it->second;
+// A .loop file: "start end" (frames, end excluded), lines starting with '#' ignored. False if
+// it is not that (or larger than k_max_loop_file).
+bool parse_loop_file(const std::string &path, Mp3Stream::Loop *out) {
     std::error_code ec;
-    const std::uintmax_t size = fs::file_size(host_path(f.path), ec);
+    const std::uintmax_t size = fs::file_size(host_path(path), ec);
     std::string text;
     bool ok = !ec && size <= k_max_loop_file;
     if (ok) {
-        std::ifstream in(host_path(f.path), std::ios::binary);
+        std::ifstream in(host_path(path), std::ios::binary);
         text.assign(std::istreambuf_iterator<char>(in), {});
         ok = in.good() || in.eof();
     }
@@ -238,13 +236,26 @@ bool read_loop(const std::string &stem_name, Mp3Stream::Loop *out) {
         }
     }
     if (!ok || n != 2 || v[0] >= v[1]) {
+        return false;
+    }
+    out->start = v[0];
+    out->end = v[1];
+    return true;
+}
+
+// <stem>.loop of the pack open now: logged once if it is no loop.
+bool read_loop(const std::string &stem_name, Mp3Stream::Loop *out) {
+    const auto it = g_pack.loops.find(stem_name);
+    if (it == g_pack.loops.end() || it->second.bad) {
+        return false;
+    }
+    File &f = it->second;
+    if (!parse_loop_file(f.path, out)) {
         f.bad = true;
         logf("audiopack: %s is not \"start end\" (frames, start below end): no loop",
              f.path.c_str());
         return false;
     }
-    out->start = v[0];
-    out->end = v[1];
     return true;
 }
 
@@ -449,3 +460,203 @@ extern "C" void mt_audio_pack_close(void) noexcept {
 }
 
 extern "C" mt_audio_pack_stats mt_audio_pack_get_stats(void) noexcept { return g_stats; }
+
+namespace mt_audio::pack {
+namespace {
+
+// What the game's file of a pack sound's stem is: its name in the bundle's sound/ folder, by
+// lower-case stem. Empty without a bundle.
+std::map<std::string, std::string> game_sounds(const std::string &bundle) {
+    std::map<std::string, std::string> out;
+    if (bundle.empty()) {
+        return out;
+    }
+    fs::path dir = host_path(bundle);
+    if (lower(utf8_of(dir.filename())) != "sound") {
+        dir /= "sound";
+    }
+    std::error_code ec;
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        const std::string name = lower(utf8_of(it->path().filename()));
+        const std::string ext = extension(name);
+        if (ext == "wav" || ext == "mp3") {
+            out[stem(name)] = name;
+        }
+    }
+    return out;
+}
+
+// Checks one sound file as effect() (an effect) or music() (a track) reads it; "" if the game
+// uses it. A track's loop, if any, is opened with it: *loop_outside when it lies past the end.
+std::string check_sound(const std::string &path, bool is_effect, const Mp3Stream::Loop *loop,
+                        bool *loop_outside) {
+    std::vector<std::uint8_t> bytes;
+    std::string why;
+    if (!read_file(path, &bytes, &why)) {
+        return why;
+    }
+    const u32 max = is_effect ? MT_AUDIO_PACK_MAX_EFFECT_SECONDS : MT_AUDIO_PACK_MAX_MUSIC_SECONDS;
+    std::shared_ptr<Mp3Stream> stream;
+    if (lower(extension(path)) == "wav") {
+        wav::Info w;
+        std::vector<std::int16_t> samples;
+        why = wav_pcm(bytes, max, &w, &samples);
+        if (!why.empty() || is_effect) {
+            return why;
+        }
+        const Mp3Stream::Loop smpl{w.loop_start, w.loop_end};
+        const Mp3Stream::Loop *l = loop != nullptr ? loop : w.has_loop ? &smpl : nullptr;
+        stream = Mp3Stream::open_pcm(std::move(samples), w.rate, w.channels, l, false);
+        *loop_outside = l != nullptr && stream && stream->loop().end == 0;
+        return stream ? "" : "holds no samples";
+    }
+    stream = Mp3Stream::open_pack(std::move(bytes), codec_of(path), is_effect ? nullptr : loop,
+                                  false, max);
+    if (!stream) {
+        return no_audio(path, max);
+    }
+    why = check_format(stream->rate(), stream->channels());
+    if (why.empty() && is_effect) {
+        std::vector<std::int16_t> samples;
+        why = decode_whole(*stream, &samples) ? "" : "holds no samples";
+    }
+    *loop_outside = why.empty() && !is_effect && loop != nullptr && stream->loop().end == 0;
+    return why;
+}
+
+} // namespace
+} // namespace mt_audio::pack
+
+extern "C" mt_packcheck_report mt_audio_pack_check(const char *dir, const char *bundle,
+                                                   mt_packcheck_fn fn, void *user) noexcept {
+    using namespace mt_audio::pack;
+    mt_packcheck::Reporter r(fn, user, "audio");
+    try {
+        const std::string d = dir != nullptr ? dir : "";
+        const fs::path root = host_path(d);
+        std::error_code ec;
+        if (d.empty() || !fs::is_directory(root, ec)) {
+            r.refused(d + ": is no folder");
+            return r.report;
+        }
+        std::map<std::string, std::string> manifest;
+        mt_packcheck::check_manifest(root, "audio", r, &manifest);
+        // The pack's index, as mt_audio_pack_open makes it.
+        std::map<std::string, std::string> sounds, loops; // lower name / stem -> path
+        u64 links = 0, skipped = 0;
+        for (fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+            std::error_code fe;
+            const fs::file_status status = it->symlink_status(fe);
+            const std::string name = lower(utf8_of(it->path().filename()));
+            if (fs::is_symlink(status)) {
+                ++links;
+                continue;
+            }
+            if (fe || !fs::is_regular_file(status)) {
+                continue;
+            }
+            const std::string ext = extension(name);
+            const bool sound = ext == "wav" || ext == "mp3" || ext == "flac";
+            if (!sound && ext != "loop") {
+                if (name != "pack.strings" && name != "audiopack.txt") {
+                    r.ignored(utf8_of(it->path().filename()) +
+                              ": not a sound (.wav, .mp3, .flac) or a .loop: ignored");
+                }
+                continue;
+            }
+            if (sounds.size() + loops.size() >= g_max_files) {
+                ++skipped;
+                continue;
+            }
+            (sound ? sounds[name] : loops[stem(name)]) = utf8_of(it->path());
+        }
+        if (links != 0) {
+            r.ignored(std::to_string(links) + " symbolic links not followed");
+        }
+        if (skipped != 0) {
+            r.ignored(std::to_string(skipped) + " files past the first " +
+                      std::to_string(g_max_files) + " skipped");
+        }
+        const std::map<std::string, std::string> game =
+            game_sounds(bundle != nullptr ? bundle : "");
+        if (game.empty()) {
+            r.note("the game's sounds not at hand: every file checked as a track (an effect "
+                   "may be at most " +
+                   std::to_string(MT_AUDIO_PACK_MAX_EFFECT_SECONDS) + " s)");
+        }
+        // Which file of a stem the game asks for first (find(): the game's name, then .wav,
+        // .mp3, .flac); the others of that stem are never read.
+        std::map<std::string, std::string> winner; // stem -> lower name
+        for (const auto &[name, path] : sounds) {
+            const std::string s = stem(name);
+            const auto g = game.find(s);
+            if (!game.empty() && g == game.end()) {
+                r.ignored(name + ": the game has no sound " + s + ": ignored");
+                continue;
+            }
+            if (winner.count(s) != 0) {
+                continue;
+            }
+            // Without the game's sounds: .wav, then .mp3, then .flac, as for either kind.
+            const std::string first = g != game.end() ? g->second : s + ".wav";
+            for (const std::string &c : {first, s + ".wav", s + ".mp3", s + ".flac"}) {
+                if (sounds.count(c) != 0) {
+                    winner[s] = c;
+                    break;
+                }
+            }
+        }
+        for (const auto &[name, path] : sounds) {
+            const std::string s = stem(name);
+            const auto w = winner.find(s);
+            if (w == winner.end()) {
+                continue;
+            }
+            if (w->second != name) {
+                r.ignored(name + ": " + w->second + " replaces the same sound: ignored");
+                continue;
+            }
+            const auto g = game.find(s);
+            const bool is_effect = g != game.end() && extension(g->second) == "wav";
+            mt_audio::Mp3Stream::Loop loop;
+            bool has_loop = false;
+            if (const auto l = loops.find(s); l != loops.end()) {
+                has_loop = parse_loop_file(l->second, &loop);
+                if (!has_loop) {
+                    r.rejected(s + ".loop is not \"start end\" (frames, start below end): no "
+                                   "loop");
+                } else if (is_effect) {
+                    r.ignored(s + ".loop: " + g->second +
+                              " is an effect, which never loops: "
+                              "ignored");
+                }
+            }
+            bool outside = false;
+            const std::string why =
+                check_sound(path, is_effect, has_loop && !is_effect ? &loop : nullptr, &outside);
+            const std::string replaces = g != game.end() ? " (replaces " + g->second + ")" : "";
+            if (!why.empty()) {
+                r.rejected(name + replaces + " " + why + ": rejected, the game's sound kept");
+                continue;
+            }
+            ++r.report.good;
+            if (outside) {
+                r.rejected(s + ".loop " + std::to_string(loop.start) + " to " +
+                           std::to_string(loop.end) + " is outside " + name + "'s frames: no loop");
+            }
+        }
+        for (const auto &[s, path] : loops) {
+            if (winner.count(s) == 0) {
+                r.ignored(s + ".loop: no sound " + s + " in the pack: ignored");
+            }
+        }
+        r.note(std::to_string(r.report.good) + " of " + std::to_string(winner.size()) +
+               " sounds usable");
+        if (sounds.empty()) {
+            r.ignored("no sound files: the pack replaces nothing");
+        }
+    } catch (const std::exception &) {
+        r.refused(std::string(dir != nullptr ? dir : "") + ": cannot be read");
+    }
+    return r.report;
+}
