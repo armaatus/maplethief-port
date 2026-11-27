@@ -850,6 +850,28 @@ foreach(what on off)
                          SKIP_RETURN_CODE 77 TIMEOUT 300 RUN_SERIAL TRUE)
 endforeach()
 
+# Every shipped script through both script VMs (#431, ADR 0153's second proof, ADR 0226): in the
+# main menu's turn the test loads each of the 307 .out files with the game's Lua::loadBuffer and
+# runs main and every function slot with Lua::callFunction, once in the recompiled Lua::execute
+# and once in the host VM, from the same guest memory, under 16 native answer sets; the
+# opcode sequences, the native calls (a recording stub at Lua::callNative) and guest memory must
+# be equal. Skipped (77) without the generated code, the slice or the bundle.
+add_executable(scriptvm_real_test cpp/scriptvm_real_test.cpp)
+target_link_libraries(scriptvm_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
+target_compile_definitions(
+    scriptvm_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+if(TARGET maplethief_gen)
+    target_link_libraries(scriptvm_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(scriptvm_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(scriptvm_real_test)
+add_test(NAME runtime.scriptvm_corpus COMMAND scriptvm_real_test
+                                              "${MAPLETHIEF_TEST_OUTPUT_DIR}/scriptvm_corpus")
+set_tests_properties(runtime.scriptvm_corpus PROPERTIES LABELS "cpp;real_assets"
+                     SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE)
+
 # The keyboard in the real game (#68, ADR 0048's addendum): as the gamepad's, from the turn hook
 # with synthetic SDL key events (and the held keys' repeats) through Input, Keyboard and Actions:
 # input.keyboard_play plays the first map by keys and checks the hero in guest memory;
