@@ -16,6 +16,7 @@ import hashlib
 import io
 import lzma
 import struct
+import sys
 import tarfile
 from pathlib import Path
 
@@ -341,8 +342,9 @@ def test_appdir_layout(tmp_path):
     assert (top / f"{linux_package.APP_ID}.png").read_bytes() == ICON_PNG
     desktop = (top / f"{linux_package.APP_ID}.desktop").read_text(encoding="utf-8")
     assert f"Icon={linux_package.APP_ID}\n" in desktop
-    assert (top / "bin/MapleThief").stat().st_mode & 0o777 == 0o755
-    assert (top / "README.md").stat().st_mode & 0o777 == 0o644
+    if sys.platform != "win32":  # Windows keeps no Unix modes; AppDirs are packed on Linux
+        assert (top / "bin/MapleThief").stat().st_mode & 0o777 == 0o755
+        assert (top / "README.md").stat().st_mode & 0o777 == 0o644
 
 
 def test_flatpak_dir_layout(tmp_path):
