@@ -238,6 +238,33 @@ std::string check(const Entries &m, const std::string &kind, const char *port, b
 
 } // namespace
 
+extern "C" int mt_pack_manifest_kind(const std::uint8_t *bytes, std::size_t n,
+                                     char kind[8]) MT_NOEXCEPT {
+    if (kind == nullptr) {
+        return 0;
+    }
+    kind[0] = 0;
+    if (bytes == nullptr && n != 0) {
+        return 0;
+    }
+    try {
+        mt_textpack::StringsFile file;
+        std::string why;
+        if (n > MT_TEXTPACK_MAX_FILE || !mt_textpack::parse_strings(bytes, n, &file, &why)) {
+            return 0;
+        }
+        const auto it = file.entries.find("kind");
+        if (it == file.entries.end() ||
+            (it->second != "texture" && it->second != "audio" && it->second != "text")) {
+            return 0;
+        }
+        std::memcpy(kind, it->second.c_str(), it->second.size() + 1);
+        return 1;
+    } catch (...) {
+        return 0;
+    }
+}
+
 extern "C" int mt_pack_compare_versions(const char *a, const char *b, int *ok) MT_NOEXCEPT {
     std::uint64_t x[4], y[4];
     const bool good = parse_version(a, x) && parse_version(b, y);

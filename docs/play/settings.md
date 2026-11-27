@@ -86,6 +86,16 @@ All the packs that are on play at once. When two packs of a kind have the same e
 
 A pack can say what it is in a file `pack.strings` at its top: its kind, name, version and author, and which game and port version it needs ([ADR 0149](../adr/0149-pack-manifest-several-packs-and-what-the-project-hosts.md)). A pack without one shows by its folder's name. The game refuses a pack whose `pack.strings` is broken (the reason names the line), is of another kind, needs a newer version of the port, or was made for another version of the game; a second text pack in another language; a second pack with the same `id`; and more than 16 packs of a kind. A refused pack shows **refused** on the screen with its reason, and if `settings.ini` still names it, the title screen says at the start that it wasn't loaded and why.
 
+### Adding a pack from anywhere (desktop)
+
+On a Mac, Windows or Linux desktop you don't have to copy a pack into the pack folders yourself:
+
+- **Add a pack...**, the last row of the packs screen, opens the system's folder picker. Choose a pack's folder and the game adds it by its path: it goes on, last in its kind's list, and stays where it is. Its `pack.strings` says its kind; a folder without one counts as a text pack if it has `textpack.strings`, a texture pack if it holds `.png` files, an audio pack if it holds `.wav`, `.mp3` or `.flac` files. The row is not there where no dialog can show: in a fullscreen window on Linux, and in a Steam Deck's Game Mode.
+- **Drop a folder** on the game's window while the packs screen is open: the same.
+- **Drop a `.zip`** on the window while the packs screen is open: the game unpacks it into its kind's pack folder (a zip whose files all sit in one folder becomes that folder; otherwise the zip's name names it) and lists it, off; choose it to turn it on. A zip is someone else's file, so the game checks all of it before it writes anything and refuses the whole zip on the first problem: an entry with an absolute path or `..`, a link or other special file, an encrypted entry, two entries whose names differ only in case, more files than its kind takes, a file over its kind's size (80 MiB for a picture, 128 MiB for a sound, 4 MiB for a text file), more than 1 GiB in all, or a pack folder of that name already there. A zip holds at most 4,096 entries; add a larger pack as a folder. A Finder zip's `__MACOSX` folder and `.DS_Store` files are left out.
+
+A folder or zip the game refuses says why on the status line, for example `Old Songs not added: pack.strings: needs port 9.0.0 or later; this is 1.4.0`, and nothing changes. Like turning a pack on, an added pack applies from the next start.
+
 In `settings.ini` each kind is one line, its packs in order with `|` between them: `texture_pack = /packs/HD|/packs/UI`. On the command line, give `--texture-pack`, `--audio-pack` or `--text-pack` more than once, first first: `--texture-pack /packs/HD --texture-pack /packs/UI` is the same list.
 
 ## Making packs

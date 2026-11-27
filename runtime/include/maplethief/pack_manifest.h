@@ -23,6 +23,7 @@
 #ifndef MAPLETHIEF_PACK_MANIFEST_H
 #define MAPLETHIEF_PACK_MANIFEST_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "maplethief/recomp/recomp.h"
@@ -62,6 +63,12 @@ typedef struct mt_pack_manifest {
  * folder's name whenever the manifest gives none, so a refused pack still has a name to show. */
 int mt_pack_manifest_read(const char *dir, const char *kind, const char *port_version,
                           mt_pack_manifest *out) MT_NOEXCEPT;
+
+/* The kind the pack.strings in `bytes` (`n` bytes) names (#422: a folder or zip added to the
+ * packs screen goes where its kind's packs go): the bytes through the same strict parser, then
+ * its "kind" copied into `kind` ("texture", "audio" or "text"). Returns 1, or 0 with `kind` ""
+ * when the bytes are refused or name none of the three. */
+int mt_pack_manifest_kind(const uint8_t *bytes, size_t n, char kind[8]) MT_NOEXCEPT;
 
 /* Compares two versions X.Y.Z[-rc.N]: negative, zero or positive as a is older than, as old as or
  * newer than b (a release candidate is older than its release). If either is not a version: 0,

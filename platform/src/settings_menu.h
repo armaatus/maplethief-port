@@ -186,6 +186,10 @@ struct MenuList {
     std::function<std::vector<MenuListRow>()> refresh;
     std::function<std::string(std::size_t row)> row_help; // the help lines; none: `help`
     std::size_t start_row = 0;                            // selected as it opens
+    // A file or folder dropped on the window while the list is open (#422: the packs screen
+    // adds it), or chosen in a dialog the list opened: the status line; it may move `row`, and
+    // the rows are then `refresh`ed. Without it, a drop does nothing.
+    std::function<std::string(const std::string &path, std::size_t &row)> drop;
 };
 
 class SettingsMenu {
@@ -274,7 +278,8 @@ class SettingsMenu {
     void open();
     void close();
 
-    // An SDL event: a key, gamepad button or axis, or the mouse wheel. While closed only the
+    // An SDL event: a key, gamepad button or axis, the mouse wheel, or a drop on the window (an
+    // open list's `drop`, #422). While closed only the
     // hotkeys (F1, Guide, L3 + R3), if allowed. Returns true if the menu took it: while open
     // every key and gamepad event. Mouse buttons, motion and fingers go to pointer() instead,
     // once the caller has their screen point (while open the caller drops them from the game).
@@ -290,6 +295,9 @@ class SettingsMenu {
     void open_list(MenuList list);
     void close_list();
     bool in_list() const { return list_open_; }
+    // A path for the open list's `drop` (#422): an SDL_EVENT_DROP_FILE, or a dialog's answer.
+    // False if no list that takes one is open.
+    bool drop_on_list(const std::string &path);
     const MenuList &list() const { return list_; }
     // The status line, set from outside (a file dialog's answer, #192).
     void set_status(std::string text) { say(std::move(text)); }

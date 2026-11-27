@@ -130,6 +130,15 @@
 "packs_last" = "{0}은(는) 이미 마지막입니다";
 "packs_nothing" = "아직 팩이 없습니다";
 "packs_not_saved" = "변경할 수 없었습니다";
+"packs_add_label" = "팩 추가...";
+"packs_add_button" = "폴더 선택";
+"packs_add_help" = "팩의 폴더를 골라 그 경로로 추가합니다. 또는 팩의 폴더나 .zip을 창에 끌어다 놓으세요.";
+"packs_added_on" = "{0} 추가됨, 켜짐 (#{1}), 다음 시작부터";
+"packs_unpacked" = "{0}을(를) {1}에 풀었습니다: 골라서 켜세요";
+"packs_add_refused" = "{0} 추가 안 됨: {1}";
+"packs_add_listed" = "{0}은(는) 이미 목록에 있습니다";
+"packs_add_cannot" = "폴더 선택 창을 열 수 없습니다: {0}";
+"packs_add_failed" = "폴더 선택 창이 실패했습니다: {0}";
 "notice_pack_refused" = "팩 {0}을(를) 불러오지 않았습니다: {1}";
 "picker_keep" = "내 설정 유지";
 "picker_ready" = "플레이 준비 완료";

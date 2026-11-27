@@ -109,7 +109,9 @@ bool FileDialogs::show(SDL_Window *window, const FileDialogRequest &request, Don
         }
     };
     SDL_Log("files: the %s dialog for %s opens at %s",
-            request.kind == FileDialogRequest::Kind::kSaveFile ? "save" : "open",
+            request.kind == FileDialogRequest::Kind::kSaveFile     ? "save"
+            : request.kind == FileDialogRequest::Kind::kOpenFolder ? "folder"
+                                                                   : "open",
             request.title.c_str(), request.default_location.c_str());
     if (!backend_ || !backend_(window, request, answer)) {
         const std::lock_guard<std::mutex> lock(shared_->mutex);
@@ -208,6 +210,8 @@ bool FileDialogs::sdl_backend(SDL_Window *window, const FileDialogRequest &reque
     SdlDialogContext *raw = ctx.release(); // the callback owns it now; it may run at once
     if (request.kind == FileDialogRequest::Kind::kSaveFile) {
         SDL_ShowSaveFileDialog(sdl_dialog_done, raw, window, filters, count, where);
+    } else if (request.kind == FileDialogRequest::Kind::kOpenFolder) {
+        SDL_ShowOpenFolderDialog(sdl_dialog_done, raw, window, where, false);
     } else {
         SDL_ShowOpenFileDialog(sdl_dialog_done, raw, window, filters, count, where, false);
     }

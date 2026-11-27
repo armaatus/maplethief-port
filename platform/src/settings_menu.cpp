@@ -723,6 +723,18 @@ void SettingsMenu::list_changed(std::size_t row, std::string status) {
     say(std::move(status));
 }
 
+bool SettingsMenu::drop_on_list(const std::string &path) {
+    if (!open_ || !list_open_ || !list_.drop) {
+        return false;
+    }
+    cancel_confirm();
+    const Item &it = items_[selected_];
+    std::size_t row = it.kind == ItemKind::kListRow ? it.row : 0;
+    std::string status = list_.drop(path, row);
+    list_changed(row, std::move(status));
+    return true;
+}
+
 void SettingsMenu::page(int dir) {
     if (!list_open_) {
         move(dir);
@@ -1033,6 +1045,16 @@ bool SettingsMenu::handle(const SDL_Event &e) {
     }
     case SDL_EVENT_KEY_UP:
     case SDL_EVENT_TEXT_INPUT:
+        return true;
+    case SDL_EVENT_DROP_FILE:
+        if (e.drop.data != nullptr) {
+            drop_on_list(e.drop.data);
+        }
+        return true;
+    case SDL_EVENT_DROP_BEGIN:
+    case SDL_EVENT_DROP_COMPLETE:
+    case SDL_EVENT_DROP_POSITION:
+    case SDL_EVENT_DROP_TEXT:
         return true;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
         const auto b = static_cast<SDL_GamepadButton>(e.gbutton.button);
