@@ -82,12 +82,15 @@ def build(
     rebase: bytes = b"",
     weak: bytes = b"",
     entry: int | None = None,
+    stub_size: int = 4,
 ) -> bytes:
     """The image with ``text`` at 0x1800 and ``function_starts`` (Thumb bit kept).
 
     ``init_funcs`` adds a ``__mod_init_func`` section with those pointers, ``rebase`` and
     ``weak`` the rebase and weak-bind streams of LC_DYLD_INFO_ONLY, ``entry`` an ARM
-    LC_UNIXTHREAD with that pc."""
+    LC_UNIXTHREAD with that pc. ``stub_size``: the stubs' size (the section's reserved2), 4 for
+    the game's ``ldr pc, [pc, #n]``; 12 or 16 for a modern ld's ``__symbol_stub4`` /
+    ``__picsymbolstub4`` (#385), whose words ``stub_words`` then gives, 3 stubs' worth."""
     assert len(text) <= 0x500
     methname = b"length\0"
     stubs = stub_words or [0xE59FF000 | (LAZY + 4 * i - (STUBS + 4 * i) - 8) for i in range(3)]
@@ -157,7 +160,7 @@ def build(
             [
                 ("__text", TEXT, len(text), TEXT - 0x1000, 0x80000400, 0, 0),
                 ("__objc_methname", METHNAME, len(methname), METHNAME - 0x1000, 0x2, 0, 0),
-                ("__symbolstub1", STUBS, 12, STUBS - 0x1000, 0x80000408, 0, 4),
+                ("__symbolstub1", STUBS, 3 * stub_size, STUBS - 0x1000, 0x80000408, 0, stub_size),
             ],
         ),
         segment(
@@ -208,7 +211,7 @@ def build(
     out += b"\0" * (link - len(out))
     out[TEXT - 0x1000 : TEXT - 0x1000 + len(text)] = text
     out[METHNAME - 0x1000 : METHNAME - 0x1000 + len(methname)] = methname
-    out[STUBS - 0x1000 : STUBS - 0x1000 + 12] = struct.pack("<3I", *stubs)
+    out[STUBS - 0x1000 : STUBS - 0x1000 + 4 * len(stubs)] = struct.pack(f"<{len(stubs)}I", *stubs)
     out[0x2000 : 0x2000 + len(data)] = data
     out += linkedit
     return bytes(out)

@@ -93,6 +93,37 @@ def test_tbb_switch_lifts_and_runs(tmp_path, r0: int) -> None:
     assert out["r1"] == (10 * (r0 + 1) if r0 < 3 else 99)
 
 
+def clang_sjlj_dispatch(t: Thumb, at, mark) -> None:
+    """clang's SjLj dispatch with one landing pad (the guest program, #385): ``cmp r0, #1;
+    bls`` admits index 1 too, which is the zero byte padding the one-entry table."""
+    t.cmp(0, 1).bcond(LS, at("site"))
+    t.raw(b"\xfe\xde")  # trap (udf #254)
+    mark("site")
+    t.tbb(0)
+    site = at("site")
+    t.bytes8((at("case0") - (site + 4)) // 2, 0)
+    cases(t, at, mark, 1)
+
+
+def test_tbb_padding_byte_is_no_case() -> None:
+    code, lab = assemble(clang_sjlj_dispatch)
+    fn = disc(code)
+    assert not fn.problems
+    table = fn.tables[lab["site"]]
+    assert (table.kind, table.count) == ("tbb", 2)
+    assert table.cases == ((0, lab["case0"]),)
+
+
+@pytest.mark.parametrize("r0", [0, 1])
+def test_tbb_padding_byte_traps(tmp_path, r0: int) -> None:
+    code, _ = assemble(clang_sjlj_dispatch, SNIPPET_BASE)
+    if r0 == 0:
+        assert run_snippet(tmp_path, code, {"r0": r0})["r1"] == 10
+    else:
+        with pytest.raises(Exception, match="(?i)trap|unreachable"):
+            run_snippet(tmp_path, code, {"r0": r0})
+
+
 def o0_tbh_switch(t: Thumb, at, mark) -> None:
     """The -O0 shape: the index goes through stack slots and another register is compared."""
     t.adds(0, 0, 0)  # adds r0, r0, #0 (a computed index)

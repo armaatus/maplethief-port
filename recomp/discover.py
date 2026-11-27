@@ -642,6 +642,11 @@ class _Descent:
                 value, target = i, e & ~1
             else:
                 value, target = e, (insn.address + 4 + e) & 0xFFFFFFFE
+            if kind == "tbb" and i == count - 1 and count % 2 == 0 and e == 0:
+                # clang pads a tbb table of odd length with a zero byte, and the bound check
+                # of its SjLj dispatch (cmp rI, #n; bls) admits that index too (the guest
+                # program, #385): no case, so it traps as an index outside the table.
+                continue
             if not fn.contains(target):
                 return f"entry {i} target {target:#x} is outside the function"
             if base <= target < base + count * size:

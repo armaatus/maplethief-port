@@ -16,10 +16,12 @@
         problems, then a summary. Without --only it also writes the coverage report
         (coverage.json and coverage.md in --coverage DIR, default work/recomp/; #40) and
         ends with its summary line; --compile measures compiling too (as `coverage`)
-    all [--slice PATH] [--units N] [--compile] [--jobs N]
-        the full pipeline into work/: load, discover, lift and the coverage report (exit
-        status 1 if any stage failed or fewer than 99% of the functions lift cleanly, or with
-        --compile, lift and compile)
+    all [--slice PATH] [--units N] [--compile] [--jobs N] [--work DIR] [--no-hooks]
+        the full pipeline into work/ (or DIR: its recomp/ and gen/): load, discover, lift and
+        the coverage report (exit status 1 if any stage failed or fewer than 99% of the
+        functions lift cleanly, or with --compile, lift and compile); --no-hooks lifts no
+        hooked or observed function and lets no noreturn call fall through (they are the
+        game's addresses: another program, the guest program of #385)
     coverage [--slice PATH] [--out DIR] [--units N] [--no-compile] [--jobs N] [--coverage DIR]
         discover and lift into DIR (default work/gen/), compile every generated unit with the
         host C compiler (strict flags; errors charged to functions) and write
@@ -92,6 +94,9 @@ def main(argv: list[str] | None = None) -> int:
     p_all = sub.add_parser("all", help="load, discover, lift and report coverage into work/")
     p_all.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
     p_all.add_argument("--units", type=int, default=DEFAULT_UNITS)
+    p_all.add_argument("--work", type=Path, help="write recomp/ and gen/ here, not work/")
+    p_all.add_argument("--no-hooks", action="store_true",
+                       help="another program: no game hooks, observers or may-return calls")  # fmt: skip
     _coverage_args(p_all, compile_default=False)
     p_cov = sub.add_parser("coverage", help="lift, compile and write work/recomp/coverage.md")
     p_cov.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
@@ -136,16 +141,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "discover":
         return _discover(args.slice, args.out, args.report, args.ghidra)[0]
     if args.command == "all":
-        status = _load(args.slice, loader.MANIFEST_OUT)
+        work = args.work or REPO / "work"
+        recomp_dir = work / "recomp"
+        if args.work is not None and args.coverage == coverage_mod.COVERAGE_JSON.parent:
+            args.coverage = recomp_dir
+        status = _load(args.slice, recomp_dir / "loader.json")
         image = Image(Path(args.slice).read_bytes())
         found_status, found = _discover(
             args.slice,
-            discovery_report.FUNCTIONS_OUT,
-            discovery_report.REPORT_OUT,
-            discovery_report.GHIDRA_FUNCTIONS,
+            recomp_dir / "functions.json",
+            recomp_dir / "discovery-report.md",
+            work / "ghidra" / "functions.json",
             image,
+            plain=args.no_hooks,
         )
-        return status | found_status | _lift(args, image, REPO / "work" / "gen", True, found)
+        return status | found_status | _lift(args, image, work / "gen", True, found)
     if args.command == "coverage":
         return _lift(args, Image.load(args.slice), args.out, gate=True)
     if args.command == "lift" and not args.only:
@@ -218,8 +228,10 @@ def _lift(args, image: Image, out: Path, gate: bool, found=None) -> int:
     from recomp.discover import discover
 
     t0 = time.perf_counter()
-    found = found or discover(image)
-    lifted = prototype.lift(image, list(image.function_starts), discovery=found)
+    plain = getattr(args, "no_hooks", False)
+    found = found or discover(image, **({"may_return": ()} if plain else {}))
+    options = prototype.PLAIN_OPTIONS if plain else prototype.IMAGE_OPTIONS
+    lifted = prototype.lift(image, list(image.function_starts), discovery=found, options=options)
     span = (image.text.addr, image.text.end)
     imports = ImportTable.from_image(image)
     sources = write_program(out, lifted, imports, args.units, span)
@@ -260,16 +272,22 @@ def _lift(args, image: Image, out: Path, gate: bool, found=None) -> int:
 
 
 def _discover(
-    slice_path: Path, out: Path, report: Path, ghidra_path: Path, image: Image | None = None
+    slice_path: Path,
+    out: Path,
+    report: Path,
+    ghidra_path: Path,
+    image: Image | None = None,
+    plain: bool = False,
 ):
-    """Discover, write functions.json and the report; returns (exit status, the discovery)."""
+    """Discover, write functions.json and the report; returns (exit status, the discovery).
+    ``plain``: no noreturn call falls through for a hook (another program than the game)."""
     from mtport import ghidra_common as gc
     from recomp.discover import discover
 
     t0 = time.perf_counter()
     image = image or Image(Path(slice_path).read_bytes())
     data = image.data
-    found = discover(image)
+    found = discover(image, may_return=()) if plain else discover(image)
     ghidra = discovery_report.write(
         found, image, gc.source_info(Path(slice_path), data, REPO), out, report, ghidra_path
     )

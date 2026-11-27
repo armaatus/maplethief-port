@@ -69,6 +69,7 @@ from mtport.imports_analysis import (
     resolve_sends,
     run,
     sides,
+    stub_pointer,
 )
 from mtport.imports_doc import (
     counts,
@@ -117,6 +118,7 @@ __all__ = [
     "resolve_sends",
     "run",
     "sides",
+    "stub_pointer",
     "to_json",
     "to_markdown",
 ]

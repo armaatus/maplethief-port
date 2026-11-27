@@ -132,6 +132,33 @@ class ImportTableTest(unittest.TestCase):
         self.assertEqual(len(problems), 2)
         self.assertIn("_foo", problems[0])
 
+    def test_symbol_stub4_shapes(self):
+        # A modern ld's stubs (#385, the guest program): no PIE, ldr ip, [pc]; ldr pc, [ip];
+        # .long the lazy pointer. PIE: ldr ip, [pc, #4]; add ip, pc, ip; ldr pc, [ip]; .long the
+        # pointer - (stub + 12).
+        no_pie = [w for i in range(3) for w in (0xE59FC000, 0xE59CF000, fx.LAZY + 4 * i)]
+        pie = [
+            w
+            for i in range(3)
+            for w in (0xE59FC004, 0xE08FC00C, 0xE59CF000, fx.LAZY + 4 * i - (fx.STUBS + 16 * i + 12))
+        ]
+        for words, size in ((no_pie, 12), (pie, 16)):
+            m = macho.MachO(fx.build(b"\x80\xbd", [fx.TEXT | 1], words, stub_size=size))
+            with self.subTest(size=size):
+                self.assertEqual(imports.check_stubs(m), [])
+                self.assertEqual(
+                    [imports.stub_pointer(m, fx.STUBS + size * i) for i in range(3)],
+                    [fx.LAZY, fx.LAZY + 4, fx.LAZY + 8],
+                )
+                self.assertEqual(m.stub_symbol(fx.STUBS + size), "_objc_msgSend")
+
+    def test_unknown_stub_shape_is_reported(self):
+        words = [w for _ in range(3) for w in (0xE59FC000, 0xE12FFF1C, fx.LAZY)]  # bx ip
+        m = macho.MachO(fx.build(b"\x80\xbd", [fx.TEXT | 1], words, stub_size=12))
+        self.assertIsNone(imports.stub_pointer(m, fx.STUBS))
+        self.assertEqual(len(imports.check_stubs(m)), 3)
+        self.assertIn("not an ARM import stub", imports.check_stubs(m)[0])
+
     def test_framework_names(self):
         self.assertEqual(
             imports.framework_name("/System/Library/Frameworks/UIKit.framework/UIKit"), "UIKit"
