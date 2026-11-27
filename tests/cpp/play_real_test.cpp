@@ -13418,6 +13418,132 @@ void systems2_restored_carnival_4(Run &r, u64) { restored_carnival_run(r, 4, tru
 void systems2_restored_carnival_6(Run &r, u64) { restored_carnival_run(r, 6, true); }
 void systems2_restored_carnival_checks(Run &, u64) {}
 
+// --- The unreached maps 4.5 and 4.8 (restored_content, #428) ----------------------------------
+//
+// docs/re/original-bugs.md "Unreachable content": 4.5 and 4.8 are a third road through Orbis's
+// garden; their own portals lead to each other and out to 4.3 and 4.10, but no reached map leads
+// in. With restored_content on, 4.3's list starts with one portal more, kind 2 portal480
+// (mt_restored_portal_on), then 43.obj's records. The hero (level 60, chapter 3, the start
+// restored_maps_4_3) walks every way in and out by the d-pad: 4.3's added portal to 4.5, up
+// 4.5 to its portal 1 and into 4.8, back through 4.8's portal 0 to 4.5 and its portal 0 to 4.3,
+// where he lands on 4.3's own portal 2 (the arrival takes the last kind-2 object, not the added
+// one); then 4.3 to 4.5 to 4.8 again and out through 4.8's portal 1 to 4.10. Each landing is the
+// target portal's arrival point (x = anchor + 16). systems2_restored_maps_off: the same start
+// with the setting off: 4.3's list is 43.obj's, record for record, and its portal 2 (portal432)
+// still leads to 4.6, as shipped.
+
+// Where a warp to portal (col, row) puts the hero: the anchor's x + 16, its y (obj.md).
+struct Landing {
+    int area, map, col, row;
+};
+struct RestoredMapsRun {
+    std::vector<std::string> landed; // "4.5 at 568,399" per warp, in order
+    bool all_ok = true;
+};
+RestoredMapsRun g_restored_maps;
+
+// Walks to the portal at tile (col, row) of (area, map) and up through it; checks that the hero
+// lands on `to` at its arrival point.
+void then_portal(Run &r, const std::string &what, int area, int map, int col, int row, Landing to) {
+    using namespace quest_bot;
+    const int x = col * 16 + 8, y = (row + 1) * 16 - 1;
+    then_go(r, what + ": to the portal", {area, map, x, y, 4}, 240);
+    then(r, what + ": up through it", 20, [&r, to](mt_cpu *cpu, double el) {
+        const Hero h = hero(cpu);
+        if (h.addr != 0 && h.on(to.area, to.map) && field(cpu)) {
+            release_all(r);
+            return true;
+        }
+        if (!field(cpu)) { // a notice the portal's script opened: A through it
+            hold(r, UP, false);
+            hold(r, A, std::fmod(el, 0.8) < 0.1);
+        } else {
+            hold(r, A, false);
+            hold(r, UP, std::fmod(el, 1.0) < 0.3);
+        }
+        return false;
+    });
+    then_do(r, what + ": the landing", [what, to](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const int ax = to.col * 16 + 8 + 16, ay = (to.row + 1) * 16 - 1;
+        const std::string at = std::to_string(h.area) + "." + std::to_string(h.map) + " at " +
+                               std::to_string(h.x) + "," + std::to_string(h.y);
+        std::printf("restored maps: %s: landed %s (portal %d,%d: %d,%d)\n", what.c_str(),
+                    at.c_str(), to.col, to.row, ax, ay);
+        g_restored_maps.landed.push_back(at);
+        const bool ok = h.on(to.area, to.map) && std::abs(h.x - ax) <= 24 &&
+                        std::abs(h.y - ay) <= 24 && h.hp > 0;
+        g_restored_maps.all_ok = g_restored_maps.all_ok && ok;
+        check(ok, what + ": on " + std::to_string(to.area) + "." + std::to_string(to.map) +
+                      " at portal (" + std::to_string(to.col) + ", " + std::to_string(to.row) +
+                      ")'s arrival point");
+    });
+}
+
+void restored_maps_run(Run &r, bool on) {
+    using namespace quest_bot;
+    r.settings.restored_content = on;
+    g_restored_maps = RestoredMapsRun{};
+    from_save(r);
+    then_wait_field(r);
+    const mt_restored_portal *p = mt_restored_portal_on(4, 3);
+    check(p != nullptr && std::string(p->script) == "portal480" && p->kind == 2,
+          "4.3's added portal is portal480, kind 2");
+    if (p == nullptr) {
+        then_finish(r);
+        return;
+    }
+    then_do(r, "4.3's object list", [on, p](mt_cpu *cpu) {
+        const std::vector<LiveObject> live = live_objects(cpu);
+        const std::vector<LiveObject> file = file_objects(4, 3);
+        const std::size_t skip = on ? 1 : 0;
+        bool same = live.size() == file.size() + skip;
+        for (std::size_t i = 0; same && i < file.size(); i++) {
+            same = live[i + skip].cell == file[i].cell && live[i + skip].kind == file[i].kind &&
+                   live[i + skip].name == file[i].name;
+        }
+        std::printf("4.3: %zu live objects, its .obj has %zu\n", live.size(), file.size());
+        if (on) {
+            check(!live.empty() && live[0].cell == p->cell && live[0].kind == p->kind &&
+                      live[0].name == p->script,
+                  "restored_content: 4.3's list starts with portal480, kind 2, at its cell");
+            check(same, "then 43.obj's records, in order");
+        } else {
+            check(same, "restored_content off: 4.3's list is 43.obj's, record for record");
+        }
+    });
+    if (!on) {
+        // portal432 (4.3's portal 2) to 4.6's portal 0, as shipped.
+        then_portal(r, "4.3 portal 2 (portal432)", 4, 3, 31, 5, {4, 6, 30, 24});
+        then_check(r, "restored_content off: no object added",
+                   [](mt_cpu *) { return mt_hooks_restored_maps_stats().portals == 0; });
+        then_finish(r);
+        return;
+    }
+    const int col = p->cell % 38, row = p->cell / 38;
+    // In, up and back: every exit of 4.5 and 4.8 by walking.
+    then_portal(r, "4.3 added portal (portal480)", 4, 3, col, row, {4, 5, 34, 24});
+    then_portal(r, "4.5 portal 1 (portal450)", 4, 5, 22, 5, {4, 8, 3, 26});
+    then_portal(r, "4.8 portal 0 (portal480)", 4, 8, 3, 26, {4, 5, 34, 24});
+    then_portal(r, "4.5 portal 0 (portal451)", 4, 5, 34, 24, {4, 3, 31, 5});
+    then_portal(r, "4.3 added portal again", 4, 3, col, row, {4, 5, 34, 24});
+    then_portal(r, "4.5 portal 1 again", 4, 5, 22, 5, {4, 8, 3, 26});
+    then_portal(r, "4.8 portal 1 (portal481)", 4, 8, 8, 5, {4, 10, 32, 33});
+    then_do(r, "the restored maps' runs", [](mt_cpu *cpu) {
+        const mt_restored_maps_stats s = mt_hooks_restored_maps_stats();
+        std::printf("restored maps: %zu warps, the portal added %llu times\n",
+                    g_restored_maps.landed.size(), static_cast<unsigned long long>(s.portals));
+        check(g_restored_maps.all_ok && g_restored_maps.landed.size() == 7,
+              "4.5 and 4.8 entered and left through each of their portals");
+        check(s.portals == 2, "the portal added on each load of 4.3 (the start, the way back)");
+        check(hero(cpu).hp > 0 && field(cpu), "the hero is alive in the field on 4.10");
+    });
+    then_finish(r);
+}
+void systems2_restored_maps(Run &r, u64) { restored_maps_run(r, true); }
+void systems2_restored_maps_off(Run &r, u64) { restored_maps_run(r, false); }
+void systems2_restored_maps_checks(Run &, u64) {}
+
 // --- the compendium's NPCs, shops and recipes in the port (#220) ---------------------------------
 //
 // compendium_npcs: from the start of chapter 2 (tests/starts/chapter_2.json, equal to part L's
@@ -15340,6 +15466,8 @@ constexpr Mode k_modes[] = {
      systems2_restored_carnival_checks, 1},
     {"systems2_restored_carnival_6", systems2_restored_carnival_6,
      systems2_restored_carnival_checks, 1},
+    {"systems2_restored_maps", systems2_restored_maps, systems2_restored_maps_checks, 1},
+    {"systems2_restored_maps_off", systems2_restored_maps_off, systems2_restored_maps_checks, 1},
     {"compendium_npcs", compendium_npcs, compendium_npcs_checks, 1},
     {"map_page", map_page, map_page_checks, 1, false, map_page_setup},
     {"korean_chapter_1_a", korean_chapter_1_a, korean_checks, 1, false, korean_setup},

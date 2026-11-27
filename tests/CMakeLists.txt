@@ -1523,6 +1523,7 @@ set(_starts
     restored_carnival_0_0
     restored_carnival_4_0
     restored_carnival_6_0
+    restored_maps_4_3
     speech_notices)
 foreach(start IN LISTS _starts)
     add_test(NAME starts.${start}
@@ -1569,7 +1570,9 @@ set(_from_starts
     systems2_restored_carnival:restored_carnival_0_0
     systems2_restored_carnival_off:restored_carnival_0_0
     systems2_restored_carnival_4:restored_carnival_4_0
-    systems2_restored_carnival_6:restored_carnival_6_0)
+    systems2_restored_carnival_6:restored_carnival_6_0
+    systems2_restored_maps:restored_maps_4_3
+    systems2_restored_maps_off:restored_maps_4_3)
 # The five map pages checked in the running port (#221): from a start on each map, the hero takes
 # one portal (MT_MAP_PAGE_PORTAL, its kind) and play_real_test map_page writes where it landed;
 # tests/test_compendium_world_port.py compares that with the page's Connections row. The 2.0
