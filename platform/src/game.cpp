@@ -609,6 +609,9 @@ struct Game {
     // writes images. A new scale waits for the next run-loop turn.
     RenderScaleGovernor scale_gov;
     bool govern = false;
+    // The GPU's time per GL frame for the governor (#365): one GL frame in a few is timed.
+    GpuFrameTimer gpu_timer;
+    bool gpu_timing_env = false;     // MAPLETHIEF_GFX_GPU_TIMING=1: the backend times every frame
     std::uint32_t pending_scale = 0; // 0: none
     std::uint32_t scale_changes = 0;
     std::string notice; // the guard's warning in the window, until notice_until (SDL ns)
@@ -1763,8 +1766,29 @@ bool request_render_scale(Game &g, std::uint32_t n) {
     return true;
 }
 
+// The GPU's time for the governor (#365, ADR 0203): after a window frame that showed a new GL
+// frame, the timed GL frame's GPU time goes to the GpuFrameTimer, and timing goes on for the
+// next one when the timer asks for it (its fence wait stalls only that frame's flushes).
+void time_gpu_frame(Game &g, const FrameRecord &record, Uint64 now_ns) {
+    if (!record.tick || mt_gfx_gpu_installed() == 0) {
+        return;
+    }
+    const double now = static_cast<double>(now_ns) / 1e9;
+    if (g.gpu_timing_env) {
+        g.gpu_timer.add(mt_gfx_gpu_get_stats().last_frame_gpu_ns, now);
+        return;
+    }
+    if (g.gpu_timer.armed()) {
+        g.gpu_timer.add(mt_gfx_gpu_get_stats().last_frame_gpu_ns, now);
+        mt_gfx_gpu_set_timing(0);
+    }
+    if (g.govern && g.gpu_timer.arm()) {
+        mt_gfx_gpu_set_timing(1);
+    }
+}
+
 // render_scale = auto and the frame-budget guard (#152): after a window frame, the governor
-// gets the image's place (a resize) and the last second's telemetry.
+// gets the image's place (a resize), the last second's telemetry and the GPU's time (#365).
 void govern_render_scale(Game &g) {
     if (!g.govern) {
         return;
@@ -1774,7 +1798,9 @@ void govern_render_scale(Game &g) {
     const Rect &r = g.presenter.placement().rect;
     std::uint32_t n = g.scale_gov.set_cap(render_scale_cap(r.w, r.h), now);
     if (n == 0) {
-        n = g.scale_gov.update(g.stats.recent(), now);
+        RecentStats recent = g.stats.recent();
+        recent.gpu_ms = g.gpu_timer.ms(now);
+        n = g.scale_gov.update(recent, now);
     }
     if (n != 0) {
         g.pending_scale = n;
@@ -2358,6 +2384,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     if (g.locked && record.tick && record.tick_ns != 0) {
         g.overload.add(presented, record.tick_ns, g.paced->plan()); // #163
     }
+    time_gpu_frame(g, record, presented);
     govern_render_scale(g);
     g.shown_gl = gl_frame(g);
     g.last_present = now;
@@ -3617,6 +3644,9 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     }
     g.scale_gov = RenderScaleGovernor(auto_scale, scale);
     g.govern = perf_overlay_allowed(options) && (auto_scale || scale > 1);
+    if (const char *t = SDL_getenv("MAPLETHIEF_GFX_GPU_TIMING")) {
+        g.gpu_timing_env = t[0] != '\0' && std::strcmp(t, "0") != 0; // as the backend reads it
+    }
     if (auto_scale) {
         SDL_Log("render: render_scale auto: %s",
                 g.govern ? "from 1x up to the largest that keeps a frame within the budget and "
