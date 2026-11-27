@@ -14,9 +14,9 @@
  *   - sets the engine's view width E each turn and in the camera hooks: in the field (the current
  *     state a CStateGame, game mode 0x11AA00 0 or 4, a map loaded) while the host allows it, E is
  *     the map's width clamped to 480 ... `width`; also behind the popup menu, the shop, the map
- *     screen and the cash shop (modes 1, 2, 3, 0xB: see the menus below, #169); everywhere else
- *     480. The original clamp then keeps the camera inside the map, and the culling widens
- *     with E;
+ *     screen and the cash shop (modes 1, 2, 3, 0xB: see the menus below, #169); in the scenes
+ *     on mt_widescreen_scene_wide's list (modes 9 and 10, #396); everywhere else 480. The
+ *     original clamp then keeps the camera inside the map, and the culling widens with E;
  *   - stretches the field's backdrop (CStateGame +0x454, a fixed 480 x 320 image drawn at (0, 0)
  *     through 0x24DC9) to E columns with mt_gles_set_host_x_transform;
  *   - moves the field HUD (HUD_Paint 0x5A465: the bar, the quick slots and the attack key's
@@ -49,6 +49,9 @@ uint32_t mt_widescreen_width(void) MT_NOEXCEPT;
  * globals. */
 uint32_t mt_widescreen_decide(const mt_cpu *cpu, uint32_t width, int allow) MT_NOEXCEPT;
 
+/* Whether scripted scene `scene` (CStateGame +0x1E4, CStateGame::StartScene 0x853E5's number) keeps
+ * the field's E in game modes 9 and 10 (#396): 1 for the scenes on the allowlist, else 0. */
+int mt_widescreen_scene_wide(uint32_t scene) MT_NOEXCEPT;
 /* Once a run-loop turn, before the guest's frame: whether the host allows the wide view now
  * (the setting), then decides and applies E (as the camera hooks do too).
  * Returns E. With widescreen off it does nothing and returns 480. */
@@ -83,10 +86,14 @@ void mt_widescreen_reset(void) MT_NOEXCEPT;
  * clip-space x offset of (E - 480) / 2 points moves what they draw into the GL frame's centre
  * 480 points, the screen image the host shows (and takes touches on). The popup menu's dim, its
  * fill of (0, 0, 480, 320) (0x8079), is stretched over the whole view. The cash shop is UIKit:
- * nothing to wrap. Registered by mt_widescreen_configure. */
+ * nothing to wrap. A wide scene's speech box (#396: CChatBox::drawChatBox 0x35189, from Paint in
+ * game mode 9) is drawn the same way, its lines wrapped at the 3:2 width (Text_Wrap 0x22EC5 from
+ * the scene runner's command 50). Registered by mt_widescreen_configure. */
 typedef struct mt_widescreen_menu_stats {
-    uint64_t screens; /* screen paints drawn in the centre of a wide view */
-    uint64_t dims;    /* popup menu dims stretched over the wide view */
+    uint64_t screens;   /* screen paints (and scene speech boxes) drawn in the centre of a wide
+                           view */
+    uint64_t dims;      /* popup menu dims stretched over the wide view */
+    uint64_t box_wraps; /* scene speech boxes wrapped at the 3:2 width (#396) */
 } mt_widescreen_menu_stats;
 
 mt_widescreen_menu_stats mt_widescreen_get_menu_stats(void) MT_NOEXCEPT;

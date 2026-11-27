@@ -60,10 +60,16 @@ MT_EXTERN_C_BEGIN
 #define MT_HOOK_FN_TEXT_CHAR_COUNT 0x22989u
 #define MT_HOOK_FN_TEXT_SUB_CHARS 0x22A1Du
 #define MT_HOOK_FN_DRAW_IMAGE 0x24DC9u /* (image, x, y): draws a CMImage at its top left */
+/* Text_Wrap (owner, text, width, &count): whole lines; the scene speech box's wrap (the runner's
+ * command 50) at the 3:2 width in a wide view (#396) */
+#define MT_HOOK_FN_TEXT_WRAP 0x22EC5u
 /* CChatBox::NextPage and CChatBox::FirstPage (box): an NPC dialogue page set, wrapped whole
  * (#391: the text events read it after them, maplethief/text_events.h) */
 #define MT_HOOK_FN_CHAT_BOX_NEXT_PAGE 0x34A05u
 #define MT_HOOK_FN_CHAT_BOX_FIRST_PAGE 0x34CD1u
+/* CChatBox::drawChatBox (box, speaker, lines, count): the scene speech box, from
+ * CStateGame::Paint (#396: drawn at 480 in a wide view's centre) */
+#define MT_HOOK_FN_CHAT_BOX_DRAW 0x35189u
 #define MT_HOOK_FN_SAVE_QUEST_DATA 0x38F55u /* CDataMgr::SaveQuestData (data manager, hero) */
 /* Popup_Open (mgr, id, text, kind): the engine's popup (#392: the text events read it after it,
  * maplethief/text_events.h) */

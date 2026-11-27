@@ -78,6 +78,11 @@ HOOKED: dict[int, Hooked] = {
         "(owner, text, from, to): a new[] copy of characters [from, to) of a C string, stepped "
         "as Text_CharCount; with a text pack (#189, ADR 0108) by each character's UTF-8 length",
     ),
+    0x22EC5: Hooked(
+        "Text_Wrap",
+        "(owner, text, width, &count): a new[] array of whole lines; widescreen scenes (#396, "
+        "ADR 0090) wrap the scene speech box (the runner's command 50) at the 3:2 width",
+    ),
     0x24DC9: Hooked(
         "DrawImage",
         "(image, x, y): an image at its top-left corner; widescreen (#86, ADR 0090) stretches "
@@ -92,6 +97,11 @@ HOOKED: dict[int, Hooked] = {
         "CChatBox::FirstPage",
         "(box): the first NPC dialogue page, as NextPage; the text events (#391, ADR 0187) "
         "read it after it",
+    ),
+    0x35189: Hooked(
+        "CChatBox::drawChatBox",
+        "(box, speaker, lines, count): the scene speech box, from CStateGame::Paint; "
+        "widescreen scenes (#396, ADR 0090) draw it at 480 in the wide view's centre",
     ),
     0x38F55: Hooked(
         "CDataMgr::SaveQuestData",
