@@ -154,3 +154,38 @@ Three processes on one data directory (`build/test-output/<preset>/play_chapter_
 The bytes the game never writes (heap leftovers, [formats/save.md](../formats/save.md)) are left
 out of every compare and counted (`9 never-written heap bytes differ` in quest0 when the save
 came from another process).
+
+## Run coverage
+
+Rerun of #295's report (`python3 -m mtport.runcoverage run --tests 'play\.chapter_3.*'`,
+`mac-coverage`, the same M4) on this branch, 2026-11-27: the ten chapter-3 tests and the chapter-2
+chain they need as fixtures, 20 runs, all passed. The runs were then reported by chapter:
+
+| | Chapter 2's runs (10) | Chapter 3's runs (10) | Both | Chapter 2's rerun ([chapter-2-quests.md](chapter-2-quests.md#run-coverage)) |
+|---|---:|---:|---:|---:|
+| Game functions (of 1,980) | 1,197 | 1,204 | **1,240** | 1,183 |
+| `engine` (of 1,353) | 975 | 990 | 1,017 | 964 |
+| `app-objc` (of 620) | 218 | 210 | 219 | 215 |
+| Scripts read (of 307) | 121 | 109 | **171** | 112 |
+| Natives called (of 65) | 33 | 33 | 35 | 32 |
+| Maps entered (of 90) | 33 | 35 | **50** | 32 |
+| Game imports (of 225) | 134 | 134 | 134 | 134 |
+| (class, selector) pairs | 622 | 614 | 623 | 619 |
+
+Against chapter 2's runs, chapter 3's add 43 game functions, 50 scripts, 17 maps and 2 natives:
+
+- **Functions:** the eight scenes of chapter 3 (`CAniManager::makeAniMagatiaHumanoid1` to `4`,
+  `makeAniHomunIn`, `makeAniHomunEnd`, `makeAniBalogIn`, and the two ending scenes
+  `makeAniEndingZacum` and `makeAniEndingHenesis`), the floating background of the ending's map
+  (`CFloatingBG`, `CFloatingBGFlowerAlgorithm`, `CFloatingBGImage` and their helpers), the scene
+  effects (`CEffects_Get`, `CEffects_AddSprite`, `CEffects_AddAt`), `CNpcs_AddSceneNpc`,
+  `CMMap::SetObjFrame`, the fifth quest-list button (`-[NpcKeyPadView questButton4]`), and 14
+  unnamed engine functions.
+- **Scripts:** 18 of `script/chapter3/` (the NPCs of the quests, `HomunMap`, `BalogMap` and
+  three portals) and 32 of `script/common/` (26 portals of areas 5 and 7 to 10 and six NPCs met on
+  the way).
+- **Maps:** 7.0, 7.1, 7.2, 7.4, 7.6, 8.0, 8.2, 8.4, 8.6, 9.6, 9.7, 10.0 to 10.3, 10.5 and 2.11.
+- **Natives:** 29 `regRequireMeso` and 44 `getItem`.
+
+The report is in the git-ignored `work/coverage/chapter-3/`. The total with chapter 1 whole was
+not rerun.
