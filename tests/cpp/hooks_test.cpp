@@ -5,7 +5,8 @@
 // on and off between calls, the statistics, and the port's fixes of original bugs (#155): the
 // OpenPortalURLAndExit hook on a guest with a URL in an image segment, and the early Play guard
 // on a guest with SkyCanvas's global and a state; and the quest page fix (#167) on a guest
-// with a data manager and stand-ins for the game's quest lookups. The real game's hooked calls are
+// with a data manager and stand-ins for the game's quest lookups; portal620's warp target
+// (#388). The real game's hooked calls are
 // runtime.hooks_portal_on/off (hooks_real_test.cpp) and platform.early_tap(_fixed)
 // (platform/input_test.cmake), and play.popup_menu_tabs for the quest pages.
 #include <doctest/doctest.h>
@@ -397,9 +398,11 @@ TEST_CASE("hooks: fix_original_bugs installs every fix, on or off together (#155
     mt_hooks_install_original_bug_fixes(1);
     CHECK(mt_hook_enabled(MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT) == 1);
     CHECK(mt_hook_enabled(MT_HOOK_FN_MAIN_MENU_CLICK_PLAY) == 1);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CHANGE_MAP) == 1);
     mt_hooks_install_original_bug_fixes(0);
     CHECK(mt_hook_enabled(MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT) == 0);
     CHECK(mt_hook_enabled(MT_HOOK_FN_MAIN_MENU_CLICK_PLAY) == 0);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CHANGE_MAP) == 0);
     // Registered either way, so mt_hook_set_enabled can switch them at run time.
     CHECK(mt_hook_set_enabled(MT_HOOK_FN_MAIN_MENU_CLICK_PLAY, 1) == 1);
 }
@@ -589,6 +592,86 @@ TEST_CASE("hooks: a wrapper around the quest page fix runs after it, the fix on 
     CHECK(g_original_calls == 3);
     CHECK(g_lookups == 1);
     CHECK(mt_hook_get_stats(k_quest_tab).handled == 3u);
+}
+
+// --- CMapleWorld::changeMap 0x81369: portal620's target (#388, original bug 14) -------------
+
+namespace {
+
+constexpr u32 k_change_map = MT_HOOK_FN_CHANGE_MAP;
+// The target the original saw: area, map, portal, and the explicit position on the stack.
+u32 g_warp[5] = {};
+void change_map_original(mt_cpu *MT_RESTRICT cpu) {
+    g_original_calls++;
+    g_warp[0] = cpu->r[1];
+    g_warp[1] = cpu->r[2];
+    g_warp[2] = cpu->r[3];
+    std::memcpy(&g_warp[3], cpu->mem + cpu->r[MT_SP], 4);
+    std::memcpy(&g_warp[4], cpu->mem + cpu->r[MT_SP] + 4u, 4);
+    cpu->r[0] = 0x1u; // void in the game; whatever it leaves
+    cpu->r[2] = 0x5555u;
+}
+void hooked_change_map(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(k_change_map, change_map_original); }
+
+// changeMap(world, area, map, portal, -1, -1) as the native 0x99969 calls it; checks r4-lr kept.
+void warp(QuestGuest &g, u32 area, u32 map, u32 portal) {
+    for (u32 i = 0; i < 15; i++) {
+        g.cpu.r[i] = k_regs[i];
+    }
+    g.cpu.r[MT_SP] = 0x8000u;
+    g.put(0x8000u, 0xFFFFFFFFu);
+    g.put(0x8004u, 0xFFFFFFFFu);
+    g.cpu.r[0] = 0x6000u;
+    g.cpu.r[1] = area;
+    g.cpu.r[2] = map;
+    g.cpu.r[3] = portal;
+    hooked_change_map(&g.cpu);
+    for (u32 i = 4; i < 15; i++) {
+        CHECK(g.cpu.r[i] == (i == MT_SP ? 0x8000u : k_regs[i]));
+    }
+    CHECK(g_warp[3] == 0xFFFFFFFFu);
+    CHECK(g_warp[4] == 0xFFFFFFFFu);
+}
+
+bool warped_to(u32 area, u32 map, u32 portal) {
+    return g_warp[0] == area && g_warp[1] == map && g_warp[2] == portal;
+}
+
+} // namespace
+
+TEST_CASE("hooks: portal620's warp to 6.1's portal 2 lands at portal 1 when on (#388)") {
+    Fresh fresh;
+    QuestGuest g;
+    mt_hooks_install_portal620_fix(1);
+    CHECK(mt_hook_enabled(k_change_map) == 1);
+    warp(g, 6, 1, 2); // common/portal620
+    CHECK(warped_to(6, 1, 1));
+    // Every other warp is the original's: 6.1's real portals, 6.2's, another area's portal 2.
+    warp(g, 6, 1, 1);
+    CHECK(warped_to(6, 1, 1));
+    warp(g, 6, 1, 0);
+    CHECK(warped_to(6, 1, 0));
+    warp(g, 6, 2, 0);
+    CHECK(warped_to(6, 2, 0));
+    warp(g, 5, 1, 2);
+    CHECK(warped_to(5, 1, 2));
+    warp(g, 6, 0, 2);
+    CHECK(warped_to(6, 0, 2));
+    CHECK(g_original_calls == 6);
+    const mt_hook_stats st = mt_hook_get_stats(k_change_map);
+    CHECK(st.entries == 6u);
+    CHECK(st.handled == 1u);
+    CHECK(st.passed == 5u);
+}
+
+TEST_CASE("hooks: with the portal620 fix off, the warp keeps 6.1's missing portal 2") {
+    Fresh fresh;
+    QuestGuest g;
+    mt_hooks_install_portal620_fix(0);
+    warp(g, 6, 1, 2);
+    CHECK(warped_to(6, 1, 2)); // the device: no kind 2 on 6.1, the hero keeps its 6.2 place
+    CHECK(g_original_calls == 1);
+    CHECK(mt_hook_get_stats(k_change_map).passed == 1u);
 }
 
 namespace {

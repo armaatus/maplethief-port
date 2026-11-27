@@ -2815,6 +2815,11 @@ void chapter_1_l(Run &r, u64) {
                      {1, 16, 2},
                      {1, 34, 2}});
     then_bag(r, "before the trip");
+    then_do(r, "main 20's record active before the trip", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        check(quest_active(cpu, h, 0, 20) && !quest_active(cpu, h, 0, 40),
+              "main 20 in the active list, main 40 not (original bug 16: kept)");
+    });
     then_talk_to(r, "Pirate: the trip to Orbis (the end of chapter 1)", 2, 0, "Pirate", -1,
                  [](mt_cpu *cpu) {
                      const Hero h = hero(cpu);
@@ -2852,6 +2857,11 @@ void chapter_1_l(Run &r, u64) {
             q += " main " + std::to_string(n) + ":" + std::to_string(quest_state(cpu, h, 0, n));
         }
         q += " side 11:" + std::to_string(quest_state(cpu, h, 1, 11));
+        // CQuestList::ClearAll 0x7C61D keeps the record of the main quest still at 1 (main 20)
+        // and renumbers it 40: chapter 2's first main quest (docs/re/original-bugs.md, bug 16).
+        check(quest_active(cpu, h, 0, 40) && !quest_active(cpu, h, 0, 20) &&
+                  active_quests(cpu, h).size() == 1,
+              "main 20's record carried into chapter 2 as main 40, the only active quest");
         check(h.chapter == 2 && h.on(4, 1),
               "chapter " + std::to_string(h.chapter) + " in the quest manager, map " +
                   std::to_string(h.area) + "." + std::to_string(h.map) +
@@ -11602,13 +11612,16 @@ void systems2_pigmy_checks(Run &, u64) {}
 // and takes it. common/portal620 warps to (6, 1, 2), and 6.1 has no portal of kind 2, so the map
 // change 0x868D5 writes no position: the hero lands on 6.1 at the coordinates it had on 6.2, not
 // at portal611 (docs/re/original-bugs.md, bug 14). The run reads the first position on 6.1.
+// systems2_portal620_fixed: the same with fix_original_bugs on (#388): the warp is (6, 1, 1) and
+// the hero lands at portal611.
 struct PortalRun {
     i32 x62 = 0, y62 = 0, x61 = 0, y61 = 0;
     bool landed = false;
 };
 std::shared_ptr<PortalRun> g_portal;
 
-void systems2_portal620(Run &r, u64) {
+void portal620_run(Run &r, bool fixed) {
+    r.settings.fix_original_bugs = fixed;
     g_portal = std::make_shared<PortalRun>();
     from_save(r);
     then_wait_field(r);
@@ -11630,24 +11643,34 @@ void systems2_portal620(Run &r, u64) {
         return g_portal->landed;
     });
     then_wait_field(r);
-    then_do(r, "where the hero landed on 6.1", [](mt_cpu *cpu) {
+    then_do(r, "where the hero landed on 6.1", [fixed](mt_cpu *cpu) {
         const PortalRun &k = *g_portal;
         const world_map::Object *p611 = world_map::get(6, 1).object("portal611");
         const world_map::Object *p610 = world_map::get(6, 1).object("portal610");
-        std::printf("portal620: left 6.2 at (%d, %d), landed on 6.1 at (%d, %d); portal610 (%d, "
-                    "%d), portal611 (%d, %d); now %s\n",
-                    k.x62, k.y62, k.x61, k.y61, p610 != nullptr ? p610->x : -1,
-                    p610 != nullptr ? p610->y : -1, p611 != nullptr ? p611->x : -1,
-                    p611 != nullptr ? p611->y : -1, where(cpu).c_str());
+        std::printf("portal620 (fix_original_bugs %s): left 6.2 at (%d, %d), landed on 6.1 at "
+                    "(%d, %d); portal610 (%d, %d), portal611 (%d, %d); now %s\n",
+                    fixed ? "on" : "off", k.x62, k.y62, k.x61, k.y61,
+                    p610 != nullptr ? p610->x : -1, p610 != nullptr ? p610->y : -1,
+                    p611 != nullptr ? p611->x : -1, p611 != nullptr ? p611->y : -1,
+                    where(cpu).c_str());
         check(k.landed, "portal620 leads to 6.1");
-        check(k.x61 == k.x62 && k.y61 == k.y62,
-              "original bug 14: the hero keeps its 6.2 coordinates on 6.1");
-        check(p611 != nullptr && std::abs(k.x61 - p611->x) > 100,
-              "the hero is not at portal611, the portal back to 6.2");
+        check(p611 != nullptr, "6.1 has portal611");
+        const i32 dx = p611 != nullptr ? std::abs(k.x61 - p611->x) : 0;
+        if (fixed) {
+            check(dx <= 40 && !(k.x61 == k.x62 && k.y61 == k.y62),
+                  "bug 14 fixed: the hero lands at portal611, the portal back to 6.2 (" +
+                      std::to_string(dx) + " points away)");
+        } else {
+            check(k.x61 == k.x62 && k.y61 == k.y62,
+                  "original bug 14: the hero keeps its 6.2 coordinates on 6.1");
+            check(dx > 100, "the hero is not at portal611, the portal back to 6.2");
+        }
         check(hero(cpu).hp > 0 && field(cpu), "the hero is alive in the field on 6.1");
     });
     then_finish(r);
 }
+void systems2_portal620(Run &r, u64) { portal620_run(r, false); }
+void systems2_portal620_fixed(Run &r, u64) { portal620_run(r, true); }
 void systems2_portal620_checks(Run &, u64) {}
 
 // --- the compendium's NPCs, shops and recipes in the port (#220) ---------------------------------
@@ -12934,6 +12957,7 @@ constexpr Mode k_modes[] = {
     {"systems2_scrolls_failure", systems2_scrolls_failure, systems2_scrolls_checks, 1},
     {"systems2_pigmy", systems2_pigmy, systems2_pigmy_checks, 1},
     {"systems2_portal620", systems2_portal620, systems2_portal620_checks, 1},
+    {"systems2_portal620_fixed", systems2_portal620_fixed, systems2_portal620_checks, 1},
     {"compendium_npcs", compendium_npcs, compendium_npcs_checks, 1},
     {"map_page", map_page, map_page_checks, 1, false, map_page_setup},
     {"korean_chapter_1_a", korean_chapter_1_a, korean_checks, 1, false, korean_setup},
