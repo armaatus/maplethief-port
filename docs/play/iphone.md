@@ -2,6 +2,8 @@
 
 The port runs on an iPhone with iOS 16 or later, as an app you build yourself and install from a Mac with Xcode. This is called sideloading. There is no App Store version and no download for iOS.
 
+> **Preview.** The iOS app ships with v1.0 and plays, but has not been signed off on the device yet. The label comes off when controllers, touch and the safe area ([#73](https://github.com/armaatus/maplethief-port/issues/73)), the app lifecycle ([#128](https://github.com/armaatus/maplethief-port/issues/128)) and the audio session ([#197](https://github.com/armaatus/maplethief-port/issues/197)) are checked on an iPhone. What that means: [Known issues, Preview](../KNOWN_ISSUES.md#preview).
+
 > **Checked on one iPhone so far.** On an iPhone 12 with iOS 26.6.1 the app installs, starts and reaches the first map by touch ([#83](https://github.com/armaatus/maplethief-port/issues/83)). If you try another model or iOS version, please tell us how it goes.
 
 ## What you need
