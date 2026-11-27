@@ -210,7 +210,6 @@ FLOW_NAMES: tuple[tuple[int, str, str], ...] = (
     (0x35189, "CChatBox::drawChatBox", "(box, speaker, lines, n): a scene's speech box"),
     (0x34FA1, "CChatBox::SetNpc", "(box, npc): CStateGame +0xAC = npc, +0x40 its sprite"),
     (0x32B4D, "CChatBox::SetBossSpeaker", "CStateGame +0xAC = -1, +0x40 the boss's sprite"),
-    (0x3990D, "CDataMgr::FindRow", "(mgr, table, col, id): the row whose u8 column is id"),
     (0x37999, "CDataMgr::ReadString", "(mgr, table, col, row, width): new[] copy, NUL-ended"),
     # 0x22EC5 Text_Wrap and 0x6299D CHero::SetFace are named in scenes.py (the scenes use them too).
     # Text_Wrap's character steps (#189, docs/re/text.md): 3 bytes for any byte >= 0x80.
