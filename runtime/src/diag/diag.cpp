@@ -542,9 +542,9 @@ extern "C" void mt_diag_finish(void) noexcept {
         const std::size_t n = mt_coverage_format(nullptr, 0) + 1u;
         const std::size_t m = mt_hits_format(nullptr, 0) + 1u;
         char *buf = static_cast<char *>(std::malloc(n > m ? n : m));
-        char path[1024];
-        expand_path(g.coverage_path, path, sizeof path);
-        std::FILE *f = buf != nullptr ? open_write(path) : nullptr;
+        char cov_path[1024];
+        expand_path(g.coverage_path, cov_path, sizeof cov_path);
+        std::FILE *f = buf != nullptr ? open_write(cov_path) : nullptr;
         if (f != nullptr) {
             mt_coverage_format(buf, n);
             std::fputs(buf, f);
