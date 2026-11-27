@@ -120,3 +120,48 @@ Functions entered per run:
 | `play.chapter_1_l` | 1,044 |
 | `play.chapter_1_m` | 976 |
 | `play.regress` | 920 |
+
+## #299's parts
+
+2026-11-28, branch `429-chapter-2-sides-coverage` on `219025a1` (the `agent-sweep-2026-11-26` tip after #430), Apple M4, `mac-coverage` build, function tags from the 2026-11-27 `scripts/re-analyze` ([#429](https://github.com/armaatus/maplethief-port/issues/429)). One `runcoverage run --out work/coverage/all` over the baseline's tests and `play\.chapter_2_(sides|climb|crafts|shop|side_16).*`: 82 tests with their fixture setups, one at a time, about 2.5 h.
+
+**Every one of #299's 11 parts passed**: `play.chapter_2_sides_a` to `_sides_f`, `play.chapter_2_climb_synthetic`, `play.chapter_2_crafts_synthetic`, `play.chapter_2_shops`, `play.chapter_2_shop_6` and `play.chapter_2_side_16_full_synthetic`; so did every baseline test. One setup failed: `play.chapter_2_f_synthetic`'s kept-hero check counts three potions drunk on the walk ([#436](https://github.com/armaatus/maplethief-port/issues/436)); it still writes the save the parts after it start from.
+
+The 2026-11-26 baseline's `run-coverage.json` lives in git-ignored `work/` and was not kept, so the comparison baseline is this run's own baseline set, reported on its own with `report`: 59 test directories, the 2026-11-26 tests plus `input.menu_shops_save_auto_potion`, `input.speech_menus_skills` and `input.menu_touches` (#433) and the setups `play.bot_world` and `starts.jobs_ch*_rogue_30`. `input.menu_touches` presses every key pad button: without its directory the re-run baseline is 1,291 game functions, the 2026-11-26 number, so the 50 more are all its.
+
+| | Re-run baseline | #299's parts alone | Baseline + parts | Baseline + parts + chapter 2 setups |
+|---|---:|---:|---:|---:|
+| Game functions (of 1,980) | 1,341 (67.7%) | 1,130 (57.1%) | 1,344 (67.9%) | 1,362 (68.8%) |
+| Scripts read (of 307) | 113 | 139 | 192 | 203 |
+| Natives called (of 65) | 36 | 30 | 37 | 38 |
+| Maps entered (of 90) | 30 | 42 | 55 | 60 |
+| Game imports called | 137 | 134 | 137 | 137 |
+| (class, selector) pairs | 794 | 629 | 796 | 797 |
+
+The setups are `starts.chapter_2*` and `play.chapter_2_a` to `_f` (12 directories), which the parts chain from; the last column is everything the run entered.
+
+What #299's parts add over the re-run baseline (`report <the 11 parts' directories> --baseline <the baseline's run-coverage.json>`):
+
+- **3 game functions**: the native `0x9966D` (`invenFullNotify`, side 16 with a full bag) and the NPC key pad's sixth quest button (`0xB0551` release, `0xB0575` press).
+- **79 scripts**: 61 under `common`, 15 under `chapter2`, 3 under `chapter3`.
+- **1 native**: 60 (`invenFullNotify`).
+- **25 maps**: 4.0, 4.2, 4.3, 4.6, 4.9, 4.10, 4.12, 4.13, 4.14, 5.0, 5.1, 5.2, 5.3, 6.0, 9.0, 9.1, 9.2, 9.3, 9.4, 9.6, 9.7, 9.9, 9.10, 10.0 and 10.1.
+- No new imports; 2 new (class, selector) pairs, the quest button's above.
+
+The chapter 2 setups add 18 more game functions (five scenes in `CAniManager`, the buff skills in `CSkill`, the native 53 `getHeroClass`, `-[TouchKeyPadView setOnShort4Key:]` at `0xB48CD` and 7 unnamed engine functions), 11 more scripts and 5 more maps: 4.4, 4.7, 4.11, 4.17 and 9.5.
+
+Functions entered per part:
+
+| Run | Functions entered |
+|---|---:|
+| `play.chapter_2_climb_synthetic` | 1,020 |
+| `play.chapter_2_crafts_synthetic` | 970 |
+| `play.chapter_2_shop_6` | 815 |
+| `play.chapter_2_shops` | 933 |
+| `play.chapter_2_side_16_full_synthetic` | 817 |
+| `play.chapter_2_sides_a` | 1,082 |
+| `play.chapter_2_sides_b` | 1,091 |
+| `play.chapter_2_sides_c` | 1,093 |
+| `play.chapter_2_sides_d` | 1,084 |
+| `play.chapter_2_sides_e` | 1,081 |
+| `play.chapter_2_sides_f` | 1,073 |
