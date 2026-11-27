@@ -70,7 +70,7 @@ The technical reference: how the original game is built, and how the port is des
 |---|---|
 | [The scripted first-map run](testing/first-map-run.md) | `play.first_map`: the real game played to the first map |
 | [Chapter 1's quests](testing/chapter-1-quests.md) | The checks of chapter 1's NPCs and quests |
-| [The regression replay](testing/regression-replay.md) | `scripts/regress`: input replay against recorded checkpoints |
+| [The regression replay](testing/regression-replay.md) | `scripts/regress`: input replay against recorded checkpoints; `scripts/playthrough`: the chain's digest per part |
 | [Playthrough checklist](testing/playthrough-checklist.md) | The chapter by chapter checklist, generated from the knowledge base |
 | [Switch sign-off checklist](testing/switch-checklist.md) | The hardware sign-off of the Switch build |
 | [Switch performance](testing/switch-performance.md) | The logged performance session on the console |
