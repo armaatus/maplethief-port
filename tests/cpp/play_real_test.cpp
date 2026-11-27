@@ -12787,17 +12787,19 @@ void then_shop_matches(Run &r, const std::string &name, int area, int map,
     });
 }
 
-// Crafts the compendium's recipe for equipment `item` at the smith (0.0) through his lists
-// `choices`, and checks what left and entered the bag against the recipe.
-void then_craft(Run &r, const std::string &name, i32 item, std::vector<int> choices) {
+// Crafts the compendium's recipe for equipment `item` of `chapter` at the smith (0.0) through his
+// lists `choices`, and checks what left and entered the bag against the recipe.
+void then_craft(Run &r, const std::string &name, i32 item, std::vector<int> choices,
+                int chapter = 2) {
     const world_map::Recipe *rc = nullptr;
     for (const world_map::Recipe &c : world_map::recipes()) {
-        if (c.chapter == 2 && c.table == 0 && c.item == item) {
+        if (c.chapter == chapter && c.table == 0 && c.item == item) {
             rc = &c;
         }
     }
     check(rc != nullptr && rc->area == 0 && rc->map == 0 && rc->npc == "smith",
-          name + ": the compendium has its chapter-2 recipe at the smith on 0.0");
+          name + ": the compendium has its chapter-" + std::to_string(chapter) +
+              " recipe at the smith on 0.0");
     if (rc == nullptr) {
         return;
     }
@@ -13425,6 +13427,369 @@ void chapter_2_side_16_full(Run &r, u64) {
     then_finish(r);
 }
 void chapter_2_side_16_full_checks(Run &, u64) {}
+
+// --- chapter 3's side quests, the climb of 6.1 and 6.2, crafts and trades (#301) ---------------
+//
+// From part D's save (chapter 3 on 9.0, main 7 active, the 4th job), in parts by place
+// (docs/testing/chapter-3-quests.md). Each NPC's list value for a quest is the row its script
+// gives it (regSelList): BrokerHan (6.0) 1 = 2, 3 = 3, 16 = 5, the trades 6; ZenumistChief (7.0)
+// 5 = 6, 6 = 7, 8 = 8, 9 = 9, 13 = 10, 14 = 11; AlchadnoChief (8.0) 2 = 2, 17 = 3, 18 = 4;
+// Humanoid3 (8.4) 10 = 2, 11 = 3; the smith (0.0) 12 = 1, the Craft 2; Alchester (9.0) 7 = 2,
+// 26 = 3, 27 = 4, 28 = 5, 30 = 6, 31 = 7; Skadru (9.0) 20 = 1, 28 = 2, 29 = 3; the SnowQueen
+// (9.0) 22 = 2, 23 = 3, 24 = 4; the Miner (9.0) 26 = 1; remem2 (6.2) has no list.
+
+// The side quests' items: then_sell keeps them.
+const std::vector<i32> k_chapter_3_side_items = {73,  74,  75,  76,  77,  78,  79,  80,
+                                                 81,  82,  83,  84,  85,  117, 118, 119,
+                                                 121, 122, 123, 124, 125, 126, 127};
+
+// The common start of a side part of chapter 3: the SP, the bag's materials sold and the
+// potions stocked at the shop of `area` (6 or 9).
+void chapter_3_side_start(Run &r, const std::string &part, int area) {
+    using namespace quest_bot;
+    from_save(r);
+    then_check(r, "chapter 3", [](mt_cpu *cpu) { return hero(cpu).chapter == 3; });
+    then_spend_sp(r, part, k_chapter_2_build);
+    const std::string shop = area == 9 ? "Etc90" : "Etc60";
+    then_sell(r, "materials (" + shop + ")", area, 4, k_chapter_3_side_items);
+    then_stock(r, "item 4 (" + shop + ")", area, 4, 200, 500, 600);
+    then_stock(r, "item 7 (" + shop + ")", area, 7, 80, 500, 600);
+    then_bag(r, part + "'s start");
+}
+
+Pred on_map(int area, int map) {
+    return [area, map](mt_cpu *cpu) { return hero(cpu).on(area, map); };
+}
+
+// Part sides_a (#301): from part D's save on 9.0, to Magatia by Pirate_Orbis (4.1, list 2).
+// BrokerHan's 3 (while 2 is active: 10,000 meso), 1 (his path: 15,000 meso) and 16 (his path: 30
+// of mob 56 and 10,000 meso); AlchadnoChief ends 2 (side 4 is done) and gives 17;
+// ZenumistChief's 5 (25 of item 83 from mob 58 on 7.2), then 6, which wants item 121: side 7's
+// reward, for item 127 (mob 57 on 7.5, one drop in ten). 17: 30 of item 78 from mob 61 on 8.1.
+void chapter_3_sides_a(Run &r, u64) {
+    using namespace quest_bot;
+    chapter_3_side_start(r, "sides_a", 9);
+    const FarmStyle fight = chapter_3_fight();
+    then_talk_to(r, "Pirate_Orbis (4.1): to 6.0 (list 2)", 4, 1, "Pirate_Orbis", 2, on_map(6, 0),
+                 1200);
+    then_talk_to(r, "BrokerHan: side 3 given", 6, 0, "BrokerHan", 3, quest_is(1, 3, 1));
+    then_talk_to(r, "BrokerHan: side 3 done (10,000 meso)", 6, 0, "BrokerHan", 3,
+                 quest_is(1, 3, 2));
+    then_talk_to(r, "BrokerHan: side 1 given (his path)", 6, 0, "BrokerHan", 2, quest_is(1, 1, 1));
+    then_talk_to(r, "BrokerHan: side 1 done (15,000 meso)", 6, 0, "BrokerHan", 2,
+                 quest_is(1, 1, 2));
+    then_talk_to(r, "BrokerHan: side 16 given (his path)", 6, 0, "BrokerHan", 5,
+                 quest_is(1, 16, 1));
+    then_talk_to(r, "AlchadnoChief: side 2 done", 8, 0, "AlchadnoChief", 2, quest_is(1, 2, 2));
+    then_talk_to(r, "AlchadnoChief: side 17 given", 8, 0, "AlchadnoChief", 3, quest_is(1, 17, 1));
+    then_talk_to(r, "ZenumistChief: side 5 given", 7, 0, "ZenumistChief", 6, quest_is(1, 5, 1));
+    then_farm(r, "30 of mob 56 and 25 of item 83 (mob 58) on 7.2 (sides 16, 5)", 7, 2, {56, 58},
+              all_of({ready(1, 16), ready(1, 5)}), 3600, fight);
+    then_farm(r, "item 127 from mob 57 on 7.5 (side 7)", 7, 5, {57}, has_item(127, 1), 3600, fight);
+    then_talk_to(r, "BrokerHan: side 16 done (10,000 meso)", 6, 0, "BrokerHan", 5,
+                 quest_is(1, 16, 2));
+    then_talk_to(r, "ZenumistChief: side 5 done", 7, 0, "ZenumistChief", 6, quest_is(1, 5, 2));
+    then_talk_to(r, "ZenumistChief: side 6 given", 7, 0, "ZenumistChief", 7, quest_is(1, 6, 1));
+    then_farm(r, "30 of item 78 from mob 61 on 8.1 (side 17)", 8, 1, {61}, ready(1, 17), 3600,
+              fight);
+    then_talk_to(r, "AlchadnoChief: side 17 done", 8, 0, "AlchadnoChief", 3, quest_is(1, 17, 2));
+    then_talk_to(r, "AlchadnoChief: side 18 given", 8, 0, "AlchadnoChief", 4, quest_is(1, 18, 1));
+    then_quests_are(r, "part sides_a's quests",
+                    {{1, 1, 2},
+                     {1, 2, 2},
+                     {1, 3, 2},
+                     {1, 5, 2},
+                     {1, 6, 1},
+                     {1, 16, 2},
+                     {1, 17, 2},
+                     {1, 18, 1}});
+    chapter_2_side_end(r, "sides_a");
+}
+void chapter_3_sides_a_checks(Run &, u64) {}
+
+// Part sides_b (#301): Alchester (9.0) gives 7 and ends it at once for item 127, with item 121,
+// which ZenumistChief's 6 takes; then his 8 (30 of item 80 from mob 59 on 8.3) and 9, which
+// wants Humanoid3's item 122 (side 11). Humanoid3 gives 10 while 9 is active (30 of item 79 from
+// mob 60 on 8.2, for item 124) and then 11, which wants item 125 from the smith (side 12).
+void chapter_3_sides_b(Run &r, u64) {
+    using namespace quest_bot;
+    chapter_3_side_start(r, "sides_b", 6);
+    const FarmStyle fight = chapter_3_fight();
+    then_talk_to(r, "Pirate_Magatia (6.0): to 4.1 (list 1)", 6, 0, "Pirate_Magatia", 1,
+                 on_map(4, 1));
+    then_talk_to(r, "Alchester (9.0): side 7 given", 9, 0, "Alchester", 2, quest_is(1, 7, 1), 1200);
+    then_talk_to(r, "Alchester: side 7 done (item 127), item 121", 9, 0, "Alchester", 2,
+                 all_of({quest_is(1, 7, 2), has_item(121, 1)}));
+    then_talk_to(r, "Pirate_Orbis (4.1): to 6.0 (list 2)", 4, 1, "Pirate_Orbis", 2, on_map(6, 0),
+                 1200);
+    then_talk_to(r, "ZenumistChief: side 6 done (item 121)", 7, 0, "ZenumistChief", 7,
+                 quest_is(1, 6, 2));
+    then_talk_to(r, "ZenumistChief: side 8 given", 7, 0, "ZenumistChief", 8, quest_is(1, 8, 1));
+    then_farm(r, "30 of item 80 from mob 59 on 8.3 (side 8)", 8, 3, {59}, ready(1, 8), 3600, fight);
+    then_talk_to(r, "ZenumistChief: side 8 done", 7, 0, "ZenumistChief", 8, quest_is(1, 8, 2));
+    then_talk_to(r, "ZenumistChief: side 9 given", 7, 0, "ZenumistChief", 9, quest_is(1, 9, 1));
+    then_talk_to(r, "Humanoid3 (8.4): side 10 given", 8, 4, "Humanoid3", 2, quest_is(1, 10, 1));
+    then_farm(r, "30 of item 79 from mob 60 on 8.2 (side 10)", 8, 2, {60}, ready(1, 10), 3600,
+              fight);
+    then_talk_to(r, "Humanoid3: side 10 done, item 124", 8, 4, "Humanoid3", 2,
+                 all_of({quest_is(1, 10, 2), has_item(124, 1)}));
+    then_talk_to(r, "Humanoid3: side 11 given", 8, 4, "Humanoid3", 3, quest_is(1, 11, 1));
+    then_quests_are(r, "part sides_b's quests",
+                    {{1, 6, 2}, {1, 7, 2}, {1, 8, 2}, {1, 9, 1}, {1, 10, 2}, {1, 11, 1}});
+    chapter_2_side_end(r, "sides_b");
+}
+void chapter_3_sides_b_checks(Run &, u64) {}
+
+// Part sides_c (#301): to the smith (0.0) by Pirate_Magatia and Pirate_Orbis: his 12 (item 124
+// and 10,000 meso) gives item 125; back by the Pirate (2.0). Humanoid3 ends 11 with item 122,
+// ZenumistChief ends 9 and gives 13 (30 of item 81 from mob 62 on 8.4, where AlchadnoChief's 18
+// wants 40 of mob 62), ends 13 and gives 14, which wants item 85 (side 34, the climb).
+void chapter_3_sides_c(Run &r, u64) {
+    using namespace quest_bot;
+    chapter_3_side_start(r, "sides_c", 6);
+    const FarmStyle fight = chapter_3_fight();
+    then_talk_to(r, "Pirate_Magatia (6.0): to 4.1 (list 1)", 6, 0, "Pirate_Magatia", 1,
+                 on_map(4, 1));
+    then_talk_to(r, "Pirate_Orbis (4.1): to 2.0 (list 1)", 4, 1, "Pirate_Orbis", 1, on_map(2, 0));
+    then_talk_to(r, "smith (0.0): side 12 given", 0, 0, "smith", 1, quest_is(1, 12, 1), 900);
+    then_talk_to(r, "smith: side 12 done (item 124, 10,000 meso), item 125", 0, 0, "smith", 1,
+                 all_of({quest_is(1, 12, 2), has_item(125, 1)}));
+    then_talk_to(r, "Pirate (2.0): back to 4.1", 2, 0, "Pirate", -1, on_map(4, 1), 900);
+    then_talk_to(r, "Pirate_Orbis (4.1): to 6.0 (list 2)", 4, 1, "Pirate_Orbis", 2, on_map(6, 0));
+    then_talk_to(r, "Humanoid3: side 11 done (item 125), item 122", 8, 4, "Humanoid3", 3,
+                 all_of({quest_is(1, 11, 2), has_item(122, 1)}), 900);
+    then_talk_to(r, "ZenumistChief: side 9 done (item 122)", 7, 0, "ZenumistChief", 9,
+                 quest_is(1, 9, 2));
+    then_talk_to(r, "ZenumistChief: side 13 given", 7, 0, "ZenumistChief", 10, quest_is(1, 13, 1));
+    then_farm(r, "40 of mob 62 and 30 of item 81 on 8.4 (sides 18, 13)", 8, 4, {62},
+              all_of({ready(1, 18), ready(1, 13)}), 3600, fight);
+    then_talk_to(r, "AlchadnoChief: side 18 done", 8, 0, "AlchadnoChief", 4, quest_is(1, 18, 2));
+    then_talk_to(r, "ZenumistChief: side 13 done", 7, 0, "ZenumistChief", 10, quest_is(1, 13, 2));
+    then_talk_to(r, "ZenumistChief: side 14 given", 7, 0, "ZenumistChief", 11, quest_is(1, 14, 1));
+    then_quests_are(r, "part sides_c's quests",
+                    {{1, 9, 2}, {1, 11, 2}, {1, 12, 2}, {1, 13, 2}, {1, 14, 1}, {1, 18, 2}});
+    chapter_2_side_end(r, "sides_c");
+}
+void chapter_3_sides_c_checks(Run &, u64) {}
+
+// Part climb (#301): 6.0's portal to 6.1 opens while side 14 is active. 6.1 and 6.2 are a climb
+// to remem2 at 6.2's top, who gives side 34 and ends it on one talk with item 85. The part saves
+// on 6.0 with 14 still active, for part side_14 (the Bandit's reward) and side_14_assassin.
+void chapter_3_climb(Run &r, u64) {
+    using namespace quest_bot;
+    chapter_3_side_start(r, "climb", 6);
+    then_check(r, "side 14 active, no item 85", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return quest_state(cpu, h, 1, 14) == 1 && item_count(cpu, h, 85) == 0;
+    });
+    then_talk_to(r, "remem2 (6.2): the climb, side 34 done, item 85", 6, 2, "remem2", -1,
+                 all_of({quest_is(1, 34, 2), has_item(85, 1)}), 1800);
+    then_run_event(r, "6.0's portal to 6.1 (side 14 active)", MT_GAME_EVENT_MAP_CHANGE, 6, {1});
+    then_run_event(r, "6.1's top to 6.2", MT_GAME_EVENT_MAP_CHANGE, 6, {2});
+    then_go(r, "back down to 6.0", at_object(6, 0, "BrokerHan", 6), 900);
+    then_quests_are(r, "part climb's quests", {{1, 14, 1}, {1, 34, 2}});
+    chapter_2_side_end(r, "climb");
+}
+void chapter_3_climb_checks(Run &, u64) {}
+
+// ZenumistChief ends side 14 for item 85 with a weapon by the hero's job (getHeroClass): claw 44
+// for an Assassin (branch 1), dagger 32 otherwise.
+void then_side_14(Run &r, i32 weapon) {
+    using namespace quest_bot;
+    auto before = std::make_shared<i32>(0);
+    then_do(r, "side 14: before", [before, weapon](mt_cpu *cpu) {
+        *before = equip_owned(cpu, hero(cpu), weapon);
+    });
+    then_talk_to(r, "ZenumistChief: side 14 done (item 85)", 7, 0, "ZenumistChief", 11,
+                 quest_is(1, 14, 2), 900);
+    then_do(r, "side 14's reward", [before, weapon](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const i32 other = weapon == 44 ? 32 : 44;
+        check(equip_owned(cpu, h, weapon) == *before + 1 && item_count(cpu, h, 85) == 0,
+              "branch " + std::to_string(rdi(cpu, h.addr + 0x88)) + ": equipment " +
+                  std::to_string(weapon) + " " + std::to_string(*before) + " -> " +
+                  std::to_string(equip_owned(cpu, h, weapon)) + ", equipment " +
+                  std::to_string(other) + " " + std::to_string(equip_owned(cpu, h, other)) +
+                  ", item 85 " + std::to_string(item_count(cpu, h, 85)));
+    });
+}
+
+// Part side_14 (#301): the chain's Bandit (branch 2) hands side 14 in: dagger 32.
+void chapter_3_side_14(Run &r, u64) {
+    using namespace quest_bot;
+    chapter_3_side_start(r, "side_14", 6);
+    then_side_14(r, 32);
+    then_quests_are(r, "part side_14's quests", {{1, 14, 2}, {1, 34, 2}});
+    chapter_2_side_end(r, "side_14");
+}
+void chapter_3_side_14_checks(Run &, u64) {}
+
+// Side 14's other offer (#301, synthetic: tests/starts/raise/chapter_3_side_14_assassin.json
+// over part climb's save makes the hero an Assassin, branch 1): claw 44.
+void chapter_3_side_14_assassin(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_check(r, "an Assassin with side 14 active and item 85", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return h.chapter == 3 && rdi(cpu, h.addr + 0x88) == 1 && quest_state(cpu, h, 1, 14) == 1 &&
+               item_count(cpu, h, 85) == 1;
+    });
+    then_side_14(r, 44);
+    then_quests_are(r, "side 14 done by an Assassin", {{1, 14, 2}});
+    then_finish(r);
+}
+void chapter_3_side_14_assassin_checks(Run &, u64) {}
+
+// Area 10's side parts (#301, synthetic: tests/starts/raise/chapter_3_sides_10.json over part
+// side_14's save raises the hero to level 99 by the game's level-up rules, as part E). Area 10's
+// mobs are level 98 to 130; the played level-72 hero of part E fell 23 times there in an hour.
+// sides_10_a: Skadru's 20 (30 of item 73 from mob 43 on 10.0) and the SnowQueen's 22 (30 of mob
+// 43), 23 (33 of mob 44 on 10.1) and 24 (30 each of item 75, mob 33 on 10.2, and item 123, mob
+// 37 on 10.1).
+void chapter_3_sides_10_a(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_check(r, "chapter 3, level 99", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return h.chapter == 3 && h.level == 99;
+    });
+    then_spend_sp(r, "sides_10_a", k_chapter_2_build);
+    const FarmStyle fight = chapter_3_fight();
+    then_talk_to(r, "Pirate_Magatia (6.0): to 4.1 (list 1)", 6, 0, "Pirate_Magatia", 1,
+                 on_map(4, 1));
+    then_sell(r, "materials (Etc90)", 9, 4, k_chapter_3_side_items, 1200);
+    then_stock(r, "item 4 (Etc90)", 9, 4, 200, 500, 600);
+    then_stock(r, "item 7 (Etc90)", 9, 7, 80, 500, 600);
+    then_talk_to(r, "Skadru (9.0): side 20 given", 9, 0, "Skadru", 1, quest_is(1, 20, 1));
+    then_talk_to(r, "SnowQueen (9.0): side 22 given", 9, 0, "SnowQueen", 2, quest_is(1, 22, 1));
+    then_farm(r, "30 of mob 43 and 30 of item 73 on 10.0 (sides 22, 20)", 10, 0, {43},
+              all_of({ready(1, 22), ready(1, 20)}), 3600, fight);
+    then_talk_to(r, "Skadru: side 20 done", 9, 0, "Skadru", 1, quest_is(1, 20, 2), 900);
+    then_talk_to(r, "SnowQueen: side 22 done", 9, 0, "SnowQueen", 2, quest_is(1, 22, 2));
+    then_talk_to(r, "SnowQueen: side 23 given", 9, 0, "SnowQueen", 3, quest_is(1, 23, 1));
+    then_farm(r, "33 of mob 44 on 10.1 (side 23)", 10, 1, {44}, ready(1, 23), 3600, fight);
+    then_talk_to(r, "SnowQueen: side 23 done", 9, 0, "SnowQueen", 3, quest_is(1, 23, 2), 900);
+    then_talk_to(r, "SnowQueen: side 24 given", 9, 0, "SnowQueen", 4, quest_is(1, 24, 1));
+    then_farm(r, "30 of item 123 from mob 37 on 10.1 (side 24)", 10, 1, {37}, has_item(123, 30),
+              3600, fight);
+    then_farm(r, "30 of item 75 from mob 33 on 10.2 (side 24)", 10, 2, {33}, ready(1, 24), 3600,
+              fight);
+    then_talk_to(r, "SnowQueen: side 24 done", 9, 0, "SnowQueen", 4, quest_is(1, 24, 2), 900);
+    then_quests_are(r, "part sides_10_a's quests", {{1, 20, 2}, {1, 22, 2}, {1, 23, 2}, {1, 24, 2}});
+    chapter_2_side_end(r, "sides_10_a");
+}
+void chapter_3_sides_10_a_checks(Run &, u64) {}
+
+// Part sides_10_b (#301, synthetic: from sides_10_a's save, the raised hero): the Miner's 26
+// (after 24), ended by Alchester; his 27 (30 of item 74 from mob 29 on 10.2) and 28, ended by
+// Skadru; Skadru's 29 (60 of item 76 from mob 54 on 10.2); Alchester's 30 (60 of mob 54) and 31
+// (60 of item 77 from mob 55 on 10.3).
+void chapter_3_sides_10_b(Run &r, u64) {
+    using namespace quest_bot;
+    chapter_3_side_start(r, "sides_10_b", 9);
+    const FarmStyle fight = chapter_3_fight();
+    then_talk_to(r, "Miner (9.0): side 26 given", 9, 0, "Miner", 1, quest_is(1, 26, 1));
+    then_talk_to(r, "Alchester: side 26 done", 9, 0, "Alchester", 3, quest_is(1, 26, 2));
+    then_talk_to(r, "Alchester: side 27 given", 9, 0, "Alchester", 4, quest_is(1, 27, 1));
+    then_farm(r, "30 of item 74 from mob 29 on 10.2 (side 27)", 10, 2, {29}, ready(1, 27), 3600,
+              fight);
+    then_talk_to(r, "Alchester: side 27 done", 9, 0, "Alchester", 4, quest_is(1, 27, 2), 900);
+    then_talk_to(r, "Alchester: side 28 given", 9, 0, "Alchester", 5, quest_is(1, 28, 1));
+    then_talk_to(r, "Skadru: side 28 done", 9, 0, "Skadru", 2, quest_is(1, 28, 2));
+    then_talk_to(r, "Skadru: side 29 given", 9, 0, "Skadru", 3, quest_is(1, 29, 1));
+    then_farm(r, "60 of item 76 from mob 54 on 10.2 (side 29)", 10, 2, {54}, ready(1, 29), 3600,
+              fight);
+    then_talk_to(r, "Skadru: side 29 done", 9, 0, "Skadru", 3, quest_is(1, 29, 2), 900);
+    then_talk_to(r, "Alchester: side 30 given", 9, 0, "Alchester", 6, quest_is(1, 30, 1));
+    then_farm(r, "60 of mob 54 on 10.2 (side 30)", 10, 2, {54}, ready(1, 30), 3600, fight);
+    then_talk_to(r, "Alchester: side 30 done", 9, 0, "Alchester", 6, quest_is(1, 30, 2), 900);
+    then_talk_to(r, "Alchester: side 31 given", 9, 0, "Alchester", 7, quest_is(1, 31, 1));
+    then_farm(r, "60 of item 77 from mob 55 on 10.3 (side 31)", 10, 3, {55}, ready(1, 31), 3600,
+              fight);
+    then_talk_to(r, "Alchester: side 31 done", 9, 0, "Alchester", 7, quest_is(1, 31, 2), 900);
+    then_quests_are(
+        r, "part sides_10_b's quests",
+        {{1, 26, 2}, {1, 27, 2}, {1, 28, 2}, {1, 29, 2}, {1, 30, 2}, {1, 31, 2}});
+    // Every side quest of chapter 3 the chain can take (the knowledge base's 33 but 42, the 3rd
+    // job: the chain's hero took it in chapter 2).
+    then_quests_are(r, "chapter 3's side quests but 42",
+                    {{1, 0, 2},  {1, 1, 2},  {1, 2, 2},  {1, 3, 2},  {1, 4, 2},  {1, 5, 2},
+                     {1, 6, 2},  {1, 7, 2},  {1, 8, 2},  {1, 9, 2},  {1, 10, 2}, {1, 11, 2},
+                     {1, 12, 2}, {1, 13, 2}, {1, 14, 2}, {1, 15, 2}, {1, 16, 2}, {1, 17, 2},
+                     {1, 18, 2}, {1, 20, 2}, {1, 22, 2}, {1, 23, 2}, {1, 24, 2}, {1, 25, 2},
+                     {1, 26, 2}, {1, 27, 2}, {1, 28, 2}, {1, 29, 2}, {1, 30, 2}, {1, 31, 2},
+                     {1, 34, 2}, {1, 58, 2}});
+    chapter_2_side_end(r, "sides_10_b");
+}
+void chapter_3_sides_10_b_checks(Run &, u64) {}
+
+// Part crafts (#301, synthetic: tests/starts/raise/chapter_3_crafts.json over part D's save, the
+// materials and meso every recipe and trade of chapter 3 needs, and an empty equipment bag for
+// the 18 results). Every trade of chapter 3 once: Ericsson (4.0, lists 1-4: in chapter 3 he has no
+// quest, so his trades open at once), BrokerHan (6.0, list 6, then 1-3) and the pig (1.0, lists 1-3); then every recipe of chapter 3's smith
+// (0.0) once, the kind, then the row (with no side 12 to offer, his quest list is skipped and
+// the kinds show at once), each against the knowledge base's recipe (then_craft).
+void chapter_3_crafts(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_check(r, "chapter 3 on 9.0", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return h.chapter == 3 && h.on(9, 0);
+    });
+    then_bag(r, "the crafts' start");
+    then_trade(r, "Ericsson: trade 1, 50 of item 54 for 3 of item 94", 4, 0, "Ericsson", {1}, 54,
+               94);
+    then_trade(r, "Ericsson: trade 2, 50 of item 50 for 3 of item 100", 4, 0, "Ericsson", {2},
+               50, 100);
+    then_trade(r, "Ericsson: trade 3, 50 of item 66 for 3 of item 95", 4, 0, "Ericsson", {3}, 66,
+               95);
+    then_trade(r, "Ericsson: trade 4, 50 of item 68 for 3 of item 101", 4, 0, "Ericsson", {4},
+               68, 101);
+    then_talk_to(r, "Pirate_Orbis (4.1): to 6.0 (list 2)", 4, 1, "Pirate_Orbis", 2, on_map(6, 0));
+    then_trade(r, "BrokerHan: trade 1, 50 of item 79 for 3 of item 96", 6, 0, "BrokerHan", {6, 1},
+               79, 96);
+    then_trade(r, "BrokerHan: trade 2, 50 of item 81 for 3 of item 102", 6, 0, "BrokerHan", {6, 2},
+               81, 102);
+    then_trade(r, "BrokerHan: trade 3, 50 of item 74 for 3 of item 97", 6, 0, "BrokerHan", {6, 3},
+               74, 97);
+    then_talk_to(r, "Pirate_Magatia (6.0): to 4.1 (list 1)", 6, 0, "Pirate_Magatia", 1,
+                 on_map(4, 1));
+    then_talk_to(r, "Pirate_Orbis (4.1): to 2.0 (list 1)", 4, 1, "Pirate_Orbis", 1, on_map(2, 0));
+    then_trade(r, "pig: trade 1, 50 of item 103 for 3 of item 98", 1, 0, "pig", {1}, 103, 98);
+    then_trade(r, "pig: trade 2, 50 of item 42 for 3 of item 93", 1, 0, "pig", {2}, 42, 93);
+    then_trade(r, "pig: trade 3, 50 of item 112 for 3 of item 99", 1, 0, "pig", {3}, 112, 99);
+    // The smith's rows in each kind are its recipes by result id (the knowledge base's order).
+    const std::vector<std::tuple<const char *, i32, int, int>> recipes = {
+        {"hat 7", 7, 1, 1},        {"hat 9", 9, 1, 2},        {"hat 11", 11, 1, 3},
+        {"overall 19", 19, 2, 1},  {"overall 21", 21, 2, 2},  {"overall 23", 23, 2, 3},
+        {"dagger 31", 31, 3, 1},   {"dagger 33", 33, 3, 2},   {"dagger 35", 35, 3, 3},
+        {"glove 43", 43, 4, 1},    {"glove 45", 45, 4, 2},    {"glove 47", 47, 4, 3},
+        {"shoes 55", 55, 5, 1},    {"shoes 57", 57, 5, 2},    {"shoes 59", 59, 5, 3},
+        {"earrings 67", 67, 6, 1}, {"earrings 69", 69, 6, 2}, {"earrings 71", 71, 6, 3}};
+    auto made = std::make_shared<int>(0);
+    for (const auto &[name, item, kind, row] : recipes) {
+        then_craft(r, std::string("smith: ") + name, item, {kind, row}, 3);
+        then_do(r, std::string("smith: ") + name + ": side 77", [made](mt_cpu *cpu) {
+            ++*made;
+            check(quest_state(cpu, hero(cpu), 1, 77) == 2,
+                  "the Craft is side 77, state " +
+                      std::to_string(quest_state(cpu, hero(cpu), 1, 77)));
+        });
+    }
+    then_do(r, "every recipe of chapter 3", [made](mt_cpu *) {
+        int kb = 0;
+        for (const world_map::Recipe &c : world_map::recipes()) {
+            kb += c.chapter == 3 ? 1 : 0;
+        }
+        check(*made == kb && kb == 18, "crafted " + std::to_string(*made) +
+                                           " recipes; the knowledge base has " +
+                                           std::to_string(kb) + " in chapter 3");
+    });
+    then_bag(r, "the crafts' end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_3_crafts_checks(Run &, u64) {}
 
 // --- map pages in the running port (#221, docs/compendium/kb.md) --------------------------------
 //
@@ -14480,6 +14845,15 @@ constexpr Mode k_modes[] = {
      1, true},
     {"chapter_3_postgame_reload", chapter_3_postgame_reload, chapter_3_postgame_reload_checks, 1,
      true},
+    {"chapter_3_sides_a", chapter_3_sides_a, chapter_3_sides_a_checks, 1},
+    {"chapter_3_sides_b", chapter_3_sides_b, chapter_3_sides_b_checks, 1},
+    {"chapter_3_sides_c", chapter_3_sides_c, chapter_3_sides_c_checks, 1},
+    {"chapter_3_climb", chapter_3_climb, chapter_3_climb_checks, 1},
+    {"chapter_3_side_14", chapter_3_side_14, chapter_3_side_14_checks, 1},
+    {"chapter_3_side_14_assassin", chapter_3_side_14_assassin, chapter_3_side_14_assassin_checks, 1},
+    {"chapter_3_sides_10_a", chapter_3_sides_10_a, chapter_3_sides_10_a_checks, 1},
+    {"chapter_3_sides_10_b", chapter_3_sides_10_b, chapter_3_sides_10_b_checks, 1},
+    {"chapter_3_crafts", chapter_3_crafts, chapter_3_crafts_checks, 1},
     {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},
     {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
     {"confirm_guard", confirm_guard, confirm_guard_checks, 1},

@@ -1937,6 +1937,54 @@ set_tests_properties(
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
                FIXTURES_REQUIRED play_chapter_3_postgame_relaunch ENVIRONMENT "${_chapter_3_env}")
 
+# Chapter 3's side quests, the climb of 6.1 and 6.2, crafts and trades (#301,
+# docs/testing/chapter-3-quests.md). The side parts branch off part d's save (main 7 active), each
+# from the save of the one before. side_14_assassin starts from the climb's save with the hero made
+# an Assassin, area 10's parts from side_14's save raised to level 99, and the crafts from part d's
+# save with every recipe's and trade's materials (tests/starts/raise/chapter_3_*.json: synthetic).
+function(_chapter_3_part name test fixture_required from_dir)
+    add_test(NAME ${test} COMMAND play_real_test chapter_3_${name}
+                                  "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_${name}")
+    set_tests_properties(
+        ${test}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+                   FIXTURES_REQUIRED ${fixture_required} FIXTURES_SETUP play_chapter_3_${name}
+                   ENVIRONMENT "${_chapter_3_env};MT_FROM_SAVE=${from_dir}")
+endfunction()
+# starts.chapter_3_<name>: tests/starts/raise/chapter_3_<name>.json over the save of `fixture`.
+function(_chapter_3_raise name fixture from_dir)
+    add_test(NAME starts.chapter_3_${name}
+             COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savedata build
+                     "${PROJECT_SOURCE_DIR}/tests/starts/raise/chapter_3_${name}.json"
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_3_${name}/data/saves" --base
+                     "${from_dir}" --app "${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+    set_tests_properties(
+        starts.chapter_3_${name}
+        PROPERTIES LABELS "real_assets" SKIP_RETURN_CODE 77 TIMEOUT 120 FIXTURES_REQUIRED
+                   ${fixture} FIXTURES_SETUP start_chapter_3_${name} ENVIRONMENT
+                   "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+endfunction()
+set(_previous_fixture play_chapter_3_d)
+set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_d")
+foreach(part IN ITEMS sides_a sides_b sides_c climb side_14)
+    _chapter_3_part(${part} play.chapter_3_${part} ${_previous_fixture} "${_previous_dir}")
+    set(_previous_fixture play_chapter_3_${part})
+    set(_previous_dir "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_${part}")
+endforeach()
+_chapter_3_raise(side_14_assassin play_chapter_3_climb
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_climb")
+_chapter_3_part(side_14_assassin play.chapter_3_side_14_assassin_synthetic
+                start_chapter_3_side_14_assassin
+                "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_3_side_14_assassin")
+_chapter_3_raise(sides_10 play_chapter_3_side_14 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_side_14")
+_chapter_3_part(sides_10_a play.chapter_3_sides_10_a_synthetic start_chapter_3_sides_10
+                "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_3_sides_10")
+_chapter_3_part(sides_10_b play.chapter_3_sides_10_b_synthetic play_chapter_3_sides_10_a
+                "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_sides_10_a")
+_chapter_3_raise(crafts play_chapter_3_d "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_3_d")
+_chapter_3_part(crafts play.chapter_3_crafts_synthetic start_chapter_3_crafts
+                "${MAPLETHIEF_TEST_OUTPUT_DIR}/start_chapter_3_crafts")
+
 # Chapter 2's side quests, crafts, trades and shops (#299, docs/testing/chapter-2-quests.md).
 # The side-quest parts branch off part e's save (chapter 2 still open), each from the save of the
 # one before; the shops of 9.0 and 4.0 go on from the last of them. The crafts start from
