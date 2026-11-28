@@ -18,7 +18,12 @@
 #     the machine's load average, so a failure on a busy machine reads as such. CTest runs the
 #     test RUN_SERIAL; another process's load can still slow a run's ticks for a while (#344),
 #     so a run whose tick rate is outside the tolerance is run again, up to `attempts` times. A
-#     real error in the rate is outside it in every attempt.
+#     real error in the rate is outside it in every attempt. The gate is polled once a run-loop
+#     turn, and the pacer's grid is 1 ms; on a host whose sleeps are coarser (the arm64 Linux
+#     container under OrbStack: a 1 ms sleep takes about 3 ms, a turn about 4.2 ms, #441) each
+#     tick runs about half a turn late. The exit line's mean turn beyond 1 ms, halved, widens
+#     the tolerance for a slow rate as a share of the tick, and the message names it: it is the
+#     host's timer, not the clock. On macOS (a turn every 1.0-1.4 ms) it adds at most 0.8 %.
 
 # A -P script gets no policies from the project: set the project's minimum (#341).
 cmake_minimum_required(VERSION 3.28)
@@ -74,16 +79,55 @@ endfunction()
 
 set(attempts 3)
 
-# The deviation in the exit clock line ("(-0.60 %)") within `percent`: sets deviation_ok. Outside
-# it, the run is to be made again (a message), or at the last attempt the test fails.
-function(check_deviation name percent attempt)
+# Hundredths of a percent of a tick of `tick_us` microseconds that coarse run-loop turns make it
+# late (see the header): half the exit line's mean turn beyond the pacer's 1 ms grid, 0 on that
+# grid. Sets `out` to it and `out_note` to the message's words about it.
+function(turn_slack out out_note tick_us)
+    set(${out} 0 PARENT_SCOPE)
+    set(${out_note} "" PARENT_SCOPE)
+    if(NOT log MATCHES "game: [a-z]+ after ([0-9]+)\\.([0-9]) s: ([1-9][0-9]*) turns")
+        return()
+    endif()
+    math(EXPR turn_us "(${CMAKE_MATCH_1} * 10 + ${CMAKE_MATCH_2}) * 100000 / ${CMAKE_MATCH_3}")
+    if(turn_us LESS_EQUAL 1000)
+        return()
+    endif()
+    math(EXPR slack "(${turn_us} - 1000) * 5000 / ${tick_us}")
+    math(EXPR turn_tenths "(${turn_us} + 50) / 100")
+    percent_text(turn_text ${turn_tenths}0)
+    percent_text(slack_text ${slack})
+    set(${out} ${slack} PARENT_SCOPE)
+    set(${out_note}
+        "; a run-loop turn every ${turn_text} ms, coarser than the pacer's 1 ms grid, so the host's timer makes each tick about half a turn late: ${slack_text} % more allowed for a slow rate (#441)"
+        PARENT_SCOPE)
+endfunction()
+
+# `hundredths` as a decimal with two places ("9.40").
+function(percent_text out hundredths)
+    math(EXPR whole "${hundredths} / 100")
+    math(EXPR frac "${hundredths} % 100")
+    if(frac LESS 10)
+        set(frac "0${frac}")
+    endif()
+    set(${out} "${whole}.${frac}" PARENT_SCOPE)
+endfunction()
+
+# The deviation in the exit clock line ("(-0.60 %)") within `percent`, and below it by the coarse
+# turns' share of a tick of `tick_us` microseconds more (turn_slack; they only make ticks late):
+# sets deviation_ok. Outside it, the run is to be made again (a message), or at the last attempt
+# the test fails.
+function(check_deviation name percent tick_us attempt)
     load_average(load)
     if(NOT log MATCHES "game: clock: [^\n]*\\(([-+][0-9]+\\.[0-9]+) %\\)")
         message(FATAL_ERROR "${name}: no game: clock: line with a deviation:\n${log}")
     endif()
     set(dev "${CMAKE_MATCH_1}")
     string(REGEX REPLACE "^\\+" "" dev "${dev}")
-    if(dev LESS -${percent} OR dev GREATER ${percent})
+    turn_slack(slack note ${tick_us})
+    math(EXPR low "${percent} * 100 + ${slack}")
+    percent_text(low ${low})
+    string(APPEND load "${note}")
+    if(dev LESS -${low} OR dev GREATER ${percent})
         if(attempt LESS attempts)
             message(STATUS "${name}: the tick rate is ${dev} % from the option's (${percent} % "
                            "allowed${load}), attempt ${attempt} of ${attempts}: running again")
@@ -131,7 +175,8 @@ elseif(MODE STREQUAL "game")
                OR NOT log MATCHES "fast-forward [0-9.]+ s, [0-9.]+ s of game time gained")
                 message(FATAL_ERROR "ff_x${rate}: the fast-forward did not start at 4 s:\n${log}")
             endif()
-            check_deviation(ff_x${rate} 3 ${attempt})
+            math(EXPR tick_us "50000 / ${rate}")
+            check_deviation(ff_x${rate} 3 ${tick_us} ${attempt})
             if(deviation_ok)
                 break()
             endif()
@@ -144,7 +189,7 @@ elseif(MODE STREQUAL "game")
            OR NOT log MATCHES "game: clock: pacing = wall[^\n]*fast-forward [0-9.]+ s")
             message(FATAL_ERROR "ff_wall: the fast-forward did not start at 4 s:\n${log}")
         endif()
-        check_deviation(ff_wall 3 ${attempt})
+        check_deviation(ff_wall 3 25000 ${attempt})
         if(deviation_ok)
             break()
         endif()
@@ -155,7 +200,7 @@ elseif(MODE STREQUAL "game")
            OR NOT log MATCHES "against the game's 25 ms tick's 40\\.000")
             message(FATAL_ERROR "speed_25: the table was not patched to 25 ms:\n${log}")
         endif()
-        check_deviation(speed_25 5 ${attempt})
+        check_deviation(speed_25 5 25000 ${attempt})
         if(deviation_ok)
             break()
         endif()

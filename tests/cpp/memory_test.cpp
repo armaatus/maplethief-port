@@ -270,7 +270,6 @@ TEST_CASE("sealing makes __TEXT read-only and keeps __DATA writable") {
     REQUIRE(mt_mem_map_macho(s.mem, file.data(), file.size()) == 0);
     CHECK_FALSE(faults(s.host(0x20000u), Access::write)); // writable until sealed
     REQUIRE(mt_mem_seal_image(s.mem) == 0);
-    const std::uint32_t page = mt_mem_host_page_size();
 #if defined(__SWITCH__)
     // Horizon cannot reprotect memory mapped with svcMapMemory: sealing is a no-op there and
     // __TEXT stays writable (ADR 0025's Horizon addendum).
@@ -283,13 +282,14 @@ TEST_CASE("sealing makes __TEXT read-only and keeps __DATA writable") {
 #endif
     CHECK_FALSE(faults(s.host(0x20000u), Access::read));
     CHECK_FALSE(faults(s.host(0xF2000u), Access::write)); // __DATA
-    if (page == 0x1000u) {
-        CHECK(faults(s.host(0u), Access::read)); // page zero is never mapped
-    } else {
-        // A 16 KiB host page holds page zero and the start of __TEXT: readable, not writable.
-        CHECK_FALSE(faults(s.host(0u), Access::read));
-        CHECK(faults(s.host(0u), Access::write));
-    }
+    // Page zero reads as zeros and is not writable on every host page size (ADR 0250): on a
+    // 16 KiB host page it shares __TEXT's first page, on a 4 KiB one the seal commits it.
+    CHECK_FALSE(faults(s.host(0u), Access::read));
+    CHECK(s.host(0u)[0] == 0u);
+    CHECK(s.host(0u)[MT_GUEST_PAGE_ZERO_END - 1u] == 0u);
+#if !defined(__SWITCH__)
+    CHECK(faults(s.host(0u), Access::write));
+#endif
     CHECK(faults(s.host(0x130000u), Access::read)); // the image area beyond the segments
     const mt_segment late{"__LATE", 0x200000u, 0x1000u, 0u, 0u, k_rw};
     CHECK(mt_mem_map_segment(s.mem, &late, nullptr, 0u) == -1); // no mapping after sealing

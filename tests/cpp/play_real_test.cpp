@@ -13894,6 +13894,9 @@ void then_craft(Run &r, const std::string &name, i32 item, std::vector<int> choi
     });
 }
 
+void then_trade(Run &r, const std::string &name, int area, int map, const std::string &npc,
+                std::vector<int> choices, i32 cost, i32 result);
+
 void compendium_npcs(Run &r, u64) {
     from_save(r);
     then_wait_field(r);
@@ -13915,6 +13918,9 @@ void compendium_npcs(Run &r, u64) {
     // NPC 4: Blackbull (the pig, Perion 1.0).
     then_meet(r, "Blackbull", 1, 0, "pig");
     then_chat_closed(r, "Blackbull", 1, 0, "pig");
+    // Part L's save holds 10 of item 99, and the two recipes below take 7 and 6: Blackbull's
+    // third trade makes up the 3 missing, as a player would (#441).
+    then_trade(r, "Blackbull: trade 3, 50 of item 112 for 3 of item 99", 1, 0, "pig", {3}, 112, 99);
     // NPC 5: Mr. Smith (0.0), then two of his recipes: the shoes' list (5), its first pair, and
     // the earrings' list (6), its first pair. His chat stays open for the first: any row of his
     // first list crafts something.

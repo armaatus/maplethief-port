@@ -34,6 +34,7 @@ ctest --preset mac-debug -R "play\.compendium_npcs" --output-on-failure
 | NPC: Mr. Smith (`smith`) | Kerning City 0.0, tile (6, 6) | at (104, 111), chat opens |
 | Shop 3, Mr. Wang's shop in Henesys | `Etc20` on 2.0, chapters 1 to 3 | 6 rows, every item and price as listed |
 | Shop 2, Mr. Lee's shop in Henesys (`Equip20`) | `Equip20` on 2.0, chapters 1 to 3 | 10 rows, every item and price as listed |
+| Trade: Blackbull's third (`pig`, list 3) | Perion 1.0, chapter 2 | 50 of item 112 out, 3 of item 99 in (2026-11-28) |
 | Recipe: Lappy Boots (`2-equip:51`) | Mr. Smith, 0.0, chapter 2; shoes list | 2 Topaz, 7 Bronze and 700 meso out, one pair in |
 | Recipe: Lightning Earrings (`2-equip:63`) | Mr. Smith, 0.0, chapter 2; earrings list | 7 Topaz, 6 Bronze and 550 meso out, one pair in |
 
@@ -42,3 +43,7 @@ error line in the runtime's log).
 
 The smith's first list crafts whatever row is chosen, so the bot never closes his chat with
 "any row": the first recipe's talk takes over the chat the NPC check opened.
+
+Part L's save (`tests/starts/chapter_2.json`) holds 10 of item 99 since its capture after
+#306, and the two recipes take 7 and 6. The bot makes up the difference with Blackbull's third
+trade before it goes to the smith, as a player would (#441).
