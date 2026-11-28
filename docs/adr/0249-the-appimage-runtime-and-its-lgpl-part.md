@@ -18,7 +18,7 @@ ADR 0003 says: no GPL in anything we compile, link or ship, and LGPL only if it 
 
 - **The runtime may ship.** It is a separate program, redistributed unchanged from its upstream release and checked by SHA-256. ADR 0003's static-LGPL rule is about what links with our code. It still holds there, unchanged. Any other third-party program that is to ship inside a download needs its own decision.
 - **Its notices go with every Linux player download**, in `licenses/AppImage-runtime/`: the runtime's own `LICENSE` and the licence text of each library it links. Each is pinned by URL and SHA-256 (`MAPLETHIEF_APPIMAGE_LICENSE_PINS` in `cmake/Dependencies.cmake`) and downloaded at configure time, like the Switch's notices. They go into the player tarball because `mtport.linux_package` packs the tarball's files behind the runtime, so the AppImage carries them. The tarball and the Flatpak bundle carry them too, which costs a few KB and keeps one layout.
-- **The LGPL's source.** The runtime's complete corresponding source is public: its repository at the pinned commit (with its patch to libfuse) and the libfuse and squashfuse archives its build script names, each by SHA-256. THIRD_PARTY.md names all three. Whether our release page should also carry copies of those archives, so that the source sits where the binary is downloaded, is a question for Joris's legal sign-off. It is not decided here.
+- **The LGPL's source.** The runtime's complete corresponding source is public: its repository at the pinned commit (with its patch to libfuse) and the libfuse and squashfuse archives its build script names, each by SHA-256. THIRD_PARTY.md names all three. Whether our release page should also carry copies of those archives, so that the source sits where the binary is downloaded, is a question for Joris's legal sign-off (#440). It is not decided here.
 - **Pins.** The runtime's release and SHA-256s stay in `tools/containers/linux-game/Dockerfile`. `scripts/deps check` lists the release against upstream's tags (`APPIMAGE_RUNTIME_RELEASE`) and the licence texts as following it. `tests/test_deps.py` fails when a pin of a download that ships in a player download (`DOCKER_ARG_PACKAGED` in `tools/mtport/deps.py`) is missing from THIRD_PARTY.md, and when the guard's `APPIMAGE_RUNTIMES` differs from the Dockerfile's hashes.
 
 ## Alternatives
@@ -31,4 +31,4 @@ ADR 0003 says: no GPL in anything we compile, link or ship, and LGPL only if it 
 
 - Every Linux player download has seven more text files, about 40 KB.
 - A runtime bump also means reading its `LICENSE`, `Makefile` and build scripts again and moving the licence pins ([Bumping a dependency](../build/how-to/bump-a-dependency.md)).
-- Open: Joris's sign-off on how the LGPL's source is offered (a link to upstream, or copies on the release page).
+- Open (#440, needs-human): Joris's sign-off on how the LGPL's source is offered (a link to upstream, or copies on the release page).
