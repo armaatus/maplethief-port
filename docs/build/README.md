@@ -289,6 +289,15 @@ scripts/switch-test --ip 192.168.1.23 --build
 scripts/switch-test --ip 192.168.1.23 --crash-test
 ```
 
+The runtime's tests on Android are `MapleThiefTests.apk` (#357, [ADR 0251](../adr/0251-the-runtime-on-android-data-folder-and-test-apk.md)): the same suite as `MapleThiefTests.nro` plus the crash child, built by the `android-*` presets. `scripts/android-test` boots the emulator image (or uses `--serial` for a phone with USB debugging), installs and starts the APK, and passes when `results.txt`'s last line is `android: all tests passed (exit status 0)`. The API 35 images want about 7.4 GB free on the disk to boot.
+
+```sh
+scripts/android-sdk install --image 4k
+scripts/android-test --image 4k --build
+scripts/android-sdk remove-image 4k && scripts/android-sdk install --image 16k
+scripts/android-test --image 16k
+```
+
 ## Android
 
 `MapleThief.apk` is one `arm64-v8a` APK for Android 8.0 and later ([ADR 0150](../adr/0150-android-target.md), [ADR 0163](../adr/0163-android-toolchain-pins-gradle-step-and-emulator-runs.md), epic [#292](https://github.com/armaatus/maplethief-port/issues/292)). Our CMake builds `libmain.so` with the NDK and SDL3 linked in, and a step of the same build packages it with Gradle (`platform/android/`). Every version, the NDK r28c, API 35, the build tools, Temurin 17, Gradle 8.12, the emulator and its two images, is pinned with its SHA-256 in one file, [`tools/containers/android/pins.env`](../../tools/containers/android/pins.env), which the Mac and the container install from with the same script.
