@@ -10056,14 +10056,14 @@ struct HudExtrasRun {
     // Mobs: the last HP and hit counter per mob, the open hits (the tick each began).
     struct MobSeen {
         i32 id = 0, hp = 0, d0 = 0;
-        u64 hit_tick = 0;
+        u64 hit_tick = 0, seen_at = 0; // seen_at: r.ticks of the last look at the counter
         bool open = false;
     };
     std::map<u32, MobSeen> mobs;
     u64 hits = 0, kills = 0, bars_one_second = 0, hits_counter_bad = 0, bars_closed = 0,
         bars_bad_length = 0, max_hp_bad = 0;
     u64 bar_ticks_min = UINT64_MAX, bar_ticks_max = 0;
-    std::string hit_first_bad, hit_example;
+    std::string hit_first_bad, hit_example, bar_first_bad;
     // Pick-ups.
     i32 last_potions = -1, last_meso = -1;
     u64 potion_pickups = 0, potion_lines = 0, meso_gains = 0, meso_lines = 0;
@@ -10206,12 +10206,23 @@ void hud_extras_tick(Run &r, mt_cpu *cpu) {
             const u64 len = m.field_ticks - s.hit_tick;
             m.bar_ticks_min = std::min(m.bar_ticks_min, len);
             m.bar_ticks_max = std::max(m.bar_ticks_max, len);
-            m.bars_bad_length += s.d0 >= 19 && len >= 18 ? 0 : 1;
+            // The test looks at the counter only on some ticks, and the field's tick count
+            // leaves out a tick at each popup or menu, so the counter can run its last steps
+            // between two looks: it must have been able to reach 19 by now.
+            const bool ran_out = static_cast<u64>(std::max(s.d0, 0)) + (r.ticks - s.seen_at) >= 19;
+            m.bars_bad_length += ran_out ? 0 : 1;
+            if (!ran_out && m.bar_first_bad.empty()) {
+                m.bar_first_bad = "mob " + std::to_string(mob.id) + " after " +
+                                  std::to_string(len) + " field ticks, counter " +
+                                  std::to_string(s.d0) + " " +
+                                  std::to_string(r.ticks - s.seen_at) + " ticks before";
+            }
             m.bars_one_second += len >= 18 && len <= 22 ? 1 : 0;
         }
         s.id = mob.id;
         s.hp = mob.hp;
         s.d0 = d0;
+        s.seen_at = r.ticks;
     }
     // The game's own pick-up lines, while on 2.3 (the item and the line come in one call).
     const i32 potions = item_count(cpu, h, 3);
@@ -10341,7 +10352,8 @@ void hud_extras_checks(Run &, u64) {
           "the hit (" +
               std::to_string(m.bars_closed) + " closed, " + std::to_string(m.bars_one_second) +
               " after 18-22 ticks, " + std::to_string(m.bars_bad_length) +
-              " before the counter reached 20)");
+              " before the counter reached 20" +
+              (m.bar_first_bad.empty() ? "" : "; first: " + m.bar_first_bad) + ")");
     check(m.potion_pickups > 0 && m.potion_lines == m.potion_pickups,
           "each Red Potion picked up has the game's \"Red Potion Obtained!\" line (" +
               std::to_string(m.potion_lines) + " of " + std::to_string(m.potion_pickups) + ")");
