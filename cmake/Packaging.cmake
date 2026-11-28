@@ -85,10 +85,16 @@ endfunction()
 #                           the import, docs/play/switch.md
 #   LICENSE THIRD_PARTY.md licenses/  with the notices of what the NRO links (ADR 0138:
 #                           maplethief_use_switch_licenses() in cmake/Dependencies.cmake)
+#
+# The Linux player's licenses/ adds the notices of the AppImage's type-2 runtime and what it
+# links (ADR 0193, #439: maplethief_use_appimage_licenses()): mtport.linux_package packs the
+# player's files behind that runtime, so the AppImage carries them.
 
 FetchContent_GetProperties(SDL3 SOURCE_DIR sdl3_source_dir)
 if(NINTENDO_SWITCH)
     maplethief_use_switch_licenses()
+elseif(MAPLETHIEF_PLAYER_BUILD AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    maplethief_use_appimage_licenses()
 endif()
 # install(FILES) of the Switch's licence texts into licenses/, for COMPONENT <component>.
 function(_maplethief_install_switch_licenses component)
@@ -143,6 +149,16 @@ if(MAPLETHIEF_PLAYER_BUILD)
             COMPONENT player)
         _maplethief_install_switch_licenses(player)
     else()
+        foreach(item IN LISTS MAPLETHIEF_APPIMAGE_LICENSES)
+            string(REPLACE "|" ";" parts "${item}")
+            list(GET parts 0 path)
+            list(GET parts 1 name)
+            install(
+                FILES "${path}"
+                DESTINATION licenses/AppImage-runtime
+                RENAME "${name}"
+                COMPONENT player)
+        endforeach()
         install(
             FILES platform/player/README.md
             DESTINATION .
