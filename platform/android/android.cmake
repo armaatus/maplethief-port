@@ -134,6 +134,21 @@ add_custom_command(
     USES_TERMINAL VERBATIM)
 add_custom_target(MapleThief_apk ALL DEPENDS "${MAPLETHIEF_ANDROID_APK}")
 
+# What tests/CMakeLists.txt needs to package MapleThiefTests.apk (#357) with the same tools and
+# key: the Gradle command line up to its own properties, and the key's file.
+set(MAPLETHIEF_ANDROID_GRADLE_COMMAND
+    "${CMAKE_COMMAND}" -E env "JAVA_HOME=${_maplethief_android_jdk}"
+    "ANDROID_HOME=${_maplethief_android_sdk}" --unset=ANDROID_SDK_ROOT
+    "ANDROID_USER_HOME=${_maplethief_android_dir}/user-home"
+    "GRADLE_USER_HOME=${MAPLETHIEF_ANDROID_GRADLE_HOME}" "${_maplethief_android_gradle}"
+    --no-daemon --quiet --console=plain
+    CACHE INTERNAL "The pinned Gradle with its environment (ADR 0163)")
+set(MAPLETHIEF_ANDROID_KEYSTORE "${_maplethief_android_keystore}"
+    CACHE INTERNAL "The build tree's debug key")
+set(MAPLETHIEF_ANDROID_VARIANT "${_maplethief_android_variant}"
+    CACHE INTERNAL "debug or release: the Gradle variant of this build type")
+add_custom_target(maplethief_android_keystore DEPENDS "${_maplethief_android_keystore}")
+
 add_test(
     NAME platform.android_apk
     COMMAND

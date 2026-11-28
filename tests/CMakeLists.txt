@@ -53,7 +53,7 @@ find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter) # the top level's, fo
 #
 # On the Nintendo Switch (#235, ADR 0138) nothing runs on the build host: <target> becomes
 # <build dir>/tests/<target>.nro instead, a homebrew of its own to start on a console
-# (scripts/switch-run), and no CTest is registered.
+# (scripts/switch-run), and no CTest is registered. Nor on Android (#357).
 function(maplethief_doctest_discover target)
     cmake_parse_arguments(PARSE_ARGV 1 arg "" "PREFIX" "PROPERTIES")
     if(NOT arg_PREFIX OR NOT arg_PROPERTIES)
@@ -72,6 +72,11 @@ function(maplethief_doctest_discover target)
             OUTPUT "${CMAKE_BINARY_DIR}/tests/${target}.nro"
             NACP "${nacp}"
             NOICON)
+        return()
+    endif()
+    # Android (#357): nothing runs on the build host either; MapleThiefTests.apk runs the
+    # runtime's suite on a device (scripts/android-test).
+    if(ANDROID)
         return()
     endif()
     set(tests_file "${CMAKE_CURRENT_BINARY_DIR}/${target}_ctests.cmake")
@@ -173,8 +178,59 @@ else()
     target_link_libraries(crash_child PRIVATE runtime)
     set_target_properties(crash_child PROPERTIES ENABLE_EXPORTS ON)
     maplethief_target_defaults(crash_child)
-    add_dependencies(runtime_test crash_child)
-    target_compile_definitions(runtime_test PRIVATE MT_CRASH_CHILD="$<TARGET_FILE:crash_child>")
+    if(NOT ANDROID)
+        add_dependencies(runtime_test crash_child)
+        target_compile_definitions(runtime_test PRIVATE MT_CRASH_CHILD="$<TARGET_FILE:crash_child>")
+    endif()
+endif()
+
+if(ANDROID)
+    # MapleThiefTests.apk (#357, ADR 0251): the runtime's suite with the saves' tests, as
+    # Horizon's MapleThiefTests.nro, in libMapleThiefTests.so, which the APK's TestsActivity
+    # (platform/android/tests/) calls through android_test_host.cpp. crash_child goes in as
+    # libcrash_child.so: the APK's native libraries are extracted, so diag_test.cpp can start it
+    # from the native library folder (MT_CRASH_CHILD_PATH). scripts/android-test installs the APK
+    # on the emulator or a device, runs it and fetches results.txt; no CTest runs it.
+    add_library(MapleThiefTests SHARED ${MAPLETHIEF_RUNTIME_TEST_SOURCES} cpp/saves_test.cpp
+                                       cpp/android_test_host.cpp)
+    target_link_libraries(MapleThiefTests PRIVATE maplethief_doctest_main runtime log)
+    target_include_directories(MapleThiefTests PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+    maplethief_target_defaults(MapleThiefTests)
+    set(_mt_tests_apk_dir "${CMAKE_CURRENT_BINARY_DIR}/android")
+    set(_mt_tests_jni "${_mt_tests_apk_dir}/jniLibs/arm64-v8a")
+    set(_mt_tests_gradle_out "${_mt_tests_apk_dir}/gradle")
+    set(MAPLETHIEF_ANDROID_TESTS_APK "${CMAKE_BINARY_DIR}/MapleThiefTests.apk")
+    file(GLOB _mt_tests_apk_sources CONFIGURE_DEPENDS
+         "${PROJECT_SOURCE_DIR}/platform/android/tests/*.gradle"
+         "${PROJECT_SOURCE_DIR}/platform/android/tests/src/*/*/*/*/*/*.java")
+    add_custom_command(
+        OUTPUT "${MAPLETHIEF_ANDROID_TESTS_APK}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_mt_tests_jni}"
+        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:MapleThiefTests>"
+                "${_mt_tests_jni}/libMapleThiefTests.so"
+        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:crash_child>"
+                "${_mt_tests_jni}/libcrash_child.so"
+        COMMAND
+            ${MAPLETHIEF_ANDROID_GRADLE_COMMAND} -p "${PROJECT_SOURCE_DIR}/platform/android/tests"
+            --project-cache-dir "${_mt_tests_apk_dir}/gradle-project-cache"
+            "-Pmaplethief.buildDir=${_mt_tests_gradle_out}"
+            "-Pmaplethief.jniLibs=${_mt_tests_apk_dir}/jniLibs"
+            "-Pmaplethief.keystore=${MAPLETHIEF_ANDROID_KEYSTORE}"
+            "-Pmaplethief.version=${MAPLETHIEF_VERSION}" "assemble${MAPLETHIEF_ANDROID_VARIANT}"
+        COMMAND
+            "${CMAKE_COMMAND}" -E copy
+            "${_mt_tests_gradle_out}/outputs/apk/${MAPLETHIEF_ANDROID_VARIANT}/MapleThiefTests-${MAPLETHIEF_ANDROID_VARIANT}.apk"
+            "${MAPLETHIEF_ANDROID_TESTS_APK}"
+        DEPENDS MapleThiefTests
+                crash_child
+                maplethief_android_keystore
+                "${PROJECT_SOURCE_DIR}/platform/android/tests/AndroidManifest.xml"
+                "${PROJECT_SOURCE_DIR}/platform/android/tests/gradle.properties"
+                "${MAPLETHIEF_ANDROID_PINS}"
+                ${_mt_tests_apk_sources}
+        COMMENT "Packaging MapleThiefTests.apk with Gradle (assemble${MAPLETHIEF_ANDROID_VARIANT})"
+        USES_TERMINAL VERBATIM)
+    add_custom_target(MapleThiefTests_apk DEPENDS "${MAPLETHIEF_ANDROID_TESTS_APK}")
 endif()
 
 # The real image in guest memory (ADR 0025): maps work/slices/MapleThief.armv7 when

@@ -417,6 +417,52 @@ TEST_CASE("data folder: iOS keeps the app's folder and its own Documents (ADR 00
     CHECK(loc.saves == str(fs::path("/tmp/somewhere") / "saves"));
 }
 
+TEST_CASE("data folder: Android uses the app's external files folder, game/ inside it") {
+    // A file manager reaches /storage/emulated/0/Android/data/<package>/files, and the app needs
+    // no permission for it (ADR 0150, ADR 0251). No flag, marker or probe applies.
+    const std::string ext = "/storage/emulated/0/Android/data/io.github.armaatus.maplethief/files";
+    Fake f(fs::path(), "/data/user/0/io.github.armaatus.maplethief/files",
+           fe::DataInputs::Os::kAndroid);
+    f.probe_says(true);
+    f.in.flag = Place::kGame;
+    f.in.android_external = ext + "/";
+    fe::DataLocation loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kAndroid);
+    CHECK(loc.reason == Reason::kPlatform);
+    CHECK(std::string(fe::data_place_name(loc.place)) == "android");
+    CHECK(loc.dir == ext);
+    CHECK(loc.saves == str(fs::path(ext) / "saves"));
+    CHECK(loc.crashes == str(fs::path(ext) / "crashes"));
+    CHECK(loc.logs == str(fs::path(ext) / "logs"));
+    CHECK(loc.bundle_dir == str(fs::path(ext) / "game"));
+    CHECK(loc.base.empty());
+    CHECK(loc.placed_bundle.empty());
+    CHECK_FALSE(loc.fallback());
+    CHECK(f.probe_calls == 0);
+    CHECK(f.user_calls == 0);
+    // No external storage mounted writable: the internal files folder, as a fallback.
+    f.in.android_external.clear();
+    loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kAndroid);
+    CHECK(loc.reason == Reason::kFallbackNotWritable);
+    CHECK(loc.fallback());
+    CHECK(loc.dir == "/data/user/0/io.github.armaatus.maplethief/files");
+    CHECK(loc.why == "the external storage is not mounted writable");
+    CHECK(f.user_calls == 1);
+    // MAPLETHIEF_DATA_DIR still wins (the tests' data directory).
+    f.in.env = "/data/local/tmp/mt";
+    loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kEnv);
+}
+
+TEST_CASE("data folder: Android without any files folder is no data folder") {
+    Fake f(fs::path(), "", fe::DataInputs::Os::kAndroid);
+    const fe::DataLocation loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kNone);
+    CHECK(loc.dir.empty());
+    CHECK(loc.why == "Android gives no files folder");
+}
+
 TEST_CASE("data folder: the Nintendo Switch uses the SD card's folder, game/ beside data/") {
     // SDL answers romfs:/ for the base path there; the resolver must not use it, nor the
     // per-user folder, the flag or the probe (ADR 0138, #238).

@@ -21,7 +21,6 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SDK="${MAPLETHIEF_ANDROID_SDK:-$REPO/build/_android-sdk}"
-PINS="$REPO/tools/containers/android/pins.env"
 PACKAGE=io.github.armaatus.maplethief
 ACTIVITY="$PACKAGE/.MapleThiefActivity"
 
@@ -40,78 +39,31 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 case "$image" in
-    4k) key=IMAGE; tag=google_apis; page=4096; port=5580 ;;
-    16k) key=IMAGE_PS16K; tag=google_apis_ps16k; page=16384; port=5582 ;;
+    4k | 16k) ;;
     *) echo "scripts/android-run: --image is 4k or 16k" >&2; exit 2 ;;
 esac
-pin() { sed -n "s/^$1=//p" "$PINS"; }
-image_path="$(pin "ANDROID_${key}_PATH")"
-api="$(pin ANDROID_COMPILE_API)"
-for need in "$apk" "$SDK/emulator/emulator" "$SDK/platform-tools/adb" "$SDK/$image_path/system.img"; do
-    if [ ! -e "$need" ]; then
-        echo "scripts/android-run: $need is missing (scripts/android-sdk install --image $image," \
-            "cmake --workflow --preset android-release)" >&2
-        exit 2
-    fi
-done
-
-export ANDROID_HOME="$SDK" ANDROID_SDK_ROOT="$SDK"
-export ANDROID_AVD_HOME="$SDK/avd" ANDROID_USER_HOME="$SDK/user-home"
-adb="$SDK/platform-tools/adb"
-serial="emulator-$port"
-name="maplethief-$image"
-out="$REPO/build/android-run/$image"
-mkdir -p "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME" "$out"
-rm -f "$out"/*
-
-# The AVD, written directly (avdmanager needs the cmdline-tools, which the pins leave out).
-avd="$ANDROID_AVD_HOME/$name.avd"
-if [ ! -f "$avd/config.ini" ]; then
-    mkdir -p "$avd"
-    cat >"$avd/config.ini" <<EOF
-AvdId=$name
-avd.ini.displayname=MapleThief $image
-abi.type=arm64-v8a
-hw.cpu.arch=arm64
-hw.cpu.ncore=4
-hw.ramSize=3072
-hw.lcd.width=1080
-hw.lcd.height=2340
-hw.lcd.density=420
-hw.gpu.enabled=yes
-hw.gpu.mode=swiftshader_indirect
-hw.keyboard=yes
-disk.dataPartition.size=4G
-image.sysdir.1=$image_path/
-tag.id=$tag
-target=android-$api
-EOF
-    printf 'avd.ini.encoding=UTF-8\npath=%s\npath.rel=avd/%s.avd\ntarget=android-%s\n' \
-        "$avd" "$name" "$api" >"$ANDROID_AVD_HOME/$name.ini"
+if [ ! -e "$apk" ]; then
+    echo "scripts/android-run: $apk is missing (cmake --workflow --preset android-release)" >&2
+    exit 2
 fi
+
+adb="$SDK/platform-tools/adb"
+serial="$("$REPO/scripts/android-emulator" serial "$image")"
+out="$REPO/build/android-run/$image"
+mkdir -p "$out"
+rm -f "$out"/*
 
 # shellcheck disable=SC2329 # run by the trap below
 stop() {
-    [ "$keep" -eq 1 ] || "$adb" -s "$serial" emu kill >/dev/null 2>&1 || true
+    [ "$keep" -eq 1 ] || "$REPO/scripts/android-emulator" stop "$image"
 }
 trap stop EXIT
 
-echo "== Booting $name on port $port"
-"$SDK/emulator/emulator" -avd "$name" -port "$port" -no-window -no-audio -no-boot-anim \
-    -no-snapshot -gpu swiftshader_indirect >"$out/emulator.txt" 2>&1 &
-"$adb" -s "$serial" wait-for-device
-for _ in $(seq 1 180); do
-    [ "$("$adb" -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break
-    sleep 1
-done
-[ "$("$adb" -s "$serial" shell getprop sys.boot_completed | tr -d '\r')" = 1 ] ||
-    { echo "scripts/android-run: $name did not boot in 3 minutes" >&2; exit 1; }
-got_page="$("$adb" -s "$serial" shell getconf PAGESIZE | tr -d '\r')"
-release="$("$adb" -s "$serial" shell getprop ro.build.version.release | tr -d '\r')"
-echo "== Booted: Android $release, page size $got_page"
-
+# Boots the AVD (scripts/android-emulator) and checks the image's page size.
 status=0
-[ "$got_page" = "$page" ] || { echo "scripts/android-run: page size $got_page, expected $page" >&2; status=1; }
+"$REPO/scripts/android-emulator" start "$image" "$out/emulator.txt" || status=$?
+[ "$status" -ne 2 ] || exit 2
+"$adb" -s "$serial" get-state >/dev/null 2>&1 || exit 1
 
 echo "== adb install $apk"
 "$adb" -s "$serial" install -r "$apk"
@@ -121,7 +73,7 @@ echo "== adb install $apk"
 line=""
 for _ in $(seq 1 "$seconds"); do
     "$adb" -s "$serial" logcat -d >"$out/logcat.txt"
-    line="$(grep -E 'MapleThief [^ ]+, SDL [0-9.]+, video driver' "$out/logcat.txt" | head -n 1 || true)"
+    line="$(grep -E ', SDL [0-9.]+, video driver android' "$out/logcat.txt" | head -n 1 || true)"
     [ -z "$line" ] || break
     sleep 1
 done
