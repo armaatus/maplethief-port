@@ -73,7 +73,7 @@ echo "== adb install $apk"
 line=""
 for _ in $(seq 1 "$seconds"); do
     "$adb" -s "$serial" logcat -d >"$out/logcat.txt"
-    line="$(grep -E 'MapleThief [^ ]+, SDL [0-9.]+, video driver' "$out/logcat.txt" | head -n 1 || true)"
+    line="$(grep -E ', SDL [0-9.]+, video driver android' "$out/logcat.txt" | head -n 1 || true)"
     [ -z "$line" ] || break
     sleep 1
 done
