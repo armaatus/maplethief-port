@@ -21,6 +21,12 @@
 // its data/ and the bundle folder its game/: location switch, reason platform. Neither
 // SDL_GetBasePath (romfs:/ there) nor SDL_GetPrefPath (the working directory) is asked, and no
 // flag, marker or probe applies. MAPLETHIEF_DATA_DIR still wins.
+// Android (ADR 0150, ADR 0251, #357): the app's external files folder
+// (SDL_GetAndroidExternalStoragePath, /storage/emulated/0/Android/data/<package>/files), which a
+// file manager reaches and which needs no permission: location android, reason platform, game/
+// inside it. When the external storage is not mounted writable, the app's internal files folder
+// (SDL_GetAndroidInternalStoragePath), reason fallback-not-writable. No flag, marker or probe
+// applies. MAPLETHIEF_DATA_DIR still wins.
 //
 // <base> is SDL_GetBasePath()'s folder: the folder of MapleThief.exe; the folder around
 // MapleThief.app (never inside it); on Linux the game folder, the parent of bin/ when it holds
@@ -65,7 +71,7 @@ inline constexpr const char *kPrefPathApp = "MapleThief";        // the per-user
 inline constexpr const char *kSwitchBaseDir = "sdmc:/switch/maplethief";
 
 // Where the data folder is (ADR 0127's table).
-enum class DataPlace { kGame, kUser, kEnv, kIos, kSwitch, kNone };
+enum class DataPlace { kGame, kUser, kEnv, kIos, kSwitch, kAndroid, kNone };
 // Why it is there.
 enum class DataReason {
     kDefault,
@@ -80,7 +86,7 @@ enum class DataReason {
     kPlatform,
     kNone,
 };
-// "game", "user", "env", "ios", "switch", "none".
+// "game", "user", "env", "ios", "switch", "android", "none".
 const char *data_place_name(DataPlace place);
 // "default", "flag", "marker", "applications-folder", "flatpak", "fallback-translocated",
 // "fallback-not-writable", "fallback-no-base", "env", "platform", "none".
@@ -131,7 +137,7 @@ bool probe_data_dir(const std::string &data_dir, std::string *why);
 
 // What the resolver reads. current_data_inputs() fills it from the process; tests build one.
 struct DataInputs {
-    enum class Os { kMacos, kWindows, kLinux, kIos, kSwitch, kOther };
+    enum class Os { kMacos, kWindows, kLinux, kIos, kSwitch, kAndroid, kOther };
     std::string env;               // MAPLETHIEF_DATA_DIR ("": not set or empty)
     std::optional<DataPlace> flag; // --data-location (kGame or kUser)
     std::string base_path;         // SDL_GetBasePath()'s answer ("": none)
@@ -140,7 +146,11 @@ struct DataInputs {
     bool flatpak = false;          // Linux: in a Flatpak sandbox (FLATPAK_ID set)
     Os os = Os::kOther;
     std::string ios_documents; // iOS: the app's Documents/ (SDL_FOLDER_DOCUMENTS)
-    // The per-user folder (SDL_GetPrefPath, which creates it); called only when it is used.
+    // Android: the app's external files folder, "" when the storage is not mounted writable
+    // (SDL_GetAndroidExternalStoragePath and SDL_GetAndroidExternalStorageState).
+    std::string android_external;
+    // The per-user folder (SDL_GetPrefPath, which creates it; on Android the app's internal files
+    // folder); called only when it is used.
     std::function<std::string()> user_dir;
     // The probe; probe_data_dir when empty.
     std::function<bool(const std::string &data_dir, std::string *why)> probe;

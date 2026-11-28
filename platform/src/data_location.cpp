@@ -85,6 +85,8 @@ const char *data_place_name(DataPlace place) {
         return "ios";
     case DataPlace::kSwitch:
         return "switch";
+    case DataPlace::kAndroid:
+        return "android";
     case DataPlace::kNone:
         break;
     }
@@ -271,6 +273,21 @@ DataInputs current_data_inputs() {
     if (const char *docs = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS); docs != nullptr) {
         in.ios_documents = strip_separators(docs);
     }
+#elif defined(SDL_PLATFORM_ANDROID)
+    // The external files folder needs no permission (ADR 0150); SDL asks the activity for it.
+    in.os = DataInputs::Os::kAndroid;
+    constexpr Uint32 kWritable =
+        SDL_ANDROID_EXTERNAL_STORAGE_READ | SDL_ANDROID_EXTERNAL_STORAGE_WRITE;
+    if ((SDL_GetAndroidExternalStorageState() & kWritable) == kWritable) {
+        if (const char *ext = SDL_GetAndroidExternalStoragePath(); ext != nullptr) {
+            in.android_external = strip_separators(ext);
+        }
+    }
+    in.user_dir = [] {
+        const char *internal = SDL_GetAndroidInternalStoragePath();
+        return internal == nullptr ? std::string() : strip_separators(internal);
+    };
+    return in;
 #elif defined(SDL_PLATFORM_MACOS)
     in.os = DataInputs::Os::kMacos;
 #elif defined(SDL_PLATFORM_WINDOWS)
@@ -316,6 +333,24 @@ DataLocation resolve_data_location(const DataInputs &in) {
         if (!in.ios_documents.empty()) {
             loc.saves = strip_separators(in.ios_documents);
         }
+        return loc;
+    }
+    // Android: the external files folder, which a file manager reaches (ADR 0251); the internal
+    // one when the external storage is not mounted writable.
+    if (in.os == DataInputs::Os::kAndroid) {
+        if (!in.android_external.empty()) {
+            return data_location_at(in.android_external, DataPlace::kAndroid,
+                                    DataReason::kPlatform);
+        }
+        const std::string dir = in.user_dir ? in.user_dir() : std::string();
+        if (dir.empty()) {
+            DataLocation none = data_location_at("", DataPlace::kNone, DataReason::kNone);
+            none.why = "Android gives no files folder";
+            return none;
+        }
+        DataLocation loc =
+            data_location_at(dir, DataPlace::kAndroid, DataReason::kFallbackNotWritable);
+        loc.why = "the external storage is not mounted writable";
         return loc;
     }
     // The Nintendo Switch: the SD card's folder, always (ADR 0138).

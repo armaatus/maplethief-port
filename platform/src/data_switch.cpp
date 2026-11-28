@@ -98,6 +98,7 @@ const char *data_place_title(DataPlace place) {
     case DataPlace::kEnv:
         return tr(Txt::data_env_folder);
     case DataPlace::kIos:
+    case DataPlace::kAndroid:
         return tr(Txt::data_app_folder);
     case DataPlace::kSwitch:
         return tr(Txt::data_sd_card);
