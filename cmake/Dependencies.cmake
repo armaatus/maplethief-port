@@ -16,6 +16,8 @@
 #     maplethief_use_fallback_font(<var>) # <var> = the same for the fallback font (Fira Sans)
 #     maplethief_use_switch_licenses() # MAPLETHIEF_SWITCH_LICENSES: the notices of what the
 #                                #    Switch's NRO links (ADR 0138), for its packages
+#     maplethief_use_appimage_licenses() # MAPLETHIEF_APPIMAGE_LICENSES: the notices of the
+#                                #    AppImage's runtime (ADR 0193), for the Linux player
 #
 # Including this file downloads nothing. Each maplethief_use_*() call downloads its files
 # on first use, verifies their SHA-256 and keeps them in MAPLETHIEF_DOWNLOAD_DIR. A later
@@ -109,6 +111,28 @@ set(MAPLETHIEF_SWITCH_LICENSE_PINS
     # cut from nouveau.c of tag v1.0.1 of devkitPro/libdrm_nouveau (as stb's is cut from its
     # header).
     "libdrm_nouveau.txt|https://raw.githubusercontent.com/devkitPro/libdrm_nouveau/v1.0.1/source/nouveau.c|ece1e4301d7bdc7b8c32a58727ff4c84dbd4d16bfa2bb2203012913b369cb8a1")
+
+# The licence texts of the Linux AppImage's type-2 runtime (ADR 0193, #439), for the Linux
+# player's licenses/: the runtime is AppImage/type2-runtime's release 20251108 (commit dd6cebed,
+# pinned with its SHA-256s in tools/containers/linux-game/Dockerfile), which is MIT and links
+# these statically. Versions from its build scripts at that commit (libfuse, squashfuse), the
+# version strings in the pinned binary (zstd, zlib) and the Alpine 3.21 its build uses (musl,
+# mimalloc). Bump them with the runtime.
+set(MAPLETHIEF_APPIMAGE_LICENSE_PINS
+    # The runtime (MIT), with its list of what it links.
+    "AppImage-runtime.txt|https://raw.githubusercontent.com/AppImage/type2-runtime/dd6cebedcbddde9c82f89b011e8e1d40b6e43868/LICENSE|aa154fc9070614bbe7921f89db11efd1dba7a1f3a41685958110e2230f9c0ca1"
+    # libfuse 3.15.0 (LGPL-2.1): tag fuse-3.15.0 of libfuse/libfuse.
+    "libfuse-LGPL-2.1.txt|https://raw.githubusercontent.com/libfuse/libfuse/fuse-3.15.0/LGPL2.txt|dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+    # squashfuse 0.5.2 (BSD-2-Clause): tag 0.5.2 of vasi/squashfuse.
+    "squashfuse.txt|https://raw.githubusercontent.com/vasi/squashfuse/0.5.2/LICENSE|9e909cc8a8ba27b1a649c964cf9eda37de911f3138c2b64e6d2f01703904ac13"
+    # zstd 1.5.6 (BSD-3-Clause, the choice of its dual licence): tag v1.5.6 of facebook/zstd.
+    "zstd.txt|https://raw.githubusercontent.com/facebook/zstd/v1.5.6/LICENSE|7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8"
+    # zlib 1.3.1 (Zlib): tag v1.3.1 of madler/zlib.
+    "zlib.txt|https://raw.githubusercontent.com/madler/zlib/v1.3.1/LICENSE|845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243"
+    # musl 1.2.5 (MIT): COPYRIGHT of tag v1.2.5, from musl's own repository.
+    "musl.txt|https://git.musl-libc.org/cgit/musl/plain/COPYRIGHT?h=v1.2.5|f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af"
+    # mimalloc 2.1.7 (MIT): tag v2.1.7 of microsoft/mimalloc.
+    "mimalloc.txt|https://raw.githubusercontent.com/microsoft/mimalloc/v2.1.7/LICENSE|19c99805e7a44a34b297a75d1edea9985e300066dfc024d5c99d4236d4573b5d")
 
 # --- Helpers -------------------------------------------------------------------------------
 
@@ -397,4 +421,23 @@ function(maplethief_use_switch_licenses)
     endforeach()
     set(MAPLETHIEF_SWITCH_LICENSES "${items}"
         CACHE INTERNAL "The Switch NRO's licence texts (<path>|<name> items)")
+endfunction()
+
+# The licence texts of the AppImage's runtime (MAPLETHIEF_APPIMAGE_LICENSE_PINS): downloads each
+# into MAPLETHIEF_DOWNLOAD_DIR, checks its SHA-256, and sets the cache entry
+# MAPLETHIEF_APPIMAGE_LICENSES to "<path>|<name in licenses/>" items. cmake/Packaging.cmake
+# installs them into the Linux player, whose files the AppImage holds (ADR 0193).
+function(maplethief_use_appimage_licenses)
+    set(items "")
+    foreach(pin IN LISTS MAPLETHIEF_APPIMAGE_LICENSE_PINS)
+        string(REPLACE "|" ";" parts "${pin}")
+        list(GET parts 0 name)
+        list(GET parts 1 url)
+        list(GET parts 2 sha256)
+        string(SUBSTRING "${sha256}" 0 8 short)
+        _maplethief_download(cached "appimage-licenses/${short}-${name}" "${url}" "${sha256}")
+        list(APPEND items "${cached}|${name}")
+    endforeach()
+    set(MAPLETHIEF_APPIMAGE_LICENSES "${items}"
+        CACHE INTERNAL "The AppImage runtime's licence texts (<path>|<name> items)")
 endfunction()

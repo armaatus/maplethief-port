@@ -11,13 +11,13 @@ scripts/deps check --only sdl   # the rows whose name contains "sdl"
 scripts/deps check --offline    # the pins alone, no network
 ```
 
-A row is `current`, `newer` (with what upstream has), `follows` (it moves with another pin: the Switch's licence texts with the devkitA64 image, Gradle with Ghidra), `fixed` (an apt snapshot date: any later date is newer, so it moves with the image it belongs to) or `unknown` (the lookup failed, with the reason). GitHub's API allows 60 requests an hour without a token; with `gh` logged in, or `GH_TOKEN` set, the check uses that.
+A row is `current`, `newer` (with what upstream has), `follows` (it moves with another pin: the Switch's licence texts with the devkitA64 image, the AppImage runtime's with the runtime, Gradle with Ghidra), `fixed` (an apt snapshot date: any later date is newer, so it moves with the image it belongs to) or `unknown` (the lookup failed, with the reason). GitHub's API allows 60 requests an hour without a token; with `gh` logged in, or `GH_TOKEN` set, the check uses that.
 
 Not every `newer` needs a bump. Bump for a fix or a feature we need, a security fix, or to stay close enough that the next bump is small; a bump is a change like any other and can break something.
 
 ## 1. One dependency per commit
 
-Change the pin and its row in [THIRD_PARTY.md](../../../THIRD_PARTY.md) in the same commit, one dependency per commit, and say in the message why. `tests/test_deps.py` fails when a SHA-256 of `cmake/Dependencies.cmake` or an image digest of a Dockerfile is not in THIRD_PARTY.md. A new major version, a new licence or a change of mechanism is an ADR 0003 addendum.
+Change the pin and its row in [THIRD_PARTY.md](../../../THIRD_PARTY.md) in the same commit, one dependency per commit, and say in the message why. `tests/test_deps.py` fails when a SHA-256 of `cmake/Dependencies.cmake`, an image digest of a Dockerfile, or the pin of a download that ships in a player download (the AppImage runtime's release and SHA-256s, `DOCKER_ARG_PACKAGED` in `tools/mtport/deps.py`) is not in THIRD_PARTY.md. A new major version, a new licence or a change of mechanism is an ADR 0003 addendum.
 
 ## 2. The new hash
 
@@ -40,7 +40,7 @@ docker buildx imagetools inspect ubuntu:26.04 --format '{{json .Manifest.Digest}
 
 Update every Dockerfile that names the same image (`scripts/deps check` lists them in the row) and THIRD_PARTY.md. With a new Ubuntu image, move `UBUNTU_SNAPSHOT` to a date after the image too. **devkitA64** carries the Switch toolchain: after a new digest, read the versions of libnx, deko3d, newlib, GCC, switch-mesa and libdrm_nouveau from the image (`docker run --rm <image> pacman -Q`), move `MAPLETHIEF_SWITCH_LICENSE_PINS` to the source of each new version (their hashes change with them), and update the Switch section of THIRD_PARTY.md and `UAM_SHA256` in `tools/containers/shaders/Dockerfile`.
 
-**A tool in a Dockerfile** (CMake, PowerShell, DXC, the AppImage runtime): the version ARG and the hash of each architecture's archive, from the release's own checksum file where there is one. CMake is in four Dockerfiles; keep them on one version.
+**A tool in a Dockerfile** (CMake, PowerShell, DXC, the AppImage runtime): the version ARG and the hash of each architecture's archive, from the release's own checksum file where there is one. CMake is in four Dockerfiles; keep them on one version. The **AppImage runtime** ships inside the Linux AppImage: also update `APPIMAGE_RUNTIMES` in `tools/mtport/release.py` (a test compares them), read what the new release links from its `LICENSE`, `src/runtime/Makefile` and build scripts, move `MAPLETHIEF_APPIMAGE_LICENSE_PINS` in `cmake/Dependencies.cmake` to those versions, and update the Linux section of THIRD_PARTY.md.
 
 **uv** is pinned twice: `UV_VERSION` in `.github/workflows/ci.yml` and the uv image of `tools/containers/linux/Dockerfile` (tag and digest). Dependabot moves `astral-sh/setup-uv`, not the version it installs.
 
