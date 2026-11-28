@@ -10214,8 +10214,8 @@ void hud_extras_tick(Run &r, mt_cpu *cpu) {
             if (!ran_out && m.bar_first_bad.empty()) {
                 m.bar_first_bad = "mob " + std::to_string(mob.id) + " after " +
                                   std::to_string(len) + " field ticks, counter " +
-                                  std::to_string(s.d0) + " " +
-                                  std::to_string(r.ticks - s.seen_at) + " ticks before";
+                                  std::to_string(s.d0) + " " + std::to_string(r.ticks - s.seen_at) +
+                                  " ticks before";
             }
             m.bars_one_second += len >= 18 && len <= 22 ? 1 : 0;
         }
