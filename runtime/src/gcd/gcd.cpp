@@ -252,6 +252,16 @@ Group *group_of(u32 addr) {
     return it != G.groups.end() ? &it->second : nullptr;
 }
 
+// The thread running predicate `pred`'s block, or -1. A function of its own so that no map
+// iterator is alive in mt_hle_dispatch_once when it traps: under MSVC's debug iterators
+// (_ITERATOR_DEBUG_LEVEL 2) an iterator has a destructor that unlinks it from the map, and a
+// longjmp past it leaves a dead stack slot in the map's iterator list for the next clear() to
+// write through.
+int once_owner_of(u32 pred) {
+    const auto it = G.once_owner.find(pred);
+    return it != G.once_owner.end() ? it->second : -1;
+}
+
 u32 new_object(u32 tag, u32 extra) {
     if (G.mem == nullptr) {
         log_line("no guest address space to create a dispatch object in");
@@ -702,6 +712,8 @@ extern "C" int mt_gcd_configure(const mt_gcd_config *cfg) noexcept {
     return 0;
 }
 
+extern "C" mt_gcd_config mt_gcd_get_config(void) noexcept { return G.cfg; }
+
 extern "C" void mt_gcd_reset(void) noexcept {
     if (t_worker != nullptr) {
         log_line("mt_gcd_reset on a worker thread: ignored");
@@ -924,8 +936,7 @@ extern "C" void mt_hle_dispatch_once(mt_cpu *cpu, uint32_t) noexcept {
         return;
     }
     // Another call is running the block (or the predicate holds garbage).
-    const auto it = G.once_owner.find(pred);
-    const int owner = it != G.once_owner.end() ? it->second : -1;
+    const int owner = once_owner_of(pred);
     if (owner < 0) {
         log_line("dispatch_once from 0x%08X: predicate 0x%08X holds 0x%08X, but no thread runs "
                  "its block",

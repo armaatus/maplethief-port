@@ -42,6 +42,9 @@ For the folders the issue named `sdmc:/switch/maplethief/exports/` and `.../text
 | `kCapFilesApp` | the iOS import: the newest zip the Files app put in `import/` | no | yes | no |
 | `kCapPackFolders` | the pack rows offer the pack folders; Import is a list | no | no | yes |
 | `kCapIpaOnSdCard` | the import screen's SD-card route: the IPA beside the game, no dialog or drop (#243, ADR 0138's addendum) | no | no | yes |
+| `kCapMessageBox` | #198's start-up question after a crash in an SDL message box; without it (or in a Steam Deck's Game Mode) the window asks (`start_question.h`, #416, ADR 0151's addendum) | yes | yes | no |
+| `kCapSpeech` | `speech`, `speech_rate`, `speech_volume`: a system voice (#390, [ADR 0174](0174-text-to-speech-layer-system-voices-and-queue.md)) | yes | yes | no |
+| `kCapLiveSplit` | `livesplit`, `livesplit_game_time`: a TCP link to LiveSplit's server on the same computer (#407, [ADR 0156](0156-speedrun-kit-splits-clean-runs-and-verifiable-replays.md)) | yes | no | no |
 
 **The rows.** `SettingInfo::needs` and `MenuActionInfo::needs` hold the bits a row needs (0 means every platform). `setting_shown(row, platform)` adds the needs to the `ios_only` test, and `action_shown(a, platform)` is the actions' version. The menu builds its tabs and rows for its platform: `SettingsMenu::set_platform` lets a test build another platform's menu, and the build's own is the default. The iOS `#if`s around the action rows are gone; their `needs` give the same result. The file and the command line still take every key on every platform.
 
@@ -62,6 +65,7 @@ For the folders the issue named `sdmc:/switch/maplethief/exports/` and `.../text
 - Every new registry row or action row must be decided for the Switch in the test, and must state its `needs` when it depends on something a platform may lack.
 - #239 and #240 build on the table. A row that only works with a capability names it in `needs`, and frontend code asks `platform_has(...)`, not `__SWITCH__`.
 - On the Switch, `gfx_backend = gpu` and `filter` stay shown. They need #242's deko3d backend, and until then they fall back as on any machine without SDL's GPU renderer. If #242 is dropped, they get a capability bit and are hidden.
+  > **Later (2026-11-26):** #242 landed as [ADR 0143](0143-gpu-backend-on-deko3d.md) (SDL_GPU on deko3d), and [ADR 0145](0145-switch-performance-session-and-defaults.md) made `gfx_backend = gpu` the Switch's default.
 - `audio_pack`, `text_pack`, `texture_pack` and `border_image` gain an `offer` hook (empty unless set). The desktop menu, file and flags are as before.
 
 **How we'd know this was wrong:**

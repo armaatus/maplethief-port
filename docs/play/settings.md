@@ -13,7 +13,7 @@ Press **F1** (or the gamepad's Guide button, or click both sticks, or the gear b
 | **Gameplay** | Save on quit, and the game's own options (sound, speed, vibration) |
 | **Assists** | Optional help that changes the game, such as the cash shop for meso. Always off unless you turn it on |
 | **Saves** | Export and import your saves, and the backups |
-| **Other** | The language, text packs, and the optional [check for new versions](#checking-for-new-versions) |
+| **Other** | The language, text packs (the [packs screen](#the-packs-screen)), and the optional [check for new versions](#checking-for-new-versions) |
 
 Move with the arrow keys, the d-pad or the mouse. **Tab**, **Q / E** or **LB / RB** switch tabs. **Esc** or **B** closes the menu. Most settings apply at once; those marked `*` apply the next time you start the game. **Quit** is at the bottom of every tab.
 
@@ -31,7 +31,7 @@ Volumes, your controls and the border colour are always yours, whatever the pres
 ## Display
 
 - **Fullscreen**: F11 or Alt+Enter. On a Mac you can choose between a fullscreen Space (macOS's own, with its animation) and a borderless window over the desktop (`fullscreen_mode`). **Fullscreen display** (`fullscreen_display`) picks the screen fullscreen goes to, from the displays connected now; `current` is the one the window is on. If the chosen display isn't connected, fullscreen uses the window's display and the setting is kept for when it's back. A change while already fullscreen counts from the next time fullscreen turns on.
-- **Window size**: Ctrl+1 to Ctrl+5 (Cmd+1 to Cmd+5 on a Mac) make the window exactly 1 to 5 times the game's picture, centred on its display, so `scale_mode = integer` never drops a step because the window is a few pixels short. With widescreen on, the picture is 568 points wide. A size that doesn't fit the display gives the largest one that does.
+- **Window size**: Ctrl+1 to Ctrl+5 (Cmd+1 to Cmd+5 on a Mac) make the window exactly 1 to 5 times the game's picture, centred on its display, so `scale_mode = integer` never drops a step because the window is a few pixels short. With `widescreen = auto` the picture is 568 points wide; with `fill` it has the display's shape, up to 768 points. A size that doesn't fit the display gives the largest one that does.
 - **How the picture fills the window** (`scale_mode`). The iPhone's screen was 480 × 320, so the picture has to be scaled up:
   - `integer` (default): the largest whole multiple. Every pixel stays crisp and even; there may be bars around it.
   - `sharp`: fills the window, with sharp but smooth edges. A good choice for most screens.
@@ -59,34 +59,60 @@ Neither shows on a computer.
 
 ## Gameplay and assists
 
-- **Save on quit** (`autosave = on_quit`, part of Enhanced): saves wherever the game's own Save would when you quit or minimise.
+- **Save on quit** (`autosave = on_quit`, part of Enhanced): saves wherever the game's own Save would when you quit, minimise or pick the menu's exit to the main menu. Going to the main menu from the death popup never saves: the hero is dead there, and the game never lets a fallen hero save, so you go back to your last save (and skip the fall's penalty, as in the original).
+- **Crash recovery** (`crash_recovery = on`, part of Enhanced): keeps a recovery point of your game, so that after a crash the next start can put you back a few minutes before it. See [Saves](saves.md#after-a-crash-recovery-points).
 - **Cash shop for meso** (`cash_shop = meso`, an Assist, off in every preset): the original's cash shop needed real money and an online server. With this on, its items and revives cost in-game meso instead, at a price that grows with your level.
-- **Hide online buttons** (`hide_online_ui`) and **local Game Center** (`local_game_center`): hide the menu buttons whose web pages are gone, and turn Game Center's button into a leaderboard of your own save slots, with a few achievements.
+- **Hide online buttons** (`hide_online_ui`) and **local Game Center** (`local_game_center`): hide the menu buttons whose web pages are gone (and, while the cash shop is off, the Cash button and the two revive buttons of the death popup, which only said "Please wait"), and turn Game Center's button into a leaderboard of your own save slots, with a few achievements.
 
-## Texture packs
+## The packs screen
 
-You can make HD versions of the game's graphics from your own copy, or edit them by hand. It's a few steps, explained in [ADR 0081](../adr/0081-texture-packs-and-nearest-texture-filter.md). Texture dumps and packs are made from the game's art: keep them to yourself.
+Choose **Texture pack** (Video), **Audio pack** (Audio) or **Text pack** (Other) in the menu to open the packs screen. It lists every pack in the data folder's pack folders, and any pack `settings.ini` names by its path:
 
-## Audio packs
+| Kind | Folder in the [data folder](saves.md#where-your-saves-are) |
+|---|---|
+| Texture | `texture-packs/<pack>/` |
+| Audio | `audio-packs/<pack>/` |
+| Text | `text-packs/<pack>/` |
 
-An audio pack is a folder of your own music and sound files that play instead of the game's: a better-quality version of a track, a remaster, or different sound effects. The game's files stay as they are.
+The game makes the folders the first time the screen opens. Each row shows a pack's name and version, and whether it is **on** (with its place: `on #1` comes first), **off** or **refused**. The two lines under the list show its author and description, or why the game refuses it; while you play with a pack on, they also say how many of its files or lines it replaced this run and how many a pack higher in the list hid.
 
-1. List the sounds you can replace: `python3 -m mtport.audiopack init MyPack` (from the project folder, after `scripts/bootstrap`) makes the folder `MyPack` with `audiopack.txt` in it. Each line is one of the game's 44 sounds: its file name, whether it's music (BGM) or an effect (SFX), and its length. The main menu's music is `31.mp3`; the title screen has none. The music of each map is in [the audio notes](../re/audio.md#map-music).
-2. Put your files in the folder, named like the game's, with any of these extensions: `31.flac`, `31.mp3` or `31.wav` replaces `31.mp3`, and `12.wav` or `12.mp3` replaces the effect `12.wav`. WAV (PCM), MP3 or FLAC, mono or stereo, 8,000 to 192,000 Hz, up to 128 MB a file; an effect up to 60 seconds, a track up to 30 minutes. Long tracks are best as FLAC or MP3: a WAV track stays in memory whole.
-3. Music loops by itself, as the game's does. To loop only part of a track (an intro, then a loop), add `31.loop`, a text file with two numbers, the sample frame where the loop starts and the one where it ends (the end isn't played), in your file's own frames, e.g. `441000 2646000`. A WAV with a loop saved by a sound editor (a `smpl` loop) works too.
-4. Set **Audio pack** (`audio_pack = /path/to/MyPack` in `settings.ini`, or start with `--audio-pack /path/to/MyPack`) and start the game again.
+| To | Keyboard | Gamepad | Mouse or touch |
+|---|---|---|---|
+| Turn a pack on or off | **Enter** or **Space** | **A** (the bottom face button) | Click or tap the row |
+| Move a pack earlier or later | **Left / Right** | d-pad or stick **Left / Right** | The row's **<** / **>** |
+| Go back to the tab | **Esc** | **B** | |
 
-A file the game can't use (damaged, too long, too many channels) is skipped: the game's own sound plays instead, and the log says why, once. Audio packs are your own files: the project ships none.
+All the packs that are on play at once. When two packs of a kind have the same entry, the one higher in the list wins: for textures the same file name, for audio the same sound (`31.mp3` and `31.wav` are one sound; a `.loop` file goes with its own pack's sound only), for text the same key in the same file. If the higher pack's file is damaged or the wrong size, the game skips it and takes the next pack's, then its own. So a menu translation can sit above a dialogue translation, or a pack of sound effects beside a music pack. Changes apply the next time you start the game. When the game quits, the log has a line per pack: how many entries it replaced, and how many a higher pack hid (`texpack: HD Sprites 1.2: 812 replaced, 40 hidden by UI Redraw`).
 
-## Text packs
+A pack can say what it is in a file `pack.strings` at its top: its kind, name, version and author, and which game and port version it needs ([ADR 0149](../adr/0149-pack-manifest-several-packs-and-what-the-project-hosts.md)). A pack without one shows by its folder's name. The game refuses a pack whose `pack.strings` is broken (the reason names the line), is of another kind, needs a newer version of the port, or was made for another version of the game; a second text pack in another language; a second pack with the same `id`; and more than 16 packs of a kind. A refused pack shows **refused** on the screen with its reason, and if `settings.ini` still names it, the title screen says at the start that it wasn't loaded and why.
 
-A text pack is a folder of translated text: the game's dialogue, the names and descriptions of its items, monsters, NPCs and skills, and the port's own menus. A community translation can be shared as a text pack without touching the game's files.
+### Adding a pack from anywhere (desktop)
 
-1. Write out the text to translate: `python3 -m mtport.textpack export MyPack` (from the project folder, after `scripts/bootstrap`). It makes the folder `MyPack` with `textpack.strings` (the pack's name and language), `Scripts.strings` and `ScriptExtra.strings` (dialogue), `Tables.strings` (names and descriptions, each with the room it has) and `Port.strings` (the port's menus).
-2. Translate the values, the text on the right of each `=`, in any text editor that saves UTF-8. Keep the keys on the left as they are. Delete the lines you don't translate: anything a pack doesn't have stays in the game's own words. Check the pack with `python3 -m mtport.textpack check MyPack`.
-3. Set **Text pack** (`text_pack = /path/to/MyPack` in `settings.ini`, or start with `--text-pack /path/to/MyPack`) and start the game again.
+On a Mac, Windows or Linux desktop you don't have to copy a pack into the pack folders yourself:
 
-The game's text is drawn with its own font, plus a second font for accented Latin, Greek and Cyrillic letters. Names and descriptions have a fixed room in the game's tables: a longer one is cut at a whole letter, and the log says so, once. The port's menus have plain letters only: their accents are dropped ("Pötion" shows as "Potion"). The format is described in [the text pack spec](../formats/text-pack.md). A text pack holds the game's text: keep packs made from it to yourself, and share only your own translations.
+- **Add a pack...**, the last row of the packs screen, opens the system's folder picker. Choose a pack's folder and the game adds it by its path: it goes on, last in its kind's list, and stays where it is. Its `pack.strings` says its kind; a folder without one counts as a text pack if it has `textpack.strings`, a texture pack if it holds `.png` files, an audio pack if it holds `.wav`, `.mp3` or `.flac` files. The row is not there where no dialog can show: in a fullscreen window on Linux, and in a Steam Deck's Game Mode.
+- **Drop a folder** on the game's window while the packs screen is open: the same.
+- **Drop a `.zip`** on the window while the packs screen is open: the game unpacks it into its kind's pack folder (a zip whose files all sit in one folder becomes that folder; otherwise the zip's name names it) and lists it, off; choose it to turn it on. A zip is someone else's file, so the game checks all of it before it writes anything and refuses the whole zip on the first problem: an entry with an absolute path or `..`, a link or other special file, an encrypted entry, two entries whose names differ only in case, more files than its kind takes, a file over its kind's size (80 MiB for a picture, 128 MiB for a sound, 4 MiB for a text file), more than 1 GiB in all, or a pack folder of that name already there. A zip holds at most 4,096 entries; add a larger pack as a folder. A Finder zip's `__MACOSX` folder and `.DS_Store` files are left out.
+
+A folder or zip the game refuses says why on the status line, for example `Old Songs not added: pack.strings: needs port 9.0.0 or later; this is 1.4.0`, and nothing changes. Like turning a pack on, an added pack applies from the next start.
+
+In `settings.ini` each kind is one line, its packs in order with `|` between them: `texture_pack = /packs/HD|/packs/UI`. On the command line, give `--texture-pack`, `--audio-pack` or `--text-pack` more than once, first first: `--texture-pack /packs/HD --texture-pack /packs/UI` is the same list.
+
+## Making packs
+
+Packs change what the game shows and plays without touching its files: a **texture pack** (HD or edited pictures), an **audio pack** (your own music and sounds) or a **text pack** (a translation). You make and check them with the game itself: the **Other** tab has **Dump textures**, **Make texture pack**, **Export text** and **Check packs**, and they write into the same pack folders the packs screen lists. [Making packs](packs.md) walks through each kind step by step. A pack the game can't use, or a file in it, is skipped with the reason in the log; the packs screen shows why a pack is refused, and **Check packs** shows every file's reason before you play.
+
+At a render scale above 1, **Texture filter** `nearest` (`texture_filter = nearest`, the sharp sprites of [Display](#display)) keeps a texture pack's pixels crisp.
+
+Texture dumps, text exports and packs made from them hold the game's own art or text: keep them to yourself, and don't share them ([Sharing packs](sharing-packs.md)).
+
+## Language
+
+**Language** (`language`, in the **Other** tab) plays the game in English (`en`, the default) or in Korean (`ko`). Your IPA holds both: the Korean build has its own text, its two-page help and a terms screen on the first start. It applies the next time you start the game.
+
+From the command line, `--language ko` sets it for one run. The environment variable `MAPLETHIEF_LANGUAGE=ko` overrides the setting and the flag.
+
+The port's own menus, such as this settings menu, stay in English. To play in another language, use a [text pack](packs.md#text-packs) with a translation.
 
 ## Checking for new versions
 
@@ -96,9 +122,21 @@ When it is on, the port asks github.com once a day which version is the latest. 
 
 GitHub sees your IP address and the port's version, as it would for any visit to the releases page. The port sends nothing else about you, your device or your saves. It keeps the time of its last check in `update_check.txt`, next to `settings.ini`. On Linux the check needs the system's libcurl; without it there is simply no check.
 
+## Speedrun timer
+
+**Speedrun timer** and **Speedrun category** in the **Other** tab (`run_timer`, `run_category`) time a run from a new character with automatic splits. On a computer, **LiveSplit server** and **LiveSplit game time** (`livesplit = off | HOST:PORT`, `livesplit_game_time`) send the run to LiveSplit. **Input display** in the **Video** tab (`input_display`) shows the keys the game is given, lit while held. [Speedrun timer](speedrun.md) explains them.
+
+## Recording runs
+
+**Record runs** in the **Other** tab (`record_runs = on`, off by default and in every preset) keeps a replay of every session, from the start until you quit, in the `runs` folder of your data folder. A file holds the times the game read and what you pressed and touched, your settings and your own save files from the start, and nothing of the game itself; an hour is well under a megabyte.
+
+`MapleThief --play-run FILE` plays one back exactly, as fast as your computer goes, in a scratch folder of its own (your saves are never touched). It needs the same game and the same version of the port that recorded it. It says `all the same` when every checkpoint matched. `MapleThief --verify-run FILE` does the same with no window and no sound, and prints a report of the run's splits and whether it was clean ([Recording and verifying a run](speedrun.md#recording-and-verifying-a-run)).
+
+A save state's load, a save import or backup restore, a data folder switch and `autosave` cannot be played back: the recording ends just before one, and the file says which.
+
 ## On the Nintendo Switch
 
-The console's menu has only the rows that work there, so no row does nothing. Open it by clicking both sticks, or with a tap on the gear in handheld mode (the HOME button belongs to the console). Then use the d-pad, A to choose, B to go back, and L / R to change tabs.
+The console's menu has only the rows that work there, so no row does nothing. Open it with **+**, by clicking both sticks, or with a tap on the gear in handheld mode (the HOME button belongs to the console). Then use the d-pad, A to choose, B to go back, and L / R to change tabs.
 
 Not in the Switch's menu:
 
@@ -116,7 +154,7 @@ Some defaults differ on the console, in every preset. **Scale mode** is `sharp`,
 
 The keyboard shortcuts for the window (F11, Alt+Enter, Ctrl+1 to 5) and F12 for a screenshot do nothing there. **Quit** goes back to the Homebrew Menu.
 
-Packs and border pictures go in folders on the SD card, beside `game`. The menu lists what is in them: choose with Left / Right, and start the game again.
+Packs and border pictures go in folders on the SD card, beside `game`. Texture, audio and text packs are turned on, off and ordered in the [packs screen](#the-packs-screen), as on every platform; **Border image** lists the pictures: choose with Left / Right. Start the game again for a change to apply.
 
 | Row | Folder |
 |---|---|

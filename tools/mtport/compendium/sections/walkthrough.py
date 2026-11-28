@@ -49,7 +49,6 @@ REPO = "https://github.com/armaatus/maplethief-port/blob/main/docs/"
 SCRIPT_VM = REPO + "re/script-vm.md#natives"
 SCENES_DOC = REPO + "re/qol.md#which-steps-change-state"
 MECHANICS_DOC = REPO + "re/mechanics.md#drops"
-YETI_ISSUE = "https://github.com/armaatus/maplethief-port/issues/218"
 REVIEW_ISSUE = "https://github.com/armaatus/maplethief-port/issues/228"
 
 # The scenes the last boss's defeat runs (CMob::Die 0x73349 sets the queued scene to 1 for
@@ -1185,10 +1184,10 @@ def boss_block(ctx: Context, mid: str) -> str:
     evs = mons.boss_events(ctx, mon)
     if evs and not any(ev.get("used") for ev in evs):
         out += _p(
-            "No map object runs this boss's fight script in version 1.5, so how the fight"
-            " starts has not been confirmed in play"
-            f' (<a href="{YETI_ISSUE}">issue 218</a>, a playthrough check). The quest still asks'
-            " for the kill."
+            "No map object runs this boss's fight script in version 1.5, so the fight starts"
+            " with no scene and no message: the boss is one of the map's own monsters, there"
+            " from the moment the hero arrives (confirmed in play, <code>play.chapter_2_f_synthetic"
+            "</code>). The quest still asks for the kill."
         )
     elif evs:
         out += _p(
@@ -1352,8 +1351,9 @@ def chapter_end_body(ctx: Context, ev: Entity, ch: int) -> str:
     after += f" on {qs.map_phrase(ctx, target)}." if target else "."
     after += (
         " Unfinished side quests of the chapter lose their progress, and the chapter's"
-        " recipes and trades give way to the next chapter's. Level, items and meso are not among"
-        " what clearAll resets (probable, from the native's description)."
+        " recipes and trades give way to the next chapter's. The hero keeps level, EXP, job,"
+        " items, equipment and meso: they read the same before and after the trip (confirmed"
+        " in play, <code>play.chapter_1_l</code>)."
     )
     parts.append(f"<li><strong>What happens after.</strong> {after}</li>")
     out = "<ul>" + "".join(parts) + "</ul>\n"

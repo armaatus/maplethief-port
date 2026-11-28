@@ -22,8 +22,10 @@
  *                                 the first entry of each guest function (MT_TRACE_ENTRY).
  *   MAPLETHIEF_REPORT=PATH        write the unimplemented report to PATH at exit, even when it
  *                                 is empty; "-" for stderr. Unset: stderr, only if not empty.
- *   MAPLETHIEF_COVERAGE=PATH      write the function-entry coverage (MT_TRACE_ENTRY builds)
- *                                 to PATH at exit.
+ *   MAPLETHIEF_COVERAGE=PATH      the run coverage (#295, ADR 0160): write the function-entry
+ *                                 coverage (MT_TRACE_ENTRY builds) and the hit recorders'
+ *                                 counts (imports, selectors, scripts, natives, maps) to PATH
+ *                                 at exit. "%p" in PATH becomes the process id.
  *   MAPLETHIEF_SYMBOLS=PATH       load the guest symbol table (python -m recomp symbols; the
  *                                 build writes <build dir>/maplethief.sym). Without one,
  *                                 addresses stay raw.
@@ -153,8 +155,22 @@ size_t mt_report_format(char *buf, size_t size) MT_NOEXCEPT;
 /* --- function-entry coverage (generated code built with MT_TRACE_ENTRY 1, calls.h) ----- */
 
 /* Called by MT_FN_ENTER on the first entry of a generated function: `fn_name` is its
- * __func__ ("f_000225E5"), `calls` its entry counter. */
-void mt_trace_fn_first(mt_cpu *cpu, const char *fn_name, const uint64_t *calls) MT_NOEXCEPT;
+ * __func__ ("f_000225E5"), `calls` its entry counter. Answers the function's pointer if the
+ * run coverage is on and a watcher is registered for it (mt_coverage_watch), else 0. */
+uint32_t mt_trace_fn_first(mt_cpu *cpu, const char *fn_name, const uint64_t *calls) MT_NOEXCEPT;
+
+/* Called by MT_FN_ENTER on every entry of a watched function (`fn` its pointer): runs its
+ * watcher, with the registers as the caller passed them. */
+void mt_trace_fn_watched(mt_cpu *cpu, uint32_t fn) MT_NOEXCEPT;
+
+/* A watcher only reads (registers, guest memory) and records hits (mt_hit): the guest runs
+ * the same with or without it. */
+typedef void (*mt_coverage_watch_fn)(mt_cpu *cpu, uint32_t fn);
+
+/* Registers `watcher` for function pointer `fn` (a second registration replaces the first;
+ * NULL removes it). It sees the entries from the function's first entry on, so register before
+ * the guest runs. Returns 0 if the table is full (16 functions), else 1. */
+int mt_coverage_watch(uint32_t fn, mt_coverage_watch_fn watcher) MT_NOEXCEPT;
 
 /* Functions entered so far. */
 uint32_t mt_coverage_count(void) MT_NOEXCEPT;
@@ -162,6 +178,46 @@ uint32_t mt_coverage_count(void) MT_NOEXCEPT;
 /* The coverage as text, by address: one line "0x000225E5 <calls> <symbol>" per function
  * entered, after a header line. Returns the full length (like snprintf). */
 size_t mt_coverage_format(char *buf, size_t size) MT_NOEXCEPT;
+
+/* --- the run coverage's hit recorders (#295, ADR 0160) --------------------------------- */
+
+/* What a hit counts. Imports count every call through the import table (mt_imports_link
+ * wraps the slots while the coverage is on), selectors every delivered message by the
+ * receiver's class (the ObjC runtime), scripts every script file read from the bundle
+ * (CoreFoundation's resource read), natives every entry of the script VM's Lua::callNative and
+ * maps every entry of the map loader (watchers, runtime/src/events/run_hits.cpp: those two
+ * need the MT_TRACE_ENTRY build). */
+enum mt_hit_kind {
+    MT_HIT_IMPORT = 0,   /* key: the import's name ("_memcpy") */
+    MT_HIT_SELECTOR = 1, /* key: "-[Class sel]" or "+[Class sel]" */
+    MT_HIT_SCRIPT = 2,   /* key: the bundle path ("script/common/portal200.out") */
+    MT_HIT_NATIVE = 3,   /* key: "<index> <name>" ("38 changeMap") */
+    MT_HIT_MAP = 4,      /* key: "<area>.<map>" ("2.8") */
+    MT_HIT_KINDS = 5
+};
+
+/* 1 while the run coverage is on (MAPLETHIEF_COVERAGE set). The recorders check it first. */
+int mt_hits_enabled(void) MT_NOEXCEPT;
+
+/* Counts one hit of (kind, id), where `id` identifies the key within its kind (an import id, a
+ * class and selector pair, a hash). Returns 1 if it was counted, 0 if the pair is new: then
+ * the caller names it with mt_hit_add, so a key is only formatted once. */
+int mt_hit_count(uint32_t kind, uint64_t id) MT_NOEXCEPT;
+
+/* Adds the new pair (kind, id) named `key` with one hit (or counts it if it exists). */
+void mt_hit_add(uint32_t kind, uint64_t id, const char *key) MT_NOEXCEPT;
+
+/* mt_hit_count, then mt_hit_add with `key` if new; the id is the FNV-1a 64 hash of `key`. Does
+ * nothing while the coverage is off. */
+void mt_hit(uint32_t kind, const char *key) MT_NOEXCEPT;
+
+/* The number of distinct keys of `kind` hit so far. */
+uint32_t mt_hits_count(uint32_t kind) MT_NOEXCEPT;
+
+/* The hits as text: one line "hit <kind> <count> <key>" per key, by kind ("import",
+ * "selector", "script", "native", "map") then key. Returns the full length (like snprintf).
+ * The coverage file has them after the functions. */
+size_t mt_hits_format(char *buf, size_t size) MT_NOEXCEPT;
 
 /* --- guest symbols -------------------------------------------------------------------- */
 
@@ -221,6 +277,7 @@ typedef struct mt_crash_info {
 
 #define MT_CRASH_HARDWARE 0x100u /* a hardware fault, not an mt_trap */
 #define MT_CRASH_HOST 0x101u     /* a fault outside the guest (a host bug, an abort) */
+#define MT_CRASH_HANG 0x102u     /* the guest's thread stopped turning its run loop (#337) */
 
 enum mt_access {
     MT_ACCESS_UNKNOWN = 0,
@@ -298,6 +355,28 @@ void mt_crash_set_host_functions(const mt_fn_entry *table, uint32_t count) MT_NO
  * guest fault from a host one. */
 void mt_crash_set_cpu(mt_cpu *cpu) MT_NOEXCEPT;
 mt_cpu *mt_crash_get_cpu(void) MT_NOEXCEPT;
+
+/* --- the hang sampler (#337, ADR 0195) ------------------------------------------------ */
+
+/* Makes the calling thread, which runs `cpu`, the one mt_hang_report samples (NULL: none).
+ * POSIX installs a handler for SIGURG once (ignored by default, so a late one does no harm);
+ * Windows keeps a handle of the thread. Returns 0, or -1 where a thread cannot be sampled (the
+ * Nintendo Switch: the report then has the registers as last stored and no host PC). */
+int mt_hang_watch_thread(mt_cpu *cpu) MT_NOEXCEPT;
+
+/* From another thread: stops the watched thread for a moment (POSIX: SIGURG, whose handler
+ * copies its host PC and its mt_cpu; Windows: SuspendThread and GetThreadContext),
+ * then formats the report with mt_crash_format as MT_CRASH_HANG, `what` naming the stall:
+ *
+ *     === guest crash: hang (the run loop stopped turning) ===
+ *     no run-loop turn for 15 s at host pc 0x... f_0001A2B5+0x40
+ *     in guest function 0x0001A2B5 CFoo::Wait+0x0 (the guest pc is not known ...)
+ *     registers (as last stored to mt_cpu): ...
+ *     backtrace (r7 frame chain): ...
+ *
+ * A thread that does not answer the signal within half a second is reported without a host
+ * PC. Returns the full length (like snprintf); 0 if no thread is watched. */
+size_t mt_hang_report(const char *what, char *buf, size_t size) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

@@ -1,0 +1,125 @@
+{
+  "name": "main",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "refs/heads/main"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false,
+        "allowed_merge_methods": [
+          "merge"
+        ],
+        "require_extra_approval_for_unattributed_changes": true
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "scope",
+            "integration_id": 15368
+          },
+          {
+            "context": "lint + Python min/latest",
+            "integration_id": 15368
+          },
+          {
+            "context": "CI result",
+            "integration_id": 15368
+          },
+          {
+            "context": "guest image (macOS, clang + Apple ld)",
+            "integration_id": 15368
+          },
+          {
+            "context": "release title",
+            "integration_id": 15368
+          },
+          {
+            "context": "ubuntu-latest debug",
+            "integration_id": 15368
+          },
+          {
+            "context": "ubuntu-latest release",
+            "integration_id": 15368
+          },
+          {
+            "context": "macos-latest debug",
+            "integration_id": 15368
+          },
+          {
+            "context": "macos-latest release",
+            "integration_id": 15368
+          },
+          {
+            "context": "windows-latest debug",
+            "integration_id": 15368
+          },
+          {
+            "context": "windows-latest release",
+            "integration_id": 15368
+          },
+          {
+            "context": "ubuntu-24.04-arm debug",
+            "integration_id": 15368
+          },
+          {
+            "context": "ubuntu-24.04-arm release",
+            "integration_id": 15368
+          },
+          {
+            "context": "windows-11-arm debug",
+            "integration_id": 15368
+          },
+          {
+            "context": "windows-11-arm release",
+            "integration_id": 15368
+          },
+          {
+            "context": "linux asan+ubsan",
+            "integration_id": 15368
+          },
+          {
+            "context": "ios arm64 (compile, no IPA, no signing)",
+            "integration_id": 15368
+          },
+          {
+            "context": "switch (NRO, devkitA64 container, no IPA)",
+            "integration_id": 15368
+          },
+          {
+            "context": "android (APK, pinned SDK and NDK container, no IPA)",
+            "integration_id": 15368
+          },
+          {
+            "context": "lint (clang-tidy)",
+            "integration_id": 15368
+          }
+        ]
+      }
+    }
+  ]
+}

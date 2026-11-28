@@ -102,6 +102,10 @@ const char *action_title(std::uint32_t action) {
         return tr(Txt::action_quick_save);
     case MT_ACTION_QUICK_LOAD:
         return tr(Txt::action_quick_load);
+    case MT_ACTION_PRACTICE_PICK:
+        return tr(Txt::action_practice_pick);
+    case MT_ACTION_PRACTICE_LOAD:
+        return tr(Txt::action_practice_load);
     default: {
         // An action this table does not know yet: the runtime table's title.
         const mt_input_action_info *info = mt_input_action_get_info(action);
@@ -468,13 +472,20 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
     c.fill(0, 0, c.width(), c.height(), kBackdrop);
     c.fill(kPanelX, kPanelY, kPanelW, kPanelH, kPanel);
     c.frame(kPanelX, kPanelY, kPanelW, kPanelH, 1, kBorder);
-    c.text(kTitleX, 14, tr(Txt::card_title), kText, 2);
-    const std::string pad = glyphs_.pad() != 0 ? tr(Txt::remap_pad, {glyph_set_name(glyphs_.set())})
-                                               : std::string(tr(Txt::remap_no_pad));
+    // A translation is cut to its column (#372): the text's room is the English's layout.
+    const auto fit = [](const std::string &s, int w) { return Canvas::fit_width(s, w); };
+    const std::string pad =
+        fit(glyphs_.pad() != 0 ? tr(Txt::remap_pad, {glyph_set_name(glyphs_.set())})
+                               : std::string(tr(Txt::remap_no_pad)),
+            kPadEnd - kPadX);
+    c.text(
+        kTitleX, 14,
+        Canvas::fit_width(tr(Txt::card_title), kPadEnd - Canvas::text_width(pad) - 8 - kTitleX, 2),
+        kText, 2);
     c.text(kPadEnd - Canvas::text_width(pad), 18, pad, kDim);
-    c.text(kTitleX, 34, tr(Txt::remap_action), kDim);
-    c.text(kKeysX, 34, tr(Txt::card_keyboard), kDim);
-    c.text(kPadX, 34, tr(Txt::remap_gamepad), kDim);
+    c.text(kTitleX, 34, fit(tr(Txt::remap_action), kKeysX - kTitleX - 4), kDim);
+    c.text(kKeysX, 34, fit(tr(Txt::card_keyboard), kPadX - kKeysX - 4), kDim);
+    c.text(kPadX, 34, fit(tr(Txt::remap_gamepad), kPadEnd - kPadX), kDim);
 
     for (std::size_t i = top_; i < rows_.size() && i < top_ + kVisibleRows; i++) {
         const Row &row = rows_[i];
@@ -486,15 +497,18 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
         const int gy = y + (kRowH - kButtonHeight) / 2;
         switch (row.kind) {
         case RowKind::kHeader:
-            c.text(kTitleX - 6, ty, context_title(row.slot.context), kHeader);
+            c.text(kTitleX - 6, ty, fit(context_title(row.slot.context), kPadEnd - kTitleX),
+                   kHeader);
             break;
         case RowKind::kAction: {
-            c.text(kTitleX, ty, action_title(row.slot.action), kText);
+            c.text(kTitleX, ty, fit(action_title(row.slot.action), kKeysX - kTitleX - 4), kText);
             if (capturing_ && i == selected_) {
                 const int left = static_cast<int>(std::ceil(capture_until_ - now_));
                 const int shown_left =
                     std::max(0, std::min(left, static_cast<int>(kCaptureSeconds)));
-                c.text(kKeysX, ty, tr(Txt::remap_press_countdown, {std::to_string(shown_left)}),
+                c.text(kKeysX, ty,
+                       fit(tr(Txt::remap_press_countdown, {std::to_string(shown_left)}),
+                           kPadEnd - kKeysX),
                        kWarning);
                 break;
             }
@@ -529,20 +543,21 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
             break;
         }
         case RowKind::kFace:
-            c.text(kTitleX, ty, tr(Txt::remap_nintendo), kText);
-            c.text(
-                kKeysX, ty,
-                tr(face == FaceButtons::kPosition ? Txt::remap_by_position : Txt::remap_by_label),
-                kText);
+            c.text(kTitleX, ty, fit(tr(Txt::remap_nintendo), kKeysX - kTitleX - 4), kText);
+            c.text(kKeysX, ty,
+                   fit(tr(face == FaceButtons::kPosition ? Txt::remap_by_position
+                                                         : Txt::remap_by_label),
+                       kPadEnd - kKeysX),
+                   kText);
             break;
         case RowKind::kReset:
-            c.text(kTitleX, ty, tr(Txt::remap_reset), kText);
+            c.text(kTitleX, ty, fit(tr(Txt::remap_reset), kPadEnd - kTitleX), kText);
             break;
         case RowKind::kSave:
-            c.text(kTitleX, ty, tr(Txt::keypad_save), kGood);
+            c.text(kTitleX, ty, fit(tr(Txt::keypad_save), kPadEnd - kTitleX), kGood);
             break;
         case RowKind::kCancel:
-            c.text(kTitleX, ty, tr(Txt::keypad_cancel), kText);
+            c.text(kTitleX, ty, fit(tr(Txt::keypad_cancel), kPadEnd - kTitleX), kText);
             break;
         }
     }
@@ -555,12 +570,8 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
                "v", kDim);
     }
     if (!status_.empty()) {
-        std::string s = status_;
-        const std::size_t max = static_cast<std::size_t>((kPanelW - 24) / 6);
-        if (s.size() > max) {
-            s = s.substr(0, max - 3) + "...";
-        }
-        c.text(kTitleX - 6, kStatusY, s, status_warning_ ? kWarning : kGood);
+        c.text(kTitleX - 6, kStatusY, fit(status_, kPanelW - 24 - 1),
+               status_warning_ ? kWarning : kGood);
     }
     // The hints, with the pad's own glyphs.
     int x = kTitleX - 6;
@@ -574,7 +585,12 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
     const auto button = [&](int b) {
         x += draw_glyph(c, x, hy, Control{ControlKind::kGamepadButton, b}, type, face) + 2;
     };
-    const auto words = [&](const char *s) { x += c.text(x, hy + 3, s, kDim) + 8; };
+    const auto words = [&](const char *s) {
+        const std::string t = fit(s, kPanelX + kPanelW - 6 - x);
+        if (!t.empty()) {
+            x += c.text(x, hy + 3, t, kDim) + 8;
+        }
+    };
     key(SDLK_UP);
     key(SDLK_DOWN);
     x += draw_glyph(c, x, hy, Control{ControlKind::kDirection, static_cast<int>(Direction::kUp)},
@@ -590,9 +606,10 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
     const std::u8string file =
         std::filesystem::path(std::u8string(path_.begin(), path_.end())).filename().u8string();
     c.text(kTitleX - 6, hy + 16,
-           tr(shows_key_hints() ? Txt::remap_footer : Txt::remap_footer_pad,
-              {file.empty() ? std::string(tr(Txt::remap_no_file))
-                            : std::string(file.begin(), file.end())}),
+           fit(tr(shows_key_hints() ? Txt::remap_footer : Txt::remap_footer_pad,
+                  {file.empty() ? std::string(tr(Txt::remap_no_file))
+                                : std::string(file.begin(), file.end())}),
+               kPanelW - 12 - 1),
            kDim);
 }
 

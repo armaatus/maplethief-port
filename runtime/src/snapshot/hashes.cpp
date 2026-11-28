@@ -2,9 +2,14 @@
 // to one binary, and the CRC-32 (IEEE 802.3, the zip format's) of each section.
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <new>
+#include <vector>
 
 #include "maplethief/snapshot.h"
+
+#include "cg/zlib.h"
 
 namespace {
 
@@ -112,4 +117,47 @@ extern "C" std::uint32_t mt_crc32(std::uint32_t crc, const std::uint8_t *data,
         crc = k_crc.t[(crc ^ data[i]) & 0xFFu] ^ (crc >> 8);
     }
     return ~crc;
+}
+
+extern "C" int mt_zlib_deflate(const std::uint8_t *data, std::size_t size, std::uint8_t **out,
+                               std::size_t *out_size) noexcept {
+    std::vector<std::uint8_t> packed;
+    try {
+        if (!mt_cg::zlib_deflate(data, size, packed)) {
+            return -1;
+        }
+    } catch (const std::bad_alloc &) {
+        return -1;
+    }
+    auto *p = static_cast<std::uint8_t *>(std::malloc(packed.empty() ? 1 : packed.size()));
+    if (p == nullptr) {
+        return -1;
+    }
+    if (!packed.empty()) {
+        std::memcpy(p, packed.data(), packed.size());
+    }
+    *out = p;
+    *out_size = packed.size();
+    return 0;
+}
+
+extern "C" int mt_zlib_inflate(const std::uint8_t *data, std::size_t size, std::size_t expected,
+                               std::uint8_t **out) noexcept {
+    std::vector<std::uint8_t> raw;
+    try {
+        if (!mt_cg::zlib_inflate(data, size, expected, raw)) {
+            return -1;
+        }
+    } catch (const std::bad_alloc &) {
+        return -1;
+    }
+    auto *p = static_cast<std::uint8_t *>(std::malloc(raw.empty() ? 1 : raw.size()));
+    if (p == nullptr) {
+        return -1;
+    }
+    if (!raw.empty()) {
+        std::memcpy(p, raw.data(), raw.size());
+    }
+    *out = p;
+    return 0;
 }

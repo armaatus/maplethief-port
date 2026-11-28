@@ -34,6 +34,9 @@ const char *glyph_set_name(GlyphSet set);
 // The set for a pad type: PS3/PS4/PS5 PlayStation, the Switch pads and the GameCube adapter
 // Nintendo, everything else (Xbox, Steam, standard, unknown) Xbox.
 GlyphSet glyph_set_for(SDL_GamepadType type);
+// Whether a pad of `type` may have a touchpad (#381): not the Nintendo pads, the Xbox ones or the
+// PS3; PS4, PS5 and the types SDL names no further (a Steam Deck, a Steam Controller) may.
+bool pad_type_has_touchpad(SDL_GamepadType type);
 
 // The text a glyph shows for a gamepad control on a pad of `type` ("A", "Cross", "LB", "L2",
 // "D-pad up", "View"): what the overlay draws, and what tests compare.

@@ -1,0 +1,23 @@
+{
+ "level": 10,
+ "hp": 110,
+ "mp": 110,
+ "meso": 2000,
+ "map": [0, 0],
+ "position": [-1, -1],
+ "etc_inventory": [[3, 50]],
+ "chapter": 1,
+ "main": {"7": 2, "8": 2, "21": 1},
+ "side": {},
+ "records": [
+  {
+   "kind": 0,
+   "number": 21,
+   "npc": 3,
+   "title": "Chapter1_Quest_Darklord.mainQuest21.1",
+   "description": "Chapter1_Quest_Darklord.mainQuest21.2",
+   "requirements": [{"mob": 4, "needed": 10, "progress": 10}],
+   "rewards": [{"item": [0, 24], "count": 1}, {"item": [0, 36], "count": 1}, {"item": [1, 11], "count": 200}]
+  }
+ ]
+}

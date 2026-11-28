@@ -1,7 +1,8 @@
 // The maps as the bot sees them (#77): each map's collision grid (.att, docs/formats/att.md) and
 // objects (.obj, docs/formats/obj.md), read from the extracted bundle, turned into platforms,
 // ladders and the moves between them. A route on one map is a list of those moves; between maps
-// the bot follows the portal links of chapter 1 (k_links, from the portal scripts). Read only.
+// the bot follows the portal links of the hero's chapter, generated from the knowledge base
+// (tables()). Read only.
 // Header-only, like game_driver.h.
 #ifndef MAPLETHIEF_TESTS_WORLD_MAP_H
 #define MAPLETHIEF_TESTS_WORLD_MAP_H
@@ -10,12 +11,14 @@
 #include <climits>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <queue>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -60,7 +63,7 @@ struct Ladder {
 };
 
 // A move from one platform to another: how and from where.
-enum class Move { walk, jump, fall, climb_up, climb_down };
+enum class Move { walk, jump, fall, climb_up, climb_down, rope_jump, rope_grab };
 inline const char *move_name(Move m) {
     switch (m) {
     case Move::walk:
@@ -73,6 +76,10 @@ inline const char *move_name(Move m) {
         return "climb up";
     case Move::climb_down:
         return "climb down";
+    case Move::rope_jump:
+        return "rope jump";
+    case Move::rope_grab:
+        return "rope grab";
     }
     return "?";
 }
@@ -83,6 +90,8 @@ struct Edge {
     int dir = 0; // -1 / +1: the direction held for a jump or a fall (0: straight up)
     int ladder = -1;
     int cost = 0;
+    bool long_hop = false; // a running jump across k_jump_side to k_jump_level px
+    bool caught = false;   // a rope jump that starts with a jump onto the rope (kept as long hops)
 };
 
 struct Map {
@@ -152,14 +161,41 @@ struct Map {
 
 // Jumps the bot plans with (measured on the first maps: a jump rises about 50 px; walking while
 // in the air carries the hero a few cells sideways). Kept inside what always works.
-constexpr int k_jump_up = 44;    // px a jump reaches up onto a platform
-constexpr int k_jump_side = 40;  // px a running jump crosses sideways over a gap
+constexpr int k_jump_up = 44;   // px a jump reaches up onto a platform
+constexpr int k_jump_side = 40; // px a running jump crosses sideways over a gap
+// Onto a step up to 16 px higher (the hero is still 24 px up after 6 ticks), on the level or
+// lower, a running jump from a platform's very end comes down 49 px out or more (jump_travel),
+// so it crosses a gap of up to 45 px to the next one's end: 9.9's and 9.10's steps are 40 px of
+// air apart, 9.10's floor reaches the rest only by hops 16 px down and its top (the Miner) is 16 px
+// above the step before it (#299). Only taken where nothing shorter goes (k_long_hop_cost).
+constexpr int k_jump_level = 45;
+constexpr int k_long_hop_rise = 16;
+constexpr int k_long_hop_drop = 32;
+constexpr int k_long_hop_cost = 200;
+// Sideways px a running jump has carried the hero when it comes down onto a platform `rise` px
+// above its start: 7 px a tick, the hero 25, 42, 50, 49, 41, 24 px up, then 2 px below the start
+// (mechanics.md, Movement). 42 px for a step 32 px up, 49 px on the level.
+inline int jump_travel(int rise) {
+    constexpr int k_up[] = {25, 42, 50, 49, 41, 24, -2};
+    for (int t = 3; t < 7; t++) {
+        if (k_up[t] <= rise) {
+            return 7 * (t + 1);
+        }
+    }
+    return 49;
+}
 constexpr int k_fall_reach = 24; // px a walk off an edge drifts sideways before landing
 // A ladder or rope is grabbed higher than a platform is reached: up in the air looks for a ladder
 // cell a quarter of the hero's height (+0x34) above its feet (CHero::KeyUpDown 0x63665 through
 // 0x61474), so a jump reaches a ladder's foot hanging up to about 52 px above the floor (1.4's
 // ladder to portal140 hangs 48 px up).
 constexpr int k_ladder_reach = 52;
+// Off a ladder with a direction and jump the hero leaves sideways in a small hop (the side jump,
+// 12 px high, 7 px a tick: mechanics.md, Movement) and comes down about 28 px out at the height
+// it left. A platform whose near end is that close to a ladder, at a height the ladder spans, is
+// reached by climbing to it and hopping off (4.3: the ropes hang beside the platforms, not onto
+// them).
+constexpr int k_rope_hop = 24;
 
 inline void build(Map &m) {
     // Platforms: runs of foothold cells per row (one-way floors; a wall corner counts).
@@ -221,6 +257,121 @@ inline void build(Map &m) {
         const int cost = (l.r1 - l.r0) * 3 + 20;
         add(foot, {top, Move::climb_up, l.x(), 0, static_cast<int>(li), cost});
         add(top, {foot, Move::climb_down, l.x(), 0, static_cast<int>(li), cost});
+    }
+    // Rope jumps: onto a platform beside a ladder, from the ladder's foot or top.
+    for (std::size_t li = 0; li < m.ladders.size(); li++) {
+        const Ladder &l = m.ladders[li];
+        const int foot = m.platform_below(l.x(), l.bottom() - 2);
+        const bool grab =
+            foot >= 0 &&
+            m.platforms[static_cast<std::size_t>(foot)].y() - l.bottom() <= k_ladder_reach;
+        const int top = (m.at(l.c, l.r0) & k_foothold) != 0
+                            ? m.platform_at(l.x(), l.r0 * k_cell - 1, 0)
+                            : m.platform_at(l.x(), l.r0 * k_cell - 1, 3 * k_cell);
+        for (std::size_t qi = 0; qi < m.platforms.size(); qi++) {
+            const Platform &q = m.platforms[qi];
+            const int to = static_cast<int>(qi);
+            // The hero's feet at q's height while on the ladder, a cell clear of both ends.
+            if (to == foot || to == top || q.y() - k_cell < l.top() || q.y() > l.bottom()) {
+                continue;
+            }
+            for (const int dir : {-1, 1}) {
+                const int gap = dir < 0 ? l.x() - 6 - q.x1() : q.x0() - (l.x() + 6);
+                if (gap < 0 || gap > k_rope_hop) {
+                    continue;
+                }
+                const int cost = std::abs(q.y() - l.bottom()) / 6 + 40;
+                if (grab) {
+                    add(foot, {to, Move::rope_jump, l.x(), dir, static_cast<int>(li), cost});
+                }
+                if (top >= 0) {
+                    add(top, {to, Move::rope_jump, l.x(), dir, static_cast<int>(li), cost});
+                }
+            }
+        }
+    }
+    // Rope grabs, the other way: from a platform beside a rope that hangs too high to grab from
+    // the floor, a jump toward it with up held catches it in the air (up looks for a ladder cell
+    // above the feet, as from the floor), then up to its top (5.1: the rope to portal510 hangs
+    // 72 px above the floor and 19 px beside platform 2). The edge's x is the platform's near end.
+    for (std::size_t li = 0; li < m.ladders.size(); li++) {
+        const Ladder &l = m.ladders[li];
+        const int top = (m.at(l.c, l.r0) & k_foothold) != 0
+                            ? m.platform_at(l.x(), l.r0 * k_cell - 1, 0)
+                            : m.platform_at(l.x(), l.r0 * k_cell - 1, 3 * k_cell);
+        if (top < 0) {
+            continue;
+        }
+        for (std::size_t qi = 0; qi < m.platforms.size(); qi++) {
+            const Platform &q = m.platforms[qi];
+            if (static_cast<int>(qi) == top || q.y() - k_cell < l.top() ||
+                q.y() > l.bottom() + k_ladder_reach) {
+                continue;
+            }
+            for (const int dir : {-1, 1}) {
+                const int gap = dir < 0 ? l.x() - 6 - q.x1() : q.x0() - (l.x() + 6);
+                // dir is the side q lies on: the hero jumps the other way, from its near end.
+                const int end = dir < 0 ? q.x1() : q.x0();
+                if (gap < 0 || gap > k_rope_hop) {
+                    continue;
+                }
+                const int cost = (q.y() - l.top()) / k_cell * 3 + 40;
+                add(static_cast<int>(qi),
+                    {top, Move::rope_grab, end + dir * 3, -dir, static_cast<int>(li), cost});
+            }
+        }
+    }
+    // A rope with no platform at its top that hangs too high to grab from the floor: caught in
+    // the air from a platform beside it (as a rope grab), climbed and hopped off (as a rope jump)
+    // onto a platform beside it that it spans (7.5: the rope by portal750's platform hangs 63 px
+    // above the floor and 8 px left of platform 3; portal750 stands on platform 0, 16 px up the
+    // rope's other side). The edge is a rope jump from the near end of the platform it starts on.
+    for (std::size_t li = 0; li < m.ladders.size(); li++) {
+        const Ladder &l = m.ladders[li];
+        const int top = (m.at(l.c, l.r0) & k_foothold) != 0
+                            ? m.platform_at(l.x(), l.r0 * k_cell - 1, 0)
+                            : m.platform_at(l.x(), l.r0 * k_cell - 1, 3 * k_cell);
+        const int foot = m.platform_below(l.x(), l.bottom() - 2);
+        const bool grab =
+            foot >= 0 &&
+            m.platforms[static_cast<std::size_t>(foot)].y() - l.bottom() <= k_ladder_reach;
+        if (top >= 0 || grab) {
+            continue;
+        }
+        auto beside = [&l](const Platform &q, int dir) {
+            const int gap = dir < 0 ? l.x() - 6 - q.x1() : q.x0() - (l.x() + 6);
+            return gap >= 0 && gap <= k_rope_hop;
+        };
+        for (std::size_t qi = 0; qi < m.platforms.size(); qi++) {
+            const Platform &q = m.platforms[qi];
+            if (q.y() - k_cell < l.top() || q.y() > l.bottom() + k_ladder_reach) {
+                continue;
+            }
+            for (const int qdir : {-1, 1}) {
+                if (!beside(q, qdir)) {
+                    continue;
+                }
+                const int end = qdir < 0 ? q.x1() : q.x0();
+                for (std::size_t ti = 0; ti < m.platforms.size(); ti++) {
+                    const Platform &t = m.platforms[ti];
+                    if (ti == qi || t.y() >= q.y() || t.y() - k_cell < l.top() ||
+                        t.y() > l.bottom()) {
+                        continue;
+                    }
+                    for (const int dir : {-1, 1}) {
+                        if (!beside(t, dir)) {
+                            continue;
+                        }
+                        const int cost = (q.y() - t.y()) / k_cell * 3 + 60;
+                        Edge e{static_cast<int>(ti), Move::rope_jump,
+                               end + qdir * 3,       dir,
+                               static_cast<int>(li), cost};
+                        e.caught = true;
+                        add(static_cast<int>(qi), e);
+                    }
+                }
+            }
+        }
     }
     for (int i = 0; i < n; i++) {
         const Platform &p = m.platforms[static_cast<std::size_t>(i)];
@@ -290,7 +441,10 @@ inline void build(Map &m) {
                 const int from_x = dir < 0 ? p.x0() + 4 : p.x1() - 4;
                 const int land_x = dir < 0 ? q.x1() : q.x0();
                 const int gap = (land_x - from_x) * dir;
-                if (gap < -4 || gap > k_jump_side || rise < -k_cell * 40) {
+                const bool long_hop =
+                    gap > k_jump_side && rise >= -k_long_hop_drop && rise <= k_long_hop_rise;
+                if (gap < -4 || (gap > k_jump_side && !(long_hop && gap <= k_jump_level)) ||
+                    rise < -k_cell * 40) {
                     continue;
                 }
                 // A drop down: the fall edge covers it, unless that fall lands elsewhere (3.4:
@@ -315,11 +469,57 @@ inline void build(Map &m) {
                 // The hero comes down on q, not on a platform above it in the way.
                 const int land_in = land_x + dir * 2;
                 clear = clear && m.platform_below(land_in, std::min(p.y(), q.y()) - k_cell) == j;
+                // A narrow q (5.3's steps, 32 px): from p's end the jump would carry the hero past
+                // q's far end, so it leaves from further back, to come down on q's middle.
+                int take_off = from_x;
+                const int far_x = dir < 0 ? q.x0() : q.x1();
+                if (rise > 4 && (from_x + dir * jump_travel(rise) - far_x) * dir > -6) {
+                    const int mid = (q.x0() + q.x1()) / 2;
+                    take_off = std::clamp(mid - dir * jump_travel(rise), p.x0() + 2, p.x1() - 2);
+                }
+                // Level or up, from the very end; down, the fall carries the hero further, so
+                // from 4 px in (on ice the approach to the end slid off it: 9.10's 28 to 31).
+                if (long_hop && rise >= -4) {
+                    take_off = dir < 0 ? p.x0() + 1 : p.x1() - 1;
+                }
                 if (clear) {
-                    add(i, {j, Move::jump, from_x, dir, -1, 30 + std::max(0, rise) / 4 + gap / 8});
+                    add(i, {j, Move::jump, take_off, dir, -1,
+                            30 + std::max(0, rise) / 4 + gap / 8 + (long_hop ? k_long_hop_cost : 0),
+                            long_hop});
                 }
             }
         }
+    }
+    // A long hop, or a rope jump that starts with a jump onto the rope, stays only where nothing
+    // else leads from its platform to the far one, so maps that had a way keep their moves.
+    const auto reaches = [&m](std::size_t from, int to) {
+        std::vector<char> seen(m.platforms.size(), 0);
+        std::vector<std::size_t> todo = {from};
+        seen[from] = 1;
+        while (!todo.empty()) {
+            const std::size_t k = todo.back();
+            todo.pop_back();
+            for (const Edge &e : m.edges[k]) {
+                const auto t = static_cast<std::size_t>(e.to);
+                if (!e.long_hop && !e.caught && seen[t] == 0) {
+                    if (e.to == to) {
+                        return true;
+                    }
+                    seen[t] = 1;
+                    todo.push_back(t);
+                }
+            }
+        }
+        return false;
+    };
+    for (std::size_t i = 0; i < m.edges.size(); i++) {
+        std::vector<Edge> keep;
+        for (const Edge &e : m.edges[i]) {
+            if ((!e.long_hop && !e.caught) || !reaches(i, e.to)) {
+                keep.push_back(e);
+            }
+        }
+        m.edges[i] = std::move(keep);
     }
 }
 
@@ -409,6 +609,10 @@ inline std::vector<Step> route(const Map &m, int from, int from_x, int to) {
                 int land = e.x;
                 if (e.move == Move::climb_up || e.move == Move::climb_down) {
                     land = e.x;
+                } else if (e.move == Move::rope_grab) {
+                    land = m.ladders[static_cast<std::size_t>(e.ladder)].x();
+                } else if (e.move == Move::rope_jump) {
+                    land = e.x + e.dir * (k_rope_hop + 6);
                 } else if (e.move == Move::fall) {
                     land = e.x + e.dir * k_fall_reach;
                 } else if (e.move == Move::jump) {
@@ -432,34 +636,185 @@ inline std::vector<Step> route(const Map &m, int from, int from_x, int to) {
     return out;
 }
 
-// Chapter 1's portal links (script/chapter1 and script/common portal scripts: changeMap(area,
-// map, portal)): from map (area, map), the portal object of `kind` leads to (to_area, to_map).
-// Portals whose script checks a quest (portal201 main quest 9, portal240 side quest 7,
-// portal212 side quest 25, portal371 main quest 18) are listed; the bot only takes them once
-// the quest allows it.
-struct Link {
-    int area, map, kind, to_area, to_map;
+// The portal links and shops of every chapter, from the generated tables (#297): CTest
+// play.bot_world writes them from the knowledge base (python3 -m mtport.botworld, which
+// documents the format) into the build tree, MT_BOT_WORLD_FILE; MT_BOT_WORLD overrides the path.
+// A link leads from the portal object of `kind` on (area, map) to (to_area, to_map) in
+// `chapter`. Its gate is the warp's conditions: alternatives of terms that hold together, each a
+// quest's state (kind 0 main, 1 side) compared with a value, or with `require` whether that
+// active quest's requirements are met (checkRequire: 1 met, 0 not); `known` false is a term the
+// bot can't test (the level), which shuts its alternative. No alternative: open.
+struct Term {
+    int kind = 0, number = 0, value = 0;
+    std::string op = "==";
+    bool known = false;
+    bool require = false;
 };
-inline const std::vector<Link> &links() {
-    static const std::vector<Link> k = {
-        {0, 0, 0, 0, 1}, {0, 0, 1, 0, 3}, {0, 1, 1, 0, 2}, {0, 1, 0, 0, 0}, {0, 2, 1, 1, 1},
-        {0, 2, 0, 0, 1}, {0, 3, 0, 0, 0}, {0, 3, 1, 0, 4}, {0, 4, 0, 0, 3}, {0, 4, 1, 2, 4},
-        {1, 0, 0, 1, 2}, {1, 0, 1, 1, 3}, {1, 1, 1, 1, 2}, {1, 1, 0, 0, 2}, {1, 2, 1, 1, 0},
-        {1, 2, 0, 1, 1}, {1, 3, 0, 1, 0}, {1, 3, 1, 1, 4}, {1, 4, 0, 1, 3}, {1, 4, 1, 2, 1},
-        {2, 0, 0, 2, 3}, {2, 0, 1, 2, 2}, {2, 1, 2, 2, 6}, {2, 1, 0, 1, 4}, {2, 1, 1, 2, 2},
-        {2, 2, 1, 2, 1}, {2, 2, 0, 2, 0}, {2, 3, 0, 2, 4}, {2, 3, 1, 2, 0}, {2, 4, 3, 2, 5},
-        {2, 4, 0, 0, 4}, {2, 4, 1, 2, 3}, {2, 4, 2, 3, 1}, {2, 5, 0, 2, 4}, {2, 6, 1, 2, 7},
-        {2, 6, 0, 2, 1}, {2, 7, 0, 2, 6}, {3, 0, 0, 3, 2}, {3, 0, 1, 3, 3}, {3, 1, 0, 2, 4},
-        {3, 1, 1, 3, 2}, {3, 2, 0, 3, 1}, {3, 2, 1, 3, 0}, {3, 3, 0, 3, 0}, {3, 3, 1, 3, 4},
-        {3, 4, 0, 3, 3}, {3, 4, 1, 3, 5}, {3, 5, 0, 3, 4}, {3, 5, 1, 3, 6}, {3, 6, 0, 3, 5},
-        {3, 6, 1, 3, 7}, {3, 7, 0, 3, 6}, {3, 7, 1, 3, 8},
-    };
-    return k;
+struct Link {
+    int chapter, area, map, kind, to_area, to_map;
+    std::vector<std::vector<Term>> gate;
+};
+// A shop an NPC opens: the NPC object `npc` on (area, map) in `chapter` sells item `item` of
+// `table` (0 equipment, 1 other items) for `price`.
+struct Shop {
+    int chapter, area, map;
+    std::string npc;
+    int shop, table, item, price;
+};
+// An NPC object on (area, map): its name and tile (column, row), as the map's .obj places it.
+struct Npc {
+    int id, area, map;
+    std::string object;
+    int column, row;
+};
+// A crafting recipe of `chapter` at the crafter object `npc` on (area, map): `count` of item
+// `item` of `table` for `meso` and the materials (table, item, count).
+struct Material {
+    int table, item, count;
+};
+struct Recipe {
+    int chapter, area, map;
+    std::string npc;
+    int table, item, count, meso;
+    std::vector<Material> materials;
+};
+struct Tables {
+    std::vector<Link> links;
+    std::vector<Shop> shops;
+    std::vector<Npc> npcs;
+    std::vector<Recipe> recipes;
+};
+
+inline Term parse_term(const std::string &t) {
+    Term out;
+    if (t.size() < 2 || (t[0] != 'q' && t[0] != 'r')) {
+        return out; // "?"
+    }
+    const std::size_t dot = t.find('.');
+    const std::size_t op = t.find_first_of("=!<>", dot);
+    if (dot == std::string::npos || op == std::string::npos) {
+        return out;
+    }
+    std::size_t end = op + 1;
+    if (end < t.size() && t[end] == '=') {
+        end++;
+    }
+    out.kind = std::atoi(t.substr(1, dot - 1).c_str());
+    out.number = std::atoi(t.substr(dot + 1, op - dot - 1).c_str());
+    out.op = t.substr(op, end - op);
+    out.value = std::atoi(t.substr(end).c_str());
+    out.require = t[0] == 'r';
+    out.known = true;
+    return out;
 }
 
-// The portal kinds to take from (area, map) to reach (to_area, to_map): the first hop of a
-// breadth-first search over links() that skips the `closed` links. -1 when unreachable.
-inline int next_portal(int area, int map, int to_area, int to_map,
+inline const Tables &tables() {
+    static const Tables k = [] {
+        Tables t;
+        const char *env = std::getenv("MT_BOT_WORLD");
+        const std::string path = env != nullptr && *env != '\0' ? env : MT_BOT_WORLD_FILE;
+        std::ifstream in(path);
+        std::string line;
+        while (std::getline(in, line)) {
+            std::istringstream f(line);
+            std::string kind;
+            f >> kind;
+            if (kind == "link") {
+                Link l{};
+                f >> l.chapter >> l.area >> l.map >> l.kind >> l.to_area >> l.to_map;
+                std::string alt;
+                while (f >> alt) {
+                    std::vector<Term> terms;
+                    std::size_t at = 0;
+                    while (at <= alt.size()) {
+                        const std::size_t amp = std::min(alt.find('&', at), alt.size());
+                        terms.push_back(parse_term(alt.substr(at, amp - at)));
+                        at = amp + 1;
+                    }
+                    l.gate.push_back(std::move(terms));
+                }
+                t.links.push_back(std::move(l));
+            } else if (kind == "shop") {
+                Shop s{};
+                f >> s.chapter >> s.area >> s.map >> s.npc >> s.shop >> s.table >> s.item >>
+                    s.price;
+                t.shops.push_back(std::move(s));
+            } else if (kind == "npc") {
+                Npc n{};
+                f >> n.id >> n.area >> n.map >> n.object >> n.column >> n.row;
+                t.npcs.push_back(std::move(n));
+            } else if (kind == "recipe") {
+                Recipe rc{};
+                f >> rc.chapter >> rc.area >> rc.map >> rc.npc >> rc.table >> rc.item >> rc.count >>
+                    rc.meso;
+                std::string m;
+                while (f >> m) {
+                    Material mat{};
+                    if (std::sscanf(m.c_str(), "%d:%d:%d", &mat.table, &mat.item, &mat.count) ==
+                        3) {
+                        rc.materials.push_back(mat);
+                    }
+                }
+                t.recipes.push_back(std::move(rc));
+            }
+        }
+        if (t.links.empty()) {
+            std::fprintf(stderr,
+                         "world_map: no bot world tables in %s: run CTest play.bot_world "
+                         "(python3 -m mtport.botworld)\n",
+                         path.c_str());
+            std::exit(1);
+        }
+        return t;
+    }();
+    return k;
+}
+inline const std::vector<Link> &links() { return tables().links; }
+inline const std::vector<Shop> &shops() { return tables().shops; }
+inline const std::vector<Npc> &npcs() { return tables().npcs; }
+inline const std::vector<Recipe> &recipes() { return tables().recipes; }
+
+// Whether `l` is open with these quest states: `state(kind, number, require)` reads one (with
+// `require` 1 when that active quest's requirements are met, else 0).
+template <class State> bool open(const Link &l, State &&state) {
+    if (l.gate.empty()) {
+        return true;
+    }
+    for (const std::vector<Term> &alt : l.gate) {
+        bool all = true;
+        for (const Term &t : alt) {
+            const int v = t.known ? state(t.kind, t.number, t.require) : 0;
+            all = all && t.known &&
+                  (t.op == "=="   ? v == t.value
+                   : t.op == "!=" ? v != t.value
+                   : t.op == "<"  ? v < t.value
+                   : t.op == "<=" ? v <= t.value
+                   : t.op == ">"  ? v > t.value
+                                  : v >= t.value);
+        }
+        if (all) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The NPC who sells item `item` of `table` on a map of `area` in `chapter` (any chapter: -1),
+// nullptr if none does.
+inline const Shop *shop_selling(int area, int table, int item, int chapter = -1) {
+    for (const Shop &s : tables().shops) {
+        if (s.area == area && s.table == table && s.item == item &&
+            (chapter < 0 || s.chapter == chapter)) {
+            return &s;
+        }
+    }
+    return nullptr;
+}
+
+// The portal kinds to take from (area, map) to reach (to_area, to_map) in `chapter`: the first
+// hop of a breadth-first search over that chapter's links() that skips the `closed` links
+// ((area * 100 + map, kind)). -1 when unreachable.
+inline int next_portal(int chapter, int area, int map, int to_area, int to_map,
                        const std::vector<std::pair<int, int>> &closed = {}) {
     using M = std::pair<int, int>;
     std::map<M, std::pair<M, int>> prev;
@@ -479,7 +834,7 @@ inline int next_portal(int area, int map, int to_area, int to_map,
         }
         for (const Link &l : links()) {
             const M from{l.area, l.map}, to{l.to_area, l.to_map};
-            if (from != u || prev.count(to) ||
+            if (l.chapter != chapter || from != u || prev.count(to) ||
                 std::find(closed.begin(), closed.end(), M{l.area * 100 + l.map, l.kind}) !=
                     closed.end()) {
                 continue;
@@ -499,11 +854,17 @@ inline std::string describe(const Map &m) {
         std::snprintf(buf, sizeof buf, "platform %zu: y %d x %d..%d:", i, p.y(), p.x0(), p.x1());
         s += buf;
         for (const Edge &e : m.edges[i]) {
-            std::snprintf(buf, sizeof buf, " [%s@%d%s -> %d]", move_name(e.move), e.x,
-                          e.dir < 0 ? "<" : (e.dir > 0 ? ">" : ""), e.to);
+            std::snprintf(buf, sizeof buf, " [%s%s@%d%s -> %d]", e.long_hop ? "long " : "",
+                          move_name(e.move), e.x, e.dir < 0 ? "<" : (e.dir > 0 ? ">" : ""), e.to);
             s += buf;
         }
         s += "\n";
+    }
+    for (std::size_t i = 0; i < m.ladders.size(); i++) {
+        const Ladder &l = m.ladders[i];
+        std::snprintf(buf, sizeof buf, "ladder %zu: x %d y %d..%d\n", i, l.x(), l.top(),
+                      l.bottom());
+        s += buf;
     }
     return s;
 }

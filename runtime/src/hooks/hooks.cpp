@@ -20,13 +20,19 @@ constexpr u32 k_hookable[] = {
     MT_HOOK_FN_FILL_RECT,                   // 0x8079
     MT_HOOK_FN_CAMERA_CLAMP,                // 0xC069
     MT_HOOK_FN_CAMERA_FOLLOW,               // 0xC175
+    MT_HOOK_FN_MAP_LOAD_OBJ,                // 0xD259
     MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT,    // 0x22955
     MT_HOOK_FN_TEXT_CHAR_COUNT,             // 0x22989
     MT_HOOK_FN_TEXT_SUB_CHARS,              // 0x22A1D
+    MT_HOOK_FN_TEXT_WRAP,                   // 0x22EC5
     MT_HOOK_FN_CANVAS_FILL_RECT,            // 0x23D1D
     MT_HOOK_FN_CANVAS_FILL_RECT_COLOR,      // 0x23D95
     MT_HOOK_FN_DRAW_IMAGE,                  // 0x24DC9
+    MT_HOOK_FN_CHAT_BOX_NEXT_PAGE,          // 0x34A05
+    MT_HOOK_FN_CHAT_BOX_FIRST_PAGE,         // 0x34CD1
+    MT_HOOK_FN_CHAT_BOX_DRAW,               // 0x35189
     MT_HOOK_FN_SAVE_QUEST_DATA,             // 0x38F55
+    MT_HOOK_FN_POPUP_OPEN,                  // 0x3EAA1
     MT_HOOK_FN_SHOP_ON_KEY,                 // 0x46DB9
     MT_HOOK_FN_QUICK_SLOTS_PAINT,           // 0x4CAED
     MT_HOOK_FN_POPUP_MENU_EQUIP_TAB_ON_KEY, // 0x519F9
@@ -41,8 +47,17 @@ constexpr u32 k_hookable[] = {
     MT_HOOK_FN_MAP_PAINT_0,                 // 0x59BB1
     MT_HOOK_FN_HUD_PAINT,                   // 0x5A465
     MT_HOOK_FN_OBJECT_TOUCHES,              // 0x6CF01
+    MT_HOOK_FN_NOTIFY_TEXT_ADD,             // 0x78339
+    MT_HOOK_FN_CHANGE_MAP,                  // 0x81369
     MT_HOOK_FN_SCENE_RUNNER,                // 0x83C71
+    MT_HOOK_FN_START_SCENE,                 // 0x853E5
     MT_HOOK_FN_STATE_GAME_PAINT,            // 0x87501
+    MT_HOOK_FN_STATE_GAME_ON_KEY,           // 0x8D4C9
+    MT_HOOK_FN_LUA_SHOW_MARKET,             // 0x998D1
+    MT_HOOK_FN_LUA_CALL_NATIVE,             // 0x9B37D
+    MT_HOOK_FN_LUA_EXECUTE,                 // 0x9BC11
+    MT_HOOK_FN_LUA_RUN_CALLBACK,            // 0x9CE2D
+    MT_HOOK_FN_TFUNC_FETCH_U8,              // 0x9EE95
     MT_HOOK_FN_MAIN_MENU_CLICK_PLAY,        // 0xAAAB9
     MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL,       // 0xB4DB5
 };

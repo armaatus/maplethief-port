@@ -50,6 +50,13 @@ faster than real time; a Release build of one architecture is faster still.
 
 Game time is the run's turns (about a thousand a game-second).
 
+Malady's closing scene in part K goes through the same step as the bosses of chapters 2 and 3
+(`then_boss_end`): the Release chain of [#306](https://github.com/armaatus/maplethief-port/issues/306)
+killed Malady with the hero knocked back, and the scene took no key for 600 s
+([original bug 19](../re/original-bugs.md#19-a-boss-killed-while-the-hero-is-knocked-back-locks-its-end-scene)).
+When A has not moved the scene on for 5 s with `CHero +0x119` set, the run prints
+`original bug 19: …` and clears that byte, as #420's fix does.
+
 ### Starting from a later point
 
 Every part ends with the game's own save (START → Save, slot 0), written to
@@ -88,6 +95,12 @@ test copies `<dir>/data` into its own data directory, then loads slot 0 from the
   20 active, of part L a level-34 Bandit in chapter 2 on 4.1 (Orbis), and of part M the same
   hero in Kerning City with the Lappy Boots.
 
+- **A built save** can stand in for a part's output: `python3 -m mtport.savedata build` writes
+  the pair a description names, and [start-states.md](start-states.md) has the rule that keeps
+  such a start honest. `tests/starts/chapter_2.json` equals part L's save.
+- The bot's portal links, quest gates and shops are not written by hand: CTest `play.bot_world`
+  generates them from the knowledge base into the build tree before the parts run
+  ([start-states.md](start-states.md#the-bots-world)).
 - `MT_NAV_TRACE=1` prints each move the bot takes between platforms and each failed move.
   `MT_ACT_TRACE=1` prints the hero's state on every tick of a move. `MT_MAP_DUMP="1.0 3.6"`
   (with `MT_FROM_SAVE`) prints the route planner's view of each named map after the save loads:
@@ -124,7 +137,13 @@ quests (`clearAll`: every state back to 0) and starts chapter 2 on 4.1, with mai
 Part L checks it in guest memory and in the save: `ok: chapter 2 in the quest manager, map 4.1
 (want 2, 4.1); after clearAll: main 16:0 main 17:0 main 18:0 main 19:0 main 20:0 side 11:0` and
 `ok: the save: chapter 2 in quest0, map 4.1 in theif0 (want 2, 4.1)`. So main 20 is the one
-main quest that never reads 2: the game ends it by clearing it, not by a reward.
+main quest that never reads 2: the game ends it by clearing it, not by a reward. Its record is
+not dropped: `CQuestList::ClearAll` `0x7C61D` renumbers it main 40, chapter 2's first main quest
+(`ok: main 20's record carried into chapter 2 as main 40, the only active quest`; #388,
+[re/original-bugs.md](../re/original-bugs.md#16-chapter-1s-main-quest-20-is-never-completed)).
+The trip resets the quests only (#307): `ok: the trip kept the hero: level 34 EXP 2152 max HP
+640 max MP 640 job 2/2; items … meso 9710`. The level, EXP, maximums, job, every item and
+equipment slot and the meso read the same before and after it.
 
 ### Side quests
 

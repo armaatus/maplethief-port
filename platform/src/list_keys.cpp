@@ -38,7 +38,7 @@ constexpr std::uint32_t kForceScroll = 84;
 // TouchKeyPadView's marketKeyPadView ivar.
 constexpr std::uint32_t kPadMarket = 60;
 // The game's key codes (docs/controls/keypad.md).
-constexpr std::int32_t kKeyUp = -1, kKeyDown = -2, kKeyLeft = -3, kKeyRight = -4;
+constexpr std::int32_t kKeyUp = -1, kKeyDown = -2, kKeyLeft = -3, kKeyRight = -4, kKeyOk = -5;
 
 bool mapped(const mt_cpu *cpu, std::uint32_t addr, std::uint32_t n) {
     return cpu != nullptr && cpu->mem != nullptr && addr != 0 &&
@@ -285,11 +285,11 @@ constexpr std::uint32_t kItemGrid = 0xF14B8, kEquipGrid = 0xF14C0; // -> the wid
 // touch area's (the drag's clamp: [area - content, 0]), the touch drag, the fling, shown.
 constexpr std::uint32_t kWCells = 0x0, kWCapacity = 0x4, kWUsed = 0x8, kWRectY = 0x20,
                         kWRectH = 0x28, kWContent = 0x38, kWArea = 0x48, kWDrag = 0x6C,
-                        kWFling = 0x74, kWShown = 0xB1;
+                        kWFling = 0x74, kWShown = 0xB1, kWSelected = 0x14;
 // A cell: the list's offset (the cell's +0x08, +0x0C), its rect (+0x20), placed alone (+0x5C).
 constexpr std::uint32_t kCOffX = 0x08, kCOffY = 0x0C, kCRect = 0x20, kCAlone = 0x5C;
 
-std::atomic<std::uint64_t> g_grid_keys{0}, g_grid_scrolls{0};
+std::atomic<std::uint64_t> g_grid_keys{0}, g_grid_scrolls{0}, g_grid_selections{0};
 
 std::uint8_t rd8(const mt_cpu *cpu, std::uint32_t addr) {
     return mapped(cpu, addr, 1) ? cpu->mem[addr] : 0;
@@ -319,10 +319,37 @@ std::vector<GridCell> grid_cells(const mt_cpu *cpu, std::uint32_t widget) {
     return out;
 }
 
+// OK on the item tab's questions (a return scroll 100, an upgrade scroll 0x65, a special item
+// 0x18-0x1B) uses the item the grid's widget has selected (+0x14, FUN_000A07D0), which only a
+// touch sets: by the keys it is -1, and Yes used no item (#304). With no touch selection, the
+// selection becomes the keys' cursor cell, as a touch on it would.
+void item_question_selection(mt_cpu *cpu, std::uint32_t mgr, std::int32_t key) {
+    const std::int32_t popup = mapped(cpu, kPopupId, 4) ? rdi(cpu, kPopupId) : -1;
+    if (key != kKeyOk || !(popup == 100 || popup == 0x65 || (popup >= 0x18 && popup <= 0x1B)) ||
+        !mapped(cpu, mgr, kMgrKeyScroll + 4)) {
+        return;
+    }
+    const std::uint32_t widget = rd32(cpu, rd32(cpu, kItemGrid));
+    if (!mapped(cpu, widget, kWShown + 1) || rdi(cpu, widget + kWSelected) != -1) {
+        return;
+    }
+    const std::vector<GridCell> cells = grid_cells(cpu, widget);
+    const std::uint32_t scroll = rd32(cpu, mgr + kMgrKeyScroll);
+    const std::int32_t first = mapped(cpu, scroll, 8) ? rdi(cpu, scroll + kScrollFirst) : 0;
+    const std::int32_t cell = rdi(cpu, mgr + kItemCursor) + 6 * first;
+    if (cell >= 0 && cell < static_cast<std::int32_t>(cells.size())) {
+        wr32(cpu, widget + kWSelected, static_cast<std::uint32_t>(cell));
+        g_grid_selections++;
+    }
+}
+
 int on_grid_key(mt_cpu *cpu, const mt_hook_call *call) {
     const std::uint32_t mgr = cpu->r[0];
     const auto key = static_cast<std::int32_t>(cpu->r[1]);
     const std::int32_t tab = call->fn == MT_HOOK_FN_POPUP_MENU_ITEM_TAB_ON_KEY ? 1 : 2;
+    if (tab == 1) {
+        item_question_selection(cpu, mgr, key);
+    }
     bool moved = false;
     if (!grid_key(cpu, mgr, tab, key, &moved)) {
         return MT_HOOK_PASS;
@@ -542,7 +569,9 @@ void uninstall_grid_keys() {
     mt_hook_unregister(MT_HOOK_FN_POPUP_MENU_EQUIP_TAB_ON_KEY);
 }
 
-GridStats grid_stats() { return GridStats{g_grid_keys.load(), g_grid_scrolls.load()}; }
+GridStats grid_stats() {
+    return GridStats{g_grid_keys.load(), g_grid_scrolls.load(), g_grid_selections.load()};
+}
 
 // --- paging from the frontend (ADR 0114) ------------------------------------------------------
 

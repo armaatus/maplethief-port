@@ -110,6 +110,10 @@ class AppletWatch {
     // The run ends: the boost off, and the peak's line (with the verdict in applet mode).
     void finish();
 
+    // The last measurement (none before the first), and whether the run is in applet mode: the
+    // recovery points' memory check (#335, ADR 0151).
+    const std::optional<MemorySample> &last() const { return last_; }
+    bool applet_mode() const { return mode_ == SwitchRunMode::kApplet; }
     const MemorySample &peak() const { return peak_; }
     bool boosted() const { return boosted_; }
     std::uint64_t samples() const { return samples_; }
@@ -127,7 +131,8 @@ class AppletWatch {
     double last_sample_ = 0;
     std::int32_t area_ = -1, map_ = -1; // the last map logged
     MemorySample peak_;                 // the largest heap_used seen, with its sample
-    std::uint64_t peak_logged_ = 0;     // heap_used of the last peak line
+    std::optional<MemorySample> last_;
+    std::uint64_t peak_logged_ = 0; // heap_used of the last peak line
     std::uint64_t samples_ = 0;
 };
 

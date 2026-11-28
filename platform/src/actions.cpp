@@ -224,6 +224,9 @@ std::vector<Binding> default_keyboard_bindings() {
         // too, so that a press there says why it is refused. Unbound on pads.
         {key(SDLK_F5), MT_ACTION_QUICK_SAVE, MT_ACTION_QUICK_SAVE},
         {key(SDLK_F9), MT_ACTION_QUICK_LOAD, MT_ACTION_QUICK_LOAD},
+        // The speedrun timer's practice states (#409, the same gate), as F5 and F9.
+        {key(SDLK_F7), MT_ACTION_PRACTICE_PICK, MT_ACTION_PRACTICE_PICK},
+        {key(SDLK_F8), MT_ACTION_PRACTICE_LOAD, MT_ACTION_PRACTICE_LOAD},
     };
 }
 
@@ -393,6 +396,7 @@ std::uint64_t Actions::presses(std::uint32_t action, Context context) const {
 }
 
 void Actions::release_source(InputSource source) {
+    lifts_[static_cast<int>(source)]++;
     const std::vector<Held> held = held_;
     for (const Held &h : held) {
         if (h.source == source) {
@@ -400,6 +404,8 @@ void Actions::release_source(InputSource source) {
         }
     }
 }
+
+std::uint64_t Actions::lifts(InputSource source) const { return lifts_[static_cast<int>(source)]; }
 
 void Actions::start_gesture(InputSource source, const TouchFallback &f) {
     const std::uint32_t id = kGestureFinger + next_gesture_id_++ % kGestureFingers;

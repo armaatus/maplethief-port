@@ -1,7 +1,7 @@
 """Prose lint for the compendium (#212): the mechanical rules of ``docs/compendium/style.md``.
 
 It checks our own words, never the game's: hand-written Markdown under ``docs/compendium/``,
-the site generator's templates, and the built HTML site. Rules:
+the site generator's templates through the built HTML site. Rules:
 
 * ``em-dash`` (U+2014), ``en-dash`` (U+2013) and ``other-dash`` (U+2012, U+2015, U+2E3A,
   U+2E3B): ranges are written "to" in prose and with a plain hyphen in table cells.
@@ -27,8 +27,8 @@ Usage::
     PYTHONPATH=tools python3 -m mtport.prose_lint [PATH...]
 
 A path may be a file or a directory (searched for ``*.md``, ``*.html`` and ``*.htm``).
-Without paths it checks the git-tracked ``docs/compendium/**/*.md`` and every file under
-``tools/mtport/compendium/templates/`` if that exists. One line per finding,
+Without paths it checks the git-tracked ``docs/compendium/**/*.md``; the site generator's
+templates are Python, checked in the built pages by the site build. One line per finding,
 ``path:line:col: rule: message``; the exit status is 1 when there are findings.
 
 Standard library only; files are parsed as text and never executed.
@@ -48,7 +48,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 STYLE_GUIDE = ROOT / "docs" / "compendium" / "style.md"
-TEMPLATES = ROOT / "tools" / "mtport" / "compendium" / "templates"
 
 MASK = "\x00"  # stands in for exempt text, column for column
 
@@ -459,7 +458,7 @@ def lint_file(path: Path, names: Iterable[str] | None = None) -> list[Finding]:
 
 
 def default_paths(root: Path = ROOT) -> list[Path]:
-    """Tracked compendium Markdown plus the site generator's templates, if any."""
+    """The tracked compendium Markdown."""
     try:
         res = subprocess.run(
             ["git", "ls-files", "-z", "--", "docs/compendium/*.md", "docs/compendium/**/*.md"],
@@ -470,9 +469,6 @@ def default_paths(root: Path = ROOT) -> list[Path]:
         paths = sorted({root / p for p in res.stdout.decode().split("\0") if p})
     except (OSError, subprocess.CalledProcessError):
         paths = sorted((root / "docs" / "compendium").rglob("*.md"))
-    templates = root / "tools" / "mtport" / "compendium" / "templates"
-    if templates.is_dir():
-        paths += sorted(p for p in templates.rglob("*") if p.is_file())
     return paths
 
 

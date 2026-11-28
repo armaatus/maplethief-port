@@ -341,3 +341,28 @@ bool parse_strings(const std::uint8_t *bytes, std::size_t n, StringsFile *out, s
 }
 
 } // namespace mt_textpack
+
+extern "C" int mt_textpack_parse(const void *bytes, uint32_t n, mt_textpack_entry_fn fn, void *user,
+                                 char *why, uint32_t why_size) noexcept {
+    try {
+        mt_textpack::StringsFile file;
+        std::string reason;
+        if (mt_textpack::parse_strings(static_cast<const std::uint8_t *>(bytes), n, &file,
+                                       &reason)) {
+            for (const auto &[key, value] : file.entries) {
+                if (fn != nullptr) {
+                    fn(user, key.c_str(), value.c_str());
+                }
+            }
+            return static_cast<int>(file.entries.size());
+        }
+        if (why != nullptr && why_size > 0) {
+            std::snprintf(why, why_size, "%s", reason.c_str());
+        }
+    } catch (...) {
+        if (why != nullptr && why_size > 0) {
+            std::snprintf(why, why_size, "out of memory");
+        }
+    }
+    return -1;
+}

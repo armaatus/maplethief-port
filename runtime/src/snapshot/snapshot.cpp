@@ -956,6 +956,37 @@ extern "C" void mt_snapshot_configure(const mt_snapshot_config *config) noexcept
     g_config = config != nullptr ? *config : mt_snapshot_config_default();
 }
 
+extern "C" uint64_t mt_snapshot_memory_digest(mt_cpu *cpu) noexcept {
+    std::uint64_t h = 0xcbf29ce484222325ull;
+    const auto mix = [&h](const std::uint8_t *p, std::size_t n) {
+        for (std::size_t i = 0; i < n; i++) {
+            h = (h ^ p[i]) * 0x100000001b3ull;
+        }
+    };
+    const auto range = [&](u32 lo, u32 hi) {
+        const std::uint8_t head[8] = {static_cast<std::uint8_t>(lo),
+                                      static_cast<std::uint8_t>(lo >> 8),
+                                      static_cast<std::uint8_t>(lo >> 16),
+                                      static_cast<std::uint8_t>(lo >> 24),
+                                      static_cast<std::uint8_t>(hi - lo),
+                                      static_cast<std::uint8_t>((hi - lo) >> 8),
+                                      static_cast<std::uint8_t>((hi - lo) >> 16),
+                                      static_cast<std::uint8_t>((hi - lo) >> 24)};
+        mix(head, sizeof head);
+        mix(cpu->mem + lo, hi - lo);
+    };
+    mt_mem *mem = mt_mem_from_cpu(cpu);
+    if (mem == nullptr) {
+        return h;
+    }
+    for (const mt_segment *s : writable_segments(mem)) {
+        range(s->vmaddr, s->vmaddr + s->vmsize);
+    }
+    const std::lock_guard<std::mutex> lock(mem->heap.mu);
+    range(MT_GUEST_HEAP_BASE, mem->heap.committed);
+    return h;
+}
+
 namespace {
 
 // The safe-point check. A restore (`restoring`) skips the input conditions: the state it puts
@@ -1166,6 +1197,40 @@ extern "C" int mt_snapshot_read_header(const std::uint8_t *bytes, std::size_t si
         *header = h;
     }
     return 0;
+}
+
+extern "C" int mt_snapshot_deflate(const std::uint8_t *bytes, std::size_t size, std::uint8_t **out,
+                                   std::size_t *out_size, char *why,
+                                   std::size_t why_size) noexcept {
+    *out = nullptr;
+    *out_size = 0;
+    std::string reason;
+    try {
+        mt_snapshot_header h{};
+        std::vector<Section> sections;
+        if (!read_state_file(bytes, size, nullptr, &h, &sections, &reason)) {
+            set_why(why, why_size, reason);
+            return -1;
+        }
+        h.flags &= ~MT_SNAPSHOT_STORE;
+        std::vector<std::uint8_t> file;
+        if (!write_state_file(h, sections, false, &file, &reason)) {
+            set_why(why, why_size, reason);
+            return -1;
+        }
+        auto *packed = static_cast<std::uint8_t *>(std::malloc(file.size()));
+        if (packed == nullptr) {
+            set_why(why, why_size, "out of memory");
+            return -1;
+        }
+        std::memcpy(packed, file.data(), file.size());
+        *out = packed;
+        *out_size = file.size();
+        return 0;
+    } catch (const std::bad_alloc &) {
+        set_why(why, why_size, "out of memory");
+        return -1;
+    }
 }
 
 extern "C" int mt_snapshot_restore(mt_cpu *cpu, const std::uint8_t *bytes, std::size_t size,

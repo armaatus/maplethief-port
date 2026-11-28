@@ -1,8 +1,8 @@
 # Windows PC hand-offs
 
-The hand-offs that need the Windows PC. The order builds each tree once: the test builds first (`win-debug`, `win-release`), then the game folder from `scripts\build.ps1 win`, then the player zip, then the clean-machine and fresh-clone checks. [How to report](README.md#how-to-report) says what to post.
+The hand-offs that need the Windows PC. The order builds each tree once: the test builds first (`win-debug`, `win-release`), then the game folder from `scripts\build.ps1 win`, then the player zip, then the clean-machine and fresh-clone checks, then the newer hand-offs (#314 to #368, most waiting on the agent's part first), and last the check from closed #145 ([Checks from closed issues](README.md#checks-from-closed-issues)). [How to report](README.md#how-to-report) says what to post.
 
-Older comments name branches that are merged and gone (`epic-201`, `epic-259-data-folder`, `epic-269-builds-docs`, `113-demo-msvc-only-warning`) or `main`: use `dev` (or the epic branch `epic-106-itch-handoffs` until it is merged). The v0.1.0 release (2026-11-07) predates the data folder and crash report work, so its Windows zip is only used to make older saves for #264.
+Older comments name branches that are merged and gone (`epic-201`, `epic-259-data-folder`, `epic-269-builds-docs`, `113-demo-msvc-only-warning`) or `main`: use `dev`. The v0.1.0 release (2026-11-07) predates the data folder and crash report work, so its Windows zip is only used to make older saves for #264.
 
 ## Setup
 
@@ -127,3 +127,65 @@ Closes [#85](https://github.com/armaatus/maplethief-port/issues/85) (the macOS h
 2. Unzip the Windows kit and run `bin\MapleThief.exe --version | Out-String`: `MapleThief 0.1.0`.
 
 **Post back:** the release URL and both results; then close it.
+
+## #314: The update notice on Windows
+
+Covers the Windows part of [#314](https://github.com/armaatus/maplethief-port/issues/314); the agent does macOS and Linux. The WinHTTP fetcher has never made a real request. In the #141 folder:
+
+1. `.\MapleThief.exe --update-check on`, and on the title wait up to a minute.
+2. Older than the newest release (a `dev` build is `0.0.1`): one line in the title screen's corner, and **Port update** in Settings > Other names the release. Choosing either opens the release page in the browser.
+3. In the newest log in `data\logs\`, the update check's lines.
+4. Settings > Other > **Check for new versions** off again.
+
+**Post back:** whether the line showed, the log lines, and the Windows build number.
+
+## #315: The Windows parity run
+
+Closes [#315](https://github.com/armaatus/maplethief-port/issues/315)'s hardware criterion. **Waits on** the agent's part of #315: one PowerShell script that runs the real-asset suite, both forced crashes, the memory-model test, `recomp coverage` with `cl` and a five-minute map run under load, and writes one result file. When it lands, its command goes here. In the x64 developer prompt, with `work\ipa\` present:
+
+1. `git pull` on `dev`, then the script's command.
+2. Leave the PC alone during the map run (it adds its own CPU load).
+
+**Post back:** the result file, attached, and the PC's CPU and GPU. It can replace #113's step 1 and 2 and #142's Windows run when it covers them; the agent says so on those issues.
+
+## #368: Fast-forward on D3D and GL
+
+Closes [#368](https://github.com/armaatus/maplethief-port/issues/368)'s Windows criterion. It can ride on #315's run. In the #141 folder, on a 60 Hz display:
+
+1. `.\MapleThief.exe --perf-session --fast-forward x2`, load a hero, hold fast-forward on a map for two minutes, F1 > Quit.
+2. The same with `--fast-forward x3`.
+3. Both again with `--gfx-backend gpu` (D3D12).
+4. From each newest log in `data\logs\`: the `game: ticks:` and `game: clock:` lines.
+
+**Post back:** the two lines of each of the four runs, and the display's refresh rate.
+
+## #316: Release verify on the PC
+
+Closes [#316](https://github.com/armaatus/maplethief-port/issues/316)'s Windows criterion. **Waits on** #315 and on the agent adding a `verify` step to `scripts\release.ps1`, which builds a clean tree at a tag, runs the real-asset tests and the regression replay and writes a verify file. Then, at the test tag the agent names on the issue:
+
+1. `git fetch origin --tags`, then `powershell -ExecutionPolicy Bypass -File scripts\release.ps1 verify <tag>` in the x64 developer prompt.
+
+**Post back:** the Windows verify file, attached.
+
+## #352: Scoop and winget on a clean PC
+
+Closes [#352](https://github.com/armaatus/maplethief-port/issues/352)'s hardware criterion. **Waits on** v1.0.0 (#94) and the agent's Scoop manifest. You approve the pull request to the games bucket; then on a clean Windows 11 (the #82 VM or Windows Sandbox):
+
+1. Install Scoop as its site says, then the two commands the agent posts on #352 (add the bucket, `scoop install`).
+2. Start the installed `MapleThief.exe`: the import screen, then the title.
+3. Note whether SmartScreen warned.
+
+**Post back:** the command output, pass or fail for step 2, and the SmartScreen answer.
+
+## #145: Window behaviour (Windows part)
+
+From closed [#145](https://github.com/armaatus/maplethief-port/issues/145) (PR #178's hand-offs); the [Mac section](mac.md#145-window-behaviour-mac-part) has the full list. In the `dist\win\MapleThief-game-<version>-windows-x64` folder from #141, `MapleThief.exe`:
+
+1. F11 and Alt+Enter toggle fullscreen; quit in fullscreen and start: fullscreen again.
+2. Windowed, move and resize, quit, start: the same place and size (`data\window.ini`). Maximise, quit, start: maximised.
+3. The mouse pointer hides on a key or pad press and comes back when the mouse moves; the mouse wheel moves one row in a shop list and nothing on the field.
+4. F12 writes `data\screenshots\MapleThief_<date>_<time>.png`. Look at it, don't post it.
+5. Settings > Gameplay > **Pause in the background** on: Alt+Tab away and the game holds; off: it runs on.
+6. Settings > Video > **Vsync** off, then on: the picture keeps going, without tearing when on.
+
+**Post back:** pass or fail per step, and the Windows build number.

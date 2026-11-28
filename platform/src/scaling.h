@@ -118,6 +118,11 @@ bool parse_insets(std::string_view text, Insets *insets);
 // the image never reaches into a strip. Empty (w or h 0) if the insets cover the output.
 Rect safe_rect(int output_w, int output_h, const Insets &insets, float density_x, float density_y);
 
+// widescreen = fill (#425, ADR 0214): how many points wide a picture 320 points high is in an
+// area w x h (any unit: the window's safe area, a display), rounded down to an even number (the
+// wings stay whole points) and clamped to 480 ... `most`. 0 for an empty area.
+int fill_points(float w, float h, int most);
+
 // The placement inside the safe area: as place() above, sized for the safe area, centred in
 // the whole output, then clamped into the safe area (scaling.h's header). Placement::safe is
 // the safe area; with zero insets the result equals place()'s.

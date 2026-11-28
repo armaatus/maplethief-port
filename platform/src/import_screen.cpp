@@ -33,6 +33,7 @@ constexpr Rgba kGood = {0x7C, 0xD3, 0x8B, 255};
 constexpr int kScreenScale = 2;
 constexpr int kLeft = 24;
 constexpr std::size_t kLineChars = 72; // (480 - 2 * 24) / 6
+constexpr int kWidth = 432;            // the text's room in points, 480 - 2 * 24
 
 std::string file_name(const std::string &path) {
     const std::size_t slash = path.find_last_of("/\\");
@@ -80,18 +81,26 @@ std::vector<std::string> wrap_text(const std::string &text, std::size_t width) {
         }
         std::string word = text.substr(at, end - at);
         at = end;
-        while (word.size() > width) { // a long path: cut it
+        // Widths in the overlays' cells (Canvas::columns: a Hangul syllable two, #372).
+        const auto cells = [](const std::string &s) {
+            return static_cast<std::size_t>(Canvas::columns(s));
+        };
+        while (cells(word) > width) { // a long path: cut it, at a whole character
             if (!line.empty()) {
                 lines.push_back(line);
                 line.clear();
             }
-            lines.push_back(word.substr(0, width));
-            word.erase(0, width);
+            std::size_t cut = Canvas::fit_columns(word, static_cast<int>(width));
+            if (cut == 0) { // one character wider than the line
+                next_code_point(word, &cut);
+            }
+            lines.push_back(word.substr(0, cut));
+            word.erase(0, cut);
         }
         if (word.empty()) {
             continue;
         }
-        if (!line.empty() && line.size() + 1 + word.size() > width) {
+        if (!line.empty() && cells(line) + 1 + cells(word) > width) {
             lines.push_back(line);
             line.clear();
         }
@@ -104,13 +113,19 @@ std::vector<std::string> wrap_text(const std::string &text, std::size_t width) {
 }
 
 std::string shorten_path(const std::string &path, std::size_t width) {
-    if (path.size() <= width) {
+    const auto cols = static_cast<int>(width);
+    if (Canvas::columns(path) <= cols) {
         return path;
     }
-    if (width <= 3) {
-        return path.substr(path.size() - width);
-    }
-    return "..." + path.substr(path.size() - (width - 3));
+    // The longest tail of whole characters in `room` cells.
+    const auto tail = [&path](int room) {
+        std::size_t at = 0;
+        while (at < path.size() && Canvas::columns(std::string_view(path).substr(at)) > room) {
+            next_code_point(path, &at);
+        }
+        return path.substr(at);
+    };
+    return cols <= 3 ? tail(cols) : "..." + tail(cols - 3);
 }
 
 ImportScreen::ImportScreen(std::string data_dir, Importer importer, bool folder_route)
@@ -416,18 +431,23 @@ void ImportScreen::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     const bool sd = route_ == Route::kSdCard;
     Canvas c(rgba, width, height, scale);
     c.fill(0, 0, c.width(), c.height(), kBackground);
-    c.text(kLeft, 16, tr(Txt::import_title), kHeader, 2);
-    c.text(kLeft, 40, tr(Txt::import_needs), kText);
+    // A translation is cut to the English's room (#372).
+    const auto fit = [](const std::string &s, int w, int size = 1) {
+        return Canvas::fit_width(s, w, size);
+    };
+    c.text(kLeft, 16, fit(tr(Txt::import_title), kWidth, 2), kHeader, 2);
+    c.text(kLeft, 40, fit(tr(Txt::import_needs), kWidth), kText);
     c.text(kLeft, 52,
-           sd ? tr(Txt::import_sd_file, {kIpaFileName, grouped(kIpaSize)})
-              : tr(Txt::import_file, {kIpaFileName, grouped(kIpaSize)}),
+           fit(sd ? tr(Txt::import_sd_file, {kIpaFileName, grouped(kIpaSize)})
+                  : tr(Txt::import_file, {kIpaFileName, grouped(kIpaSize)}),
+               kWidth),
            kText);
     c.frame(kLeft, 66, 432, 16, 1, kFrame);
     c.text(kLeft + 4, 70, shorten_path(data_dir_, kLineChars - 2), kDim);
     if (sd) {
-        c.text(kLeft, 90, tr(Txt::import_sd_any), kDim);
+        c.text(kLeft, 90, fit(tr(Txt::import_sd_any), kWidth), kDim);
     } else if (folder_route()) {
-        c.text(kLeft, 90, tr(Txt::import_folder, {kIpaFileName}), kText);
+        c.text(kLeft, 90, fit(tr(Txt::import_folder, {kIpaFileName}), kWidth), kText);
     }
 
     const bool can_choose =
@@ -439,11 +459,13 @@ void ImportScreen::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         c.fill(kButtonX, kButtonY, kButtonW, kButtonH,
                pressed_ == Pressed::kChoose ? kButtonDown : kButton);
         c.frame(kButtonX, kButtonY, kButtonW, kButtonH, 1, can_choose ? kBorder : kFrame);
-        const char *label = sd ? tr(Txt::import_look_again) : tr(Txt::import_choose);
+        const std::string label =
+            fit(sd ? tr(Txt::import_look_again) : tr(Txt::import_choose), kButtonW - 8, 2);
         c.text(kButtonX + (kButtonW - Canvas::text_width(label, 2)) / 2, kButtonY + 8, label,
                can_choose ? kText : kDim, 2);
         if (route_ == Route::kDialog) {
-            c.text(kButtonX + kButtonW + 12, kButtonY + 12, tr(Txt::import_or_drop), kDim);
+            c.text(kButtonX + kButtonW + 12, kButtonY + 12,
+                   fit(tr(Txt::import_or_drop), kLeft + kWidth - (kButtonX + kButtonW + 12)), kDim);
         }
     }
 
@@ -484,14 +506,15 @@ void ImportScreen::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         break;
     }
     case State::kNotFound:
-        c.text(kLeft, y, tr(Txt::import_none), kBad, 2);
+        c.text(kLeft, y, fit(tr(Txt::import_none), kWidth, 2), kBad, 2);
         y = paragraph(y + 22, tr(Txt::import_none_why, {kIpaFileName}), kText, 5);
         paragraph(y + 4, tr(Txt::import_sd_retry), kDim, 3);
         break;
     case State::kRefused: {
         c.text(kLeft, y,
-               refused_.size() > 1 ? tr(Txt::import_refused_all) : tr(Txt::import_refused), kBad,
-               2);
+               fit(refused_.size() > 1 ? tr(Txt::import_refused_all) : tr(Txt::import_refused),
+                   kWidth, 2),
+               kBad, 2);
         y += 22;
         if (refused_.size() > 1) {
             // One line each: the file and its reason, as much as fits.
@@ -511,10 +534,11 @@ void ImportScreen::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         break;
     }
     case State::kAskDelete: {
-        c.text(kLeft, y, tr(Txt::import_done_title), kGood, 2);
+        c.text(kLeft, y, fit(tr(Txt::import_done_title), kWidth, 2), kGood, 2);
         paragraph(y + 22, tr(Txt::import_delete_question, {file_name(file_), megabytes(kIpaSize)}),
                   kText, 4);
-        const auto answer = [&](int x, const char *label, bool focused, bool pressed) {
+        const auto answer = [&](int x, const std::string &full, bool focused, bool pressed) {
+            const std::string label = fit(full, kAnswerW - 8, 2);
             c.fill(x, kAnswerY, kAnswerW, kAnswerH, pressed ? kButtonDown : kButton);
             c.frame(x, kAnswerY, kAnswerW, kAnswerH, focused ? 2 : 1, focused ? kHeader : kFrame);
             c.text(x + (kAnswerW - Canvas::text_width(label, 2)) / 2, kAnswerY + 6, label,
@@ -525,9 +549,9 @@ void ImportScreen::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         break;
     }
     case State::kImported:
-        c.text(kLeft, y, tr(Txt::import_done), kGood, 2);
+        c.text(kLeft, y, fit(tr(Txt::import_done), kWidth, 2), kGood, 2);
         if (sd && deleted_) {
-            c.text(kLeft, y + 22, tr(Txt::import_deleted, {file_name(file_)}), kDim);
+            c.text(kLeft, y + 22, fit(tr(Txt::import_deleted, {file_name(file_)}), kWidth), kDim);
         }
         break;
     }
@@ -540,17 +564,23 @@ void ImportScreen::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     const auto glyph = [&](int button) {
         x += draw_glyph(c, x, hy, Control{ControlKind::kGamepadButton, button}, type, face) + 2;
     };
+    const auto words = [&](const char *s) {
+        const std::string t = fit(s, kLeft + kWidth - x);
+        if (!t.empty()) {
+            x += c.text(x, hy + 3, t, kDim) + 8;
+        }
+    };
     if (sd) {
         if (state_ == State::kAskDelete) {
             glyph(SDL_GAMEPAD_BUTTON_SOUTH);
-            x += c.text(x, hy + 3, tr(Txt::import_hint_answer), kDim) + 8;
+            words(tr(Txt::import_hint_answer));
             glyph(SDL_GAMEPAD_BUTTON_EAST);
-            c.text(x, hy + 3, tr(Txt::import_hint_keep), kDim);
+            words(tr(Txt::import_hint_keep));
         } else if (state_ != State::kImporting && state_ != State::kImported) {
             glyph(SDL_GAMEPAD_BUTTON_SOUTH);
-            x += c.text(x, hy + 3, tr(Txt::import_hint_look), kDim) + 8;
+            words(tr(Txt::import_hint_look));
             glyph(SDL_GAMEPAD_BUTTON_START);
-            c.text(x, hy + 3, tr(Txt::import_hint_home), kDim);
+            words(tr(Txt::import_hint_home));
         }
         return;
     }
@@ -558,8 +588,8 @@ void ImportScreen::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
                     face) +
          2;
     glyph(SDL_GAMEPAD_BUTTON_SOUTH);
-    x += c.text(x, hy + 3, tr(Txt::import_hint_choose), kDim) + 8;
-    c.text(x, hy + 3, tr(Txt::import_hint_quit), kDim);
+    words(tr(Txt::import_hint_choose));
+    words(tr(Txt::import_hint_quit));
 }
 
 std::optional<std::string> run_import_screen(SDL_Window *window, SDL_Renderer *renderer,

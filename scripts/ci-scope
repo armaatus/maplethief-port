@@ -8,10 +8,13 @@
 #                       covers on its own. scripts/lint counts as native: it runs clang-tidy (#325)
 #   switch=true|false   whether any of those native paths can affect the Nintendo Switch build
 #                       (the `switch` job, ADR 0138); false when they only touch another
-#                       platform's own files (macOS, iOS, Windows, Linux packaging)
+#                       platform's own files (macOS, iOS, Windows, Linux packaging, Android)
+#   android=true|false  the same for the Android build (the `android` job, ADR 0150): false when
+#                       the native paths only touch another platform's own files (macOS, iOS,
+#                       Windows, Linux packaging, the Switch)
 #
 # Both lists below are allow-lists of what may be skipped: a path that matches none of their
-# patterns counts as native and as Switch-relevant, so a new kind of file never skips a job by
+# patterns counts as native and as Switch- and Android-relevant, so a new kind of file never skips a job by
 # accident.
 #
 # Usage: git diff --name-only BASE...HEAD | scripts/ci-scope
@@ -19,6 +22,7 @@ set -euo pipefail
 
 native=false
 switch=false
+android=false
 any=false
 while IFS= read -r path || [ -n "$path" ]; do
     [ -n "$path" ] || continue
@@ -31,18 +35,41 @@ while IFS= read -r path || [ -n "$path" ]; do
         tests/test_compendium*.py) continue ;;
         tests/test_prose_lint.py) continue ;;
         tests/test_doc_links.py) continue ;;
+        tests/test_platform_docs.py) continue ;;
+        tests/test_play_coverage.py) continue ;;
+        tests/test_env_vars_documented.py) continue ;;
+        tests/test_docs_indexes.py) continue ;;
         tools/mtport/handoffs.py) continue ;;
         tests/test_handoff_checklists.py) continue ;;
+        tools/mtport/cireport.py) continue ;;   # the weekly report job (#339)
+        tests/test_ci_report.py) continue ;;
         tests/test_ci_scope.py) continue ;;
+        .github/ISSUE_TEMPLATE/*) continue ;;
+        tests/test_issue_templates.py) continue ;;
+        tests/test_pr_template.py) continue ;;
         tests/fixtures/compendium/*) continue ;;
         scripts/compendium) continue ;;
         scripts/ci-scope) continue ;;
+        scripts/rulesets) continue ;;
+        tests/test_rulesets.py) continue ;;
+        .github/rulesets/*) continue ;;
         scripts/local-ci) continue ;;   # never runs in CI
         .github/workflows/compendium.yml) continue ;;
+        .github/dependabot.yml) continue ;;
+        scripts/deps) continue ;;      # run by hand (#340)
+        tools/mtport/deps.py) continue ;;
+        tests/test_deps.py) continue ;;
         *) native=true ;;
     esac
     # A native change; does the Switch build see it?
     case "$path" in
+        platform/android/*) ;;
+        cmake/AndroidToolchain.cmake) ;;
+        tools/containers/android/*) ;;
+        scripts/build-android) ;;
+        scripts/android-*) ;;
+        tools/mtport/apk.py) ;;
+        tests/test_apk.py) ;;
         platform/macos/*) ;;
         platform/ios/*) ;;
         platform/windows/*) ;;
@@ -59,7 +86,36 @@ while IFS= read -r path || [ -n "$path" ]; do
         scripts/linux-game) ;;
         tests/fuzz/*) ;;               # libFuzzer targets: the asan job's linux-fuzz (ADR 0158)
         scripts/fuzz) ;;
+        tests/guest/*) ;;              # the guest program (ADR 0213): desktop builds only
+        scripts/guest-image) ;;
         *) switch=true ;;
+    esac
+    # And the Android build?
+    case "$path" in
+        platform/switch/*) ;;
+        tools/containers/switch/*) ;;
+        scripts/build-switch) ;;
+        scripts/switch-*) ;;
+        cmake/patches/sdl3-nx-*) ;;
+        platform/macos/*) ;;
+        platform/ios/*) ;;
+        platform/windows/*) ;;
+        platform/linux/*) ;;
+        platform/icon/*) ;;            # Android draws its own icons (tools/mtport/appicon.py)
+        platform/src/*.mm) ;;
+        cmake/MacApp.cmake) ;;
+        cmake/IosApp.cmake) ;;
+        cmake/DittoZip.cmake) ;;
+        tools/containers/linux/*) ;;
+        tools/containers/linux-game/*) ;;
+        scripts/*.ps1) ;;
+        scripts/test-linux) ;;
+        scripts/linux-game) ;;
+        tests/fuzz/*) ;;
+        scripts/fuzz) ;;
+        tests/guest/*) ;;
+        scripts/guest-image) ;;
+        *) android=true ;;
     esac
 done
 
@@ -67,6 +123,8 @@ done
 if [ "$any" = false ]; then
     native=true
     switch=true
+    android=true
 fi
 echo "native=$native"
 echo "switch=$switch"
+echo "android=$android"

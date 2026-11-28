@@ -139,6 +139,31 @@ TEST_CASE("bindings: controls by SDL's names, and back") {
     CHECK_FALSE(fe::reserved_control(key(SDLK_F2)));
 }
 
+TEST_CASE("bindings: F1 and Guide stay the settings menu's, whatever the file says (#381)") {
+    // They are the way back to every setting, these bindings too (docs/controls/remapping.md):
+    // a line that gives them away is skipped, with the reason, and the rest of it applies.
+    fe::BindingSet s;
+    const std::string text = "[field]\n"
+                             "attack = key F1, key V\n"                 // 2
+                             "jump = button guide, hold guide, key X\n" // 3
+                             "[menu]\n"
+                             "back = button guide, key Escape\n"; // 5
+    const std::vector<std::string> p = fe::parse_bindings(text, "r.ini", &s);
+    for (const std::string &l : p) {
+        MESSAGE(l);
+    }
+    CHECK(has(p, "r.ini:2: key F1 opens the settings menu and cannot be bound: skipped"));
+    CHECK(has(p, "r.ini:3: button guide opens the settings menu and cannot be bound: skipped"));
+    CHECK(has(p, "r.ini:3: hold guide opens the settings menu and cannot be bound: skipped"));
+    CHECK(has(p, "r.ini:5: button guide opens the settings menu and cannot be bound: skipped"));
+    CHECK(field(s, MT_ACTION_ATTACK) == std::vector<Control>{key(SDLK_V)});
+    CHECK(field(s, MT_ACTION_JUMP) == std::vector<Control>{key(SDLK_X)});
+    CHECK(menu(s, MT_ACTION_BACK) == std::vector<Control>{key(SDLK_ESCAPE)});
+    for (const fe::Binding &b : s.table) {
+        CHECK_FALSE(fe::reserved_control(b.control));
+    }
+}
+
 TEST_CASE("bindings: a good file overrides rows of the defaults, the rest stay") {
     fe::BindingSet s;
     const std::string text = "\xEF\xBB\xBF# remapped\r\n"
@@ -286,7 +311,7 @@ TEST_CASE("bindings: bad lines are reported by file and line and skipped, never 
     CHECK(has(p, "my.ini:6: not 'action = controls'"));
     CHECK(has(p, "my.ini:7: the d-pad is 'direction up'"));
     CHECK(has(p, "my.ini:7: slot3: no control left on the line"));
-    CHECK(has(p, "my.ini:8: key F1 opens the remap overlay and cannot be bound: skipped"));
+    CHECK(has(p, "my.ini:8: key F1 opens the settings menu and cannot be bound: skipped"));
     CHECK(has(p, "my.ini:9: an empty control"));
     CHECK(has(p, "my.ini:10: unknown section '[options]'"));
     CHECK(has(p, "my.ini:12: malformed section '[field'"));
@@ -632,7 +657,7 @@ TEST_CASE("bindings: the window's size keys: chords, the [window] section, the r
     CHECK(has(p, "w.ini:6: key Ctrl+F3 is already a size key: skipped here"));
     CHECK(has(p, "w.ini:6: 'button a' is not 'key CHORD' (key Ctrl+3): skipped"));
     CHECK(has(p, "w.ini:6: unknown key 'Nonsense': skipped"));
-    CHECK(has(p, "w.ini:6: key F1 opens the remap overlay and cannot be bound: skipped"));
+    CHECK(has(p, "w.ini:6: key F1 opens the settings menu and cannot be bound: skipped"));
     // Ctrl+F3 is size_3x's already (line 2): line 6 has nothing left.
     CHECK(has(p, "w.ini:6: size_2x: no key left on the line (write 'size_2x = none' to unbind "
                  "it): the line is skipped"));

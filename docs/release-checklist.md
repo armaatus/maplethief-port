@@ -2,38 +2,40 @@
 
 How to cut a release. A tag becomes a GitHub Release that carries, per platform, a **player build** and a **port kit**, plus `SHA256SUMS` and notes:
 
-- The **player builds** are what people download to play: the game with its code recompiled, and none of the game's files. The player imports their own IPA on first launch. They are named `MapleThief-<version>-macos-universal.zip`, `MapleThief-<version>-windows-x64.zip`, `MapleThief-<version>-linux-x86_64.tar.gz` and, for the Nintendo Switch, `MapleThief-<version>-switch.zip` ([ADR 0125](adr/0125-player-builds-icon-guard-modes-and-release-flow.md); the Switch's: [ADR 0138](adr/0138-nintendo-switch-homebrew-target.md), #243). The Switch zip holds `switch/maplethief/MapleThief.nro`, laid out as on the SD card, with its README and licences; the Switch has a player build only, no kit.
+- The **player builds** are what people download to play: the game with its code recompiled, and none of the game's files. The player imports their own IPA on first launch. They are named `MapleThief-<version>-macos-universal.zip`, `MapleThief-<version>-windows-x64.zip`, `MapleThief-<version>-linux-x86_64.tar.gz` (also as `.AppImage` and `.flatpak`, the same files repacked, [ADR 0193](adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md)), the ARM64 ones `MapleThief-<version>-windows-arm64.zip` and `MapleThief-<version>-linux-aarch64.tar.gz` ([ADR 0194](adr/0194-windows-arm64-and-linux-aarch64-builds.md)) and, for the Nintendo Switch, `MapleThief-<version>-switch.zip` ([ADR 0125](adr/0125-player-builds-icon-guard-modes-and-release-flow.md); the Switch's: [ADR 0138](adr/0138-nintendo-switch-homebrew-target.md), #243). The Switch zip holds `switch/maplethief/MapleThief.nro`, laid out as on the SD card, with its README and licences; the Switch has a player build only, no kit.
 - The **kits** hold only our own code: the runtime, the platform shell without the game, SDL3, the recompiler, the tools, the scripts, the docs and the licences. They are named `MapleThief-kit-<version>-<os>-<arch>` ([ADR 0024](adr/0024-release-contents-and-flow.md)).
 
-The content guard checks every file before it is uploaded and again before publishing: kits in kit mode (no recompiled code at all), player builds in player mode (the recompiled code, but no image, sound, bundle file or anything identical to a file of the IPA). A release starts as a pull request from `dev` into `main` titled `Release TAG`; when it merges, GitHub Actions (`.github/workflows/release.yml`) creates the tag and the draft and builds the three kits. The player builds need `work/gen/`, which CI never has, so they are built on Joris's Mac and Windows PC. The decisions are in [ADR 0024](adr/0024-release-contents-and-flow.md), [ADR 0100](adr/0100-public-repository-and-player-releases.md), ADR 0125 and [ADR 0126](adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md).
+The content guard checks every file before it is uploaded and again before publishing: kits in kit mode (no recompiled code at all), player builds in player mode (the recompiled code, but no image, sound, bundle file or anything identical to a file of the IPA). A release starts as a pull request from `dev` into `main` titled `Release TAG`; when it merges, GitHub Actions (`.github/workflows/release.yml`) creates the tag and the draft and builds the five kits (Windows and Linux on x64 and ARM64, ADR 0194). The player builds need `work/gen/`, which CI never has, so they are built on Joris's Mac and Windows PC. The decisions are in [ADR 0024](adr/0024-release-contents-and-flow.md), [ADR 0100](adr/0100-public-repository-and-player-releases.md), ADR 0125 and [ADR 0126](adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md).
 
 Tags are annotated SemVer: `vX.Y.Z`, or `vX.Y.Z-rc.N` for a pre-release. Below, `TAG` is the tag, for example `v0.0.1-rc.1`.
 
 ## Before
 
 - [ ] Everything for the release is merged into `dev`, each PR with green CI.
-- [ ] The epic PRs since the last release carry their epic's labels (`gh pr edit N --add-label type:epic,area:...`), so the generated notes group them ([`.github/release.yml`](../.github/release.yml)). Unlabelled PRs land in "Other changes".
-- [ ] [`.github/release-notes-header.md`](../.github/release-notes-header.md), the text above the generated notes, still says the right thing.
-- [ ] On both machines: `gh auth status` is logged in with access to `armaatus/maplethief-port`. The checkout has `work/` (`scripts/bootstrap`, then `python3 -m recomp all` for `work/gen/`), up to date with the tag's recompiler. The player builds link `work/gen/`, and the guard checks the IPA's hashes and the dispatch table. Docker (OrbStack) runs on the Mac: the Linux and Switch player builds use it.
+- [ ] The epic PRs since the last release carry their epic's labels (`gh pr edit N --add-label type:epic,area:...`), so the generated notes group them ([`.github/release.yml`](../.github/release.yml)). Unlabelled PRs land in "Other changes": `scripts/release notes TAG` asks GitHub for the notes it would generate and fails, naming each PR, while any does (#313). Label them until it says OK. `scripts/release start` runs the same check.
+- [ ] [`.github/release-notes-header.md`](../.github/release-notes-header.md), the text above the generated notes, still says the right thing: **What's new** names, for players, what changed since the last release (rewrite it for each release), the downloads table has a row per player build, and the note on going back to an older version still holds.
+- [ ] The **preview labels** match the open sign-offs ([ADR 0147](adr/0147-what-v1-is-and-what-gates-it.md)): the Switch is preview while [#245](https://github.com/armaatus/maplethief-port/issues/245) is open, the iPhone while any of [#73](https://github.com/armaatus/maplethief-port/issues/73), [#128](https://github.com/armaatus/maplethief-port/issues/128) and [#197](https://github.com/armaatus/maplethief-port/issues/197) is (`gh issue view N --json state`). When a platform's last issue has closed, drop its label in all the same places before publishing: the note at the top of its play page ([iphone.md](play/iphone.md), [switch.md](play/switch.md)), the release notes header (the What's new line and the downloads row), the itch.io page ([page.md](itch/page.md): the downloads row, the Switch install heading and note, the known issues line) and the Switch upload's display name in [metadata.md](itch/metadata.md), and its row in the Preview section of [Known issues](KNOWN_ISSUES.md#preview).
+- [ ] [Known issues](KNOWN_ISSUES.md) cites no closed issue: `python3 -m mtport.release known-issues` (with `tools/` on `PYTHONPATH`) says OK. `scripts/release start` and `publish` stop when it doesn't.
+- [ ] On both machines: `gh auth status` is logged in with access to `armaatus/maplethief-port`. The checkout has `work/` (`scripts/bootstrap`, then `python3 -m recomp all` for `work/gen/`), up to date with the tag's recompiler. `scripts/bootstrap` also writes `work/gen/ipa_files.inc`, the per-file hash list the player builds need (#350): run it once if a player build stops for it. The player builds link `work/gen/`, and the guard checks the IPA's hashes and the dispatch table. Docker (OrbStack) runs on the Mac: the Linux and Switch player builds use it.
 - [ ] Optional rehearsal, with nothing sent to GitHub: `git tag -a v0.0.0-rc.99 -m rehearsal`, then `scripts/release build v0.0.0-rc.99 --dry-run` and `scripts/release publish v0.0.0-rc.99 --dry-run --platforms mac,linux,switch` on the Mac, or `scripts\release.ps1 build v0.0.0-rc.99 -DryRun` on Windows. Then `git tag -d v0.0.0-rc.99`.
 
 ## 1. Release pull request
 
 ```sh
-gh pr create --base main --head dev --title "Release TAG" --body "Release TAG"
+gh pr create --base main --head dev --title "Release TAG" --body "Release TAG" --label type:release
 ```
 
-The `release title` check requires the title `Release vX.Y.Z` or `Release vX.Y.Z-rc.N`, the source branch `dev`, and a tag that doesn't exist yet. CI runs every OS, Debug and Release, and packages the kits. Merge it with a merge commit when everything is green.
+The `release title` check requires the title `Release vX.Y.Z` or `Release vX.Y.Z-rc.N`, the source branch `dev`, a tag that doesn't exist yet, and the `type:release` label, which keeps the release PR itself out of the notes. CI runs every OS, Debug and Release, and packages the kits. Merge it with a merge commit when everything is green.
 
 ## 2. Tag, draft and kits (GitHub Actions)
 
-The merge starts `release.yml`. It creates the annotated tag on the merge commit and the draft release, a pre-release for `-rc.N`. The draft's notes start with the header (what each download holds, and that players need their own IPA), followed by GitHub's generated notes. Read them on the draft and edit them on GitHub if needed. Then it builds the three kits from the tag on hosted runners (the Linux kit in the pinned container), checks each (`--version`; on macOS `lipo` and `codesign`), runs the guard in kit mode, and uploads each kit and its `.sha256` to the draft. Watch it with `gh run watch`.
+The merge starts `release.yml`. It creates the annotated tag on the merge commit and the draft release, a pre-release for `-rc.N`. The draft's notes start with the header (what's new, what each download holds, that players need their own IPA, going back to an older version), followed by GitHub's generated notes. Read them on the draft and edit them on GitHub if needed. Then it builds the five kits from the tag on hosted runners (the Linux kits in the pinned container, on x64 and ARM64 runners), checks each (`--version`; on macOS `lipo` and `codesign`), runs the guard in kit mode, and uploads each kit and its `.sha256` to the draft. Watch it with `gh run watch`.
 
 (By hand, without the pull request: tag `main` with `git tag -a TAG -m "MapleThief TAG"`, push the tag, run `scripts/release start TAG`, then use `build` without `--players-only` below.)
 
 ## 3. Player builds
 
-On the Mac (macOS universal, Linux x86_64 and the Nintendo Switch):
+On the Mac (macOS universal, Linux x86_64 and aarch64, and the Nintendo Switch):
 
 ```sh
 git fetch origin --tags
@@ -47,20 +49,27 @@ git fetch origin --tags
 powershell -ExecutionPolicy Bypass -File scripts\release.ps1 build TAG -PlayersOnly
 ```
 
+Then, on the same PC, the Windows ARM64 player build, cross-compiled ([ADR 0194](adr/0194-windows-arm64-and-linux-aarch64-builds.md)), from a prompt with the ARM64 cross tools (`"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64_arm64`, or the *ARM64 Cross Tools* prompt; the path depends on the edition):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\release.ps1 build TAG -PlayersOnly -Arch arm64
+```
+
 Each script builds from a clean checkout of the tag, with `MAPLETHIEF_VERSION` taken from the tag. Without `--players-only` (`-PlayersOnly`) it also builds the kits, as before ADR 0126: on the Mac with `scripts/local-ci TAG --release`, on Windows with `scripts\test.ps1 -Release`.
 
 The player builds use this checkout's `work/gen/`, linked in read-only:
 
 - Mac: the `mac-player` workflow.
-- Linux: `scripts/linux-game player TAG`, in the glibc 2.39 container.
+- Linux: `scripts/linux-game player TAG --arch amd64`, and `--arch arm64` for aarch64, in the glibc 2.35 container of each CPU (the arm64 one runs natively on Apple silicon). The amd64 build also makes the AppImage and the Flatpak bundle. Then `scripts/linux-game check-player` starts each tarball in stock Ubuntu 22.04 and Debian 12, and `check-packages` runs the AppImage and the bundle under Xvfb to the import screen (it downloads Flathub's runtime, about 2 GB, into a Docker volume it removes afterwards).
 - Nintendo Switch: `scripts/build-switch TAG --preset switch-player --gen work/gen`, the `switch-player` workflow in the pinned devkitA64 container (about 4 minutes on the Mac). CI never has `work/gen/`, so like the other player builds it is built here, not in `release.yml`.
-- Windows: the `win-player` workflow.
+- Windows: the `win-player` workflow; with `-Arch arm64` the `win-arm64-player` workflow, cross-compiled.
 
 Then each script unpacks every file and checks it:
 
 - `--version` must print `MapleThief <version>`.
 - On the Mac, `lipo -archs` must show arm64 and x86_64, and `codesign --verify --deep --strict` must pass.
-- The Linux files run in the container.
+- The Linux files run in the container of their CPU.
+- The Windows ARM64 player build can't run on the x64 PC: its `MapleThief.exe` must be an ARM64 PE file instead, and `--version` is checked on an ARM64 device (below).
 - The Switch zip must hold `switch/maplethief/MapleThief.nro`, `README.md`, `LICENSE`, `THIRD_PARTY.md` and the Switch's notices in `licenses/` (libnx, newlib, the GCC runtime exception, Mesa, libdrm_nouveau, deko3d, SDL). Its NRO's NACP must say `MapleThief`, `armaatus` and the tag's version, with the 256 x 256 icon (`python3 -m mtport.nro check`). The version comes from the tag: `MAPLETHIEF_VERSION` reaches the container and CMake writes it into the NACP.
 - On Windows, `dumpbin /dependents` must list no MSVC runtime DLL in the player build.
 
@@ -72,7 +81,7 @@ Last, it runs the content guard (kits in kit mode, player builds in player mode)
 scripts/release publish TAG
 ```
 
-It checks that the draft has all seven files and their `.sha256`: the macOS, Linux and Windows kits and player builds, and the Switch zip. It downloads them to `build/release/TAG/download/` and checks each against its `.sha256`. It runs the guard again (each file in its mode; the Switch zip in player mode, its NRO split into code, icon and NACP), writes `SHA256SUMS` over all seven and checks it with `shasum -a 256 -c`. Then it uploads `SHA256SUMS` and publishes the release.
+It checks first that [Known issues](KNOWN_ISSUES.md) at the tag cites no closed issue, then that the draft has all nine files and their `.sha256`: the macOS, Linux and Windows kits and player builds, the Linux AppImage and Flatpak bundle, and the Switch zip. It downloads them to `build/release/TAG/download/` and checks each against its `.sha256`. It runs the guard again (each file in its mode; the Switch zip in player mode, its NRO split into code, icon and NACP), writes `SHA256SUMS` over all nine and checks it with `shasum -a 256 -c`. Then it uploads `SHA256SUMS` and publishes the release.
 
 ## 5. itch.io
 
@@ -100,10 +109,11 @@ Each downloads the published release's player builds and `SHA256SUMS` into `buil
 
 ## After
 
-- [ ] On the release page: four player builds (one the Switch zip), three kits, seven `.sha256`, `SHA256SUMS`, the notes with the header on top, and "Pre-release" for `-rc.N`.
+- [ ] On the release page: seven player builds (one the Switch zip), five kits, twelve `.sha256`, `SHA256SUMS`, the notes with the header on top, and "Pre-release" for `-rc.N`.
 - [ ] Download the assets into an empty directory and run `shasum -a 256 -c SHA256SUMS` (`sha256sum -c SHA256SUMS` on Linux).
 - [ ] Unpack each file and run `MapleThief --version`: `MapleThief.app/Contents/MacOS/MapleThief --version` on macOS, `MapleThief.exe --version | Out-String` (player build) or `bin\MapleThief.exe --version | Out-String` (kit) on Windows, and `./MapleThief.sh --version` or `bin/MapleThief --version` on Linux. Each prints the tag's version.
 - [ ] Each player build, unpacked into a fresh folder with an empty data directory, shows the import screen, imports your `MapleThief-1.5.ipa` and starts the game. On the Mac, also check the Gatekeeper prompt and the app on Apple silicon and under Rosetta (`arch -x86_64`). This is a `needs-human` check.
+- [ ] On an ARM64 Windows PC, when one is at hand: the `windows-arm64` player build's `MapleThief.exe --version | Out-String` prints the tag's version, and it imports the IPA and starts the game. Record the first run on [#362](https://github.com/armaatus/maplethief-port/issues/362). A `needs-human` check.
 - [ ] The Switch zip on a console: a fresh `sdmc:/switch/maplethief/` with only the zip's `switch/maplethief/MapleThief.nro` and your IPA; start it from the Homebrew Menu (through a game): it imports the IPA, offers to delete it and reaches the first map; the next start goes straight to the game ([Playing on the Nintendo Switch](play/switch.md); rows I1 to I6 of the [Switch checklist](testing/switch-checklist.md)). A `needs-human` check.
 
 ## If something goes wrong

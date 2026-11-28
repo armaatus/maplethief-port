@@ -21,6 +21,9 @@
 # change already there upstream) fails the configure step, loudly. A second run on the same
 # source changes nothing (the header is copied again).
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 set(header_from "${CMAKE_CURRENT_LIST_DIR}/sdl3-nx-render-shaders.h")
 set(header_to "src/render/gpu/SDL_render_private_shaders.h")
 if(NOT EXISTS "${header_from}")

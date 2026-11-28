@@ -1,0 +1,8 @@
+# MapleThief run category (docs/formats/run-category.md): Chapter 1, a new character to the
+# trip to Orbis (the script native clearAll that ends chapter 1).
+title = Chapter 1
+allow fix_original_bugs = off
+allow skip_intros = off
+split chapter_end 0 = Tutorial
+split boss_killed 64 = Chapter 1 boss
+split chapter_end 1 = Orbis

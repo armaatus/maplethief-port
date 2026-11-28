@@ -727,6 +727,21 @@ inline void ensure_initialized(mt_cpu *cpu, mt_objc *rt, long ci) {
     }
 }
 
+// The run coverage (#295, ADR 0160): one hit of (class, selector) per delivered message, by
+// the class the lookup starts from (the receiver's, or the super send's).
+void record_selector_hit(mt_objc *rt, long ci, u32 sel) {
+    const std::uint64_t id = (static_cast<std::uint64_t>(ci) << 32) | sel;
+    if (mt_hit_count(MT_HIT_SELECTOR, id) != 0) {
+        return;
+    }
+    const Class &c = rt->classes[ci];
+    const char *name = mt_objc_sel_name(rt, sel);
+    char key[320];
+    std::snprintf(key, sizeof key, "%c[%s %s]", c.is_meta ? '+' : '-', c.name,
+                  name != nullptr ? name : "?");
+    mt_hit_add(MT_HIT_SELECTOR, id, key);
+}
+
 // Looks up `sel` from class index `ci` and enters the method with the registers as they are.
 void deliver(mt_cpu *cpu, mt_objc *rt, u32 self, long ci, u32 sel, bool stret) {
     if (ci >= 0) {
@@ -736,6 +751,9 @@ void deliver(mt_cpu *cpu, mt_objc *rt, u32 self, long ci, u32 sel, bool stret) {
     if (mi < 0) {
         undeliverable(cpu, rt, self, ci, sel, stret);
         return;
+    }
+    if (MT_UNLIKELY(mt_hits_enabled() != 0)) {
+        record_selector_hit(rt, ci, sel);
     }
     Method &m = rt->methods[mi];
     if (m.fn == nullptr) {

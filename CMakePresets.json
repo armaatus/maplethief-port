@@ -51,6 +51,24 @@
       }
     },
     {
+      "name": "mac-coverage",
+      "displayName": "macOS Debug with the run coverage's entry counters (host architecture)",
+      "description": "The generated code counts the entries of every guest function; MAPLETHIEF_COVERAGE=PATH writes them with the hit recorders' counts (ADR 0160, #295; python3 -m mtport.runcoverage)",
+      "inherits": "mac-debug",
+      "cacheVariables": {
+        "MAPLETHIEF_TRACE_ENTRY": "ON"
+      }
+    },
+    {
+      "name": "mac-release",
+      "displayName": "macOS Release (host architecture)",
+      "description": "The playthrough's build: scripts/playthrough plays the chain in it (#306)",
+      "inherits": "mac-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
       "name": "mac-release-universal",
       "displayName": "macOS Release, universal (arm64 + x86_64)",
       "inherits": "mac-base",
@@ -167,6 +185,46 @@
       }
     },
     {
+      "name": "win-arm64-base",
+      "hidden": true,
+      "inherits": "win-base",
+      "description": "Ninja + MSVC cl for ARM64, run from a Visual Studio ARM64 developer environment: native on an ARM64 PC, or the x64_arm64 cross tools on an x64 one (ADR 0194)",
+      "architecture": {
+        "value": "arm64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "MAPLETHIEF_TARGET_ARCH": "arm64"
+      }
+    },
+    {
+      "name": "win-arm64-debug",
+      "displayName": "Windows ARM64 Debug (MSVC)",
+      "inherits": "win-arm64-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "win-arm64-release",
+      "displayName": "Windows ARM64 Release (MSVC)",
+      "inherits": "win-arm64-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "win-arm64-player",
+      "displayName": "Windows ARM64 player download (MSVC): the game with the recompiled code, no bundle",
+      "description": "Needs work/gen; static MSVC runtime, packaged as MapleThief-<version>-windows-arm64.zip; cross-compiled on the x64 PC (ADR 0125, ADR 0194)",
+      "inherits": "win-arm64-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded",
+        "MAPLETHIEF_PLAYER_BUILD": "ON"
+      }
+    },
+    {
       "name": "linux-base",
       "hidden": true,
       "inherits": "base",
@@ -219,11 +277,38 @@
     {
       "name": "linux-player",
       "displayName": "Linux player download: the game with the recompiled code, no bundle",
-      "description": "Needs work/gen; built in the linux-game container for glibc 2.39 (scripts/linux-game player), packaged as MapleThief-<version>-linux-x86_64.tar.gz (ADR 0125)",
+      "description": "Needs work/gen; built in the linux-game container for glibc 2.35 (scripts/linux-game player), packaged as MapleThief-<version>-linux-x86_64.tar.gz (ADR 0125) and repacked as .AppImage and .flatpak (ADR 0193)",
       "inherits": "linux-base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "MAPLETHIEF_PLAYER_BUILD": "ON"
+      }
+    },
+    {
+      "name": "linux-arm64-debug",
+      "displayName": "Linux aarch64 Debug",
+      "description": "linux-debug on an aarch64 host or container; configuring fails for another CPU (ADR 0194)",
+      "inherits": "linux-debug",
+      "cacheVariables": {
+        "MAPLETHIEF_TARGET_ARCH": "arm64"
+      }
+    },
+    {
+      "name": "linux-arm64-release",
+      "displayName": "Linux aarch64 Release",
+      "description": "linux-release on an aarch64 host or container, packaged as MapleThief-kit-<version>-linux-aarch64.tar.gz (ADR 0194)",
+      "inherits": "linux-release",
+      "cacheVariables": {
+        "MAPLETHIEF_TARGET_ARCH": "arm64"
+      }
+    },
+    {
+      "name": "linux-arm64-player",
+      "displayName": "Linux aarch64 player download: the game with the recompiled code, no bundle",
+      "description": "Needs work/gen; built in the arm64 linux-game container (scripts/linux-game player --arch arm64), packaged as MapleThief-<version>-linux-aarch64.tar.gz (ADR 0125, ADR 0194)",
+      "inherits": "linux-player",
+      "cacheVariables": {
+        "MAPLETHIEF_TARGET_ARCH": "arm64"
       }
     },
     {
@@ -266,11 +351,47 @@
       "cacheVariables": {
         "MAPLETHIEF_PLAYER_BUILD": "ON"
       }
+    },
+    {
+      "name": "android-base",
+      "hidden": true,
+      "inherits": "base",
+      "description": "Android 8.0+ arm64 APK: the NDK r28c of tools/containers/android/pins.env (build/_android-sdk/ on the Mac, scripts/android-sdk; /opt/android-sdk in the container, scripts/build-android). libmain.so with SDL3 linked statically, packaged by Gradle; memory model checked (ADR 0025, ADR 0150, ADR 0163)",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "toolchainFile": "${sourceDir}/cmake/AndroidToolchain.cmake",
+      "cacheVariables": {
+        "ANDROID_ABI": "arm64-v8a",
+        "ANDROID_PLATFORM": "26",
+        "ANDROID_STL": "c++_static",
+        "MAPLETHIEF_MEM_MODEL": "checked"
+      }
+    },
+    {
+      "name": "android-debug",
+      "displayName": "Android Debug: MapleThief.apk, arm64-v8a, debuggable (pinned SDK and NDK)",
+      "inherits": "android-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "android-release",
+      "displayName": "Android Release: MapleThief.apk, arm64-v8a, signed with the build tree's debug key (pinned SDK and NDK)",
+      "inherits": "android-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [
     { "name": "mac-debug", "configurePreset": "mac-debug" },
     { "name": "mac-asan", "configurePreset": "mac-asan" },
+    { "name": "mac-coverage", "configurePreset": "mac-coverage" },
+    { "name": "mac-release", "configurePreset": "mac-release" },
     { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
     { "name": "mac-app", "configurePreset": "mac-app" },
     { "name": "mac-player", "configurePreset": "mac-player", "targets": ["MapleThief"] },
@@ -281,14 +402,22 @@
     { "name": "win-debug", "configurePreset": "win-debug" },
     { "name": "win-release", "configurePreset": "win-release" },
     { "name": "win-player", "configurePreset": "win-player", "targets": ["MapleThief"] },
+    { "name": "win-arm64-debug", "configurePreset": "win-arm64-debug" },
+    { "name": "win-arm64-release", "configurePreset": "win-arm64-release" },
+    { "name": "win-arm64-player", "configurePreset": "win-arm64-player", "targets": ["MapleThief"] },
     { "name": "linux-debug", "configurePreset": "linux-debug" },
     { "name": "linux-asan", "configurePreset": "linux-asan" },
     { "name": "linux-fuzz", "configurePreset": "linux-fuzz", "targets": ["maplethief_fuzz"] },
     { "name": "linux-release", "configurePreset": "linux-release" },
     { "name": "linux-player", "configurePreset": "linux-player", "targets": ["MapleThief"] },
+    { "name": "linux-arm64-debug", "configurePreset": "linux-arm64-debug" },
+    { "name": "linux-arm64-release", "configurePreset": "linux-arm64-release" },
+    { "name": "linux-arm64-player", "configurePreset": "linux-arm64-player", "targets": ["MapleThief"] },
     { "name": "switch-debug", "configurePreset": "switch-debug" },
     { "name": "switch-release", "configurePreset": "switch-release" },
-    { "name": "switch-player", "configurePreset": "switch-player", "targets": ["MapleThief_nro"] }
+    { "name": "switch-player", "configurePreset": "switch-player", "targets": ["MapleThief_nro"] },
+    { "name": "android-debug", "configurePreset": "android-debug", "targets": ["MapleThief_apk", "MapleThiefTests_apk"] },
+    { "name": "android-release", "configurePreset": "android-release", "targets": ["MapleThief_apk", "MapleThiefTests_apk"] }
   ],
   "testPresets": [
     {
@@ -316,12 +445,23 @@
     },
     { "name": "mac-debug", "inherits": "test-base", "configurePreset": "mac-debug" },
     { "name": "mac-asan", "inherits": "asan-base", "configurePreset": "mac-asan" },
+    { "name": "mac-coverage", "inherits": "test-base", "configurePreset": "mac-coverage" },
+    { "name": "mac-release", "inherits": "test-base", "configurePreset": "mac-release" },
     { "name": "mac-release-universal", "inherits": "test-base", "configurePreset": "mac-release-universal" },
     { "name": "mac-app", "inherits": "test-base", "configurePreset": "mac-app" },
     { "name": "mac-player", "inherits": "player-base", "configurePreset": "mac-player" },
     { "name": "win-debug", "inherits": "test-base", "configurePreset": "win-debug" },
     { "name": "win-release", "inherits": "test-base", "configurePreset": "win-release" },
     { "name": "win-player", "inherits": "player-base", "configurePreset": "win-player" },
+    { "name": "win-arm64-debug", "inherits": "test-base", "configurePreset": "win-arm64-debug" },
+    { "name": "win-arm64-release", "inherits": "test-base", "configurePreset": "win-arm64-release" },
+    {
+      "name": "win-arm64-player",
+      "inherits": "test-base",
+      "configurePreset": "win-arm64-player",
+      "description": "Only the checks that read the executable: the x64 PC that cross-compiles it can't run it, so --version is checked on an ARM64 device (ADR 0194)",
+      "filter": { "include": { "name": "^platform\\.player_contents$" } }
+    },
     { "name": "linux-debug", "inherits": "test-base", "configurePreset": "linux-debug" },
     { "name": "linux-asan", "inherits": "asan-base", "configurePreset": "linux-asan" },
     {
@@ -334,6 +474,9 @@
     },
     { "name": "linux-release", "inherits": "test-base", "configurePreset": "linux-release" },
     { "name": "linux-player", "inherits": "player-base", "configurePreset": "linux-player" },
+    { "name": "linux-arm64-debug", "inherits": "test-base", "configurePreset": "linux-arm64-debug" },
+    { "name": "linux-arm64-release", "inherits": "test-base", "configurePreset": "linux-arm64-release" },
+    { "name": "linux-arm64-player", "inherits": "player-base", "configurePreset": "linux-arm64-player" },
     {
       "name": "switch-checks",
       "hidden": true,
@@ -349,17 +492,31 @@
       "configurePreset": "switch-player",
       "description": "The NRO's host-side checks (its version, the guard's player mode) and the player build's own",
       "filter": { "include": { "name": "^platform\\.(switch_nro|switch_guard|player_contents)$" } }
-    }
+    },
+    {
+      "name": "android-checks",
+      "hidden": true,
+      "inherits": "test-base",
+      "description": "The host-side checks of the APK only; the emulator runs are scripts/android-run's (#356)",
+      "filter": { "include": { "name": "^platform\\.android_" } }
+    },
+    { "name": "android-debug", "inherits": "android-checks", "configurePreset": "android-debug" },
+    { "name": "android-release", "inherits": "android-checks", "configurePreset": "android-release" }
   ],
   "packagePresets": [
     { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
     { "name": "mac-player", "configurePreset": "mac-player" },
     { "name": "win-release", "configurePreset": "win-release" },
     { "name": "win-player", "configurePreset": "win-player" },
+    { "name": "win-arm64-release", "configurePreset": "win-arm64-release" },
+    { "name": "win-arm64-player", "configurePreset": "win-arm64-player" },
     { "name": "linux-release", "configurePreset": "linux-release" },
     { "name": "linux-player", "configurePreset": "linux-player" },
+    { "name": "linux-arm64-release", "configurePreset": "linux-arm64-release" },
+    { "name": "linux-arm64-player", "configurePreset": "linux-arm64-player" },
     { "name": "switch-release", "configurePreset": "switch-release" },
-    { "name": "switch-player", "configurePreset": "switch-player" }
+    { "name": "switch-player", "configurePreset": "switch-player" },
+    { "name": "android-release", "configurePreset": "android-release" }
   ],
   "workflowPresets": [
     {
@@ -420,6 +577,23 @@
       ]
     },
     {
+      "name": "win-arm64-debug",
+      "steps": [
+        { "type": "configure", "name": "win-arm64-debug" },
+        { "type": "build", "name": "win-arm64-debug" },
+        { "type": "test", "name": "win-arm64-debug" }
+      ]
+    },
+    {
+      "name": "win-arm64-release",
+      "steps": [
+        { "type": "configure", "name": "win-arm64-release" },
+        { "type": "build", "name": "win-arm64-release" },
+        { "type": "test", "name": "win-arm64-release" },
+        { "type": "package", "name": "win-arm64-release" }
+      ]
+    },
+    {
       "name": "linux-debug",
       "steps": [
         { "type": "configure", "name": "linux-debug" },
@@ -453,6 +627,23 @@
       ]
     },
     {
+      "name": "linux-arm64-debug",
+      "steps": [
+        { "type": "configure", "name": "linux-arm64-debug" },
+        { "type": "build", "name": "linux-arm64-debug" },
+        { "type": "test", "name": "linux-arm64-debug" }
+      ]
+    },
+    {
+      "name": "linux-arm64-release",
+      "steps": [
+        { "type": "configure", "name": "linux-arm64-release" },
+        { "type": "build", "name": "linux-arm64-release" },
+        { "type": "test", "name": "linux-arm64-release" },
+        { "type": "package", "name": "linux-arm64-release" }
+      ]
+    },
+    {
       "name": "mac-player",
       "steps": [
         { "type": "configure", "name": "mac-player" },
@@ -471,12 +662,30 @@
       ]
     },
     {
+      "name": "win-arm64-player",
+      "steps": [
+        { "type": "configure", "name": "win-arm64-player" },
+        { "type": "build", "name": "win-arm64-player" },
+        { "type": "test", "name": "win-arm64-player" },
+        { "type": "package", "name": "win-arm64-player" }
+      ]
+    },
+    {
       "name": "linux-player",
       "steps": [
         { "type": "configure", "name": "linux-player" },
         { "type": "build", "name": "linux-player" },
         { "type": "test", "name": "linux-player" },
         { "type": "package", "name": "linux-player" }
+      ]
+    },
+    {
+      "name": "linux-arm64-player",
+      "steps": [
+        { "type": "configure", "name": "linux-arm64-player" },
+        { "type": "build", "name": "linux-arm64-player" },
+        { "type": "test", "name": "linux-arm64-player" },
+        { "type": "package", "name": "linux-arm64-player" }
       ]
     },
     {
@@ -503,6 +712,23 @@
         { "type": "build", "name": "switch-player" },
         { "type": "test", "name": "switch-player" },
         { "type": "package", "name": "switch-player" }
+      ]
+    },
+    {
+      "name": "android-debug",
+      "steps": [
+        { "type": "configure", "name": "android-debug" },
+        { "type": "build", "name": "android-debug" },
+        { "type": "test", "name": "android-debug" }
+      ]
+    },
+    {
+      "name": "android-release",
+      "steps": [
+        { "type": "configure", "name": "android-release" },
+        { "type": "build", "name": "android-release" },
+        { "type": "test", "name": "android-release" },
+        { "type": "package", "name": "android-release" }
       ]
     }
   ]

@@ -21,6 +21,9 @@
 #       window with vsync off; the default run logs neither.
 #     - no scripted run reads or writes window.ini or writes a screenshot.
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 if(MODE STREQUAL "usage")
     set(cases
         "--fullscreen|maybe|fullscreen: 'maybe' is not on or off (desktop or borderless: on, in that mode)"

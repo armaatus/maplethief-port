@@ -22,9 +22,17 @@
  * checked) whose header has the right size are decoded (stb_image, PNG only); anything else is
  * rejected with one log line, and the game's texture is kept.
  *
- * The hooks: the dump at MT_GFX_REPLACE_ORDER_DUMP (it sees every upload and replaces none), the
- * pack at MT_GFX_REPLACE_ORDER_PACK (after hd_text's text, maplethief/cg.h), and one UIKit image
- * hook for both (mt_cg_set_image_replace_hook; the dump first, then the pack's ui/ files).
+ * Several packs (#421, ADR 0149): mt_texpack_add appends a pack to an ordered list of at most
+ * MT_PACKS_MAX. For each upload (by its file name) and each ui/ file the first pack with a file
+ * that passes the checks wins; a rejected file falls through to the next pack, then the game.
+ * Packs of different k mix: each file is checked against its own upload. Each pack's counts
+ * (replaced, rejected, hidden by an earlier pack): mt_texpack_pack_use
+ * (maplethief/pack_manifest.h).
+ *
+ * The hooks: the dump at MT_GFX_REPLACE_ORDER_DUMP (it sees every upload and replaces none), one
+ * hook for every pack at MT_GFX_REPLACE_ORDER_PACK (after hd_text's text, maplethief/cg.h), and
+ * one UIKit image hook for both (mt_cg_set_image_replace_hook; the dump first, then the packs'
+ * ui/ files).
  *
  * Single guest thread (ADR 0033). C17, also C++20. */
 #ifndef MAPLETHIEF_TEXPACK_H
@@ -34,20 +42,22 @@
 
 #include "maplethief/cg.h"
 #include "maplethief/gfx.h"
+#include "maplethief/pack_manifest.h"
+#include "maplethief/packcheck.h"
 
 MT_EXTERN_C_BEGIN
 
 typedef struct mt_texpack_stats {
-    /* The pack. */
+    /* The packs, all together. */
     uint32_t files;       /* GL texture files indexed */
     uint32_t ui_files;    /* ui/ files indexed */
-    uint64_t uploads;     /* uploads the pack was asked about (hd_text's are not) */
+    uint64_t uploads;     /* uploads the packs were asked about (hd_text's are not) */
     uint64_t replaced;    /* replaced by a pack file */
-    uint64_t missing;     /* with no file in the pack */
-    uint64_t rejected;    /* with a file that was rejected: the game's texture kept */
-    uint64_t ui_images;   /* UIKit images the pack was asked about */
+    uint64_t missing;     /* with no file in any pack */
+    uint64_t rejected;    /* with files that were all rejected: the game's texture kept */
+    uint64_t ui_images;   /* UIKit images the packs were asked about */
     uint64_t ui_replaced; /* replaced by a ui/ file */
-    uint64_t ui_rejected; /* with a ui/ file that was rejected */
+    uint64_t ui_rejected; /* with ui/ files that were all rejected */
     /* The dump. */
     uint64_t dumped;      /* texture files written */
     uint64_t dumped_ui;   /* ui/ files written */
@@ -56,20 +66,31 @@ typedef struct mt_texpack_stats {
 
 /* The files a pack indexes at most (GL and ui/ together); the rest are skipped, logged (#413). */
 #define MT_TEXPACK_MAX_FILES 65536u
+/* A pack file larger than this is rejected unread (a 4096 x 4096 RGBA PNG stored without
+ * compression is 64 MiB and a little more). */
+#define MT_TEXPACK_MAX_FILE (80u << 20) /* bytes */
 
-/* Opens the pack in the directory `dir` (UTF-8): indexes its file names and installs its hooks.
- * Returns the files indexed (GL and ui/), or -1 (logged) if `dir` is no directory. Another pack
- * open before is closed first. */
+/* Adds the pack in the directory `dir` (UTF-8) after the packs open now: indexes its file names
+ * and, for the first pack, installs the hooks. Returns the files indexed (GL and ui/), or -1
+ * (logged) if `dir` is no directory or MT_PACKS_MAX packs are open. */
+int mt_texpack_add(const char *dir) MT_NOEXCEPT;
+/* Closes every pack, then adds `dir`: the pack alone. */
 int mt_texpack_open(const char *dir) MT_NOEXCEPT;
+/* Closes every pack. */
 void mt_texpack_close(void) MT_NOEXCEPT;
+/* The packs open now, and what pack `index` (0: the first) did: 0, or -1 if there is none. */
+uint32_t mt_texpack_pack_count(void) MT_NOEXCEPT;
+int mt_texpack_pack_use(uint32_t index, mt_pack_use *out) MT_NOEXCEPT;
 
 /* Starts a dump into `dir` (UTF-8, made if needed; files already there are not written again)
  * and installs its hooks. Returns 0, or -1 (logged) if the directory or its manifest cannot be
  * made. */
 int mt_texpack_dump_open(const char *dir) MT_NOEXCEPT;
 void mt_texpack_dump_close(void) MT_NOEXCEPT;
+/* Whether a dump is open (the menu turns it on and off, #371). */
+int mt_texpack_dump_is_open(void) MT_NOEXCEPT;
 
-/* The counters since the pack (for the pack's) or the dump (for the dump's) opened. */
+/* The counters since the first pack (for the packs') or the dump (for the dump's) opened. */
 mt_texpack_stats mt_texpack_get_stats(void) MT_NOEXCEPT;
 
 /* The file name a dump writes and a pack reads for an upload: "<hash>_<W>x<H>.png" (raw 0) or
@@ -77,6 +98,18 @@ mt_texpack_stats mt_texpack_get_stats(void) MT_NOEXCEPT;
 #define MT_TEXPACK_NAME_MAX 48
 void mt_texpack_file_name(uint64_t hash, uint32_t width, uint32_t height, int raw,
                           char *out) MT_NOEXCEPT;
+
+/* Builds a pack from a dump (#371, ADR 0205; what python3 -m mtport.texpack build does, in the
+ * game): every file of DUMP/manifest.jsonl, k (1 to MT_GFX_MAX_SCALE) times larger, under its
+ * name into `pack` (made if needed; another folder than the dump). The scaler: Scale2x and
+ * Scale3x composed for 4x, 6x and 8x (nearest for 5x and 7x), or nearest. `ui` 0 leaves the
+ * ui/ images out. Manifest lines it cannot trust (a bad name, a size that disagrees with the
+ * name, a ui/ path with "..") are skipped, each a line to `fn` (maplethief/packcheck.h).
+ * Returns the files written, or -1 (the reason to `fn`) if it cannot start. */
+#define MT_TEXPACK_SCALER_SCALE 0
+#define MT_TEXPACK_SCALER_NEAREST 1
+int mt_texpack_build(const char *dump, const char *pack, unsigned k, int scaler, int ui,
+                     mt_packcheck_fn fn, void *user) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

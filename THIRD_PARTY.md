@@ -4,6 +4,8 @@ Everything this project uses but didn't write. The decision and the rules live i
 
 No third-party source is committed to this repository. The build downloads the files listed here into `build/_downloads/` and checks each one against its SHA-256.
 
+Dependabot bumps the GitHub Actions and the Python packages; `scripts/deps check` lists every other pin against upstream. A bump follows [Bumping a dependency](docs/build/how-to/bump-a-dependency.md).
+
 ## Libraries
 
 | Dependency | Version | Upstream tag → commit (date) | License | Mechanism | Used for |
@@ -51,6 +53,7 @@ Download URLs:
 | Temurin JDK | 25.0.4.1+1 | GPL-2.0 WITH Classpath-exception-2.0 | `tools/mtport/ghidra_setup.py` (ADR 0007): one archive per host (macOS arm64/x64, Linux x64/arm64, Windows x64), each with its SHA-256 |
 | Gradle | 9.8.0 | Apache-2.0 | `tools/mtport/ghidra_setup.py` (ADR 0007): `gradle-9.8.0-bin.zip`, SHA-256 `bafd5ce9cfaea0fbccfdc8439a1ac42fbd4cd9c89dc9a988228d8a2639a58e6c`; only builds Ghidra's native tools on hosts the release zip has none for (macOS, Linux arm64) |
 | Ubuntu base image | 26.04, index digest `sha256:19fcd1bf268f02b60aca3bd30bd8a6d9a11759a430e32921833e65f16d87348a`; apt packages from snapshot `20261024T000000Z` | various (Ubuntu archive) | `tools/containers/linux/Dockerfile` ([ADR 0023](docs/adr/0023-local-ci-and-packaging.md)): the Linux CI container of `scripts/test-linux` |
+| Ubuntu base image (portable Linux build) | 22.04, index digest `sha256:b000e69a50ff940390233025e7a337fb8469b509e2334fa4d018ac30f3e18cdb`; apt packages and the Toolchain PPA's GCC 14 from snapshot `20261125T000000Z` | various (Ubuntu archive) | `tools/containers/linux-game/Dockerfile` ([ADR 0193](docs/adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md)): the glibc 2.35 image of `scripts/linux-game` |
 | CMake (Kitware release archive) | 4.4.4 | BSD-3-Clause | `tools/containers/linux/Dockerfile` (ADR 0023): `cmake-4.4.4-linux-{x86_64,aarch64}.tar.gz`, each with its SHA-256 |
 | PowerShell | 7.6.7 | MIT | `tools/containers/linux/Dockerfile` (ADR 0023): `powershell-7.6.7-linux-{x64,arm64}.tar.gz`, each with its SHA-256; runs the `.ps1` scripts in the tests, as on `ubuntu-latest` |
 | uv (container image) | 0.11.7 | MIT OR Apache-2.0 | `tools/containers/linux/Dockerfile` (ADR 0023): `ghcr.io/astral-sh/uv:0.11.7`, index digest `sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a` |
@@ -83,6 +86,28 @@ The Android target ([ADR 0150](docs/adr/0150-android-target.md)) uses the upstre
 
 Shipped in the APK: `libmain.so` (the runtime, the recompiled code and SDL, Zlib, linked statically with libc++), our `MapleThiefActivity`, SDL's Java classes (`org.libsdl.app`, Zlib, compiled from the pinned SDL archive) and our icon. It links the system's own libraries (Bionic, `libGLESv2`, `libEGL`, `libandroid`, `liblog`, `libaaudio`, `libOpenSLES`), which are part of the phone and not shipped. No AndroidX or other Java library. The notices go into the APK's `assets/licenses/` (`SDL3.txt`, `libc++.txt`, the fonts' OFL texts), as in every kit.
 
+## Linux only
+
+The Linux player's AppImage ([ADR 0193](docs/adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md), [#349](https://github.com/armaatus/maplethief-port/issues/349)) is a type-2 runtime followed by a SquashFS image of the player's files. The runtime is the only third-party binary in it. [`tools/containers/linux-game/Dockerfile`](tools/containers/linux-game/Dockerfile) downloads it and checks its SHA-256, and `mtport.release guard` accepts no other runtime (`APPIMAGE_RUNTIMES`). The Flatpak bundle carries no third-party code of its own: it runs on the Freedesktop runtime that Flatpak installs from Flathub.
+
+| Dependency | Version | Pin | License | Mechanism | Used for |
+|---|---|---|---|---|---|
+| **AppImage type-2 runtime** ([AppImage/type2-runtime](https://github.com/AppImage/type2-runtime)) | release `20251108` → `dd6cebedcbddde9c82f89b011e8e1d40b6e43868` (2025-11-07) | `runtime-x86_64`, SHA-256 `2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d` (944,632 bytes); `runtime-aarch64`, SHA-256 `00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444` | MIT (its `LICENSE` and `src/runtime/runtime.c`; GitHub's licence detection says NOASSERTION because the file also lists what the binary links). Statically linked into it: musl 1.2.5 (MIT), libfuse 3.15.0 (LGPL-2.1, with the runtime's patch to `mount.c`), squashfuse 0.5.2 (BSD-2-Clause), zstd 1.5.6 (BSD-3-Clause, one of its two licences), zlib 1.3.1 (Zlib), mimalloc 2.1.7 (MIT) | `ARG APPIMAGE_RUNTIME_RELEASE=20251108` and `APPIMAGE_RUNTIME_SHA256_{AMD64,ARM64}` in the Dockerfile; GitHub release asset `https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-<arch>` | The front of `MapleThief-<version>-linux-<arch>.AppImage`: it mounts the SquashFS image with FUSE 3 and runs `AppRun` |
+
+Where the versions come from: libfuse and squashfuse from the runtime's `scripts/common/install-dependencies.sh` at that commit (`fuse-3.15.0.tar.xz`, SHA-256 `70589cfd5e1cff7ccd6ac91c86c01be340b227285c5e200baa284e401eea2ca0`; squashfuse `0.5.2.tar.gz`, SHA-256 `db0238c5981dabbd80ee09ae15387f390091668ca060a7bc38047912491443d3`); zstd and zlib from the version strings in the pinned `runtime-x86_64`; musl and mimalloc from Alpine 3.21, which the runtime's `scripts/chroot/` build uses (`mimalloc-dev` is in its `src/runtime/Makefile` but missing from its `LICENSE`'s list).
+
+The notices go with every Linux player download, and so into the AppImage, in `licenses/AppImage-runtime/` (`MAPLETHIEF_APPIMAGE_LICENSE_PINS` in `cmake/Dependencies.cmake`, each downloaded at configure time and checked by its SHA-256):
+
+- `AppImage-runtime.txt`: `LICENSE` of AppImage/type2-runtime at `dd6cebedcbddde9c82f89b011e8e1d40b6e43868`, SHA-256 `aa154fc9070614bbe7921f89db11efd1dba7a1f3a41685958110e2230f9c0ca1`
+- `libfuse-LGPL-2.1.txt`: `LGPL2.txt` of libfuse/libfuse tag `fuse-3.15.0`, SHA-256 `dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551`
+- `squashfuse.txt`: `LICENSE` of vasi/squashfuse tag `0.5.2`, SHA-256 `9e909cc8a8ba27b1a649c964cf9eda37de911f3138c2b64e6d2f01703904ac13`
+- `zstd.txt`: `LICENSE` of facebook/zstd tag `v1.5.6`, SHA-256 `7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8`
+- `zlib.txt`: `LICENSE` of madler/zlib tag `v1.3.1`, SHA-256 `845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243`
+- `musl.txt`: `COPYRIGHT` of musl tag `v1.2.5` (`https://git.musl-libc.org/cgit/musl/plain/COPYRIGHT?h=v1.2.5`), SHA-256 `f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af`
+- `mimalloc.txt`: `LICENSE` of microsoft/mimalloc tag `v2.1.7`, SHA-256 `19c99805e7a44a34b297a75d1edea9985e300066dfc024d5c99d4236d4573b5d`
+
+libfuse is LGPL-2.1 and linked statically into the runtime, a separate program that never links with ours ([ADR 0249](docs/adr/0249-the-appimage-runtime-and-its-lgpl-part.md), the exception to ADR 0003's rule). The runtime's complete source is what lets a user relink it: the runtime's repository at the commit above (its patch is `patches/libfuse/mount.c.diff`) and the libfuse and squashfuse archives named above. The runtime is bumped with these texts in one commit ([Bumping a dependency](docs/build/how-to/bump-a-dependency.md)); `scripts/deps check` lists it as `APPIMAGE_RUNTIME_RELEASE` and the texts as `AppImage licence …`.
+
 ## Shipped binaries
 
-Release builds link only SDL3 (Zlib), stb_image, stb_image_write and stb_truetype (used under the Unlicense) and dr_mp3 and dr_flac (used under the Unlicense or MIT-0). None of these requires a notice in the binary. The runtime also embeds the NanumGothic and Fira Sans fonts (SIL OFL 1.1), which may be bundled with software as long as their copyright notices and licences go with them: the kit carries `licenses/NanumGothic-OFL.txt` and `licenses/FiraSans-OFL.txt`, and the fonts keep their names. Release packaging still copies this file and the upstream license texts into the kit (`THIRD_PARTY.md` and `licenses/` at its top level; `cmake/Packaging.cmake`, [ADR 0023](docs/adr/0023-local-ci-and-packaging.md)). The Switch's NRO links more, and carries those notices: [Nintendo Switch only](#nintendo-switch-only). The Android APK adds libc++ and SDL's Java classes: [Android only](#android-only).
+Release builds link only SDL3 (Zlib), stb_image, stb_image_write and stb_truetype (used under the Unlicense) and dr_mp3 and dr_flac (used under the Unlicense or MIT-0). None of these requires a notice in the binary. The runtime also embeds the NanumGothic and Fira Sans fonts (SIL OFL 1.1), which may be bundled with software as long as their copyright notices and licences go with them: the kit carries `licenses/NanumGothic-OFL.txt` and `licenses/FiraSans-OFL.txt`, and the fonts keep their names. Release packaging still copies this file and the upstream license texts into the kit (`THIRD_PARTY.md` and `licenses/` at its top level; `cmake/Packaging.cmake`, [ADR 0023](docs/adr/0023-local-ci-and-packaging.md)). The Switch's NRO links more, and carries those notices: [Nintendo Switch only](#nintendo-switch-only). The Android APK adds libc++ and SDL's Java classes: [Android only](#android-only). The Linux AppImage adds its type-2 runtime: [Linux only](#linux-only).

@@ -9,9 +9,12 @@
 // 2 ms on the Mac). Further down: #88's present filters, and GPU presentation (#130, ADR 0068:
 // the GL frame copied on the GPU and composed with an overlay, without a read-back).
 //
-// Local only. CI has no GPU: every case passes as "skipped" (the "gfx_gpu: skipped" line,
-// which CTest's SKIP_REGULAR_EXPRESSION turns into a skip) when there is no GPU device, and on
-// GitHub Actions. MAPLETHIEF_GPU_TESTS=1 makes a missing device a failure, =0 skips.
+// Without a GPU device every case passes as "skipped" (the "gfx_gpu: skipped" line, which
+// CTest's SKIP_REGULAR_EXPRESSION turns into a skip), and so it does on GitHub Actions unless
+// the job asks for the tests. MAPLETHIEF_GPU_TESTS=1 makes a missing device a failure, =0
+// skips. CI's Linux job sets =1 on Mesa's software Vulkan driver, lavapipe (#364): on a
+// software device the GPU-time limits (written for the Mac's GPU) are not checked, and the
+// cases that only measure time are skipped; every picture comparison runs.
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
@@ -65,6 +68,12 @@ SDL_GPUDevice *device() {
         if (want == "0" || (want != "1" && std::string(env("GITHUB_ACTIONS")) == "true")) {
             return static_cast<SDL_GPUDevice *>(nullptr);
         }
+        // Without a display (CI's Linux runner) SDL's offscreen video driver, which the device
+        // and the offscreen renderers need no more of: nothing here opens a window.
+        if (!SDL_WasInit(SDL_INIT_VIDEO) && env("SDL_VIDEO_DRIVER")[0] == '\0' &&
+            !SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+            SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "offscreen");
+        }
         SDL_GPUDevice *d = mt_gfx_gpu_create_device();
         if (d == nullptr && want == "1") {
             FAIL("MAPLETHIEF_GPU_TESTS=1 but there is no GPU device: " << SDL_GetError());
@@ -81,6 +90,38 @@ SDL_GPUDevice *device() {
     do {                                                                                           \
         if (device() == nullptr) {                                                                 \
             std::printf("gfx_gpu: skipped: no GPU device (CI, or MAPLETHIEF_GPU_TESTS=0)\n");      \
+            return;                                                                                \
+        }                                                                                          \
+    } while (0)
+
+// The device rasterizes on the CPU (#364): Mesa's lavapipe (llvmpipe), SwiftShader, or
+// Direct3D's WARP adapter (the Microsoft Basic Render Driver), by SDL's name for the device.
+// Its GPU time says nothing about a GPU's, so the time limits are not checked on it.
+bool software_device() {
+    static const bool soft = [] {
+        const char *name = device() != nullptr
+                               ? SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device()),
+                                                       SDL_PROP_GPU_DEVICE_NAME_STRING, "")
+                               : "";
+        const std::string n = name != nullptr ? name : "";
+        const bool s = n.find("llvmpipe") != std::string::npos ||
+                       n.find("SwiftShader") != std::string::npos ||
+                       n.find("Basic Render Driver") != std::string::npos;
+        if (device() != nullptr) {
+            std::printf("gfx_gpu: device name \"%s\"%s\n", n.c_str(),
+                        s ? ", a software device: the GPU-time limits are not checked" : "");
+        }
+        return s;
+    }();
+    return soft;
+}
+
+// A case that only measures GPU time: skipped on a software device.
+#define REQUIRE_HARDWARE_GPU()                                                                     \
+    do {                                                                                           \
+        REQUIRE_GPU();                                                                             \
+        if (software_device()) {                                                                   \
+            std::printf("gfx_gpu: skipped: GPU time on a software device\n");                      \
             return;                                                                                \
         }                                                                                          \
     } while (0)
@@ -186,6 +227,7 @@ struct SceneSpec {
     u32 w, h;
     golden::Rgba fill;
     Scene draw;
+    bool lines = false; // a scene of lines: see check_scene
 };
 
 void blend_factors_scene(mt_gfx_target *t) {
@@ -409,6 +451,58 @@ void check_scene(const SceneSpec &s) {
     const auto r = golden::check_golden(gpu, path, std::string("gfx_gpu/") + s.golden, k_tolerance,
                                         golden::Update::Never);
     std::printf("gfx_gpu: %s: %s\n", s.golden, describe(r.comparison).c_str());
+    if (s.lines && software_device() && !r.passed) {
+        // Mesa's lavapipe rasterizes Vulkan's lines, not GL ES's diamond-exit ones that the
+        // backend's line shift aims at (ADR 0060), so a line takes some of its steps a pixel
+        // away from the reference's (#364, ADR 0202). There every pixel beyond the tolerance
+        // must be a line's pixel moved by one: its colour within the tolerance somewhere in
+        // the reference's 3 x 3 neighbourhood, and the reference's colour in the GPU's.
+        // A missing or extra line, a wrong colour or blend still fails.
+        const golden::Image &ref = sw;
+        auto near = [](const golden::Image &img, int x, int y, golden::Rgba c) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    const int nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= img.width() || ny >= img.height()) {
+                        continue;
+                    }
+                    const golden::Rgba n = img.at(nx, ny);
+                    if (std::abs(n.r - c.r) <= k_tolerance.channel &&
+                        std::abs(n.g - c.g) <= k_tolerance.channel &&
+                        std::abs(n.b - c.b) <= k_tolerance.channel &&
+                        std::abs(n.a - c.a) <= k_tolerance.channel) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+        std::size_t moved = 0, other = 0;
+        for (int y = 0; y < gpu.height(); y++) {
+            for (int x = 0; x < gpu.width(); x++) {
+                const golden::Rgba a = gpu.at(x, y), e = ref.at(x, y);
+                if (std::max({std::abs(a.r - e.r), std::abs(a.g - e.g), std::abs(a.b - e.b),
+                              std::abs(a.a - e.a)}) <= k_tolerance.channel) {
+                    continue;
+                }
+                if (near(gpu, x, y, e) && near(ref, x, y, a)) {
+                    moved++;
+                } else {
+                    other++;
+                    std::printf("gfx_gpu: %s: (%d, %d) is %d,%d,%d,%d, the reference %d,%d,%d,%d\n",
+                                s.golden, x, y, a.r, a.g, a.b, a.a, e.r, e.g, e.b, e.a);
+                }
+            }
+        }
+        const std::size_t total = static_cast<std::size_t>(gpu.width()) * gpu.height();
+        std::printf("gfx_gpu: %s on a software device: %zu pixel(s) of a line a pixel away, %zu "
+                    "other(s) (at most %.1f%% of the pixels)\n",
+                    s.golden, moved, other, 100.0 * k_tolerance.max_differing_ratio);
+        CHECK_MESSAGE(static_cast<double>(other) <=
+                          k_tolerance.max_differing_ratio * static_cast<double>(total),
+                      r.message);
+        return;
+    }
     CHECK_MESSAGE(r.passed, r.message);
 }
 
@@ -457,7 +551,7 @@ TEST_CASE("golden scenes on the GPU: the perspective floor (gfx_perspective)") {
 TEST_CASE("golden scenes on the GPU: lines (gfx_lines)") {
     REQUIRE_GPU();
     Fresh fresh;
-    check_scene({"gfx_lines", 96, 64, {}, lines_scene});
+    check_scene({"gfx_lines", 96, 64, {}, lines_scene, true});
 }
 
 TEST_CASE("internal scale 4: the prototype scene and a busy frame on both backends") {
@@ -521,8 +615,11 @@ TEST_CASE("batching: a busy frame is two batches, and its GPU time at scale 4") 
     // with the machine's load (median 3.23 ms at load average 17 against 0.57 ms alone), so
     // the check uses the best of the frames: every frame is the same work, and each reading is
     // an upper bound on it, so the smallest is the tightest. A real regression (more than
-    // 2 ms of GPU work) still fails, because then every frame reads over 2 ms.
-    CHECK(best_ms < 2.0);
+    // 2 ms of GPU work) still fails, because then every frame reads over 2 ms. Not on a
+    // software device (#364), whose time is the CPU's.
+    if (!software_device()) {
+        CHECK(best_ms < 2.0);
+    }
 }
 
 TEST_CASE("sync points: CPU writes and reads between draws") {
@@ -829,6 +926,82 @@ struct OffscreenPresent {
     }
 };
 
+// The GPU time of a draw on one or more presenters (#344), for the time checks below. A
+// fence-timed frame is an upper bound that grows with the machine's load: the fence's wait also
+// waits for other processes' work on the GPU and for the OS to wake this thread (#265: with a
+// second process drawing, the fence-timed blur read 0.43-1.09 ms while Metal's own GPU time for
+// the command buffer stayed at 0.49-0.60 ms). Such a disturbance only adds time and comes and
+// goes within seconds, so one window of frames can fail with no change in the work.
+//
+// So the presenters are timed in k_time_windows short windows, every presenter in turn in each
+// window (the two sides of a with/without pair see the same load). A window gives each
+// presenter's median frame of one draw and its pass, what each further draw adds (a clear and
+// the pass over the output): the frame's fixed part (the submit, the fence's wake-up) is the
+// same with any pass and follows the load. A round's reading is each presenter's median over the
+// windows, so a disturbance in fewer than half the windows changes nothing. A load that lasts
+// the whole round (another process drawing all along) can still push it over: while
+// `reading(best)` is at or over `limit`, the presenters are timed again after a pause, up to
+// k_time_rounds rounds, and each presenter keeps its smallest frame and pass over the rounds.
+// The without side is minimised too, so a disturbed baseline cannot hide a real cost; a cost
+// really over the limit reads over it in every round.
+struct GpuTime {
+    double frame = DBL_MAX; // ms, a frame of one draw
+    double pass = DBL_MAX;  // ms, what each further draw adds
+};
+
+constexpr int k_time_windows = 5;
+constexpr int k_time_frames = 15; // per window and presenter, each one draw and 1 + k_time_extra
+constexpr int k_time_extra = 4;
+constexpr int k_time_rounds = 8;
+
+double median_of(std::vector<double> v) {
+    std::sort(v.begin(), v.end());
+    return v[v.size() / 2];
+}
+
+struct GpuTimes {
+    std::vector<GpuTime> best; // per presenter, the smallest over the rounds
+    int rounds = 0;
+};
+
+// Each presenter has drawn its image once (OffscreenPresent::draw uploads it).
+GpuTimes gpu_time(const std::vector<OffscreenPresent *> &os,
+                  const std::function<double(const std::vector<GpuTime> &)> &reading,
+                  double limit) {
+    GpuTimes t;
+    t.best.resize(os.size());
+    for (OffscreenPresent *o : os) {
+        o->frame_ms(1 + k_time_extra); // warms the pipelines up
+    }
+    do {
+        if (t.rounds > 0) {
+            SDL_Delay(100);
+        }
+        std::vector<std::vector<double>> frames(os.size()), passes(os.size());
+        for (int w = 0; w < k_time_windows; w++) {
+            for (size_t i = 0; i < os.size(); i++) {
+                std::vector<double> one, many;
+                for (int f = 0; f < k_time_frames; f++) {
+                    one.push_back(os[i]->frame_ms(1));
+                    many.push_back(os[i]->frame_ms(1 + k_time_extra));
+                }
+                const double frame = median_of(one);
+                frames[i].push_back(frame);
+                passes[i].push_back(std::max(0.0, (median_of(many) - frame) / k_time_extra));
+            }
+        }
+        for (size_t i = 0; i < os.size(); i++) {
+            t.best[i].frame = std::min(t.best[i].frame, median_of(frames[i]));
+            t.best[i].pass = std::min(t.best[i].pass, median_of(passes[i]));
+        }
+        t.rounds++;
+    } while (reading(t.best) >= limit && t.rounds < k_time_rounds);
+    return t;
+}
+
+// What the second presenter's draw adds to the first's.
+double added_pass(const std::vector<GpuTime> &t) { return std::max(0.0, t[1].pass - t[0].pass); }
+
 golden::Image flat(int w, int h, golden::Rgba c) {
     golden::Image img(w, h);
     for (int y = 0; y < h; y++) {
@@ -1023,7 +1196,7 @@ TEST_CASE("present filters: lcd darkens the cell edges on texel boundaries") {
 }
 
 TEST_CASE("present filters: GPU time per frame at 1080p, 1800p and 4K outputs (under 1 ms)") {
-    REQUIRE_GPU();
+    REQUIRE_HARDWARE_GPU();
     // A busy image (every texel its own colour), so no filter takes an early way out.
     golden::Image img(480, 320);
     for (int y = 0; y < 320; y++) {
@@ -1036,36 +1209,27 @@ TEST_CASE("present filters: GPU time per frame at 1080p, 1800p and 4K outputs (u
     struct Size {
         int w, h;
     };
-    constexpr int frames = 60;
-    constexpr int extra = 4;
+    constexpr double limit_ms = 1.0;
     for (const Size size : {Size{1920, 1080}, Size{2880, 1800}, Size{3840, 2160}}) {
         for (const fe::ShaderFilter f : {fe::ShaderFilter::kNone, fe::ShaderFilter::kXbr,
                                          fe::ShaderFilter::kCrt, fe::ShaderFilter::kLcd}) {
             OffscreenPresent o(size.w, size.h, f, 480, 320, ScaleMode::kFit);
-            o.draw(img); // uploads; warms the pipeline up
-            o.frame_ms(1 + extra);
-            std::vector<double> one, many;
-            for (int i = 0; i < frames; i++) {
-                one.push_back(o.frame_ms(1));
-                many.push_back(o.frame_ms(1 + extra));
-            }
-            std::sort(one.begin(), one.end());
-            std::sort(many.begin(), many.end());
-            const double frame = one[frames / 2];
-            // The pass's own time: what each further draw adds (a clear and the pass).
-            const double pass = std::max(0.0, (many[frames / 2] - frame) / extra);
+            o.draw(img); // uploads
+            const GpuTimes t =
+                gpu_time({&o}, [](const std::vector<GpuTime> &b) { return b[0].pass; }, limit_ms);
+            const double pass = t.best[0].pass;
             const Rect &r = o.presenter.placement().rect;
             const char *name = f == fe::ShaderFilter::kNone ? "copy" : fe::shader_filter_name(f);
-            std::printf("gfx_gpu: present %s at %dx%d (the image %gx%g): the frame %.3f ms "
-                        "(median of %d, %.3f ms at most), the pass alone %.3f ms (fence-timed, "
-                        "upper bounds)\n",
+            std::printf("gfx_gpu: present %s at %dx%d (the image %gx%g): the frame %.3f ms, the "
+                        "pass alone %.3f ms (%d round(s), each the median of %d windows of %d "
+                        "frames, fence-timed, upper bounds)\n",
                         name, size.w, size.h, static_cast<double>(r.w), static_cast<double>(r.h),
-                        frame, frames, one.back(), pass);
+                        t.best[0].frame, pass, t.rounds, k_time_windows, k_time_frames);
             // #88's acceptance criterion, a filter under 1 ms a frame on the target hardware (the
             // median, as ADR 0060's bound), on the pass's own time at every size. The frame's
             // fixed part (the submit, the fence's wake-up: the copy pass's frame minus its pass)
             // is the same without a filter and follows the machine's load, not the filter.
-            CHECK(pass < 1.0);
+            CHECK(pass < limit_ms);
         }
     }
 }
@@ -1120,7 +1284,7 @@ TEST_CASE("present border: blur on SDL's GPU renderer under every filter, 16:9 a
 }
 
 TEST_CASE("present border: the blur's GPU time at 1080p and 21:9 (under 1 ms a frame)") {
-    REQUIRE_GPU();
+    REQUIRE_HARDWARE_GPU();
     golden::Image img(480, 320);
     for (int y = 0; y < 320; y++) {
         for (int x = 0; x < 480; x++) {
@@ -1132,9 +1296,6 @@ TEST_CASE("present border: the blur's GPU time at 1080p and 21:9 (under 1 ms a f
     struct Size {
         int w, h;
     };
-    constexpr int frames = 60;
-    constexpr int extra = 4;
-    constexpr int max_rounds = 8;
     constexpr double blur_limit_ms = 1.0;
     for (const Size size : {Size{1920, 1080}, Size{2560, 1080}, Size{3840, 2160}}) {
         for (const int scale : {1, 3}) {
@@ -1144,57 +1305,32 @@ TEST_CASE("present border: the blur's GPU time at 1080p and 21:9 (under 1 ms a f
                     src.set(x, y, img.at(x / scale, y / scale));
                 }
             }
-            // The smallest of each over the rounds so far.
-            double pass[2] = {DBL_MAX, DBL_MAX};
-            double frame[2] = {DBL_MAX, DBL_MAX};
-            double blur = 0.0;
-            int rounds = 0;
-            do {
-                if (rounds > 0) {
-                    SDL_Delay(100);
-                }
-                for (const fe::BorderMode b : {fe::BorderMode::kColor, fe::BorderMode::kBlur}) {
-                    OffscreenPresent o(size.w, size.h, fe::ShaderFilter::kNone,
-                                       static_cast<u32>(src.width()),
-                                       static_cast<u32>(src.height()), ScaleMode::kFit);
-                    o.presenter.set_border(b);
-                    o.draw(src); // uploads; warms the pipelines up
-                    o.frame_ms(1 + extra);
-                    std::vector<double> one, many;
-                    for (int i = 0; i < frames; i++) {
-                        one.push_back(o.frame_ms(1));
-                        many.push_back(o.frame_ms(1 + extra));
-                    }
-                    std::sort(one.begin(), one.end());
-                    std::sort(many.begin(), many.end());
-                    const int k = b == fe::BorderMode::kBlur ? 1 : 0;
-                    const double one_ms = one[frames / 2];
-                    frame[k] = std::min(frame[k], one_ms);
-                    pass[k] = std::min(pass[k], std::max(0.0, (many[frames / 2] - one_ms) / extra));
-                }
-                // What the blur adds to a draw of the image (its chain and the stretch): the draw
-                // with it less the draw without (each a clear and the copy pass over the output).
-                blur = std::max(0.0, pass[1] - pass[0]);
-                rounds++;
-            } while (blur >= blur_limit_ms && rounds < max_rounds);
+            const auto present = [&](fe::BorderMode b) {
+                auto o = std::make_unique<OffscreenPresent>(
+                    size.w, size.h, fe::ShaderFilter::kNone, static_cast<u32>(src.width()),
+                    static_cast<u32>(src.height()), ScaleMode::kFit);
+                o->presenter.set_border(b);
+                o->draw(src); // uploads
+                return o;
+            };
+            const auto without = present(fe::BorderMode::kColor);
+            const auto with = present(fe::BorderMode::kBlur);
+            // What the blur adds to a draw of the image (its chain and the stretch): the draw
+            // with it less the draw without (each a clear and the copy pass over the output).
+            const GpuTimes t = gpu_time({without.get(), with.get()}, added_pass, blur_limit_ms);
+            const double blur = added_pass(t.best);
             std::printf("gfx_gpu: border blur at %dx%d, render scale %d: a draw %.3f ms with it, "
                         "%.3f ms without, the blur alone %.3f ms; the frame %.3f / %.3f ms "
-                        "(best of %d round(s), each the median of %d, fence-timed, upper "
-                        "bounds)\n",
-                        size.w, size.h, scale, pass[1], pass[0], blur, frame[1], frame[0], rounds,
-                        frames);
+                        "(best of %d round(s), each the median of %d windows of %d frames, "
+                        "fence-timed, upper bounds)\n",
+                        size.w, size.h, scale, t.best[1].pass, t.best[0].pass, blur,
+                        t.best[1].frame, t.best[0].frame, t.rounds, k_time_windows, k_time_frames);
             // #157's criterion: the blur under 1 ms a frame on the Mac at 1080p (and here at
             // 21:9 and 4K, at render scales 1 and 3). Measured on an M4 (#265): the blur costs
             // 0.37-0.41 ms at render scale 1 and 0.53-0.57 ms at scale 3 at 1080p, the same in
             // Debug and Release, unchanged since the limit was set (0.54-0.56 at ac7a3c2), and
-            // SDL_RenderPresent's CPU share of it is nil. A reading can still be about twice that:
-            // with a second process drawing, the fence-timed blur read 0.43-1.09 ms while Metal's
-            // own GPU time for the command buffer stayed at 0.49-0.60 ms, because the fence also
-            // waits for the other process's work. So a single window of 60 frames can fail with
-            // no change in the blur. Such a disturbance only adds time and passes within seconds,
-            // so a round over the limit is measured again, and each mode keeps its smallest
-            // reading: the without-blur side is minimised too, so a disturbed baseline cannot
-            // hide a real cost. A blur really over 1 ms reads over it in all the rounds.
+            // SDL_RenderPresent's CPU share of it is nil. A reading under load can be about twice
+            // that; gpu_time's windows and rounds keep such a disturbance out (#344).
             CHECK(blur < blur_limit_ms);
         }
     }
@@ -1347,47 +1483,39 @@ TEST_CASE("present grade: the picture adjustments on the GPU way, with and witho
 
 TEST_CASE(
     "present colorblind: GPU time at 1080p, 21:9 and 4K, render scales 1 and 3 (under 1 ms)") {
-    REQUIRE_GPU();
+    REQUIRE_HARDWARE_GPU();
     struct Size {
         int w, h;
     };
-    constexpr int frames = 60;
-    constexpr int extra = 4;
+    constexpr double limit_ms = 1.0;
     for (const Size size : {Size{1920, 1080}, Size{2560, 1080}, Size{3840, 2160}}) {
         for (const int scale : {1, 3}) {
             const golden::Image src = busy_image(480, 320, scale);
             for (const fe::ShaderFilter f : {fe::ShaderFilter::kNone, fe::ShaderFilter::kCrt}) {
-                double pass[2] = {};
-                double frame[2] = {};
-                for (const bool on : {false, true}) {
-                    OffscreenPresent o(size.w, size.h, f, static_cast<u32>(src.width()),
-                                       static_cast<u32>(src.height()), ScaleMode::kFit);
-                    o.presenter.set_colorblind(on ? fe::ColorblindFilter::kDeuteranopia
-                                                  : fe::ColorblindFilter::kOff);
-                    o.draw(src); // uploads; warms the pipelines up
-                    o.frame_ms(1 + extra);
-                    std::vector<double> one, many;
-                    for (int i = 0; i < frames; i++) {
-                        one.push_back(o.frame_ms(1));
-                        many.push_back(o.frame_ms(1 + extra));
-                    }
-                    std::sort(one.begin(), one.end());
-                    std::sort(many.begin(), many.end());
-                    const int k = on ? 1 : 0;
-                    frame[k] = one[frames / 2];
-                    pass[k] = std::max(0.0, (many[frames / 2] - frame[k]) / extra);
-                }
+                const auto present = [&](fe::ColorblindFilter c) {
+                    auto o = std::make_unique<OffscreenPresent>(
+                        size.w, size.h, f, static_cast<u32>(src.width()),
+                        static_cast<u32>(src.height()), ScaleMode::kFit);
+                    o->presenter.set_colorblind(c);
+                    o->draw(src); // uploads
+                    return o;
+                };
+                const auto off = present(fe::ColorblindFilter::kOff);
+                const auto on = present(fe::ColorblindFilter::kDeuteranopia);
                 // What the filter adds to a draw of the image: its pass into the image-sized
                 // target (and the target switch), the draw with it less the draw without.
-                const double added = std::max(0.0, pass[1] - pass[0]);
+                const GpuTimes t = gpu_time({off.get(), on.get()}, added_pass, limit_ms);
+                const double added = added_pass(t.best);
                 std::printf("gfx_gpu: colour-blind filter at %dx%d, render scale %d, under %s: a "
                             "draw %.3f ms with it, %.3f ms without, the filter alone %.3f ms; the "
-                            "frame %.3f / %.3f ms (median of %d, fence-timed, upper bounds)\n",
+                            "frame %.3f / %.3f ms (best of %d round(s), each the median of %d "
+                            "windows of %d frames, fence-timed, upper bounds)\n",
                             size.w, size.h, scale, f == fe::ShaderFilter::kNone ? "copy" : "crt",
-                            pass[1], pass[0], added, frame[1], frame[0], frames);
+                            t.best[1].pass, t.best[0].pass, added, t.best[1].frame, t.best[0].frame,
+                            t.rounds, k_time_windows, k_time_frames);
                 // #158's criterion: under 1 ms a frame on the Mac at 1080p (and here at 21:9
                 // and 4K, render scales 1 and 3, with and without a shader filter).
-                CHECK(added < 1.0);
+                CHECK(added < limit_ms);
             }
         }
     }
@@ -1582,12 +1710,11 @@ TEST_CASE("present widescreen: the key pad's strips and a narrow view in the wid
 }
 
 TEST_CASE("present widescreen: the wide picture's GPU time at 1080p and 1800p (under 1 ms)") {
-    REQUIRE_GPU();
+    REQUIRE_HARDWARE_GPU();
     struct Size {
         int w, h;
     };
-    constexpr int frames = 60;
-    constexpr int extra = 4;
+    constexpr double limit_ms = 1.0;
     for (const Size size : {Size{1920, 1080}, Size{2880, 1800}}) {
         for (const int k : {1, 3}) {
             const WideImages wi = wide_images(k);
@@ -1595,41 +1722,35 @@ TEST_CASE("present widescreen: the wide picture's GPU time at 1080p and 1800p (u
             for (const fe::ShaderFilter f : {fe::ShaderFilter::kNone, fe::ShaderFilter::kCrt}) {
                 for (const fe::ColorblindFilter cb :
                      {fe::ColorblindFilter::kOff, fe::ColorblindFilter::kDeuteranopia}) {
-                    double pass[2] = {};
-                    double frame[2] = {};
-                    for (const bool wings : {false, true}) {
-                        OffscreenPresent o(size.w, size.h, f, 480 * uk, 320 * uk, ScaleMode::kFit);
-                        o.presenter.set_colorblind(cb);
-                        o.presenter.set_wide(568);
+                    const auto present = [&](bool wings) {
+                        auto o = std::make_unique<OffscreenPresent>(size.w, size.h, f, 480 * uk,
+                                                                    320 * uk, ScaleMode::kFit);
+                        o->presenter.set_colorblind(cb);
+                        o->presenter.set_wide(568);
                         // Without wings: #86's wide placement with the bars beside the image.
-                        REQUIRE(o.presenter.upload_wings(wi.whole.bytes().data(), 568 * uk,
-                                                         320 * uk, wings ? 568 : 480));
-                        o.draw(wi.screen); // uploads; warms the pipelines up
-                        CHECK(o.presenter.picture_drawn() == wings);
-                        o.frame_ms(1 + extra);
-                        std::vector<double> one, many;
-                        for (int i = 0; i < frames; i++) {
-                            one.push_back(o.frame_ms(1));
-                            many.push_back(o.frame_ms(1 + extra));
-                        }
-                        std::sort(one.begin(), one.end());
-                        std::sort(many.begin(), many.end());
-                        const int j = wings ? 1 : 0;
-                        frame[j] = one[frames / 2];
-                        pass[j] = std::max(0.0, (many[frames / 2] - frame[j]) / extra);
-                    }
+                        REQUIRE(o->presenter.upload_wings(wi.whole.bytes().data(), 568 * uk,
+                                                          320 * uk, wings ? 568 : 480));
+                        o->draw(wi.screen); // uploads
+                        CHECK(o->presenter.picture_drawn() == wings);
+                        return o;
+                    };
+                    const auto without = present(false);
+                    const auto with = present(true);
                     // What composing the wide picture adds to a draw: the composition (the GL
                     // frame's columns and the screen image into the picture), the grade and the
                     // pass over 568 points instead of 480.
-                    const double added = std::max(0.0, pass[1] - pass[0]);
+                    const GpuTimes t = gpu_time({without.get(), with.get()}, added_pass, limit_ms);
+                    const double added = added_pass(t.best);
                     std::printf("gfx_gpu: widescreen's wide picture at %dx%d, render scale %d, "
                                 "%s, colour-blind %s: a draw %.3f ms with it, %.3f ms without "
-                                "wings, the picture alone %.3f ms; the frame %.3f / %.3f ms "
-                                "(median of %d, fence-timed, upper bounds)\n",
+                                "wings, the picture alone %.3f ms; the frame %.3f / %.3f ms (best "
+                                "of %d round(s), each the median of %d windows of %d frames, "
+                                "fence-timed, upper bounds)\n",
                                 size.w, size.h, k, f == fe::ShaderFilter::kNone ? "copy" : "crt",
-                                fe::colorblind_filter_name(cb), pass[1], pass[0], added, frame[1],
-                                frame[0], frames);
-                    CHECK(added < 1.0);
+                                fe::colorblind_filter_name(cb), t.best[1].pass, t.best[0].pass,
+                                added, t.best[1].frame, t.best[0].frame, t.rounds, k_time_windows,
+                                k_time_frames);
+                    CHECK(added < limit_ms);
                 }
             }
         }

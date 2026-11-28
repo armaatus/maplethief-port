@@ -12,6 +12,9 @@
 #       and the WAV are the same bytes, and the overlay says it is off in such a run.
 # Logs, CSVs, captures and data directories go to OUT (build/, never committed).
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 # skip_intros is pinned off (#174, ADR 0096): it runs the guest clock x8 through scenes, and this
 # test times or counts the guest's ticks; a suite run with MAPLETHIEF_SETTINGS="skip_intros = on"
 # must still pass. The flag comes after the environment's settings, so it wins.

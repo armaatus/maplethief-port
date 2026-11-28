@@ -47,6 +47,7 @@
 #include "focus.h"
 #include "gamepad.h"
 #include "guest_state.h"
+#include "hang_watchdog.h"
 #include "input.h"
 #include "keyboard.h"
 #include "keypad_layout.h"
@@ -61,6 +62,7 @@
 #include "maplethief/input.h"
 #include "maplethief/memory.h"
 #include "maplethief/saves.h"
+#include "maplethief/scriptvm.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
 #include "maplethief/widescreen.h"
@@ -69,8 +71,11 @@
 #include "present.h"
 #include "prompts.h"
 #include "replay.h"
+#include "restored_content.h"
 #include "save_tools.h"
 #include "scene_skip.h"
+#include "speech.h"
+#include "speech_menus.h"
 #include "virtual_pad.h"
 
 namespace game_driver {
@@ -122,6 +127,39 @@ struct Task {
     double timeout;
     std::function<bool(mt_cpu *, double)> step;
 };
+
+// The menus' speech (#393, speech_menus.h) over a run, with MT_SPEECH_MENUS=1: the frontend's
+// SpeechMenus on the log backend after each turn's focus, as game.cpp's speak_menus. It counts
+// what it should have said (each change of the focused control while the focus is active, each
+// change of the popup menu's or the shop's row) against what was said, and the focused buttons
+// whose image has no name. Texts are hashed in its output, never printed.
+struct SpeechProbe {
+    fe::LogSpeechBackend *log = nullptr;
+    fe::Speech speech;
+    fe::SpeechMenus menus;
+    std::uint32_t control = 0;
+    std::string action;
+    fe::MenuSpot spot;
+    std::uint64_t moves = 0;          // focused control changes
+    std::uint64_t spot_moves = 0;     // row changes
+    std::uint64_t nameless = 0;       // rows whose table name was empty
+    std::vector<std::string> images;  // every focused control's table key, once each, in order
+    std::vector<std::string> unnamed; // of them, those without a name
+    SpeechProbe() {
+        auto backend = std::make_unique<fe::LogSpeechBackend>([](const std::string &) {});
+        log = backend.get();
+        speech.set_backend(std::move(backend));
+        speech.set_enabled(true);
+    }
+};
+
+inline std::uint32_t fnv1a(const std::string &s) {
+    std::uint32_t h = 2166136261u;
+    for (const unsigned char c : s) {
+        h = (h ^ c) * 16777619u;
+    }
+    return h;
+}
 
 struct Run {
     std::string mode;
@@ -188,11 +226,19 @@ struct Run {
     // With wide_keypad: the groups at the view's edges (widescreen_hud = edges), or at their 3:2
     // places (narrow).
     bool wide_anchored = true;
+    // MT_SPEECH_MENUS=1 (#393): the menus' speech over the run (speech_turn).
+    std::unique_ptr<SpeechProbe> speech;
     // The outcome of the run, for a flow's last checks (boot() fills them).
     std::uint32_t outcome = 0;
     mt_process_result result{};
+    // The run ends in a trap on purpose (#335's forced crash): boot() checks for it instead.
+    bool expect_trap = false;
 
     Run() {
+        if (const char *e = std::getenv("MT_SPEECH_MENUS");
+            e != nullptr && std::strcmp(e, "1") == 0) {
+            speech = std::make_unique<SpeechProbe>();
+        }
         focus.set_forward(fe::MenuInput::sink, &menu);
         menu.set_actions(&actions);
         gamepads.set_hold_gate(fe::PadPointer::hold_gate, &pointer);
@@ -228,6 +274,12 @@ struct Run {
     std::function<std::string(mt_cpu *)> state;
     bool checkpoint_shots = false; // each checkpoint's screen also to OUT_DIR/check_NAME.png
     u64 end_step = UINT64_MAX;
+    // A part of the playthrough (#306, MT_CHECKPOINTS): a checkpoint "end" at the end of the
+    // turn the run is done in.
+    bool end_checkpoint = false;
+    // The deliberate one-tick change (#306, MT_NUDGE_TICK): at the end of this step's turn the
+    // virtual clock moves one game tick (50 ms) more.
+    u64 nudge_step = UINT64_MAX;
     // The turn's step: turns from the first (0), one fixed step of virtual time each.
     u64 step() const { return turns == 0 ? 0 : turns - 1; }
 };
@@ -238,6 +290,78 @@ inline void take_checkpoints(Run &r, mt_cpu *cpu);
 inline void survey_shots(Run &r, mt_cpu *cpu);
 inline void window_shots(Run &r, mt_cpu *cpu);
 inline void window_summary(const Run &r);
+
+// The menus' speech for one turn (MT_SPEECH_MENUS=1, SpeechProbe).
+inline void speech_turn(Run &r, mt_cpu *cpu) {
+    if (!r.speech) {
+        return;
+    }
+    SpeechProbe &p = *r.speech;
+    const double now = r.t;
+    const fe::FocusTarget *t = r.focus.active() ? r.focus.focused() : nullptr;
+    if (t == nullptr) {
+        p.control = 0;
+        p.action.clear();
+    } else if (t->object != p.control || t->action != p.action) {
+        p.control = t->object;
+        p.action = t->action;
+        p.moves++;
+        const std::string key = fe::shell_button_lookup(*t);
+        if (std::find(p.images.begin(), p.images.end(), key) == p.images.end()) {
+            p.images.push_back(key);
+            if (fe::shell_button_name(*t) == nullptr) {
+                p.unnamed.push_back(key + " (-[" + t->target + " " + t->action + "], panel " +
+                                    std::to_string(mt_input_panel()) + ")");
+            }
+        }
+    }
+    const std::vector<fe::ScreenLabel> labels =
+        r.focus.active() ? fe::runtime_labels(cpu) : std::vector<fe::ScreenLabel>{};
+    p.menus.shell_turn(r.focus, labels, p.speech, now);
+    const fe::MenuSpot spot = fe::read_menu_spot(cpu);
+    const fe::SpotText text = fe::spot_text(cpu, spot);
+    if (spot.kind != fe::MenuSpot::Kind::kNone &&
+        (spot.kind != p.spot.kind || spot.row != p.spot.row || spot.id != p.spot.id)) {
+        p.spot_moves++;
+        p.nameless += text.name.empty() ? 1 : 0;
+        std::printf("speech: %s row %d id %d%s price %d name #%08X\n",
+                    fe::menu_spot_kind_name(spot.kind), spot.row, spot.id,
+                    spot.equip ? " (equip)" : "", spot.price, fnv1a(text.name));
+    }
+    p.spot = spot;
+    p.menus.spot_turn(spot, text, p.speech, now);
+}
+
+// The menus' speech over the run: what it said against what it should have (SpeechProbe).
+inline void speech_summary(Run &r) {
+    if (!r.speech) {
+        return;
+    }
+    const SpeechProbe &p = *r.speech;
+    const fe::SpeechMenus::Stats &s = p.menus.stats();
+    std::string images;
+    for (const std::string &i : p.images) {
+        images += " " + i;
+    }
+    std::printf(
+        "speech: %llu focus moves, %llu controls said, %llu unnamed, %llu titles; %llu "
+        "rows, %llu said, %llu descriptions; %zu utterances; images:%s\n",
+        static_cast<unsigned long long>(p.moves), static_cast<unsigned long long>(s.controls),
+        static_cast<unsigned long long>(s.unnamed), static_cast<unsigned long long>(s.titles),
+        static_cast<unsigned long long>(p.spot_moves), static_cast<unsigned long long>(s.spots),
+        static_cast<unsigned long long>(s.details), p.log->said().size(), images.c_str());
+    for (const std::string &i : p.unnamed) {
+        std::printf("speech: no name for the control %s\n", i.c_str());
+    }
+    check(p.unnamed.empty() && s.unnamed == 0,
+          "the speech names every focused button (" + std::to_string(p.images.size()) + " images)");
+    check(s.controls == p.moves, "the speech says the focused control once per move (" +
+                                     std::to_string(s.controls) + " of " + std::to_string(p.moves) +
+                                     ")");
+    check(p.nameless == 0 && s.spots == p.spot_moves,
+          "the speech says the list's row once per move, each with a name (" +
+              std::to_string(s.spots) + " of " + std::to_string(p.spot_moves) + ")");
+}
 
 inline void on_log(void *, const char *line) {
     std::fprintf(stderr, "%s\n", line);
@@ -261,6 +385,7 @@ inline void pump(Run &r) {
 
 inline int turn(void *, mt_cpu *cpu, double now, double) {
     Run &r = *g_run;
+    fe::hang_watchdog_beat(); // as game.cpp's on_turn (#337)
     if (r.turns++ == 0) {
         r.first = now;
     }
@@ -284,6 +409,7 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     r.pointer.turn(now, r.focus.stats().uses);
     r.menu.turn(cpu, now);
     r.hints.turn(cpu, r.focus, mt_input_panel(), true, true);
+    speech_turn(r, cpu);
     while (r.next_step < r.steps.size() && r.t >= r.steps[r.next_step].at) {
         r.steps[r.next_step++].run(cpu);
         pump(r); // the pad's change reaches the action layer in this turn
@@ -292,6 +418,7 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     run_tasks(r, cpu);
     r.assists.turn(cpu, r.settings, r.actions, r.t);
     r.scene_skip.turn(cpu, r.settings, r.t);
+    mt_cf_set_missing_key_fallback(r.settings.fix_original_bugs ? 1 : 0); // as game.cpp
     mt_uikit_set_animation_scale(fe::ui_animation_scale(r.settings.ui_animations));
     std::int64_t frame = 0;
     std::memcpy(&frame, cpu->mem + k_last_frame, sizeof frame);
@@ -304,11 +431,15 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     }
     survey_shots(r, cpu);
     window_shots(r, cpu);
+    if (r.done && r.end_checkpoint) {
+        r.plan.add(r.step(), "end");
+        r.end_checkpoint = false;
+    }
     take_checkpoints(r, cpu);
     if (r.step() >= r.end_step) {
         r.done = true;
     }
-    r.clock.advance(r.step_ns);
+    r.clock.advance(r.step() == r.nudge_step ? r.step_ns + 50000000 : r.step_ns);
     if (r.audio) {
         r.audio->render_to(r.clock.elapsed_ns());
     }
@@ -426,6 +557,14 @@ inline bool logged(const Run &r, std::size_t from, const std::string &needle) {
     return false;
 }
 
+inline int count_logged(const Run &r, std::size_t from, const std::string &needle) {
+    int n = 0;
+    for (std::size_t i = from; i < r.log.size(); i++) {
+        n += r.log[i].find(needle) != std::string::npos ? 1 : 0;
+    }
+    return n;
+}
+
 inline std::uintmax_t file_size(const Run &r, const char *name) {
     std::error_code ec;
     const std::uintmax_t n = fs::file_size(r.data / "saves" / name, ec);
@@ -530,6 +669,7 @@ inline void finish(Run &r, double t) {
             static_cast<unsigned long long>(s.forwarded));
         check(r.input.live() == 0, "no touch is left down");
         window_summary(r);
+        speech_summary(r);
         r.done = true;
     });
 }
@@ -967,7 +1107,8 @@ inline void then_new_game(Run &r) {
         r, "the focus on Play", 5, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
     then_press(r, A);
 }
-inline void then_load_slot0(Run &r) {
+// `ready` ends it (default: the field), for a save that opens a popup over the field at once.
+inline void then_load_slot0(Run &r, Pred ready = nullptr) {
     then_wait_for(
         r, "the focus on Play", 15, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
     then_press(r, A);
@@ -979,7 +1120,7 @@ inline void then_load_slot0(Run &r) {
     // load follow the game's random numbers, and so the run's clock.
     then_wait(r, 1.5);
     then_press(r, A);
-    then_wait_for(r, "the game", 30, field, 1.0);
+    then_wait_for(r, "the game", 30, ready != nullptr ? ready : Pred(field), 1.0);
 }
 
 inline void then_finish(Run &r) {
@@ -987,6 +1128,7 @@ inline void then_finish(Run &r) {
         release_all(r);
         check(r.input.live() == 0, "no touch is left down");
         window_summary(r);
+        speech_summary(r);
         r.done = true;
     });
 }
@@ -1164,7 +1306,30 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     cfg.imports.log = on_log;
     cfg.app_main = mt_uikit_app_main;
     cfg.app_user = &ui;
-    mt_hooks_install_quest_page_fix(1); // in every mode, as the game (#167)
+    mt_hooks_install_quest_page_fix(1);  // in every mode, as the game (#167)
+    mt_hooks_install_text_wrap_guard(1); // in every mode, as the game (#419)
+    mt_hooks_install_original_bug_fixes(r.settings.fix_original_bugs ? 1 : 0); // as game.cpp
+    fe::install_restored_shops(r.settings.restored_content);                   // as game.cpp
+    fe::install_restored_carnival(r.settings.restored_content);                // as game.cpp
+    fe::install_restored_maps(r.settings.restored_content);                    // as game.cpp
+    // MAPLETHIEF_NATIVE_SCRIPT_VM=on|off|shadow: game.cpp's --native-script-vm (#386, #430), on
+    // by default as in the game.
+    const std::string script_vm = [] {
+        const char *e = std::getenv("MAPLETHIEF_NATIVE_SCRIPT_VM");
+        return std::string(e != nullptr ? e : "on");
+    }();
+    check(script_vm == "on" || script_vm == "off" || script_vm == "shadow",
+          "MAPLETHIEF_NATIVE_SCRIPT_VM is on, off or shadow (" + script_vm + ")");
+    mt_scriptvm_shadow_reset();
+    mt_scriptvm_reset_stats();
+    if (script_vm == "shadow") {
+        mt_scriptvm_shadow_install(1, nullptr);
+    } else {
+        mt_hooks_install_native_script_vm(script_vm == "on" ? 1 : 0);
+    }
+    if (script_vm != "on") {
+        std::printf("MAPLETHIEF_NATIVE_SCRIPT_VM: %s\n", script_vm.c_str());
+    }
     if (!r.clock.install()) {
         check(false, "the virtual clock is installed");
         return 1;
@@ -1193,7 +1358,43 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     if (r.before_run) {
         r.before_run(mt_process_cpu(p));
     }
+    // The hang watchdog (#337, ADR 0195) at the player's limit, though the virtual clock would
+    // leave it off: real time per turn, so every real-asset run records its longest turn and
+    // shows that no load or scene comes near the limit.
+    fe::hang_watchdog_start(mt_process_cpu(p), fe::kHangSeconds);
     const std::uint32_t outcome = mt_process_run(p);
+    fe::hang_watchdog_stop();
+    if (const fe::HangStats hang = fe::hang_watchdog_stats(); hang.seconds > 0) {
+        char line[160];
+        std::snprintf(line, sizeof line,
+                      "no hang report: the longest run-loop turn took %.2f s (the limit %g s)",
+                      hang.longest_gap, hang.seconds);
+        check(hang.hangs == 0u, line);
+    }
+    if (script_vm == "shadow") {
+        // The shadow runs (#430): every outermost Lua::execute run both ways, none different.
+        const mt_scriptvm_shadow_stats sh = mt_scriptvm_shadow_get_stats();
+        mt_scriptvm_shadow_difference d{};
+        const bool differs = mt_scriptvm_shadow_first_difference(&d) != 0;
+        char line[320];
+        std::snprintf(line, sizeof line,
+                      "scriptvm shadow: %llu runs, %llu native calls replayed, %llu with a "
+                      "difference%s%s",
+                      static_cast<unsigned long long>(sh.runs),
+                      static_cast<unsigned long long>(sh.natives),
+                      static_cast<unsigned long long>(sh.differences),
+                      differs ? "; the first: " : "", differs ? d.what : "");
+        check(sh.differences == 0u, line);
+        mt_scriptvm_shadow_install(0, nullptr);
+    } else if (script_vm == "on") {
+        const mt_scriptvm_stats st = mt_scriptvm_get_stats();
+        std::printf("scriptvm: %llu calls, %llu opcodes, %llu native calls, %llu checks\n",
+                    static_cast<unsigned long long>(st.calls),
+                    static_cast<unsigned long long>(st.steps),
+                    static_cast<unsigned long long>(st.natives),
+                    static_cast<unsigned long long>(st.checks));
+        mt_hooks_install_native_script_vm(0);
+    }
     const mt_process_result *res = mt_process_result_of(p);
     r.outcome = outcome;
     r.result = *res;
@@ -1201,9 +1402,14 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
         std::printf("trap kind %u at pc 0x%08X detail 0x%08X\n", res->trap_kind, res->trap_pc,
                     res->trap_detail);
     }
-    check(outcome == MT_PROCESS_STOPPED && r.done,
-          "the run went through its script and ended from the turn hook (" +
-              std::to_string(r.turns) + " turns)");
+    if (r.expect_trap) {
+        check(outcome == MT_PROCESS_TRAPPED,
+              "the run ended in the forced trap (" + std::to_string(r.turns) + " turns)");
+    } else {
+        check(outcome == MT_PROCESS_STOPPED && r.done,
+              "the run went through its script and ended from the turn hook (" +
+                  std::to_string(r.turns) + " turns)");
+    }
     check(!logged(r, 0, "uncaught NSException"), "no exception was raised");
     r.pad.reset();
     mt_process_destroy(p);

@@ -31,7 +31,70 @@ std::uint64_t steps_ns(std::uint64_t steps, const PacingPlan &p) {
     return steps / p.vblanks * tick_ns + steps % p.vblanks * tick_ns / p.vblanks;
 }
 
+// Refreshes a tick of `tick_ms` lasts at `refresh_hz` when that is a whole number within
+// kLockTolerance (ADR 0075's rule), or 0.
+std::uint32_t lock_vblanks(double refresh_hz, std::int64_t tick_ms) {
+    const double exact = refresh_hz * static_cast<double>(tick_ms) / 1000.0;
+    const double n = std::round(exact);
+    if (n >= 1 && std::fabs(exact / n - 1) <= kLockTolerance) {
+        return static_cast<std::uint32_t>(n);
+    }
+    return 0;
+}
+
+bool known_rate(double hz) { return hz >= 1 && hz <= 1000; }
+
+// A rate for the log: "60", "59.94", "15.38" (to 0.01, no trailing zeros).
+std::string hz_text(double hz) {
+    char b[32];
+    std::snprintf(b, sizeof b, "%.2f", hz);
+    std::string s = b;
+    while (s.back() == '0') {
+        s.pop_back();
+    }
+    if (s.back() == '.') {
+        s.pop_back();
+    }
+    return s;
+}
+
 } // namespace
+
+std::vector<double> lockable_rates(const std::vector<double> &modes_hz, std::int64_t tick_ms) {
+    std::vector<double> out;
+    if (tick_ms <= 0 || tick_ms > 1000) {
+        return out;
+    }
+    for (const double hz : modes_hz) {
+        if (known_rate(hz) && lock_vblanks(hz, tick_ms) != 0) {
+            out.push_back(hz);
+        }
+    }
+    std::sort(out.begin(), out.end(), [](double a, double b) { return a > b; });
+    out.erase(
+        std::unique(out.begin(), out.end(),
+                    [](double a, double b) { return std::round(a * 100) == std::round(b * 100); }),
+        out.end());
+    return out;
+}
+
+std::string lock_advice(const PacingPlan &plan, double refresh_hz,
+                        const std::vector<double> &modes_hz) {
+    if (!plan.grid || std::strcmp(plan.why, kWhyNotMultiple) != 0 || !known_rate(refresh_hz)) {
+        return "";
+    }
+    std::string s = hz_text(refresh_hz) + " Hz cannot lock to the " + std::to_string(plan.tick_ms) +
+                    " ms tick; ";
+    const std::vector<double> rates = lockable_rates(modes_hz, plan.tick_ms);
+    if (rates.empty()) {
+        return s + "set the display to a multiple of " + hz_text(1000.0 / plan.tick_ms) + " Hz";
+    }
+    s += "this display also offers ";
+    for (std::size_t i = 0; i < rates.size(); i++) {
+        s += (i == 0 ? "" : ", ") + hz_text(rates[i]);
+    }
+    return s + " Hz, which would";
+}
 
 PacingPlan plan_pacing(PacingMode mode, double refresh_hz, bool vsync, std::int64_t tick_ms,
                        std::uint32_t rate) {
@@ -50,21 +113,19 @@ PacingPlan plan_pacing(PacingMode mode, double refresh_hz, bool vsync, std::int6
     const bool tick_known = tick_ms > 0 && tick_ms <= 1000;
     if (!vsync) {
         p.why = "vsync off";
-    } else if (!(refresh_hz >= 1 && refresh_hz <= 1000)) {
+    } else if (!known_rate(refresh_hz)) {
         p.why = "the refresh rate is unknown";
     } else if (!tick_known) {
         p.why = "the game's tick interval is not known yet";
     } else {
-        const double exact = refresh_hz * static_cast<double>(tick_ms) / 1000.0;
-        const double n = std::round(exact);
-        if (n >= 1 && std::fabs(exact / n - 1) <= kLockTolerance) {
+        if (const std::uint32_t n = lock_vblanks(refresh_hz, tick_ms); n != 0) {
             p.locked = true;
-            p.vblanks = static_cast<std::uint32_t>(n);
+            p.vblanks = n;
             p.refresh_hz = refresh_hz;
             p.tick_ms = static_cast<std::uint32_t>(tick_ms);
             return p;
         }
-        p.why = "the refresh rate is not a multiple of the tick rate";
+        p.why = kWhyNotMultiple;
     }
     if (!tick_known) {
         return p; // no interval to step by yet: the wall clock

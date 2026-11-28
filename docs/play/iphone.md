@@ -2,6 +2,8 @@
 
 The port runs on an iPhone with iOS 16 or later, as an app you build yourself and install from a Mac with Xcode. This is called sideloading. There is no App Store version and no download for iOS.
 
+> **Preview.** The iOS app ships with v1.0 and plays, but has not been signed off on the device yet. The label comes off when controllers, touch and the safe area ([#73](https://github.com/armaatus/maplethief-port/issues/73)), the app lifecycle ([#128](https://github.com/armaatus/maplethief-port/issues/128)) and the audio session ([#197](https://github.com/armaatus/maplethief-port/issues/197)) are checked on an iPhone. What that means: [Known issues, Preview](../KNOWN_ISSUES.md#preview).
+
 > **Checked on one iPhone so far.** On an iPhone 12 with iOS 26.6.1 the app installs, starts and reaches the first map by touch ([#83](https://github.com/armaatus/maplethief-port/issues/83)). If you try another model or iOS version, please tell us how it goes.
 
 ## What you need
@@ -73,7 +75,7 @@ The game keeps its saves in the app's own folder. To copy them off the phone or 
 
 ## Playing
 
-The game runs in landscape, either way round, and the status bar stays hidden. You can play with the on-screen key pad or with a controller paired in the iPhone's Bluetooth settings. See [Controls](controls.md).
+The game runs in landscape, either way round, and the status bar stays hidden. You can play with the on-screen key pad or with a controller paired in the iPhone's Bluetooth settings. See [iPhone controls](iphone-controls.md): the touch key pad, the gear for the settings menu, moving the key pad, and controllers.
 
 ## Sound
 
@@ -89,4 +91,4 @@ A call, Siri or an alarm stops the sound, and it comes back when they're done. N
 - **A signing error in Xcode:** check that your Apple account is added and your team is selected. With a free account, use a bundle identifier of your own, and remove an older app of yours if you already have three.
 - **The iPhone refuses the app:** turn on Developer Mode, and trust your account under VPN & Device Management.
 
-For anything else, see [Troubleshooting](troubleshooting.md).
+For problems while playing, see [Troubleshooting → On the iPhone](troubleshooting.md#on-the-iphone). To reset the game or remove it, see [Uninstall and reset](uninstall-and-reset.md#iphone).

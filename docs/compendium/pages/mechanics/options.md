@@ -1,6 +1,6 @@
 # Options
 
-The game's options are sound, game speed and vibration. They live in one small options file shared by all three character slots, which the game creates with its defaults on the first start and rewrites when an option changes.
+The game's options are sound, game speed, walking and vibration. They live in one small options file shared by all three character slots, which the game creates with its defaults on the first start and rewrites when an option changes.
 
 ## The options
 
@@ -8,19 +8,24 @@ The game's options are sound, game speed and vibration. They live in one small o
 |---|---|---|
 | Sound | effects and music each on or off | both on |
 | Game speed | three speeds: a game tick of 65, 50 or 40 milliseconds | 50 milliseconds |
+| Walking | hold a direction to walk, or press once to start walking | hold |
 | Vibration | on or off | on |
 
 - **Sound.** Effects and music switch independently, so there are four combinations. Turning music back on resumes the current track.
 - **Game speed** sets the length of the game's tick, and with it everything that counts in ticks: walking, attacks, buffs and timers. At the default speed the game runs 20 ticks a second; the slower setting gives about 15.4 and the faster 25. The tick counts on the [mechanics pages](mechanics/index.html) are the same at every speed; only the seconds change.
+- **Walking.** With the default the hero walks or climbs while a direction is held and stops when it is let go. With the other choice each press acts once: the hero keeps walking after the key is released, and the other direction stops him.
 - **Vibration** makes the phone vibrate on a critical hit, when the hero is hit and at some moments of the story's scenes. Switching it on gives a short test vibration.
 
 The options are reached from the popup menu's last tab, which also holds Save and the exit to the main menu; the game's help pages open from there too.
 
 **Example:** a buff of 600 ticks lasts 30 seconds at the default speed, 39 seconds at the slower and 24 seconds at the faster.
 
-## Unknown settings
+## Settings the menu does not offer
 
-The options file has three more bytes. One is never read by the game's loader, one is cleared when the death popup opens, and one picks a value from a short table that two game functions read. What they mean is unknown.
+The options file has two more bytes, each with a row on the options screen that cannot be selected:
+
+- **Shortcut window.** Whether the quick slots are drawn. The game uses it as a switch while playing: it hides the slots when a dialogue, a popup or a scene covers the field and shows them again when play resumes, so the saved value is whatever it was at the last save, and entering the game resets it.
+- **Information lines.** How many lines of messages the field keeps on screen: none, one or three. It stays at one.
 
 ## In the port
 
@@ -28,4 +33,4 @@ The port keeps the game's own options and adds its own settings beside them; it 
 
 ## Sources
 
-The options file is `config`, loaded and created by `CDataMgr::LoadConfig` `0x38611` and written by the options menu (`0x50131`, `0x46A29`). Sound is applied by `0x37C79`, the game speed by `CDataMgr::ApplyGameSpeed` `0x37C41` from the table at `0x108C58`, vibration by `0x37BD1` through `CMSoundPlayer::SetVibrate` `0x1CC61`, with the test vibration from `VibratePreview` `0x1D309`. The vibrations themselves are `CMSoundPlayer::Vibrate` `0x1D2E9`, called from `CHero::TakeDamage` `0x65B55`, `CMob::TakeHit` `0x73715` and the scenes. The help pages are opened by `Shell_EnalbeHelpScrollKey` `0x6655` (sic).
+The options file is `config`, loaded and created by `CDataMgr::LoadConfig` `0x38611` and written by the options menu (`0x50131`, `0x46A29`). Sound is applied by `0x37C79`, the game speed by `CDataMgr::ApplyGameSpeed` `0x37C41` from the table at `0x108C58`, walking by the field's key handlers `CStateGame::OnFieldKeyPressed` `0x817F1` and `OnFieldKeyReleased` `0x807B9`, vibration by `0x37BD1` through `CMSoundPlayer::SetVibrate` `0x1CC61`, with the test vibration from `VibratePreview` `0x1D309`. The vibrations themselves are `CMSoundPlayer::Vibrate` `0x1D2E9`, called from `CHero::TakeDamage` `0x65B55`, `CMob::TakeHit` `0x73715` and the scenes. The shortcut window is drawn by `HUD_Paint` `0x5A465` and the information lines kept by `CNotifyTextList::SetMaxLines` `0x785BD`. The help pages are opened by `Shell_EnalbeHelpScrollKey` `0x6655` (sic).

@@ -185,6 +185,20 @@ TEST_CASE("scaling: fit, smooth and sharp share the fit rectangle, with their fi
     }
 }
 
+TEST_CASE("scaling: widescreen = fill's width is the area's at 320 high (#425)") {
+    CHECK(fe::fill_points(1920, 1080, 768) == 568); // 16:9: 568.9 rounded down to even
+    CHECK(fe::fill_points(2556, 1179, 768) == 692); // an iPhone's 19.5:9 (693.7)
+    CHECK(fe::fill_points(2400, 1080, 768) == 710); // a phone's 20:9 (711.1)
+    CHECK(fe::fill_points(3440, 1440, 768) == 764); // a 21:9 monitor (764.4)
+    CHECK(fe::fill_points(5120, 1440, 768) == 768); // 32:9: the layer's 768
+    CHECK(fe::fill_points(960, 640, 768) == 480);   // 3:2
+    CHECK(fe::fill_points(1024, 768, 768) == 480);  // 4:3: never below 480
+    CHECK(fe::fill_points(1920, 1080, 568) == 568);
+    CHECK(fe::fill_points(3440, 1440, 568) == 568); // capped by `most`
+    CHECK(fe::fill_points(0, 1080, 768) == 0);      // an empty area
+    CHECK(fe::fill_points(1920, 0, 768) == 0);
+}
+
 TEST_CASE("scaling: the Nintendo Switch's screens, handheld and docked (#238)") {
     // switch_screen.h: the window is the screen, and a dock or undock changes it.
     static_assert(fe::switch_screen(false) == fe::SwitchScreen{1280, 720});

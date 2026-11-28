@@ -6,7 +6,7 @@ The mechanical rules are enforced by the prose lint, `PYTHONPATH=tools python3 -
 
 ## The lint
 
-- **What it reads:** with no arguments, the tracked `docs/compendium/**/*.md` and the site generator's templates (`tools/mtport/compendium/templates/`, once they exist). Given paths, it reads those files, or every `.md`, `.html` and `.htm` file under a directory, so `PYTHONPATH=tools python3 -m mtport.prose_lint build/compendium/site` checks the built site.
+- **What it reads:** with no arguments, the tracked `docs/compendium/**/*.md`. The site generator's templates are Python (`tools/mtport/compendium/templates.py`), so their words are checked in the built pages: the site build runs `lint_text` over every HTML page it writes. Given paths, it reads those files, or every `.md`, `.html` and `.htm` file under a directory, so `PYTHONPATH=tools python3 -m mtport.prose_lint build/compendium/site` checks the built site.
 - **Rules:** `em-dash`, `en-dash`, `other-dash`, `double-hyphen`, `banned-phrase`, `first-person`, `term`, `emoji` and `title-case-heading`, each one described in the sections below. One line per finding, `path:line:col: rule: message`; the exit status is 1 when there is any.
 - **Exempt in Markdown:** fenced code blocks, code spans, `{{...}}` references and template tags, link targets, inline HTML tags and any inline element with a `data-verbatim` attribute.
 - **Exempt in HTML:** any element with a `data-verbatim` attribute and everything inside it, `<script>`, `<style>`, `<code>` and `<pre>`. The site generator puts `data-verbatim` on every piece of game text, entity names included.
@@ -93,8 +93,8 @@ Two hits of a basic attack defeat it from level 2.
 
 ## Notes
 
-The level column of the monster table is probable, not confirmed
-([spec](../formats/data-tables.md#mobdat), field `level`).
+Its level is what the evade, miss and contact damage rules read, confirmed in play
+(`play.mechanics`; [spec](../formats/data-tables.md#mobdat), field `level`).
 ```
 
 ### Item page
@@ -371,7 +371,7 @@ Notes on the names:
 ## Evidence
 
 - Facts come from the data tables, the scripts and the port's tests. A page states read facts plainly.
-- **Inferred facts** (a column whose meaning was worked out, not read from the game) carry a "probable" note with a link to the spec field, as the data-table specs mark these: "Level 12 (probable; [spec](../formats/data-tables.md#mobdat), `mob.level`)".
+- **Inferred facts** (a column whose meaning was worked out, not read from the game) carry a "probable" note with a link to the spec field, as the data-table specs mark these: "Name: a town's (probable; [notes](../re/map-names.md), a map past its area's row)".
 - Facts from a playthrough name the test or the date: "confirmed in play (`play.chapter_1_a`)".
 - Unknown values are written "unknown", never guessed. A column the specs list as unknown is left out of the infobox.
 - Unused content (a map no portal reaches, an item no table drops) goes in an Unused content section with the evidence for "unused".

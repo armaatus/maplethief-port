@@ -80,7 +80,7 @@ Server → client (`CDataMgr::OnServerPacket`), payload `u16 op, u8 status, u8 l
 |---|---|---|
 | 1 | hello acknowledged | status 0 → send op 2 or 4; otherwise `Disconnect(true)` |
 | 3 | purchase verified | status 0 or 0x1E: grant the product (`com.nexonmobile.maplestory.thief.*`: meso/EXP packs, SP items, `powpackage`, `ComebackPack`), update `crestore`/`riprestore1`/`riprestore2`/`totalrestore` (#20) and show *"Purchase complete!"* (0x1E: re-enable the cash shop key instead); other status → `Disconnect(true)` |
-| 5 | restore result | same product dispatch, then *"Restoration Complete!"*; status other than 0/0x1E → `Disconnect(true)` |
+| 5 | restore result | *"Restoration Complete!"*, the `totalrestore` entry removed, then the cash shop opens; for an `exppack1` receipt no EXP is granted ([original-bugs.md 18](original-bugs.md#18-totalrestore-grants-no-exp-pack); the other products were not tried); status other than 0/0x1E → `Disconnect(true)` |
 
 The purchase kind lives at `CDataMgr`+0x688 (0–2 new purchases, 1/2 the in-game revival items, 3–5 re-sending a stored receipt, 6 restore all).
 
@@ -93,7 +93,7 @@ The purchase kind lives at `CDataMgr`+0x688 (0–2 new purchases, 1/2 the in-gam
 | **Purchase / revival**: StoreKit reports success and a receipt (`getIsPurchaseSuccess`, `getPurchasedReceipt`); the receipt is written to `crestore` and `CStateGame`+0x478 is set | `-[InAppPurchaseManager completeTransaction:]` → `CStateGame::Paint` (cash shop and death popup `0x68`) | op 0 → op 2 → op 3 | `Disconnect(true)` → popup `0x20` |
 | **Restore**: popup `0x267` → `0x268`, stored receipts from `riprestore1`/`riprestore2`/`totalrestore` (kinds 3–6) | `CStateGame::OnKeyPressed` `0x8D4C9` | op 0 → op 2/4 → op 3/5 | popup `0x20` |
 | **Popup `0x16`** ("Connecting to Network") → `0x17` ("Transferring Data") | `CStateGame::OnKeyPressed` `0x8D4C9`, `CStateMainMenu::OnKeyPressed` `0x9462D` | op 0 | `Disconnect(true)` → popup `0x20` |
-| **Pigmy hatch** (`CStateGame::SetPigmeState` states `0xF` "Connecting to network." → `0x10`) | `CStateGame::OnKeyPressed` (Pigmy dialog) | state `0x10`, whose dialog says *"Server connection has failed…"* (no packet is sent: the online hatch was cut from the iOS build) | `Disconnect(false)`, state `0x11` |
+| **Pigmy hatch** (`CStateGame::SetPigmeState` states `0xF` "Connecting to network." → `0x10`) | `CStateGame::OnKeyPressed` (Pigmy dialog) | state `0x10`, whose dialog says *"Server connection has failed…"* (no packet is sent: the online hatch was cut from the iOS build) | `Disconnect(false)`, state `0x11`. Seen in `play.systems2_pigmy_synthetic` (real assets): from state 7, one connect, refused, no frame, the state through `0x10` to `0x11` in one tick and OK to the field. The dialog is unreachable in normal play ([original-bugs.md](original-bugs.md#unreachable-content)) |
 | Title "Verifying…" (popup `0x16` while the title state paints → `0x2D`, failure `0x20`; `0x2E` = *"Cannot verify your account. Customer Center…"*) | WIPI account check; no title code opens popup `0x16` itself | popup `0x2D` | `Disconnect(true)` + popup `0x20` |
 
 Without a working StoreKit purchase, only the Pigmy hatch and popup `0x16` reach the socket, and both end in a dismissible message.

@@ -14,7 +14,7 @@ Everything the game keeps for you is in a **`data` folder next to the game**: be
 | `states`, `screenshots` | save states and screenshots |
 | `exports`, `import` | for moving saves ([below](#moving-saves-to-another-computer)) |
 
-`game`, beside `data`, holds the game imported from your IPA. It doesn't need a backup: import it again any time.
+`game`, beside `data`, holds the game imported from your IPA (with [the user folder](#the-user-folder-instead), it is inside that folder instead). It doesn't need a backup: import it again any time.
 
 To open the data folder from the game: settings menu (F1, or Guide on a gamepad) → Saves → **Open data folder**. It opens in Finder, Explorer or your file manager. The Saves tab shows its path at the top, and `MapleThief --print-data-dir` prints it.
 
@@ -45,6 +45,23 @@ On a Mac, an app dragged alone into Applications uses the user folder (the game 
 
 In a protected folder (`C:\Program Files`), on a read-only disk, or on a Mac when the freshly downloaded app runs from a temporary read-only copy, the game uses the user folder for the time being. It says so once at the start, and the Saves tab's **Data location** says why and what to do. See [Troubleshooting](troubleshooting.md#the-game-keeps-its-data-in-the-user-folder).
 
+## After a crash: recovery points
+
+With **Crash recovery** on (settings menu → Gameplay, or `crash_recovery = on`; part of the Enhanced preset), the port keeps a recovery point of the game while you play: after each map loads, after each save, and every five minutes of play. Play pauses for a moment while it takes one (a tick or two). The two newest points are in `states` (`recovery-1.state`, `recovery-2.state`), beside the game's saves, which they never change. Quitting normally deletes them.
+
+If the game crashes, the next start says so and offers four choices. On a computer it asks in a message box. On the Nintendo Switch and in a Steam Deck's Game Mode it asks in the game's window instead, so a controller or the touch screen can answer: Up and Down choose, A (or Enter) confirms, and B (or Esc) is **Start normally**. Without a recovery point the same question has two choices, **Start with default settings** and **Start normally**.
+
+| Button | What happens |
+|---|---|
+| **Resume** (Enter, A) | Your settings. Load the same character as usual; once it is in the field, the game goes on from the recovery point. |
+| **Resume with default settings** | The same, with default settings for this run (no texture or audio packs, the software renderer). For a crash that a pack or a setting might have caused. |
+| **Start with default settings** | Default settings for this run; the recovery point is deleted. |
+| **Start normally** (Esc, B) | Your settings; the recovery point is deleted. |
+
+A point is used once. If the resumed game crashes again before the next point, the following start offers the older one. A point is not offered when it is older than that character's last save (it would undo progress already saved), when it was made by another version of the port, or when its file is damaged. If you load a different character first, the point is dropped and the game says so.
+
+Crash recovery is off on the Nintendo Switch until its pause has been measured on a console.
+
 ## Backups
 
 After every save, the port keeps a copy of that character in `backups`: the newest 10 per slot. Change the number in the settings menu (Saves) or with `save_backups = 20` (0 turns backups off).
@@ -74,10 +91,23 @@ The data folder is `sdmc:/switch/maplethief/data` on the SD card, with the same 
 
 An import checks every file first. If anything would break the game (a cut-off file, an item the game doesn't have, a character without its quest file) it refuses the whole set, changes nothing and says why. The saves it replaces are backed up first.
 
+## Saves from another folder
+
+Settings menu → Saves → **Saves from a folder** (from the title or the main menu) lists the folders the game can bring saves from, and imports the one you choose:
+
+- **the other data folder**: the user folder when your data is next to the game, or the game folder's `data` when it is in the user folder ([above](#the-user-folder-instead));
+- **every folder in `import`** that holds saves: an old version's `data` folder, a copy of a friend's `saves`, an old build's `Documents`. Copy the folder into `import` first.
+
+It asks *Bring the saves of …? The files they replace are backed up first.* with **No** selected; Right for **Yes**. Only the saves are brought over, checked and backed up as any import; the other folder is never changed. To bring a whole data folder over, settings and backups too, start the game once with `--migrate-from <folder>` instead.
+
+## Checking your saves
+
+Settings menu → Saves → **Check saves** runs every file in `saves` through the checks an import uses and lists them with their verdict: `ok`, or the rule a file breaks (`bad_size`, `bad_item`, `bad_map`, …). Choose a row to read the reason. It only reads: nothing is changed. A file that fails was most likely edited or copied in by hand; restore a backup of that slot (**Backups**) or import a good copy. From the command line: `MapleThief --check-saves <folder or zip>`.
+
 ## Sharing saves through Dropbox, iCloud or OneDrive
 
 Set `save_dir` in `settings.ini` to a folder in your cloud drive, for example `save_dir = C:\Users\you\Dropbox\MapleThief`. Every computer that points there plays the same saves, and the achievements (`gamecenter.json` sits with the saves). Settings and backups stay on each computer. Don't play the same slot on two computers at once.
 
 ## Bringing your iPhone or iPod save over
 
-If the original game is still installed on your device, you can bring your character along. You make a backup of the device with Finder or iTunes and run one command. Step by step: [Saves from your iPhone](iphone-saves.md).
+If the original game is still installed on your device, you can bring your character along. Make an unencrypted backup of the device with Finder, Apple Devices or iTunes, then on the title screen open the settings menu → Saves → **iPhone backup** and choose it. Step by step: [Saves from your iPhone](iphone-saves.md).

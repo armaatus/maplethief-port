@@ -61,8 +61,9 @@ function(maplethief_add_generated_code target gen_dir)
         # one overrides the other). /bigobj: a unit can hold more than 2^16 COFF sections.
         target_compile_options(${target} PRIVATE /W4 /utf-8 /bigobj /clang:-ffp-contract=off)
     elseif(MSVC)
-        # cl: /fp:precise does not contract since VS 2022.
-        target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:precise /bigobj)
+        # cl: /fp:precise does not contract since VS 2022. C4702: the trap after a call that
+        # never returns is unreachable by design (the guest program's code has one, #385).
+        target_compile_options(${target} PRIVATE /W4 /wd4702 /utf-8 /fp:precise /bigobj)
     else()
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -ffp-contract=off)
     endif()
@@ -88,6 +89,15 @@ function(maplethief_mem_checked out_var)
         if(model STREQUAL "reserved")
             message(FATAL_ERROR "MAPLETHIEF_MEM_MODEL reserved: the Nintendo Switch cannot "
                                 "reserve 4 GiB (ADR 0025, ADR 0138)")
+        endif()
+        set(model checked)
+    endif()
+    # Android: the arena alone too; the low-memory killer, not the address space, is the limit
+    # (ADR 0150).
+    if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+        if(model STREQUAL "reserved")
+            message(FATAL_ERROR "MAPLETHIEF_MEM_MODEL reserved: Android builds use the checked "
+                                "arena (ADR 0025, ADR 0150)")
         endif()
         set(model checked)
     endif()

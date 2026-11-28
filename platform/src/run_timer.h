@@ -1,0 +1,365 @@
+// The speedrun timer (#406, ADR 0156): a run, its splits, both of its times, whether it was clean
+// and the personal best of its category. No SDL: game.cpp feeds it the run events and reads its
+// overlay lines; the tests feed it synthetic events and a fake clock.
+//
+//   run_timer = on | off     settings.ini (off by default, outside the presets), --run-timer
+//   run_category = NAME      the category it times (any by default), --run-category
+//
+// A category (docs/formats/run-category.md) is our own data file: a name, the values its run
+// variables may take, and a list of splits, each a run event of maplethief/events.h with its
+// values. The port ships any.mtcat (Any%: a new character to mob 69's death) and chapter_1.mtcat
+// (a new character to the trip to Orbis), embedded in the binary from platform/categories/; a
+// player's own files go in <data dir>/categories/ (one of the same name replaces the shipped one).
+//
+// The run.
+//   - It starts at MT_GAME_EVENT_NEW_CHARACTER (a new character in any slot), and again at the
+//     next one: a run in progress then ends as reset and a new one starts. A category with a
+//     `start` line (#408) starts at that event instead, and only while no run is in progress
+//     (a run from a save: `start = load_character 0`, or `start = map_change 2.0`).
+//   - Its splits fire in the category's order: only the next split's event counts (a later
+//     split's event before it does nothing). The last split ends the run (finished).
+//   - Each split records two times since the start: real time (the host's monotonic clock, what
+//     the overlay shows) and game ticks (mt_input_get_stats's tick count). Both are the clock's
+//     (RunClock), so a test gives a fake one.
+//   - reset() ends a run in progress as reset: run_timer turned off, another category, the game
+//     quitting, the next new character.
+//   - A finished or reset run becomes a RunRecord; take_records() hands them to the caller,
+//     which writes each one to <data dir>/runs/ (write_run).
+//
+// A clean run (ADR 0156, ADR 0070). Every row of settings_registry() in SettingGroup::kAssists
+// must hold its neutral value (its Original column) from the start to the end. check() reads
+// every such row at the start, every turn (turn()) and at the last split; one that differs marks
+// the run assisted for good, even if it goes back, and the record names it. The rows are found
+// by their group, so a new Assist is covered with no change here.
+//
+// Run variables: fix_original_bugs, skip_intros, widescreen and texture_pack. Allowed, recorded
+// (every value seen during the run) and shown. A category names the values it allows (`allow`
+// lines); a variable it does not name may only be off (its Original column). A run whose variable
+// takes another value is outside the category: it is recorded and shown, never a personal best.
+//
+// The personal best of a category is its fastest finished run that is clean and inside the
+// category, by real time; the overlay compares the last split reached with the best's same
+// split. write_run keeps it beside the logs (runs/<category>.best, the same text as a log).
+//
+// Practice (#409, ADR 0189). With save_states on, game.cpp keeps a save state after each split
+// (practice_state.h) and loads the one a player picks; start_practice then marks the timer as
+// practice: a run in progress ends as reset, and from the load the timer times segments, each from
+// the split before it to the next split's event, until the category's last split. A practice is
+// never a run: it writes no run log and makes no personal best.
+//
+// Best segments (#409). A segment is the time from one split to the next (from the start for the
+// first). Its best is the shortest by real time, from runs (each split's time less the one before)
+// and from practice alike; a segment counts when no Assist but save_states left its neutral value
+// during it and every run variable stayed inside the category. The sum of best adds up every
+// split's best segment once each has one. game.cpp keeps them in runs/<category>.segments.
+//
+// Single thread: the frontend's. on_event is called from a game-event listener, on the guest
+// thread inside the guest's call (maplethief/events.h), which is the frontend's in the turn hook.
+#ifndef MAPLETHIEF_PLATFORM_RUN_TIMER_H
+#define MAPLETHIEF_PLATFORM_RUN_TIMER_H
+
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "maplethief/events.h"
+#include "settings.h"
+
+namespace maplethief::frontend {
+
+// --- Categories ---------------------------------------------------------------------------------
+
+inline constexpr const char *kRunCategoryExtension = ".mtcat";
+inline constexpr std::size_t kMaxRunCategoryFileBytes = 16 * 1024;
+inline constexpr std::size_t kMaxRunSplits = 64;
+inline constexpr std::size_t kMaxRunNameBytes = 32; // a category's or a split's title
+// The run variables (ADR 0156): allowed in a run, recorded and shown. widescreen and
+// texture_pack reach guest memory (#408's presentation check, ADR 0156's addendum): the view
+// width, and a pack's UIKit images' pixels. texture_pack is recorded as off or on (a pack set),
+// never its folder.
+inline constexpr const char *kRunVariables[] = {"fix_original_bugs", "skip_intros", "widescreen",
+                                                "texture_pack"};
+// A run variable's value as a run records it: texture_pack's "off" or "on", every other one's
+// setting text.
+std::string run_variable_text(const Settings &s, const SettingInfo &row);
+
+// One split: a run event of `kind` whose values are `a` (the event's value) and, for a job
+// advance and a map change, `b` (more[0]: the tier, the map).
+struct RunSplit {
+    mt_game_event_kind kind = MT_GAME_EVENT_CHAPTER_END;
+    std::int32_t a = 0;
+    std::int32_t b = 0;
+    std::string title; // the overlay's name of it
+
+    bool matches(const mt_game_event &e) const;
+    bool operator==(const RunSplit &) const = default;
+};
+
+// "chapter_end", "job_advance", "boss_killed", "map_change"; nullptr for another kind.
+const char *run_split_kind_name(mt_game_event_kind kind);
+// "chapter_end 1", "job_advance 2 2", "boss_killed 64", "map_change 4.1": the split's event as a
+// category file writes it.
+std::string run_split_event_text(const RunSplit &s);
+
+struct RunVariableRule {
+    std::string key;                 // one of kRunVariables
+    std::vector<std::string> values; // the values allowed, as the settings file writes them
+
+    bool operator==(const RunVariableRule &) const = default;
+};
+
+struct RunCategory {
+    std::string id;    // the file's name without .mtcat: run_category's value
+    std::string title; // `title = ...`: what the overlay shows
+    std::vector<RunVariableRule> allow;
+    std::vector<RunSplit> splits;
+    // `start = EVENT` (#408): the event that starts a run while none is in progress, in place
+    // of a new character: a split's event, or load_character SLOT (a run from a save); its title
+    // is unused. None: a new character.
+    std::optional<RunSplit> start;
+
+    // The values `key` may take: its `allow` line's, else its Original column only.
+    std::vector<std::string> allowed(std::string_view key) const;
+    bool operator==(const RunCategory &) const = default;
+};
+
+// Parses a category file's text (the format in docs/formats/run-category.md) as category `id`.
+// Nothing on any problem: `problems` then has one message per bad line ("line 4: ..."), or one
+// for the whole file (too large, no title, no split).
+std::optional<RunCategory> parse_run_category(std::string_view id, std::string_view text,
+                                              std::vector<std::string> *problems);
+// The category file's text of `c` (parse_run_category reads it back as `c`).
+std::string run_category_text(const RunCategory &c);
+
+// The shipped categories' files, as embedded at build time: {name, text}, in name order.
+std::vector<std::pair<std::string, std::string>> shipped_run_category_files();
+// The shipped categories and those of <data_dir>/categories/*.mtcat (when data_dir is not
+// empty), by name; a player's file replaces a shipped one of the same name. A file that does not
+// parse is left out with its problems in `problems` ("categories/x.mtcat: line 3: ...").
+std::vector<RunCategory> load_run_categories(const std::string &data_dir,
+                                             std::vector<std::string> *problems);
+
+// --- Runs ----------------------------------------------------------------------------------------
+
+// A reading of the run's two clocks.
+struct RunInstant {
+    double seconds = 0;      // real time: the host's monotonic clock, in seconds
+    std::uint64_t ticks = 0; // the game's ticks so far
+
+    bool operator==(const RunInstant &) const = default;
+};
+
+// A time of a run: since its start.
+struct RunTime {
+    std::int64_t ms = 0;     // real time, whole milliseconds
+    std::uint64_t ticks = 0; // game ticks
+
+    bool operator==(const RunTime &) const = default;
+};
+
+// A finished or reset run, as its log holds it.
+struct RunRecord {
+    std::string category;       // the category's id
+    std::string category_title; // its title
+    std::string started;        // the wall-clock time it started ("2026-11-26 21:03:04")
+    bool finished = false;      // false: reset before its last split
+    // The category's splits (their events and titles), and the times of those reached.
+    std::vector<RunSplit> splits;
+    std::vector<RunTime> times;
+    RunTime end;                      // the last split's time, or when it was reset
+    std::vector<std::string> assists; // the Assists that left their neutral value, in order
+    // Every run variable with every value it had during the run, in order ("off", "off,on").
+    std::vector<std::pair<std::string, std::string>> variables;
+    bool in_category = true; // every run variable's values allowed by the category
+    std::string settings;    // every setting at the start, "key = value; key = value"
+
+    bool clean() const { return assists.empty(); }
+    // A personal best can be made of it: finished, clean and inside the category.
+    bool counts() const { return finished && clean() && in_category; }
+    bool operator==(const RunRecord &) const = default;
+};
+
+// A run log's text (docs/formats/run-category.md#the-run-log), and the record read back from
+// one. Nothing for a malformed log (`problems` says why, by line).
+std::string run_log_text(const RunRecord &r);
+std::optional<RunRecord> parse_run_log(std::string_view text, std::vector<std::string> *problems);
+
+// "12:34.5", "1:02:03.4" (tenths), "-0:01.2" with `sign` (a difference: '+' or '-' always).
+std::string format_run_time(std::int64_t ms, bool sign = false);
+
+// The run log's file name: "<category>-<started, digits only>.log" ("any-20261126-210304.log").
+std::string run_log_name(const RunRecord &r);
+// Writes `r` to <data_dir>/runs/<run_log_name> (another name with "-2", "-3", ... if that one
+// exists), and, when it counts and beats `best` (or there is none), to runs/<category>.best.
+// Returns false with `why` if a file could not be written. `log_path` gets the log's path,
+// `new_best` whether the best was replaced.
+bool write_run(const std::string &data_dir, const RunRecord &r, const RunRecord *best,
+               std::string *log_path, bool *new_best, std::string *why);
+// The personal best of `category` in <data_dir>/runs/, if there is one and it reads.
+std::optional<RunRecord> load_run_best(const std::string &data_dir, std::string_view category);
+
+// --- Best segments (#409) -----------------------------------------------------------------------
+
+// The best segment of each split of a category (docs/formats/run-category.md#best-segments).
+struct RunSegments {
+    std::string category;
+    std::vector<RunSplit> splits;             // the category's, when the bests were timed
+    std::vector<std::optional<RunTime>> best; // one per split: none until one is timed
+
+    // Every split's best added up; none while a split has no best (or there is no split).
+    std::optional<RunTime> sum_of_best() const;
+    // The splits with a best.
+    std::size_t known() const;
+    // Records `t` as split `i`'s segment if it is the first or faster by real time; true if so.
+    bool offer(std::size_t i, const RunTime &t);
+    bool operator==(const RunSegments &) const = default;
+};
+
+// Empty bests for the splits of `c`.
+RunSegments run_segments_for(const RunCategory &c);
+// The .segments file's text, and the bests read back from one (nothing for a malformed file:
+// `problems` says why, by line).
+std::string run_segments_text(const RunSegments &s);
+std::optional<RunSegments> parse_run_segments(std::string_view text,
+                                              std::vector<std::string> *problems);
+// <data_dir>/runs/<category>.segments: written whole through a temporary file, read back (none
+// if there is no file, it does not read, or it is of another category).
+bool write_run_segments(const std::string &data_dir, const RunSegments &s, std::string *why);
+std::optional<RunSegments> load_run_segments(const std::string &data_dir,
+                                             std::string_view category);
+
+// The run's clocks: what now reads, and the wall-clock stamp a record's `started` gets.
+struct RunClock {
+    std::function<RunInstant()> now;
+    std::function<std::string()> stamp;
+};
+
+// What a run did, for a listener that mirrors it (the LiveSplit link, #407): a run started, the
+// next split was reached (its time), or a run ended as reset or a finished run was cleared.
+enum class RunSignal { kStart, kSplit, kReset };
+using RunListener = std::function<void(RunSignal, const RunTime &)>;
+
+class RunTimer {
+  public:
+    enum class State { kWaiting, kRunning, kFinished };
+
+    explicit RunTimer(RunClock clock) : clock_(std::move(clock)) {}
+
+    // The settings the clean check and the run variables read (game.cpp's g.settings); none:
+    // a default Settings.
+    void attach(const Settings *settings) { settings_ = settings; }
+    // The category to time, its personal best (none: no comparison) and its best segments
+    // (none, or of other splits: none yet). A run in progress ends as reset; the timer then waits
+    // for the next start.
+    void set_category(RunCategory category, std::optional<RunRecord> best,
+                      std::optional<RunSegments> segments = std::nullopt);
+    const RunCategory &category() const { return category_; }
+    const std::optional<RunRecord> &best() const { return best_; }
+    // A new personal best made by this timer's last run (write_run said so).
+    void set_best(RunRecord best) { best_ = std::move(best); }
+    // Told of every start, split and reset (none: nobody). A start after a finished run is a
+    // reset, then the start.
+    void set_listener(RunListener listener) { listener_ = std::move(listener); }
+
+    // A game event (the listener's body): a new character starts a run, the next split's event
+    // splits.
+    void on_event(const mt_game_event &e);
+    // The clean check and the run variables, every turn while a run is in progress.
+    void turn();
+    // Starts a run now (a new character; a test or practice from a save). A run in progress
+    // ends as reset first.
+    void start();
+    // Ends a run in progress as reset (nothing if none is). A finished run's display is cleared
+    // back to waiting.
+    void reset();
+    // Practice from the save state taken after split `split` (1-based: the splits reached then)
+    // was loaded, now (#409): a run in progress ends as reset, the timer is practice, and it times
+    // the next split's segment from now. False, changing nothing, for a split that has no next
+    // one (or no category).
+    bool start_practice(std::size_t split);
+
+    State state() const { return state_; }
+    // The next split's index (splits reached so far, in a practice from its loaded split).
+    std::size_t next_split() const { return practice_ ? segment_ : times_.size(); }
+    // The split reached since the last call (1-based), if one was: a run's or a practice's.
+    std::optional<std::size_t> take_reached();
+    // A practice (#409): since a load, until the next start, reset or category.
+    bool practice() const { return practice_; }
+    // The split the practice was loaded from (1-based); 0 outside a practice.
+    std::size_t practice_from() const { return practice_ ? practice_from_ : 0; }
+    // The last segment a practice timed, if it has timed one.
+    const std::optional<RunTime> &last_segment() const { return last_segment_; }
+    // The best segments; true once after a best improved (game.cpp then writes them).
+    const RunSegments &segments() const { return segments_; }
+    bool take_segments_changed();
+    // The split whose state practice_load would load (1-based; none: none picked), shown on the
+    // overlay.
+    void set_picked(std::optional<std::size_t> split) { picked_ = split; }
+    const std::optional<std::size_t> &picked() const { return picked_; }
+    const std::vector<RunTime> &times() const { return times_; }
+    // Real time and ticks since the start: up to now while running, the end once finished.
+    RunTime elapsed() const;
+    // The Assists that left their neutral value during this run; the run variables' values.
+    const std::vector<std::string> &assists() const { return assists_; }
+    std::vector<std::pair<std::string, std::string>> variables() const;
+    bool in_category() const { return in_category_; }
+    // The difference, in ms, between the last split reached and the best's same split; none
+    // with no best or no split reached.
+    std::optional<std::int64_t> difference() const;
+
+    // The finished and reset runs since the last call, oldest first.
+    std::vector<RunRecord> take_records();
+    // The overlay's lines: the category and the time, the next split, the difference to the
+    // personal best, clean or assisted (and outside the category), the run variables.
+    std::vector<std::string> overlay_lines() const;
+
+  private:
+    const Settings &settings() const;
+    RunTime since_start(const RunInstant &now) const;
+    void check();
+    void end_run(bool finished, const RunInstant &now);
+    void signal(RunSignal s, const RunTime &t) const;
+    // A finished run back to waiting (its display cleared): a reset to the listener.
+    void clear_finished();
+    void practice_split(const RunInstant &now);
+    // Split `i`'s segment `t`, as a best if the segment counts; then a new segment starts.
+    void offer_segment(std::size_t i, const RunTime &t);
+    std::vector<std::string> practice_lines() const;
+
+    RunClock clock_;
+    RunListener listener_;
+    const Settings *settings_ = nullptr;
+    RunCategory category_;
+    std::optional<RunRecord> best_;
+    State state_ = State::kWaiting;
+    RunInstant start_;
+    std::string started_;
+    std::string start_settings_;
+    std::vector<RunTime> times_;
+    RunTime end_;
+    std::vector<std::string> assists_;
+    // Each run variable and every value it had, in order.
+    std::vector<std::pair<std::string, std::vector<std::string>>> variables_;
+    bool in_category_ = true;
+    std::vector<RunRecord> records_;
+    // Practice and best segments (#409).
+    bool practice_ = false;
+    std::size_t practice_from_ = 0; // the loaded split (1-based)
+    std::size_t segment_ = 0;       // the next split's index in a practice
+    RunInstant segment_start_;
+    std::optional<RunTime> last_segment_;
+    bool segment_counts_ = true; // no Assist but save_states, no variable outside, so far
+    RunSegments segments_;
+    bool segments_changed_ = false;
+    std::optional<std::size_t> reached_;
+    std::optional<std::size_t> picked_;
+};
+
+} // namespace maplethief::frontend
+
+#endif // MAPLETHIEF_PLATFORM_RUN_TIMER_H

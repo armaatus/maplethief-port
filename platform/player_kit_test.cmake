@@ -21,6 +21,9 @@
 #   cmake -DPROGRAM=<MapleThief> [-DBUNDLE=<MapleThief.app>] -DSOURCE=<repo> -DOUT=<dir>
 #         -P player_kit_test.cmake
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 foreach(var PROGRAM SOURCE OUT)
     if(NOT DEFINED ${var})
         message(FATAL_ERROR "player_kit_test: -D${var}=... is required")

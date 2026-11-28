@@ -98,6 +98,7 @@ const char *data_place_title(DataPlace place) {
     case DataPlace::kEnv:
         return tr(Txt::data_env_folder);
     case DataPlace::kIos:
+    case DataPlace::kAndroid:
         return tr(Txt::data_app_folder);
     case DataPlace::kSwitch:
         return tr(Txt::data_sd_card);
@@ -130,6 +131,9 @@ DataLocationRow data_location_row(const DataLocation &loc, std::size_t max_note)
         break;
     case DataReason::kApplicationsFolder:
         row.help = tr(Txt::data_help_applications);
+        break;
+    case DataReason::kFlatpak:
+        row.help = tr(Txt::data_help_flatpak);
         break;
     case DataReason::kFallbackNotWritable:
         row.help = tr(Txt::data_help_not_writable, {loc.why});
@@ -199,6 +203,10 @@ DataSwitchPlan plan_data_switch(const DataLocation &cur, DataPlace to, const Dat
     }
     if (to == DataPlace::kGame && cur.reason == DataReason::kApplicationsFolder) {
         plan.refused = tr(Txt::data_refused_applications);
+        return plan;
+    }
+    if (to == DataPlace::kGame && cur.reason == DataReason::kFlatpak) {
+        plan.refused = tr(Txt::data_refused_flatpak);
         return plan;
     }
     plan.marker = path_utf8(utf8_path(cur.base) / kUserDataMarkerName);

@@ -8,7 +8,8 @@
  * The layout is the same on every platform, so guest addresses (heap blocks, stacks) are the
  * same everywhere:
  *
- *   0x00000000 - 0x00000FFF  page zero (__PAGEZERO): never mapped, null pointers fault
+ *   0x00000000 - 0x00000FFF  page zero (__PAGEZERO): read-only zeros once sealed (ADR 0250),
+ *                            so null reads give 0 and null writes fault
  *   0x00001000 - 0x00FFFFFF  the image: the Mach-O's segments at their link-time addresses
  *   0x01000000 - 0x1EFFFFFF  the guest heap (mt_heap_*), grown and committed on demand
  *   0x1F000000 - 0x1FFFFFFF  guest stacks (mt_stack_*), each above a no-access guard
@@ -175,8 +176,9 @@ int mt_mem_map_macho(mt_mem *mem, const uint8_t *file, size_t size) MT_NOEXCEPT;
 
 /* Gives every mapped host page the protection of the segments in it: read-only unless a
  * segment in the page is writable. On a 16 KiB-page host, a page shared by __TEXT and __DATA
- * stays writable, and page zero shares __TEXT's first page (readable, not writable). Call
- * once after the loader has written its fixups. Returns 0 or -1. */
+ * stays writable. Page zero is readable and not writable on every host (ADR 0250): it shares
+ * __TEXT's first page on a 16 KiB-page host and is committed here on a 4 KiB one. Call once
+ * after the loader has written its fixups. Returns 0 or -1. */
 int mt_mem_seal_image(mt_mem *mem) MT_NOEXCEPT;
 
 /* The mapped segments, in mapping order; *count gets their number. */

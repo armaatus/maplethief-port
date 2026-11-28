@@ -32,6 +32,8 @@ Addresses are armv7 VM addresses; function pointers carry the Thumb bit. The fac
 
 **Verdict: go** (#396, M). The pop at a scene's start is the most visible seam left in the wide view, the decision function is the only code to change, and the per-scene check is automatable. Scenes that fail it stay 480.
 
+**Built (#396, 2026-11-27).** Corrected by the check: the boss maps (3.8 among them) are all 30 tiles wide, and the intro plays on 2.10, so the seam showed on the eight scenes that play on wider maps, not on the boss scenes. Seven are wide now. The speech box needed a fix too: its lines are wrapped to the view's width. [re/widescreen.md](widescreen.md#scenes-at-the-fields-width) has the table.
+
 ## Minimap: mobs and the map's name
 
 **Mobs.** The mob list is `CStateGame +0x34` (`CMobs`, also `0x11A9EC`): count `+0x04`, items `+0x08`; a `CMob`'s feet at `+0x04` / `+0x08`, dead flag `+0x0C` & `0x10`, mob.dat id `+0xA0` ([hud-extras.md](hud-extras.md#the-mobs-and-their-hp)). `read_minimap` already reads the `CStateGame` and the map's objects through a bounded `GuestSpan`; the mobs are one more bounded list. The PC game's minimap, which ADR 0098's addendum followed, shows no mobs, so they get their own key, off by default.
@@ -40,7 +42,7 @@ Addresses are armv7 VM addresses; function pointers carry the Thumb bit. The fac
 
 Where it goes: inside the box's top edge on a translucent strip, so the corner layout (at most 150 × 48 points, ending above y = 52 where the game's messages start) keeps its size.
 
-**Verdict: go, both in one issue** (#397, M), each behind its own key (`minimap_mobs`, `minimap_name`, off in every preset like `minimap`). Both read only.
+**Verdict: go, both in one issue** (#397, M), each behind its own key (`minimap_mobs`, `minimap_name`, off in every preset like `minimap`). Both read only. Built: [ADR 0098's last addendum](../adr/0098-port-drawn-minimap.md#addendum-the-maps-mobs-and-name-opt-in-2026-11-27). The mobs are read from the list at `0x11A9EC`, the one the runtime's text events read (`CStateGame +0x34` is the same `CMobs`).
 
 ## Rumble per event
 
@@ -50,7 +52,7 @@ Where it goes: inside the box's top edge on a translucent strip, so the corner l
 
 **Call** (delegated by Joris, 2026-11-13; to veto on #399's PR): `rumble_events = game | all`. `game` keeps only the game's vibration; `all` is today's behaviour. Original and Original + controller `game`, Enhanced `all`. The default without a settings file stays `all`, so a run without one behaves as today (ADR 0084 already lets the defaults differ from a preset). Two values rather than ADR 0070's sketched "game + level-up": the hit rumble that ignores the game's option is the port's addition as much as the level-up, and Enhanced keeps both.
 
-**Verdict: go** (#399, S). It closes a promise a settings row makes today.
+**Verdict: go** (#399, S). It closes a promise a settings row makes today. Built in #399 ([ADR 0053](../adr/0053-observed-functions-game-events-and-rumble.md)'s #399 addendum).
 
 ## The cash buttons
 
@@ -62,7 +64,7 @@ Where it goes: inside the box's top edge on a translucent strip, so the corner l
 
 **Call** (delegated by Joris, 2026-11-13; to veto on #400's PR): no new key. `hide_online_ui = on` hides them while `cash_shop = off`, the same rule by which it hides Game Center's button while `local_game_center = off` leaves it dead. So Enhanced and Original + controller hide them; Original shows them; `cash_shop = meso` shows them everywhere. The death popup's two remaining buttons stay in place unless a shot of the popup shows the empty top half reads as broken; then they move up with a host transform and touch redirects (the compass's mechanism, ADR 0098's addendum). #400 records which.
 
-**Verdict: go** (#400, S).
+**Verdict: go** (#400, S). Done in #400: the death popup keeps its layout ([ADR 0084's addendum](../adr/0084-offline-polish-hidden-online-ui-local-game-center.md#addendum-the-dead-cash-buttons-2026-11-27)).
 
 ## Larger text
 

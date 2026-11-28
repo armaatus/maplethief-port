@@ -232,6 +232,15 @@ Rect safe_rect(int output_w, int output_h, const Insets &insets, float density_x
                 static_cast<float>(output_h - t - b)};
 }
 
+int fill_points(float w, float h, int most) {
+    if (!(w > 0) || !(h > 0) || !std::isfinite(w) || !std::isfinite(h)) {
+        return 0;
+    }
+    const double points = std::floor(static_cast<double>(w) * kScreenHeight / h / 2) * 2;
+    return static_cast<int>(std::clamp(points, static_cast<double>(kScreenWidth),
+                                       static_cast<double>(std::max(most, kScreenWidth))));
+}
+
 Placement place(ScaleMode mode, int output_w, int output_h, int image_w, int image_h,
                 const Insets &insets, float density_x, float density_y, int screen_w) {
     Placement p;

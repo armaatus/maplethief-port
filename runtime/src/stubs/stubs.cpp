@@ -105,6 +105,9 @@ void compute_default_dir() {
 #elif defined(__SWITCH__)
     // No HOME on Horizon: the data folder of ADR 0127 / ADR 0138 on the SD card.
     append(g.default_dir, k_path_max, MT_STUBS_SWITCH_DATA_DIR, "");
+#elif defined(__ANDROID__)
+    // None of its own on Android: the app's files folders are known only to the activity, and the
+    // frontend always sets the data folder (data_location.cpp's android rule, ADR 0251).
 #else
     if (env_get("XDG_DATA_HOME", env, k_path_max) && env[0] == '/') {
         append(g.default_dir, k_path_max, env, "/maplethief");

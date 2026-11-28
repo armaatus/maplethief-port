@@ -203,6 +203,60 @@ TEST_CASE("pacing: what the display cannot lock gets a 1 ms grid; the rest is un
     CHECK(fe::plan_pacing(PacingMode::kDisplay, 60, false, 25, 3).rate == 3);
 }
 
+TEST_CASE("pacing: the display's rates that would lock the tick, highest first (#410)") {
+    using V = std::vector<double>;
+    // A 144 Hz panel offering 60 and 120 Hz too: those lock the 50 ms tick (3 and 6 refreshes).
+    CHECK(fe::lockable_rates({60, 120, 144}, 50) == V{120, 60});
+    CHECK(fe::lockable_rates({144, 60, 144, 120, 60}, 50) == V{120, 60}); // modes repeat a rate
+    // A 75 Hz-only panel: nothing locks 50 ms (3.75 refreshes).
+    CHECK(fe::lockable_rates({75}, 50).empty());
+    // A 165 Hz panel's modes.
+    CHECK(fe::lockable_rates({60, 120, 144, 165}, 50) == V{120, 60});
+    // The 40 ms length at 75 Hz is exactly 3 refreshes (and at 100, 4; 60 Hz is 2.4: no).
+    CHECK(fe::lockable_rates({75}, 40) == V{75});
+    CHECK(fe::lockable_rates({60, 75, 100}, 40) == V{100, 75});
+    // 59.94 Hz is within kLockTolerance of 60, as plan_pacing locks it; each listed rate is kept.
+    CHECK(fe::lockable_rates({59.94}, 50) == V{59.94});
+    CHECK(fe::lockable_rates({59.94, 60, 59.94, 60}, 50) == V{60, 59.94});
+    CHECK(fe::lockable_rates({59}, 50).empty()); // 2.95 refreshes: 1.7 % off
+    // The 65 ms length is 3.9 refreshes at 60 Hz, 7.8 at 120, 9.36 at 144: none lock it.
+    CHECK(fe::lockable_rates({60, 120, 144}, 65).empty());
+    // Unknown rates and an unknown tick give nothing.
+    CHECK(fe::lockable_rates({0, -1, 5000}, 50).empty());
+    CHECK(fe::lockable_rates({60}, 0).empty());
+}
+
+TEST_CASE("pacing: the log line names the lockable rates when the display cannot lock (#410)") {
+    const auto advice = [](double hz, std::int64_t tick, const std::vector<double> &modes,
+                           bool vsync = true, std::uint32_t rate = 1) {
+        return fe::lock_advice(fe::plan_pacing(PacingMode::kDisplay, hz, vsync, tick, rate), hz,
+                               modes);
+    };
+    CHECK(advice(144, 50, {60, 120, 144}) ==
+          "144 Hz cannot lock to the 50 ms tick; this display also offers 120, 60 Hz, which would");
+    CHECK(advice(165, 50, {60, 120, 144, 165}) ==
+          "165 Hz cannot lock to the 50 ms tick; this display also offers 120, 60 Hz, which would");
+    CHECK(advice(75, 50, {75}) ==
+          "75 Hz cannot lock to the 50 ms tick; set the display to a multiple of 20 Hz");
+    CHECK(advice(60, 65, {60}) ==
+          "60 Hz cannot lock to the 65 ms tick; set the display to a multiple of 15.38 Hz");
+    CHECK(advice(143.86, 50, {}) ==
+          "143.86 Hz cannot lock to the 50 ms tick; set the display to a multiple of 20 Hz");
+    // No line when the plan locks: 60, 120, 59.94 Hz at 50 ms, 75 Hz at 40 ms.
+    CHECK(advice(60, 50, {60, 120, 144}).empty());
+    CHECK(advice(120, 50, {60, 120, 144}).empty());
+    CHECK(advice(59.94, 50, {59.94}).empty());
+    CHECK(advice(75, 40, {75}).empty());
+    // Nor when the grid or the wall clock is for another reason: vsync off, an unknown rate or
+    // tick, fast-forward, pacing = wall. A rate cannot cure those.
+    CHECK(advice(144, 50, {60, 120, 144}, false).empty());
+    CHECK(advice(0, 50, {60, 120}).empty());
+    CHECK(advice(144, 0, {60, 120}).empty());
+    CHECK(advice(144, 50, {60, 120}, true, 2).empty());
+    CHECK(
+        fe::lock_advice(fe::plan_pacing(PacingMode::kWall, 144, true, 50), 144, {60, 120}).empty());
+}
+
 TEST_CASE("pacing: on a 1 ms grid the guest clock steps whole milliseconds at the wall clock's "
           "speed") {
     Host host;

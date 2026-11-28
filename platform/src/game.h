@@ -44,7 +44,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -53,6 +55,8 @@
 #include "bindings.h"
 #include "data_location.h"
 #include "maplethief/boot.h"
+#include "recovery.h"
+#include "run_file.h"
 #include "scaling.h"
 #include "settings.h"
 #include "switch_applet.h"
@@ -74,6 +78,9 @@ enum ExitStatus : int {
     kExitCheckMismatch = 3, // a read-back did not show what was presented
     kExitNoGame = 4,        // no generated code, no bundle, no slice, or the load failed
     kExitGuestEnded = 5,    // the guest trapped, stopped by itself or exited non-zero
+    kExitRunDiffers = 6,    // --play-run: a checkpoint differed, or the replay ended early;
+                            // --verify-run: the file does not verify (or was refused)
+    kExitHang = 7,          // the game hung and the player chose Quit (hang_watchdog.h, #337)
 };
 
 // The generated program and the reservation its memory model needs (MT_MEM_RESERVE_FOR_BUILD in
@@ -140,6 +147,15 @@ struct GameOptions {
     std::string capture_dir;               // --capture: read-back PNGs go here (empty: none)
     std::vector<std::uint64_t> capture_at; // --capture-at: window presents to capture
     std::vector<Tap> taps;                 // --tap and --swipe, by time
+    // --pad T,BUTTON,down|up (#405, a test aid): a virtual Xbox 360 pad attached at the start,
+    // its SDL gamepad button (SDL's names: a, b, dpup, start, ...) set at T seconds after the
+    // first run-loop turn, through SDL's events as a real pad's. In command-line order.
+    struct PadStep {
+        double at = 0;
+        int button = 0; // SDL_GamepadButton
+        bool down = false;
+    };
+    std::vector<PadStep> pad_steps;
     // --fixed-step: run on the virtual clock (clock.h, ADR 0044), advanced by this many
     // microseconds per run-loop turn and never waited for (0: the host's real clock).
     std::uint64_t fixed_step_us = 0;
@@ -155,6 +171,9 @@ struct GameOptions {
     // The first-launch preset picker's "Show controls" (#193): the controls card opens once the
     // game is up (kCardAfterSeconds after the first run-loop turn). Never in a scripted run.
     bool show_controls_card = false;
+    // The recovery point the start chose to resume (#335, ADR 0151, recovery.h): armed at the
+    // start, restored once the player loads its character. Not offered: none.
+    RecoveryOffer recovery;
     PromptDevice controls_card_device{}; // the device it was answered with (none: touch)
     // --shot-gl: each --shot also writes the GL frame it shows, as <NAME>.gl.png (a test aid:
     // the game's own drawing without UIKit over it).
@@ -196,10 +215,35 @@ struct GameOptions {
     // run-loop turn. Empty: never.
     std::string force_crash;
     double force_crash_at = 2.0;
+    // --force-hang (#337, a test aid: the hang watchdog's report and question): at
+    // force_crash_at seconds after the first run-loop turn the turn never ends, as a host call
+    // that never returns. It turns the watchdog on in a --fixed-step run too.
+    bool force_hang = false;
+    // --native-script-vm on|off|shadow (#386, ADR 0226, a developer switch): the script VM's
+    // opcode loop, Lua::execute 0x9BC11, runs as host code over the same guest memory
+    // (maplethief/scriptvm.h) instead of the recompiled one. On by default since #430 and #431
+    // proved the two equal; off: the recompiled original. shadow (#430): each outermost call runs
+    // both ways and is compared (mt_scriptvm_shadow_install); the game goes on from the original's.
+    bool native_script_vm = true;
+    bool native_script_vm_shadow = false;
+    // --hang-seconds S (#337, hang_watchdog.h): the watchdog's limit; 0: no watchdog. Negative
+    // (not given): kHangSeconds, and none in a --fixed-step run.
+    double hang_seconds = -1;
     // --restore-backup T,N (#192, a test aid): at T seconds after the first run-loop turn, the
     // settings menu's Backups list's row N (1 = the newest) is chosen and confirmed, as a player
     // does (save_menu.h's backups_list: refused with a character loaded). Each is (T, N).
     std::vector<std::pair<double, int>> restore_backups;
+    // --play-run FILE (#405, ADR 0156): the run file read by main.cpp (its game files in a
+    // scratch data folder, its settings in `settings`), played with its tape as the clock.
+    // nullptr: a normal run.
+    std::shared_ptr<const RunFile> run_file;
+    // --verify-run FILE (#408, run_verify.h): the run file plays as with --play-run, headless and
+    // silent, and the run prints its report on stdout. `run_path` is the file as given.
+    bool verify_run = false;
+    std::string run_path;
+    // Where the report goes: the process's stdout as it was before main.cpp sent stdout to stderr
+    // for the run, so that the guest's own printing stays out of it (nullptr: stdout).
+    std::FILE *report = nullptr;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must

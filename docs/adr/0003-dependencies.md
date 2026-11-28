@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-24
 - **Issue:** #5
-- **Amended:** 2026-10-25: the reason for stb's `_thread` variants corrected after #21 (`CLoaderThread` is not a thread). The decision is unchanged.
+- **Amended:** 2026-10-25: the reason for stb's `_thread` variants corrected after #21 (`CLoaderThread` is not a thread). The decision is unchanged. 2026-11-28 (#340): Dependabot and `scripts/deps check` notice new versions; Capstone stays on 5.0.9 until 6.0.0 final and a move of its own (addendum).
 
 ## Context
 
@@ -162,3 +162,18 @@ Local checks on 2026-10-24 (macOS 26 arm64, Apple clang 21, CMake 4.4.3, Ninja 1
 ## Addendum: the Switch-only dependencies (#234, 2026-11-10)
 
 The Nintendo Switch target ([ADR 0138](0138-nintendo-switch-homebrew-target.md)) builds against its own SDL3 and toolchain, listed in `THIRD_PARTY.md` as Switch only: SDL3 from `nx-mod/sdl3-nx`, commit `07ea26a3ca7b60bac414823f0f45e8738c61c217` (SDL 3.4.18), archive SHA-256 `d6511751694fb868c123d0da142ad0417420bb1fe650bca25fb2ad6c8be81801`, and the toolchain image `devkitpro/devkita64` at index digest `sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282`. The NRO also links libnx (ISC), newlib, libstdc++ and libgcc (GPL with the GCC Runtime Library Exception, which allows this), Mesa's `libEGL`, `libglapi` and `libdrm_nouveau` (MIT) and deko3d (Zlib). Mesa's NVK Vulkan driver is not linked, which keeps this ADR's rule against GPL in anything shipped.
+
+## Addendum: noticing new versions, and Capstone 6 (#340, 2026-11-28)
+
+Every pin is exact and checked by hash, but nothing looked for newer versions. Two things do now, and [Bumping a dependency](../build/how-to/bump-a-dependency.md) is the routine that follows either:
+
+- **Dependabot** (`.github/dependabot.yml`) for what it can bump on its own: the GitHub Actions (pinned by commit, tag in a comment) and the Python packages (`pyproject.toml` and `uv.lock`). Weekly, one grouped pull request per ecosystem into `dev`, labelled `area:infra`, so a week's bumps are reviewed and tested together. `scripts/lint` checks the file against SchemaStore's schema.
+- **`scripts/deps check`** (`tools/mtport/deps.py`) for the rest, which Dependabot can't follow: the C and C++ pins of `cmake/Dependencies.cmake` (release archives, raw headers at a commit, the sdl3-nx commit), the container images pinned by digest in a Dockerfile `ARG` (Dependabot's `docker` ecosystem does not resolve an image named through an `ARG`), the tools in those Dockerfiles, uv's version in CI, Ghidra and its JDK, and the linters. It reads each pin from its own file, so a new pin needs no second list (a Dockerfile `ARG` or a `scripts/lint` version it doesn't know fails its test), and prints one row per pin with its upstream state. It runs by hand and never on a pull request: a newer upstream must not turn an unrelated pull request red, and CI stays independent of GitHub's API limits. Its tests use a fake upstream. `tests/test_deps.py` also checks that each SHA-256 of `cmake/Dependencies.cmake` and each image digest is in `THIRD_PARTY.md` (the first run found the portable Linux build's Ubuntu 22.04 image missing there).
+
+**Capstone 6.** This ADR said to revisit Capstone when 6.0.0 ships. On 2026-11-28 it has not: the latest is `6.0.0-Alpha11` (2026-09-21), and PyPI's latest release is still 5.0.9. Running the 195 tests that use Capstone against `capstone==6.0.0a11` (CPython 3.12) fails 32 of them (8 in `test_recomp_decode.py`, 14 in `test_recomp_decode_arm.py`, 8 in `test_imports.py`, 1 in `test_rtti.py`, and the version check), on its text: the ARM printer generated from LLVM names `r9` and `r10` where 5.0.9 says `sb` and `sl`, prints branch targets without `#` (`b 0x3000`), prints immediates as unsigned hex (`#0xffffffff` for `#-1`, `#-4` for `#-0x4`), and writes `APSR_nzcv` in upper case. The recompiler's decoder tests compare our own decoder's text with Capstone's, so the move is not a version bump: it needs our printer (or a normaliser in the tests) to follow LLVM's syntax, and `tools/mtport/armscan.py`'s listings change with it.
+
+Decision: **stay on 5.0.9.** Dependabot ignores Capstone's major versions (`ignore` in `.github/dependabot.yml`), so 6.0.0 can't arrive inside a grouped pull request. `scripts/deps check` shows it as `newer` the day 6.0.0 final is on PyPI, and the move is then an issue of its own: the 32 tests above, a decision between following LLVM's syntax and normalising, and `python3 -m recomp all` on the IPA with the function count unchanged. Nothing in the port waits for 6.0: 5.0.9 decodes the Thumb-2 and VFP the game uses, and every difference in the sampled failures is how an instruction is printed, not what it decodes to.
+
+## Addendum: a shipped program with LGPL code (#439, 2026-11-28)
+
+The Linux AppImage starts with AppImage/type2-runtime's executable, which links libfuse (LGPL-2.1) statically. [ADR 0249](0249-the-appimage-runtime-and-its-lgpl-part.md) lets it ship: it is a separate program, passed on unchanged, that never links with our code. The rule above still holds for everything that does. The runtime's notices go into the Linux player's `licenses/AppImage-runtime/`.

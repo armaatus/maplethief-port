@@ -50,6 +50,13 @@ HOOKED: dict[int, Hooked] = {
         "(map, x, y, smooth): centres the camera on a point, then clamps it; widescreen (#86, "
         "ADR 0090) sets the view width for the map first",
     ),
+    0xD259: Hooked(
+        "CMMap::LoadObj",
+        "(map, area, map): reads the map's .obj into its object list; restored_content adds "
+        "Monster Carnival's NPC (kind 42, a Spiegelman script) to Kerning City, Orbis and "
+        "Magatia's first maps after it (#427), and a portal into the unreached 4.5 to 4.3 "
+        "(#428), in memory",
+    ),
     0x23D1D: Hooked(
         "Canvas_FillRect",
         "(x, y, w, h): FillRect in the canvas's colour (and the global alpha while one is set); "
@@ -78,15 +85,40 @@ HOOKED: dict[int, Hooked] = {
         "(owner, text, from, to): a new[] copy of characters [from, to) of a C string, stepped "
         "as Text_CharCount; with a text pack (#189, ADR 0108) by each character's UTF-8 length",
     ),
+    0x22EC5: Hooked(
+        "Text_Wrap",
+        "(owner, text, width, &count): a new[] array of whole lines; widescreen scenes (#396, "
+        "ADR 0090) wrap the scene speech box (the runner's command 50) at the 3:2 width",
+    ),
     0x24DC9: Hooked(
         "DrawImage",
         "(image, x, y): an image at its top-left corner; widescreen (#86, ADR 0090) stretches "
         "the field's backdrop (CStateGame +0x454, a fixed 480 x 320 image) to the view's width",
     ),
+    0x34A05: Hooked(
+        "CChatBox::NextPage",
+        "(box): the next NPC dialogue page, its lines wrapped whole (+0x18, count +0x1C); the "
+        "text events (#391, ADR 0187) read the page after it for the speech",
+    ),
+    0x34CD1: Hooked(
+        "CChatBox::FirstPage",
+        "(box): the first NPC dialogue page, as NextPage; the text events (#391, ADR 0187) "
+        "read it after it",
+    ),
+    0x35189: Hooked(
+        "CChatBox::drawChatBox",
+        "(box, speaker, lines, count): the scene speech box, from CStateGame::Paint; "
+        "widescreen scenes (#396, ADR 0090) draw it at 480 in the wide view's centre",
+    ),
     0x38F55: Hooked(
         "CDataMgr::SaveQuestData",
         "(data manager, hero): the second of the game's save pair (after SaveSaveData 0x38711); "
         "the wrapper runs it, then backs up each slot whose files changed (#148, ADR 0078)",
+    ),
+    0x3EAA1: Hooked(
+        "Popup_Open",
+        "(mgr, id, text, kind): the engine's popup; the text events (#392) read its message, "
+        "kind and button labels (CMPopup at *0x11A96C) after it for the speech",
     ),
     0x46DB9: Hooked(
         "Shop_OnKey",
@@ -169,16 +201,71 @@ HOOKED: dict[int, Hooked] = {
         "rect; CDropItems::Update 0x5BC75 asks it for the hero and each lying drop (the call at "
         "0x5BCEE); auto_loot (#175) widens the drop's rect for that call only",
     ),
+    0x78339: Hooked(
+        "CNotifyTextList::Add",
+        "(list, text, colour): a notify line (pick-ups, meso, EXP, the map's name); the text "
+        "events (#392) read the text for the speech",
+    ),
+    0x81369: Hooked(
+        "CMapleWorld::changeMap",
+        "(this = CStateGame, area, map, portal, x at sp, y at sp + 4): a warp's target, from "
+        "the changeMap native 0x99969; common/portal620 warps to (6, 1, 2), a portal 6.1 lacks, "
+        "and the hook makes it (6, 1, 1) (fix_original_bugs, #388, docs/re/original-bugs.md)",
+    ),
     0x83C71: Hooked(
         "CStateGame::PaintExitToMenu",
         "(this): the scene runner, called by CStateGame::Paint before the shake is drawn; with "
         "screen_shake below 100 (#158, ADR 0093) it sees the game's amplitude and a new one it "
         "sets is scaled for the rest of the frame",
     ),
+    0x853E5: Hooked(
+        "CStateGame::StartScene",
+        "(this, scene): builds scene `scene`'s command list and sets game mode 9; a boss killed "
+        "while the hero is knocked back (CHero +0x119) leaves the scene's keys dropped, so the "
+        "hook clears the knock-back first (fix_original_bugs, #420, docs/re/original-bugs.md 19)",
+    ),
     0x87501: Hooked(
         "CStateGame::Paint",
         "(this): the field's frame; a scene's camera shake (+0x47E on, amplitude +0x488) is "
         "drawn here, so screen_shake below 100 (#158, ADR 0093) scales the amplitude for the call",
+    ),
+    0x8D4C9: Hooked(
+        "CStateGame::OnKeyPressed",
+        "(this, key): the field's keys and its popups, among them the death popup 0x68 and its "
+        '"Go to main menu" popup 0x6D, which leaves without a save; autosave = on_quit (#336) '
+        "checks its guards when Yes on 0x6D is confirmed, and finds the hero dead "
+        "(docs/re/autosave.md)",
+    ),
+    0x998D1: Hooked(
+        "ScriptNative_showMarket",
+        "(L): the script native showMarket (39), which opens the shop its argument names "
+        "through the shop screen 0x4628D; restored_content (#426) offers shops 0, 1 and 16 "
+        "beside the usual one in a list box when a merchant who sells them opens his",
+    ),
+    0x9BC11: Hooked(
+        "Lua::execute",
+        "(L, tfunc, base): the script VM's opcode loop, which returns the first result's stack "
+        "index; --native-script-vm on (#386, ADR 0226) runs it as host code over the same guest "
+        "memory (runtime/src/scriptvm/)",
+    ),
+    0x9B37D: Hooked(
+        "Lua::callNative",
+        "(L, index, base): runs native `index` of the script VM with the arguments above base "
+        "and returns the first result's stack index; the script corpus test (#431) puts a "
+        "recording stub there, so the recompiled and the host VM see the same answers; "
+        "--native-script-vm shadow (#430) records each native call of the original's run and "
+        "replays it in the host VM's (runtime/src/scriptvm/shadow.cpp)",
+    ),
+    0x9CE2D: Hooked(
+        "Lua::runCallback",
+        "(L): the dialogue box's close runs the script callback regCallBack stored at L + 8 "
+        "and returns its result; restored_content (#426) opens the shop chosen in its own list "
+        "box there",
+    ),
+    0x9EE95: Hooked(
+        "TFunc::fetchU8",
+        "(tfunc): the script VM's next code byte; the script corpus test (#431) observes the "
+        "recompiled Lua::execute's opcode fetches (the call at 0x9BC2A) and passes",
     ),
     0xAAAB9: Hooked(
         "MainMenuView_clickPlay",

@@ -26,12 +26,13 @@ usage() {
 Usage: scripts/test [--release] [--preset NAME] [--python LIST] [--cpp-only | --python-only]
                     [-- PYTEST_ARGS...]
 
-  --release       run the release workflow (mac-release-universal, linux-release or
-                  win-release): configure, build, test and package the kit into
-                  build/<preset>/; on macOS also check the universal binary with lipo.
+  --release       run the release workflow (mac-release-universal, linux-release,
+                  linux-arm64-release on aarch64, or win-release): configure, build, test
+                  and package the kit into build/<preset>/; on macOS also check the universal binary with lipo.
                   Implies --cpp-only.
-  --preset NAME   workflow preset for the C/C++ part (default: mac-debug, linux-debug or
-                  win-debug for this OS; or $MAPLETHIEF_PRESET)
+  --preset NAME   workflow preset for the C/C++ part (default: mac-debug, linux-debug
+                  (linux-arm64-debug on aarch64) or win-debug for this OS; or
+                  $MAPLETHIEF_PRESET)
   --python LIST   comma-separated Pythons to run the Python tests on: versions or paths as
                   uv's --python takes them, "latest" (the newest stable CPython uv finds
                   installed) or "default" (uv's own choice: $UV_PYTHON, else its preference).
@@ -47,7 +48,13 @@ EOF
 os="$(uname -s)"
 case "$os" in
     Darwin) preset=mac-debug release_preset=mac-release-universal ;;
-    Linux) preset=linux-debug release_preset=linux-release ;;
+    Linux)
+        # aarch64 (the arm64 container on a Mac, ubuntu-24.04-arm): the presets that check it.
+        case "$(uname -m)" in
+            aarch64 | arm64) preset=linux-arm64-debug release_preset=linux-arm64-release ;;
+            *) preset=linux-debug release_preset=linux-release ;;
+        esac
+        ;;
     MINGW* | MSYS* | CYGWIN*) preset=win-debug release_preset=win-release ;;
     *) preset="" release_preset="" ;;
 esac

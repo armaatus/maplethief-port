@@ -1,11 +1,11 @@
 # Linux and Steam Deck hand-offs
 
-The hand-offs that need a Steam Deck (or a Linux PC for #264). One player tarball, built on the Mac from `dev`, covers all of them. Release v0.1.0 predates the data folder, so it is only used to make older saves for #264. [How to report](README.md#how-to-report) says what to post.
+The hand-offs that need a Steam Deck (or a Linux PC for #264), then the checks from closed issues #146 and #145 ([Checks from closed issues](README.md#checks-from-closed-issues)). One player tarball, built on the Mac from `dev`, covers all of them. Release v0.1.0 predates the data folder, so it is only used to make older saves for #264. [How to report](README.md#how-to-report) says what to post.
 
 ## Setup
 
 1. On the Mac: Docker (OrbStack) running, your copy at `original/MapleThief-1.5.ipa`, then `scripts/bootstrap && python3 -m recomp all`.
-2. `scripts/linux-game player`: it builds `build/linux-game/MapleThief-0.0.1-linux-x86_64.tar.gz` in the container (Ubuntu 24.04, about 5 minutes). It holds no game; the first start imports your IPA. Optional: `scripts/linux-game build` for the tarball with the game inside, and `scripts/linux-game check` to start it on a plain Ubuntu.
+2. `scripts/linux-game player`: it builds `build/linux-game/MapleThief-0.0.1-linux-x86_64.tar.gz` in the container (Ubuntu 22.04, about 5 minutes), with its `.AppImage` and `.flatpak`. It holds no game; the first start imports your IPA. Optional: `scripts/linux-game build` for the tarball with the game inside, and `scripts/linux-game check` to start it on a plain Ubuntu.
 3. A way to copy files to the Deck (a USB stick or the network), Desktop Mode and Konsole on the Deck.
 4. For #264's older saves: `gh release download v0.1.0 -p "MapleThief-0.1.0-linux-x86_64.tar.gz"`.
 
@@ -60,3 +60,36 @@ Covers the Deck part of [#142](https://github.com/armaatus/maplethief-port/issue
 3. In the newest log in the folder's `data/logs/`, read the `game: ticks:` and `game: clock:` lines.
 
 **Post back:** those two lines.
+
+## #353: The Deck layout template in Game Mode
+
+Closes [#353](https://github.com/armaatus/maplethief-port/issues/353)'s hardware criterion. **Waits on** the agent's part of #353 (the Steam Input template in the download and its notes in [Linux and Steam Deck](../../play/linux-and-steam-deck.md)) and on #84 above. In Game Mode, with the shortcut of #84:
+
+1. Apply the template as the notes say, and the launch options they give.
+2. Start the game: the layout is in use (the controller settings name it), and the picture is integer scaled.
+3. Play the first map: walk, jump, attack, a quick slot, the menu and the map buttons.
+
+**Post back:** pass or fail per step, the SteamOS version, and anything the notes got wrong.
+
+## #146: Button prompts and focus on a TV or the Deck
+
+From closed [#146](https://github.com/armaatus/maplethief-port/issues/146) (PR #178's hand-offs). Every screen's focus and prompts are tested by hash; only reading them from a couch is left. In Game Mode (or the Deck docked to a TV), the launch option `%command% --preset original_controller` (it turns **Button prompts** on):
+
+1. With the Deck's own controls: the main menu, character select, the field's popup menu, a shop, an NPC's dialogue and the settings menu. On each, the focused item is plain to see and the prompts show the right buttons.
+2. With an Xbox pad, a PlayStation pad and a Nintendo pad in turn (press a button on each): the prompts change to that pad's glyphs. A Nintendo pad goes by position unless Bindings' **Nintendo buttons** says otherwise.
+3. With a keyboard: the prompts change to keys.
+4. At 1280 x 800, and on the TV from the couch: can the prompts and the focus be read?
+
+**Post back:** per screen and pad, what was hard to see or showed the wrong glyph, and the TV's size and distance.
+
+## #145: Window behaviour (Linux part)
+
+From closed [#145](https://github.com/armaatus/maplethief-port/issues/145) (PR #178's hand-offs); the [Mac section](mac.md#145-window-behaviour-mac-part) has the full list. In Desktop Mode on the Deck (or a Linux PC), from the folder of #264 step 3, with `./MapleThief.sh`:
+
+1. F11 and Alt+Enter toggle fullscreen; quit in fullscreen and start: fullscreen again.
+2. Windowed, move and resize, quit, start: the same place and size (`data/window.ini`).
+3. The mouse pointer hides on a key or pad press and comes back when the mouse moves; the mouse wheel moves one row in a shop list and nothing on the field.
+4. F12 writes `data/screenshots/MapleThief_<date>_<time>.png`. Look at it, don't post it.
+5. Settings > Gameplay > **Pause in the background** on: click another window and the game holds; off: it runs on.
+
+**Post back:** pass or fail per step, and the desktop (KDE on the Deck, or the distribution).

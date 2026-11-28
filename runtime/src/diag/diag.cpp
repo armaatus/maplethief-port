@@ -1,5 +1,6 @@
 // Diagnostics (ADR 0030): configuration, trace channels, the HLE call trace, the
-// unimplemented import/selector report and the function-entry coverage. See
+// unimplemented import/selector report, the function-entry coverage and the run coverage's
+// hit recorders (#295, ADR 0160). See
 // maplethief/diag.h; the symbol table is symbols.cpp, the crash reporter crash.cpp.
 //
 // Plain C++ without exceptions, `new`, function-local statics or a C++ runtime library (like
@@ -12,6 +13,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#if defined(_WIN32)
+#include <process.h> // _getpid
+#elif !defined(__SWITCH__)
+#include <unistd.h> // getpid
+#endif
 
 #include "diag_internal.h"
 
@@ -104,6 +111,28 @@ struct Covered {
     const std::uint64_t *calls;
 };
 
+// The run coverage's hits: unique by (kind, id), the key named once.
+struct Hit {
+    std::uint64_t id;
+    std::uint64_t count;
+    char *key;
+    u32 kind;
+};
+
+struct Hits {
+    Hit *items = nullptr;
+    u32 count = 0, cap = 0;
+    u32 *index = nullptr; // open addressing: item + 1, 0 = free
+    u32 index_cap = 0;    // a power of two, at least twice count
+};
+
+// A function watched on every entry (mt_coverage_watch).
+struct Watch {
+    u32 fn;
+    mt_coverage_watch_fn watcher;
+};
+constexpr u32 k_max_watches = 16;
+
 struct State {
     char *trace_hle = nullptr;
     char *trace = nullptr;
@@ -124,6 +153,11 @@ struct State {
     Report report;
     Covered *covered = nullptr;
     u32 covered_count = 0, covered_cap = 0;
+    // The HLE trace's filter result per import id (the coverage wraps every slot).
+    bool *traced = nullptr;
+    Hits hits;
+    Watch watches[k_max_watches] = {};
+    u32 watch_count = 0;
 };
 
 State g;
@@ -269,6 +303,74 @@ void free_report(Report &r) {
     r = Report{};
 }
 
+// --- the hits -----------------------------------------------------------------------------
+
+const char *const k_hit_kinds[MT_HIT_KINDS] = {"import", "selector", "script", "native", "map"};
+
+u32 hit_hash(u32 kind, std::uint64_t id) {
+    std::uint64_t h = (id ^ (static_cast<std::uint64_t>(kind) << 59)) * 0x9E3779B97F4A7C15ull;
+    return static_cast<u32>(h >> 32);
+}
+
+bool hits_reindex(Hits &r, u32 cap) {
+    auto *index = static_cast<u32 *>(std::calloc(cap, sizeof(u32)));
+    if (index == nullptr) {
+        return false;
+    }
+    for (u32 i = 0; i < r.count; i++) {
+        u32 slot = hit_hash(r.items[i].kind, r.items[i].id) & (cap - 1u);
+        while (index[slot] != 0u) {
+            slot = (slot + 1u) & (cap - 1u);
+        }
+        index[slot] = i + 1u;
+    }
+    std::free(r.index);
+    r.index = index;
+    r.index_cap = cap;
+    return true;
+}
+
+// The hit (kind, id), or nullptr; *slot gets its index slot or the free one to fill.
+Hit *hits_find(Hits &r, u32 kind, std::uint64_t id, u32 *slot) {
+    u32 i = hit_hash(kind, id) & (r.index_cap - 1u);
+    while (r.index[i] != 0u) {
+        Hit &h = r.items[r.index[i] - 1u];
+        if (h.kind == kind && h.id == id) {
+            *slot = i;
+            return &h;
+        }
+        i = (i + 1u) & (r.index_cap - 1u);
+    }
+    *slot = i;
+    return nullptr;
+}
+
+void free_hits(Hits &r) {
+    for (u32 i = 0; i < r.count; i++) {
+        std::free(r.items[i].key);
+    }
+    std::free(r.items);
+    std::free(r.index);
+    r = Hits{};
+}
+
+std::uint64_t fnv1a64(const char *s) {
+    std::uint64_t h = 14695981039346656037ull;
+    for (const char *p = s; *p != '\0'; p++) {
+        h = (h ^ static_cast<unsigned char>(*p)) * 1099511628211ull;
+    }
+    return h;
+}
+
+int by_kind_key(const void *a, const void *b) {
+    const Hit *x = *static_cast<const Hit *const *>(a);
+    const Hit *y = *static_cast<const Hit *const *>(b);
+    if (x->kind != y->kind) {
+        return x->kind < y->kind ? -1 : 1;
+    }
+    return std::strcmp(x->key, y->key);
+}
+
 // Writes the report through `out`, one line at a time.
 template <typename Out> void emit_report(Out out) {
     const std::size_t n = mt_report_format(nullptr, 0) + 1u;
@@ -286,6 +388,30 @@ template <typename Out> void emit_report(Out out) {
         line = nl != nullptr ? nl + 1 : nullptr;
     }
     std::free(buf);
+}
+
+long process_id() {
+#if defined(_WIN32)
+    return static_cast<long>(_getpid());
+#elif defined(__SWITCH__)
+    return 0;
+#else
+    return static_cast<long>(getpid());
+#endif
+}
+
+// `path` with every "%p" replaced by the process id (the run coverage's files, so that the
+// processes of one test each keep their own).
+void expand_path(const char *path, char *out, std::size_t size) {
+    Text t = text(out, size);
+    for (const char *p = path; *p != '\0'; p++) {
+        if (p[0] == '%' && p[1] == 'p') {
+            put(t, "%ld", process_id());
+            p++;
+        } else {
+            put(t, "%c", *p);
+        }
+    }
 }
 
 std::FILE *open_write(const char *path) {
@@ -414,10 +540,15 @@ extern "C" void mt_diag_finish(void) noexcept {
     }
     if (g.coverage_path != nullptr) {
         const std::size_t n = mt_coverage_format(nullptr, 0) + 1u;
-        char *buf = static_cast<char *>(std::malloc(n));
-        std::FILE *f = buf != nullptr ? open_write(g.coverage_path) : nullptr;
+        const std::size_t m = mt_hits_format(nullptr, 0) + 1u;
+        char *buf = static_cast<char *>(std::malloc(n > m ? n : m));
+        char cov_path[1024];
+        expand_path(g.coverage_path, cov_path, sizeof cov_path);
+        std::FILE *f = buf != nullptr ? open_write(cov_path) : nullptr;
         if (f != nullptr) {
             mt_coverage_format(buf, n);
+            std::fputs(buf, f);
+            mt_hits_format(buf, m);
             std::fputs(buf, f);
             std::fclose(f);
         }
@@ -431,8 +562,10 @@ extern "C" void mt_diag_reset(void) noexcept {
     std::free(g.report_path);
     std::free(g.coverage_path);
     std::free(g.orig);
+    std::free(g.traced);
     std::free(g.covered);
     free_report(g.report);
+    free_hits(g.hits);
     mt_symbols_clear();
     const bool registered = g.atexit_registered;
     g = State{};
@@ -506,36 +639,65 @@ extern "C" int mt_trace_filter_match(const char *filters, const char *name) noex
 extern "C" std::uint32_t mt_trace_imports_wrap(const mt_import_desc *descs, std::uint32_t count,
                                                mt_import_fn *table) noexcept {
     std::free(g.orig);
+    std::free(g.traced);
     g.orig = nullptr;
+    g.traced = nullptr;
     g.descs = descs;
     g.count = count;
-    if (g.trace_hle == nullptr || descs == nullptr || table == nullptr || count == 0u) {
+    const bool counting = g.coverage_path != nullptr; // the run coverage counts every call
+    if ((g.trace_hle == nullptr && !counting) || descs == nullptr || table == nullptr ||
+        count == 0u) {
         return 0;
     }
     g.orig = static_cast<mt_import_fn *>(std::calloc(count, sizeof(mt_import_fn)));
-    if (g.orig == nullptr) {
+    g.traced = static_cast<bool *>(std::calloc(count, sizeof(bool)));
+    if (g.orig == nullptr || g.traced == nullptr) {
+        std::free(g.orig);
+        std::free(g.traced);
+        g.orig = nullptr;
+        g.traced = nullptr;
         return 0;
     }
-    u32 wrapped = 0;
+    u32 wrapped = 0, traced = 0;
     for (u32 id = 0; id < count; id++) {
         g.orig[id] = table[id];
-        if ((descs[id].flags & MT_IMPORT_FUNCTION) == 0u || table[id] == mt_trace_import_call ||
-            mt_trace_filter_match(g.trace_hle, descs[id].name) == 0) {
+        if ((descs[id].flags & MT_IMPORT_FUNCTION) == 0u || table[id] == mt_trace_import_call) {
+            continue;
+        }
+        g.traced[id] = mt_trace_filter_match(g.trace_hle, descs[id].name) != 0;
+        if (!g.traced[id] && !counting) {
             continue;
         }
         table[id] = mt_trace_import_call;
         wrapped++;
+        traced += g.traced[id] ? 1u : 0u;
     }
-    char line[160];
-    std::snprintf(line, sizeof line, "hle: tracing %u of %u imports (%s)",
-                  static_cast<unsigned>(wrapped), static_cast<unsigned>(count), g.trace_hle);
-    log_line(line);
+    char line[200];
+    if (g.trace_hle != nullptr) {
+        std::snprintf(line, sizeof line, "hle: tracing %u of %u imports (%s)",
+                      static_cast<unsigned>(traced), static_cast<unsigned>(count), g.trace_hle);
+        log_line(line);
+    }
+    if (counting) {
+        std::snprintf(line, sizeof line, "hle: counting the calls of %u imports (run coverage)",
+                      static_cast<unsigned>(wrapped));
+        log_line(line);
+    }
     return wrapped;
 }
 
 extern "C" void mt_trace_import_call(mt_cpu *cpu, std::uint32_t id) noexcept {
     const mt_import_fn fn = g.orig != nullptr && id < g.count ? g.orig[id] : nullptr;
     const char *name = g.descs != nullptr && id < g.count ? g.descs[id].name : "?";
+    if (g.coverage_path != nullptr && mt_hit_count(MT_HIT_IMPORT, id) == 0) {
+        mt_hit_add(MT_HIT_IMPORT, id, name);
+    }
+    if (g.traced != nullptr && id < g.count && !g.traced[id]) {
+        if (fn != nullptr) {
+            fn(cpu, id); // counted, not traced
+        }
+        return;
+    }
     const u32 lr = cpu->r[MT_LR];
     char line[512];
     Text t = text(line, sizeof line);
@@ -626,13 +788,20 @@ extern "C" std::size_t mt_report_format(char *buf, std::size_t size) noexcept {
 
 // --- coverage -----------------------------------------------------------------------------
 
-extern "C" void mt_trace_fn_first(mt_cpu *cpu, const char *fn_name,
-                                  const std::uint64_t *calls) noexcept {
+extern "C" std::uint32_t mt_trace_fn_first(mt_cpu *cpu, const char *fn_name,
+                                           const std::uint64_t *calls) noexcept {
+    const u32 addr = fn_addr(fn_name);
+    u32 watched = 0;
+    if (g.coverage_path != nullptr && addr != 0u) {
+        for (u32 i = 0; i < g.watch_count; i++) {
+            watched = g.watches[i].fn == addr ? addr : watched;
+        }
+    }
     if (g.covered_count == g.covered_cap) {
         const u32 cap = g.covered_cap != 0u ? g.covered_cap * 2u : 1024u;
         auto *c = static_cast<Covered *>(std::realloc(g.covered, cap * sizeof(Covered)));
         if (c == nullptr) {
-            return;
+            return watched;
         }
         g.covered = c;
         g.covered_cap = cap;
@@ -640,11 +809,39 @@ extern "C" void mt_trace_fn_first(mt_cpu *cpu, const char *fn_name,
     g.covered[g.covered_count++] = Covered{fn_name, calls};
     if (mt_trace_enabled("entry") != 0) {
         char sym[160];
-        const u32 addr = fn_addr(fn_name);
         mt_symbolize(addr, sym, sizeof sym);
         mt_tracef("entry", "%s%s%s (first entry, from 0x%08X)", fn_name, sym[0] != '\0' ? " " : "",
                   sym, cpu != nullptr ? cpu->r[MT_LR] : 0u);
     }
+    return watched;
+}
+
+extern "C" void mt_trace_fn_watched(mt_cpu *cpu, std::uint32_t fn) noexcept {
+    if (g.coverage_path == nullptr) {
+        return;
+    }
+    for (u32 i = 0; i < g.watch_count; i++) {
+        if (g.watches[i].fn == fn && g.watches[i].watcher != nullptr) {
+            g.watches[i].watcher(cpu, fn);
+        }
+    }
+}
+
+extern "C" int mt_coverage_watch(std::uint32_t fn, mt_coverage_watch_fn watcher) noexcept {
+    for (u32 i = 0; i < g.watch_count; i++) {
+        if (g.watches[i].fn == fn) {
+            g.watches[i].watcher = watcher;
+            return 1;
+        }
+    }
+    if (watcher == nullptr) {
+        return 1;
+    }
+    if (g.watch_count == k_max_watches) {
+        return 0;
+    }
+    g.watches[g.watch_count++] = Watch{fn, watcher};
+    return 1;
 }
 
 extern "C" std::uint32_t mt_coverage_count(void) noexcept { return g.covered_count; }
@@ -666,6 +863,98 @@ extern "C" std::size_t mt_coverage_format(char *buf, std::size_t size) noexcept 
         const char *sym = addr != 0u ? mt_symbols_lookup(addr, nullptr, nullptr) : nullptr;
         put(t, "0x%08X %llu %s\n", addr, static_cast<unsigned long long>(*sorted[i].calls),
             sym != nullptr ? sym : sorted[i].name);
+    }
+    std::free(sorted);
+    return t.len;
+}
+
+// --- the run coverage's hits --------------------------------------------------------------
+
+extern "C" int mt_hits_enabled(void) noexcept { return g.coverage_path != nullptr ? 1 : 0; }
+
+extern "C" int mt_hit_count(std::uint32_t kind, std::uint64_t id) noexcept {
+    Hits &r = g.hits;
+    if (r.index_cap == 0u) {
+        return 0;
+    }
+    u32 slot = 0;
+    Hit *h = hits_find(r, kind, id, &slot);
+    if (h == nullptr) {
+        return 0;
+    }
+    h->count++;
+    return 1;
+}
+
+extern "C" void mt_hit_add(std::uint32_t kind, std::uint64_t id, const char *key) noexcept {
+    Hits &r = g.hits;
+    if (kind >= MT_HIT_KINDS || (r.index_cap == 0u && !hits_reindex(r, 256u))) {
+        return;
+    }
+    u32 slot = 0;
+    if (Hit *h = hits_find(r, kind, id, &slot)) {
+        h->count++;
+        return;
+    }
+    if (r.count == r.cap) {
+        const u32 cap = r.cap != 0u ? r.cap * 2u : 128u;
+        auto *items = static_cast<Hit *>(std::realloc(r.items, cap * sizeof(Hit)));
+        if (items == nullptr) {
+            return;
+        }
+        r.items = items;
+        r.cap = cap;
+    }
+    char *k = dup(key != nullptr ? key : "?");
+    if (k == nullptr) {
+        return;
+    }
+    // A key is one line of the coverage file.
+    for (char *p = k; *p != '\0'; p++) {
+        *p = *p == '\n' || *p == '\r' ? ' ' : *p;
+    }
+    r.items[r.count] = Hit{id, 1u, k, kind};
+    r.index[slot] = ++r.count;
+    if (r.count * 2u > r.index_cap) {
+        hits_reindex(r, r.index_cap * 2u);
+    }
+}
+
+extern "C" void mt_hit(std::uint32_t kind, const char *key) noexcept {
+    if (g.coverage_path == nullptr || key == nullptr) {
+        return;
+    }
+    const std::uint64_t id = fnv1a64(key);
+    if (mt_hit_count(kind, id) == 0) {
+        mt_hit_add(kind, id, key);
+    }
+}
+
+extern "C" std::uint32_t mt_hits_count(std::uint32_t kind) noexcept {
+    u32 n = 0;
+    for (u32 i = 0; i < g.hits.count; i++) {
+        n += g.hits.items[i].kind == kind ? 1u : 0u;
+    }
+    return n;
+}
+
+extern "C" std::size_t mt_hits_format(char *buf, std::size_t size) noexcept {
+    Text t = text(buf, size);
+    const Hits &r = g.hits;
+    if (r.count == 0u) {
+        return t.len;
+    }
+    auto *sorted = static_cast<const Hit **>(std::malloc(r.count * sizeof(Hit *)));
+    if (sorted == nullptr) {
+        return t.len;
+    }
+    for (u32 i = 0; i < r.count; i++) {
+        sorted[i] = &r.items[i];
+    }
+    std::qsort(sorted, r.count, sizeof(Hit *), by_kind_key);
+    for (u32 i = 0; i < r.count; i++) {
+        put(t, "hit %s %llu %s\n", k_hit_kinds[sorted[i]->kind],
+            static_cast<unsigned long long>(sorted[i]->count), sorted[i]->key);
     }
     std::free(sorted);
     return t.len;

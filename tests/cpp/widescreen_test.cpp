@@ -4,12 +4,17 @@
 // decision (field, NPC chat, menus, other states, the map's width, the host's word), what apply
 // writes (the clip rect only when it is the whole screen), off as a no-op, the hooked camera
 // and backdrop draws as the generated code calls them (MT_FN_HOOK), and the menus' screens drawn
-// at 480 in the view's centre with the popup menu's dim stretched (#169). The real game's run is
-// play.widescreen_off / play.widescreen_on (play_real_test.cpp).
+// at 480 in the view's centre with the popup menu's dim stretched (#169), and the scenes (#396):
+// wide only when listed, their speech box wrapped at the 3:2 width and drawn in the centre;
+// widescreen = fill (#425): the host's limit on the view, and the backdrop tiled when its texels
+// repeat every 160 points (synthetic images bound through the GL imports), else stretched. The
+// real game's runs are play.widescreen_off / play.widescreen_on and
+// play.widescreen_scene_<n>_off_synthetic / _on_synthetic (play_real_test.cpp).
 #include <doctest/doctest.h>
 
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 #include "maplethief/gles.h"
 #include "maplethief/hooks.h"
@@ -42,6 +47,7 @@ struct Guest {
 
     Guest() {
         mt_widescreen_reset();
+        mt_gles_reset(); // no texture bound
         mem = mt_mem_create(nullptr);
         REQUIRE(mem != nullptr);
         mt_mem_attach(mem, &cpu);
@@ -76,6 +82,7 @@ struct Guest {
     }
     ~Guest() {
         mt_widescreen_reset();
+        mt_gles_reset();
         mt_mem_destroy(mem);
     }
     Guest(const Guest &) = delete;
@@ -87,12 +94,28 @@ int g_camera_original = 0;
 void camera_original(mt_cpu *MT_RESTRICT) { g_camera_original++; }
 void hooked_clamp(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(MT_HOOK_FN_CAMERA_CLAMP, camera_original); }
 
-// The image draw's original records the host transform it was drawn with.
+// The image draw's original records the host transform it was drawn with, and runs the draw
+// filter installed (as its glDrawArrays would) on the 480-point image's box in a GL layer
+// g_draw_layer points wide, keeping what it answered.
 float g_draw_scale = 0.0f, g_draw_offset = 0.0f;
-int g_draw_original = 0;
-void draw_original(mt_cpu *MT_RESTRICT) {
+int g_draw_original = 0, g_draw_filtered = -1;
+float g_draw_m[6] = {};
+float g_draw_layer = 568.0f;
+u32 g_draw_image = 0; // r0 of the last call
+void draw_original(mt_cpu *MT_RESTRICT cpu) {
     g_draw_original++;
+    g_draw_image = cpu->r[0];
+    cpu->r[0] = cpu->r[1] = cpu->r[2] = 0xDEADu; // a call clobbers its argument registers
     mt_gles_get_host_x_transform(&g_draw_scale, &g_draw_offset);
+    void *user = nullptr;
+    const mt_gles_draw_filter filter = mt_gles_get_draw_filter(&user);
+    g_draw_filtered = -1;
+    if (filter != nullptr) {
+        const float box[4] = {-1.0f, -1.0f, 960.0f / g_draw_layer - 1.0f, 1.0f};
+        float m[6] = {1, 0, 0, 1, 0, 0};
+        g_draw_filtered = filter(user, box, m);
+        std::memcpy(g_draw_m, m, sizeof m);
+    }
 }
 void hooked_draw(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(MT_HOOK_FN_DRAW_IMAGE, draw_original); }
 
@@ -147,6 +170,81 @@ void hooked_popup(mt_cpu *MT_RESTRICT cpu) {
     MT_FN_HOOK(MT_HOOK_FN_POPUP_MENU_PAINT, screen_original);
 }
 void hooked_map(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(MT_HOOK_FN_MAP_PAINT_0, screen_original); }
+void hooked_chat_box(mt_cpu *MT_RESTRICT cpu) {
+    MT_FN_HOOK(MT_HOOK_FN_CHAT_BOX_DRAW, screen_original);
+}
+
+// Text_Wrap's original records the width it was given.
+u32 g_wrap_width = 0;
+void wrap_original(mt_cpu *MT_RESTRICT cpu) { g_wrap_width = cpu->r[2]; }
+void hooked_wrap(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(MT_HOOK_FN_TEXT_WRAP, wrap_original); }
+u32 wrap(mt_cpu &cpu, u32 width, u32 lr) {
+    cpu.r[0] = 0x2000; // the owner, the text, &count: passed through
+    cpu.r[1] = 0x3000;
+    cpu.r[2] = width;
+    cpu.r[3] = 0x4000;
+    cpu.r[MT_LR] = lr;
+    hooked_wrap(&cpu);
+    return g_wrap_width;
+}
+
+} // namespace
+
+extern "C" {
+void mt_hle_glGenTextures(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_glBindTexture(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_glTexImage2D(mt_cpu *cpu, std::uint32_t id) noexcept;
+}
+
+namespace {
+
+// A backdrop's texture as the game uploads it: a 512 x 512 RGBA8 texture with the 480 x 320
+// image in its top-left corner, `scale` texels a point (a pack's replacement: scale 2 gives
+// 1024 x 1024). The image repeats every 160 points; with `band`, rows 96 ... 224 don't (as
+// backdrops 11 and 12).
+std::vector<std::uint8_t> backdrop(u32 scale, bool band) {
+    const u32 w = 512 * scale, h = 512 * scale;
+    std::vector<std::uint8_t> rgba(static_cast<std::size_t>(w) * h * 4, 0);
+    for (u32 y = 0; y < 320 * scale; y++) {
+        for (u32 x = 0; x < 480 * scale; x++) {
+            std::uint8_t *p = &rgba[(static_cast<std::size_t>(y) * w + x) * 4];
+            const u32 col = band && y >= 96 * scale && y < 224 * scale ? x : x % (160 * scale);
+            p[0] = static_cast<std::uint8_t>(col * 7);
+            p[1] = static_cast<std::uint8_t>(y * 3);
+            p[2] = static_cast<std::uint8_t>(col / 3 + y);
+            p[3] = 255;
+        }
+    }
+    return rgba;
+}
+
+// Binds a texture with `rgba` (w x h) through the GL imports, as the backdrop's draw does.
+void bind_backdrop(Guest &g, u32 w, u32 h, const std::vector<std::uint8_t> &rgba) {
+    const u32 names = mt_heap_calloc(g.mem, 1, 4);
+    const u32 pixels = mt_heap_calloc(g.mem, 1, static_cast<u32>(rgba.size()));
+    const u32 stack = mt_heap_calloc(g.mem, 1, 32);
+    REQUIRE((names != 0 && pixels != 0 && stack != 0));
+    std::memcpy(g.cpu.mem + pixels, rgba.data(), rgba.size());
+    g.cpu.r[0] = 1;
+    g.cpu.r[1] = names;
+    mt_hle_glGenTextures(&g.cpu, 0);
+    const u32 name = get32(g.cpu, names);
+    g.cpu.r[0] = 0x0DE1; // GL_TEXTURE_2D
+    g.cpu.r[1] = name;
+    mt_hle_glBindTexture(&g.cpu, 0);
+    // glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels)
+    const u32 sp = g.cpu.r[MT_SP];
+    g.cpu.r[MT_SP] = stack;
+    const u32 rest[5] = {h, 0, 0x1908, 0x1401, pixels};
+    std::memcpy(g.cpu.mem + stack, rest, sizeof rest);
+    g.cpu.r[0] = 0x0DE1;
+    g.cpu.r[1] = 0;
+    g.cpu.r[2] = 0x1908;
+    g.cpu.r[3] = w;
+    mt_hle_glTexImage2D(&g.cpu, 0);
+    g.cpu.r[MT_SP] = sp;
+    REQUIRE(mt_gles_bound_texture_gfx() != 0u);
+}
 
 void draw(mt_cpu &cpu, u32 image, u32 x, u32 y) {
     cpu.r[0] = image;
@@ -180,7 +278,8 @@ TEST_CASE("widescreen: 480 off the field, while the host says no, or when off") 
         put32(g.cpu, k_game_mode, mode);
         CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 568u);
     }
-    for (const u32 mode : {5u, 6u, 7u, 8u, 9u, 10u, 12u}) { // loading, exit, scenes: 3:2
+    // Loading, the waiting box, scene 0 (unlisted, #396) and a scene without its list: 3:2.
+    for (const u32 mode : {5u, 6u, 7u, 8u, 9u, 10u, 12u}) {
         put32(g.cpu, k_game_mode, mode);
         CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 480u);
     }
@@ -193,6 +292,98 @@ TEST_CASE("widescreen: 480 off the field, while the host says no, or when off") 
     put32(g.cpu, g.state, k_game_vptr);
     put32(g.cpu, k_canvas_global, 0); // no canvas yet
     CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 480u);
+}
+
+TEST_CASE("widescreen: game modes 9 and 10 are wide only for the listed scenes (#396)") {
+    Guest g;
+    put32(g.cpu, g.state + 0x38, 0x1000u); // the scene's command list
+    u32 listed = 0;
+    for (u32 scene = 0; scene <= 20; scene++) {
+        put32(g.cpu, g.state + 0x1E4, scene);
+        const bool wide = mt_widescreen_scene_wide(scene) != 0;
+        listed += wide ? 1u : 0u;
+        for (const u32 mode : {9u, 10u}) {
+            put32(g.cpu, k_game_mode, mode);
+            CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == (wide ? 568u : 480u));
+            CHECK(mt_widescreen_decide(&g.cpu, 480, 1) == 480u); // off
+            CHECK(mt_widescreen_decide(&g.cpu, 568, 0) == 480u); // the host says no
+        }
+    }
+    CHECK(listed == 7u);
+    for (const u32 scene : {2u, 11u, 13u, 15u, 16u, 19u, 20u}) {
+        CHECK(mt_widescreen_scene_wide(scene) == 1);
+    }
+    CHECK(mt_widescreen_scene_wide(21u) == 0);
+    CHECK(mt_widescreen_scene_wide(0xFFFFFFFFu) == 0);
+    // A listed scene is as wide as its map: 35 tiles, 560; 30 tiles, the original 480.
+    put32(g.cpu, g.state + 0x1E4, 16u);
+    put32(g.cpu, k_game_mode, 9u);
+    put32(g.cpu, g.map + 0x5C, 35 * 16);
+    CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 560u);
+    put32(g.cpu, g.map + 0x5C, 30 * 16);
+    CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 480u);
+    put32(g.cpu, g.map + 0x5C, 60 * 16);
+    // Game mode 9 with no command list (the runner has nothing to run): 480. Queued (10): the
+    // list comes with StartScene, so none is needed yet.
+    put32(g.cpu, g.state + 0x38, 0u);
+    CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 480u);
+    put32(g.cpu, k_game_mode, 10u);
+    CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 568u);
+}
+
+TEST_CASE("widescreen: off, a listed scene changes nothing (#396)") {
+    Guest g;
+    mt_widescreen_configure(480);
+    put32(g.cpu, g.state + 0x38, 0x1000u);
+    put32(g.cpu, g.state + 0x1E4, 16u);
+    for (const u32 mode : {0u, 10u, 9u}) {
+        put32(g.cpu, k_game_mode, mode);
+        CHECK(mt_widescreen_turn(&g.cpu, 1) == 480u);
+    }
+    CHECK(get32(g.cpu, g.canvas + 0x88) == 480u);
+    CHECK(mt_widescreen_get_stats().changes == 0u);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_TEXT_WRAP) == 0);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CHAT_BOX_DRAW) == 0);
+}
+
+TEST_CASE("widescreen scenes: the speech box is wrapped at 3:2 and drawn in the centre (#396)") {
+    Guest g;
+    g_canvas = g.canvas;
+    g_surface = g.surface;
+    g_stack = mt_heap_calloc(g.mem, 1, 0x40);
+    REQUIRE(g_stack != 0);
+    mt_widescreen_configure(MT_WIDESCREEN_WIDE);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_TEXT_WRAP) == 1);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CHAT_BOX_DRAW) == 1);
+    put32(g.cpu, g.state + 0x38, 0x1000u);
+    put32(g.cpu, g.state + 0x1E4, 16u);
+    put32(g.cpu, k_game_mode, 9u);
+    REQUIRE(mt_widescreen_turn(&g.cpu, 1) == 568u);
+    // The runner's command 50 (the call at 0x85158) passes +0x88 - 24: the 3:2 456 instead.
+    constexpr u32 runner = 0x8515Du;
+    CHECK(wrap(g.cpu, 568 - 24, runner) == 456u);
+    CHECK(mt_widescreen_get_menu_stats().box_wraps == 1u);
+    // Every other caller (an NPC's dialogue page, the menus) wraps as the original.
+    CHECK(wrap(g.cpu, 568 - 24, 0x34B29u) == 544u);
+    CHECK(mt_widescreen_get_menu_stats().box_wraps == 1u);
+    // CChatBox::drawChatBox: at 480 points, 44 points right; the wide words afterwards.
+    g_seen = Seen{};
+    hooked_chat_box(&g.cpu);
+    CHECK(g_seen.calls == 1);
+    CHECK(g_seen.width == 480u);
+    CHECK(g_seen.half == 240u);
+    CHECK(g_seen.offset == doctest::Approx(88.0f / 568.0f));
+    CHECK(get32(g.cpu, g.canvas + 0x88) == 568u);
+    // An unlisted scene is drawn at 480: the box and its wrap as the original's.
+    put32(g.cpu, g.state + 0x1E4, 14u);
+    REQUIRE(mt_widescreen_turn(&g.cpu, 1) == 480u);
+    CHECK(wrap(g.cpu, 480 - 24, runner) == 456u);
+    CHECK(mt_widescreen_get_menu_stats().box_wraps == 1u);
+    g_seen = Seen{};
+    hooked_chat_box(&g.cpu);
+    CHECK(g_seen.calls == 1);
+    CHECK(g_seen.width == 480u);
+    CHECK(g_seen.offset == 0.0f);
 }
 
 TEST_CASE("widescreen: a guest without the game's image is never read") {
@@ -266,30 +457,128 @@ TEST_CASE("widescreen: on, the turn and the camera hook set the view width") {
 TEST_CASE("widescreen: only the field's backdrop at (0, 0) is stretched to the view") {
     Guest g;
     mt_widescreen_configure(MT_WIDESCREEN_WIDE);
+    g_draw_layer = 568.0f;
     const u32 backdrop = g.state + 0x454;
-    // At 480 points: drawn as the original draws it.
+    // At 480 points: drawn as the original draws it, unfiltered.
     g_draw_original = 0;
     draw(g.cpu, backdrop, 0, 0);
     CHECK(g_draw_original == 1);
     CHECK(g_draw_scale == 1.0f);
     CHECK(g_draw_offset == 0.0f);
+    CHECK(g_draw_filtered == -1);
+    // Wide, with no texture to measure (nothing repeats): its draw is stretched by the filter,
+    // x' = k x + (k - 1) in device coordinates, keeping the left edge and moving 480 to 568.
     REQUIRE(mt_widescreen_turn(&g.cpu, 1) == 568u);
     draw(g.cpu, backdrop, 0, 0);
     CHECK(g_draw_original == 2);
     const float k = 568.0f / 480.0f;
-    CHECK(g_draw_scale == doctest::Approx(k));
-    CHECK(g_draw_offset == doctest::Approx(k - 1.0f));
-    // Back to identity after it, and for any other image or place.
+    CHECK(g_draw_scale == 1.0f);
+    CHECK(g_draw_filtered == 1);
+    CHECK(g_draw_m[0] == doctest::Approx(k));
+    CHECK(g_draw_m[3] == 1.0f);
+    CHECK(g_draw_m[4] == doctest::Approx(k - 1.0f));
+    CHECK(g_draw_m[5] == 0.0f);
+    // The filter and the transform are gone after it, and for any other image or place.
+    CHECK(mt_gles_get_draw_filter(nullptr) == nullptr);
     float s = 0.0f, o = 1.0f;
     mt_gles_get_host_x_transform(&s, &o);
     CHECK(s == 1.0f);
     CHECK(o == 0.0f);
     draw(g.cpu, backdrop, 10, 0);
-    CHECK(g_draw_scale == 1.0f);
+    CHECK(g_draw_filtered == -1);
     draw(g.cpu, g.state + 0x100, 0, 0);
-    CHECK(g_draw_scale == 1.0f);
+    CHECK(g_draw_filtered == -1);
     CHECK(g_draw_original == 4);
     CHECK(mt_widescreen_get_stats().backdrops == 1u);
+    CHECK(mt_widescreen_get_stats().tiles == 0u);
+}
+
+TEST_CASE("widescreen fill: a backdrop that repeats every 160 points is tiled at x = 480 (#425)") {
+    Guest g;
+    mt_widescreen_configure(MT_WIDESCREEN_FILL);
+    g_draw_layer = 768.0f;
+    REQUIRE(mt_widescreen_turn(&g.cpu, 1) == 768u); // 60 tiles: 960 points
+    bind_backdrop(g, 512, 512, backdrop(1, false));
+    g_draw_original = 0;
+    draw(g.cpu, g.state + 0x454, 0, 0);
+    // Drawn as it is (the filter left it alone), then again 480 points right: 960 / 768 of clip
+    // space.
+    CHECK(g_draw_original == 2);
+    CHECK(g_draw_image == g.state + 0x454); // the copy draws the same image
+    CHECK(g_draw_scale == 1.0f);
+    CHECK(g_draw_offset == doctest::Approx(960.0f / 768.0f));
+    const mt_widescreen_stats st = mt_widescreen_get_stats();
+    CHECK(st.tiles == 1u);
+    CHECK(st.backdrops == 0u);
+    float s = 0.0f, o = 1.0f;
+    mt_gles_get_host_x_transform(&s, &o);
+    CHECK(s == 1.0f);
+    CHECK(o == 0.0f);
+    CHECK(mt_gles_get_draw_filter(nullptr) == nullptr);
+    // At 568 (auto's width) the same backdrop is tiled too: not stretched.
+    mt_widescreen_set_limit(568);
+    REQUIRE(mt_widescreen_turn(&g.cpu, 1) == 568u);
+    draw(g.cpu, g.state + 0x454, 0, 0);
+    CHECK(g_draw_original == 4);
+    CHECK(mt_widescreen_get_stats().tiles == 2u);
+    // Backdrops 11 and 12's kind (a middle band that doesn't repeat): stretched.
+    bind_backdrop(g, 512, 512, backdrop(1, true));
+    draw(g.cpu, g.state + 0x454, 0, 0);
+    CHECK(g_draw_original == 5);
+    CHECK(g_draw_filtered == 1);
+    CHECK(g_draw_m[0] == doctest::Approx(568.0f / 480.0f));
+    CHECK(mt_widescreen_get_stats().backdrops == 1u);
+}
+
+TEST_CASE("widescreen fill: the repeat check on synthetic images (#425)") {
+    const std::vector<std::uint8_t> tiled = backdrop(1, false), band = backdrop(1, true);
+    CHECK(mt_widescreen_backdrop_repeats(tiled.data(), 512, 512, 1) == 1);
+    CHECK(mt_widescreen_backdrop_repeats(band.data(), 512, 512, 1) == 0);
+    // A pack's replacement at twice the size: the period is 320 texels.
+    const std::vector<std::uint8_t> tiled2 = backdrop(2, false), band2 = backdrop(2, true);
+    CHECK(mt_widescreen_backdrop_repeats(tiled2.data(), 1024, 1024, 2) == 1);
+    CHECK(mt_widescreen_backdrop_repeats(band2.data(), 1024, 1024, 2) == 0);
+    // One texel off in the last period: stretched.
+    std::vector<std::uint8_t> off = tiled;
+    off[(static_cast<std::size_t>(300) * 512 + 470) * 4 + 1] ^= 1;
+    CHECK(mt_widescreen_backdrop_repeats(off.data(), 512, 512, 1) == 0);
+    // Beyond the image (x >= 480 or y >= 320) the texture doesn't count.
+    std::vector<std::uint8_t> pad = tiled;
+    pad[(static_cast<std::size_t>(400) * 512 + 100) * 4] ^= 0xFF;
+    pad[(static_cast<std::size_t>(10) * 512 + 500) * 4] ^= 0xFF;
+    CHECK(mt_widescreen_backdrop_repeats(pad.data(), 512, 512, 1) == 1);
+    // Too small to hold two periods, or nothing: not tiled.
+    CHECK(mt_widescreen_backdrop_repeats(tiled.data(), 300, 512, 1) == 0);
+    CHECK(mt_widescreen_backdrop_repeats(nullptr, 512, 512, 1) == 0);
+    CHECK(mt_widescreen_backdrop_repeats(tiled.data(), 512, 512, 0) == 0);
+}
+
+TEST_CASE("widescreen fill: the view is capped by the host's limit, the window at 320 high") {
+    Guest g;
+    mt_widescreen_configure(MT_WIDESCREEN_FILL);
+    CHECK(mt_widescreen_width() == 768u);
+    CHECK(mt_widescreen_reach() == 768u);
+    CHECK(mt_widescreen_turn(&g.cpu, 1) == 768u); // 60 tiles: no limit, the layer's 768
+    mt_widescreen_set_limit(568);                 // a 16:9 window
+    CHECK(mt_widescreen_reach() == 568u);
+    CHECK(mt_widescreen_turn(&g.cpu, 1) == 568u);
+    mt_widescreen_set_limit(692); // 19.5:9
+    CHECK(mt_widescreen_turn(&g.cpu, 1) == 692u);
+    put32(g.cpu, g.map + 0x5C, 40 * 16); // a 40-tile map (640 points) is narrower: its width
+    CHECK(mt_widescreen_turn(&g.cpu, 1) == 640u);
+    put32(g.cpu, g.map + 0x5C, 60 * 16);
+    mt_widescreen_set_limit(2000); // wider than 21:9: the layer's 768
+    CHECK(mt_widescreen_turn(&g.cpu, 1) == 768u);
+    mt_widescreen_set_limit(400); // a portrait window: 480
+    CHECK(mt_widescreen_reach() == 480u);
+    CHECK(mt_widescreen_turn(&g.cpu, 1) == 480u);
+    // auto keeps 568 whatever the limit says above it; configure and reset forget it.
+    mt_widescreen_configure(MT_WIDESCREEN_WIDE);
+    CHECK(mt_widescreen_reach() == 568u);
+    mt_widescreen_set_limit(768);
+    CHECK(mt_widescreen_reach() == 568u);
+    mt_widescreen_reset();
+    CHECK(mt_widescreen_reach() == 480u);
 }
 
 TEST_CASE("widescreen menus: a screen is drawn at 480 points in the wide view's centre") {

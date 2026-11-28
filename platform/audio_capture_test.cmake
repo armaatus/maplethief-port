@@ -13,6 +13,9 @@
 # The run: --fixed-step 16.667 --frames 180 (about 4.7 s of virtual time with the boot), a tap
 # on Play at 3 s (as platform.game_boot); effect 43 (0.89 s) sounds from about 3.16 s.
 
+# A -P script gets no policies from the project: set the project's minimum (#341).
+cmake_minimum_required(VERSION 3.28)
+
 file(REMOVE_RECURSE "${OUT}")
 file(MAKE_DIRECTORY "${OUT}")
 set(captures "")

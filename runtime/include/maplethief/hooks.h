@@ -50,6 +50,9 @@ MT_EXTERN_C_BEGIN
 /* The map's camera (#86, ADR 0090): clamp (map), follow (map, x, y, smooth) */
 #define MT_HOOK_FN_CAMERA_CLAMP 0xC069u
 #define MT_HOOK_FN_CAMERA_FOLLOW 0xC175u
+/* CMMap::LoadObj (map, area, map): the map's .obj into its object list (restored_content adds
+ * Monster Carnival's NPC after it, #427, and the unreached maps' portal before it, #428) */
+#define MT_HOOK_FN_MAP_LOAD_OBJ 0xD259u
 #define MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT 0x22955u /* (owner, url) */
 /* The canvas's fills through FillRect (#186): Canvas_FillRect (x, y, w, h) in the canvas's
  * colour, Canvas_FillRectColor (x, y, w, h, colour at sp) */
@@ -59,8 +62,21 @@ MT_EXTERN_C_BEGIN
  * Text_SubChars (owner, text, from, to); a text pack steps them by UTF-8 lengths */
 #define MT_HOOK_FN_TEXT_CHAR_COUNT 0x22989u
 #define MT_HOOK_FN_TEXT_SUB_CHARS 0x22A1Du
-#define MT_HOOK_FN_DRAW_IMAGE 0x24DC9u      /* (image, x, y): draws a CMImage at its top left */
+#define MT_HOOK_FN_DRAW_IMAGE 0x24DC9u /* (image, x, y): draws a CMImage at its top left */
+/* Text_Wrap (owner, text, width, &count): whole lines; the scene speech box's wrap (the runner's
+ * command 50) at the 3:2 width in a wide view (#396) */
+#define MT_HOOK_FN_TEXT_WRAP 0x22EC5u
+/* CChatBox::NextPage and CChatBox::FirstPage (box): an NPC dialogue page set, wrapped whole
+ * (#391: the text events read it after them, maplethief/text_events.h) */
+#define MT_HOOK_FN_CHAT_BOX_NEXT_PAGE 0x34A05u
+#define MT_HOOK_FN_CHAT_BOX_FIRST_PAGE 0x34CD1u
+/* CChatBox::drawChatBox (box, speaker, lines, count): the scene speech box, from
+ * CStateGame::Paint (#396: drawn at 480 in a wide view's centre) */
+#define MT_HOOK_FN_CHAT_BOX_DRAW 0x35189u
 #define MT_HOOK_FN_SAVE_QUEST_DATA 0x38F55u /* CDataMgr::SaveQuestData (data manager, hero) */
+/* Popup_Open (mgr, id, text, kind): the engine's popup (#392: the text events read it after it,
+ * maplethief/text_events.h) */
+#define MT_HOOK_FN_POPUP_OPEN 0x3EAA1u
 /* Shop_OnKey (shop, key, game): the NPC shop's keys (game mode 2); the platform moves the list's
  * cursor by item and scrolls the drawn list to it (docs/re/original-bugs.md) */
 #define MT_HOOK_FN_SHOP_ON_KEY 0x46DB9u
@@ -90,9 +106,36 @@ MT_EXTERN_C_BEGIN
 /* CMapleObject_Touches (object, left, top, right, bottom at sp): the object's box meets the rect;
  * the drops' pick-up test (#175: auto_loot widens the drop's rect, CDropItems::Update's call) */
 #define MT_HOOK_FN_OBJECT_TOUCHES 0x6CF01u
+/* CNotifyTextList::Add (list, text, colour): a notify line (#392: the text events read it) */
+#define MT_HOOK_FN_NOTIFY_TEXT_ADD 0x78339u
+/* CMapleWorld::changeMap (this = CStateGame, area, map, portal, x at sp, y at sp + 4): a warp's
+ * target (#388: common/portal620's (6, 1, 2) becomes (6, 1, 1) under fix_original_bugs) */
+#define MT_HOOK_FN_CHANGE_MAP 0x81369u
 /* CStateGame::PaintExitToMenu (this): the scene runner, from CStateGame::Paint */
 #define MT_HOOK_FN_SCENE_RUNNER 0x83C71u
-#define MT_HOOK_FN_STATE_GAME_PAINT 0x87501u     /* CStateGame::Paint (this): the field's frame */
+/* CStateGame::StartScene (this, scene): a scene's start, game mode 9 (#420: the hero's knock-back
+ * is cleared first under fix_original_bugs) */
+#define MT_HOOK_FN_START_SCENE 0x853E5u
+#define MT_HOOK_FN_STATE_GAME_PAINT 0x87501u /* CStateGame::Paint (this): the field's frame */
+/* CStateGame::OnKeyPressed (this, key): the field's keys and popups; #336 checks the autosave's
+ * guards on the death popup's exit to the main menu (popup 0x6D) */
+#define MT_HOOK_FN_STATE_GAME_ON_KEY 0x8D4C9u
+/* ScriptNative_showMarket (L): the script native showMarket (39), the shop its argument names; #426
+ * offers a restored shop beside it (restored_content) */
+#define MT_HOOK_FN_LUA_SHOW_MARKET 0x998D1u
+/* Lua::callNative (L, index, base): the script natives' dispatch (#431: the script corpus test's
+ * recording stub; #430: the shadow runs record and replay each native call,
+ * maplethief/scriptvm.h) */
+#define MT_HOOK_FN_LUA_CALL_NATIVE 0x9B37Du
+/* Lua::execute (L, tfunc, base): the script VM's opcode loop (#386, ADR 0226: the host VM,
+ * maplethief/scriptvm.h) */
+#define MT_HOOK_FN_LUA_EXECUTE 0x9BC11u
+/* Lua::runCallback (L): the dialogue box's close runs the script callback at L + 8; #426 opens
+ * the shop chosen in its own list box there (restored_content) */
+#define MT_HOOK_FN_LUA_RUN_CALLBACK 0x9CE2Du
+/* TFunc::fetchU8 (tfunc): the script VM's next code byte (#431: the script corpus test observes
+ * Lua::execute's opcode fetches, the call at 0x9BC2A) */
+#define MT_HOOK_FN_TFUNC_FETCH_U8 0x9EE95u
 #define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u /* -[MainMenuView clickPlay:] */
 /* -[TouchKeyPadView colorAtPixel:onImage:] (self, _cmd, CGPoint in r2/r3, UIImage at sp) */
 #define MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL 0xB4DB5u
@@ -181,8 +224,122 @@ void mt_hooks_install_early_play_guard(int enabled) MT_NOEXCEPT;
  * with `enabled` 1. Registers it, `enabled` or not (the original). */
 void mt_hooks_install_quest_page_fix(int enabled) MT_NOEXCEPT;
 
+/* CMapleWorld::changeMap 0x81369 (#388, docs/re/original-bugs.md 14): common/portal620, map
+ * 6.2's only portal, warps to (6, 1, 2), but map 6.1 has portals of kind 0 and 1 only. The map
+ * change 0x868D5 writes the hero's position only when an object's kind matches the target, so
+ * the hero lands on 6.1 at its 6.2 coordinates. The hook turns a warp to (6, 1, 2) into
+ * (6, 1, 1), portal611, the one that leads to 6.2, and runs the original; any other warp is the
+ * original alone. Registers it, `enabled` or not (the original). */
+void mt_hooks_install_portal620_fix(int enabled) MT_NOEXCEPT;
+
+/* CStateGame::StartScene 0x853E5 (#420, docs/re/original-bugs.md 19): CStateGame::OnKeyPressed
+ * 0x8D4C9 drops every key while the hero's knock-back byte CHero +0x119 is set, and only
+ * CHero::vf2 0x66189 clears it (with +0x108, which CHero::TakeDamage 0x65B55 sets with it) when
+ * the hero lands, from the field update that game mode 9 does not run. A boss killed by a blow
+ * landed while the hero was knocked back so starts its end scene with every key dropped. The
+ * hook clears both bytes of the hero (CStateGame +0x30) and runs the original. Registers it,
+ * `enabled` or not (the original). */
+void mt_hooks_install_scene_knockback_fix(int enabled) MT_NOEXCEPT;
+/* Text_Wrap 0x22EC5's runaway on a word wider than the box (#419, ADR 0228,
+ * docs/re/original-bugs.md 15). With no space on the line, the wrap stores empty lines without
+ * end until its line array overruns its own frame and Text_SubChars 0x22A1D reads off memory's
+ * end. The guard, a wrapper on Text_SubChars (a text pack's handler stays inside it), cuts
+ * such a line after the characters that fit instead; every other call is unchanged.
+ * Neutralised in every mode: the game calls it with `enabled` 1; 0 removes it. */
+void mt_hooks_install_text_wrap_guard(int enabled) MT_NOEXCEPT;
+/* Lines the guard cut, since the process started. */
+uint64_t mt_hooks_text_wrap_guarded(void) MT_NOEXCEPT;
+
+/* Shops 0, 1 and 16 from an existing merchant (#426, the setting restored_content;
+ * docs/re/original-bugs.md "Unreachable content"). The game ships their listings, and its shop
+ * screen 0x4628D opens any shop, but no script opens these three. A handler on the script native
+ * showMarket 0x998D1 knows three merchants by the shop they open and the map they stand on
+ * (mt_restored_shop_for): instead of their shop it opens a list box (the chat box's own
+ * functions, as a script's initMsg / regMsgNPC / regSelList / showMsg(2)) with the merchant's
+ * line and two rows, his usual shop and the restored one. A handler on Lua::runCallback 0x9CE2D,
+ * which the box's close runs after OK, opens the chosen shop as showMarket does. Back ends the
+ * conversation, as in any box. Registers both, `enabled` or not (off: the merchant opens his
+ * shop at once, the original). `texts` (UTF-8, copied; NULL or an empty text keeps the English)
+ * are the box's. */
+typedef struct mt_restored_shop_texts {
+    const char *line;  /* the merchant's line */
+    const char *usual; /* the row of his usual shop */
+    const char *shop0; /* the rows of the restored shops 0, 1 and 16 */
+    const char *shop1;
+    const char *shop16;
+} mt_restored_shop_texts;
+void mt_hooks_install_restored_shops(int enabled, const mt_restored_shop_texts *texts) MT_NOEXCEPT;
+/* The restored shop the merchant who opens `shop` on map (area, map) offers beside it: 16 for
+ * Etc00 (shop 5 on 0.0), 0 for Equip90 (shop 8 on 9.0), 1 for Etc90 (shop 13 on 9.0); -1 for
+ * every other shop and map. */
+int32_t mt_restored_shop_for(int32_t area, int32_t map, int32_t shop) MT_NOEXCEPT;
+typedef struct mt_restored_shop_stats {
+    uint64_t boxes;  /* list boxes opened in place of a shop */
+    uint64_t opened; /* shops opened from one (either row) */
+} mt_restored_shop_stats;
+/* The numbers since the process started. */
+mt_restored_shop_stats mt_hooks_restored_shop_stats(void) MT_NOEXCEPT;
+
+/* Monster Carnival from a Spiegelman NPC (#427, the setting restored_content;
+ * docs/re/original-bugs.md "Unreachable content"). The game ships the rounds, their rooms and
+ * three scripts that start them, common/Spiegelman1-3, but no map places the NPC (kind 42, the
+ * only kind CStateGame::StartMonsterCarnival 0x82271 takes the way back from) and no shop sells
+ * the tickets (item_etc 47-49). A wrapper on CMMap::LoadObj 0xD259 adds, after the original,
+ * one kind-42 object named for its script to the object list of Kerning City (0.0), Orbis
+ * Village (4.0) or Magatia Village (6.0) (mt_restored_carnival_npc_on), in new arrays from the
+ * guest's new[]; the map's file is not touched. The same call puts each ticket on an unused
+ * (all-zero) row of the guest's market.dat, sold by the town's etc merchant, and when the
+ * round's room loads (the carnival on, its phase -1) it sets the score CStateGame +0x434 to 0,
+ * which the original sets only after a round (the first round's starts from the state's memory,
+ * an uninitialised read). Registered
+ * `enabled` or not (off: every object list is its file's, no row is written). */
+void mt_hooks_install_restored_carnival(int enabled) MT_NOEXCEPT;
+typedef struct mt_restored_carnival_npc {
+    int32_t area, map; /* the town */
+    int32_t cell;      /* the object's tile, y * width + x of the map */
+    const char *script;
+    int32_t ticket; /* item_etc id the script takes */
+    int32_t shop;   /* the town's etc merchant's shop, which sells it */
+    int32_t price;  /* in meso */
+} mt_restored_carnival_npc;
+/* The NPC the wrapper adds on (area, map), or NULL. */
+const mt_restored_carnival_npc *mt_restored_carnival_npc_on(int32_t area, int32_t map) MT_NOEXCEPT;
+typedef struct mt_restored_carnival_stats {
+    uint64_t npcs;    /* objects added (one per load of a town) */
+    uint64_t tickets; /* market rows written */
+    uint64_t rounds;  /* rounds whose score the wrapper started from 0 */
+} mt_restored_carnival_stats;
+/* The numbers since the process started. */
+mt_restored_carnival_stats mt_hooks_restored_carnival_stats(void) MT_NOEXCEPT;
+
+/* The unreached maps 4.5 and 4.8 (#428, the setting restored_content;
+ * docs/re/original-bugs.md "Unreachable content"). Their portal scripts (common/portal450,
+ * 451, 480, 481) lead to each other and out to 4.3 and 4.10, which the game reaches, but no
+ * reached map has a portal into them. A wrapper on CMMap::LoadObj 0xD259 (mt_hook_wrap, beside
+ * Monster Carnival's handler) adds, after the original, one portal object to the start of 4.3's
+ * list (mt_restored_portal_on): kind 2, named portal480, the shipped script that warps to 4.5's
+ * portal 0. First in the list, so the warps to 4.3's own portal 2 still land on it (the arrival
+ * takes the last match). No script, map or data file changes. Registered `enabled` or not (off:
+ * every object list is its file's). */
+void mt_hooks_install_restored_maps(int enabled) MT_NOEXCEPT;
+typedef struct mt_restored_portal {
+    int32_t area, map;                  /* the reached map it stands on */
+    int32_t cell;                       /* its tile, y * width + x of the map */
+    int32_t kind;                       /* the portal number (0-2 drawn, 3 hidden) */
+    const char *script;                 /* a shipped script in script/common/ */
+    int32_t to_area, to_map, to_portal; /* where the script's changeMap warps */
+} mt_restored_portal;
+/* The portal the wrapper adds on (area, map), or NULL. */
+const mt_restored_portal *mt_restored_portal_on(int32_t area, int32_t map) MT_NOEXCEPT;
+typedef struct mt_restored_maps_stats {
+    uint64_t portals; /* objects added (one per load of 4.3) */
+} mt_restored_maps_stats;
+/* The numbers since the process started. */
+mt_restored_maps_stats mt_hooks_restored_maps_stats(void) MT_NOEXCEPT;
+
 /* Every fix of an original bug (docs/re/original-bugs.md, #155), the setting fix_original_bugs
- * (on in the Enhanced preset): the two hooks above, each registered `enabled` or not. */
+ * (on in the Enhanced preset): the portal items, the early Play guard, portal620 and the
+ * scene knock-back fix, each registered `enabled` or not. */
 void mt_hooks_install_original_bug_fixes(int enabled) MT_NOEXCEPT;
 
 /* A scene's camera shake (#158, docs/re/screen-shake.md). The scene runner

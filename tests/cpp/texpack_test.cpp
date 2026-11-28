@@ -1,7 +1,8 @@
 // Texture packs and texture dumps (#153, ADR 0081, maplethief/texpack.h) on synthetic textures:
 // the dump's files and manifest, a 1x pack built from the dump giving back every premultiplied
 // texel byte for byte, a 2x pack premultiplied at load, the files a pack rejects, and the pack's
-// place after hd_text in mt_gfx's chain. Nothing here comes from the game.
+// place after hd_text in mt_gfx's chain, and two packs at once, the first winning per file
+// (#421). Nothing here comes from the game.
 #include <doctest/doctest.h>
 
 #include <cstdint>
@@ -516,4 +517,79 @@ TEST_CASE("texpack: ui/ paths are 5 to 255 bytes of [A-Za-z0-9 _-+.@] parts endi
     CHECK(mt_texpack_open(pack.str().c_str()) == static_cast<int>(good_made));
     CHECK(mt_texpack_get_stats().ui_files == good_made);
     CHECK(fresh.count(", " + std::to_string(bad_made) + " other files ignored") == 1);
+}
+
+TEST_CASE("texpack: two packs with overlapping files: the first wins per file, a rejected file "
+          "falls to the second (#421)") {
+    Fresh fresh;
+    // Opaque texels of one grey: the same straight and premultiplied.
+    const auto opaque = [](std::size_t n, u8 v) {
+        std::vector<u8> out(n, v);
+        for (std::size_t i = 3; i < n; i += 4) {
+            out[i] = 255;
+        }
+        return out;
+    };
+    Dir first("multi-first");
+    Dir second("multi-second");
+    const std::vector<u8> both(2 * 2 * 4, 1), broken(2 * 2 * 4, 2), only2(2 * 2 * 4, 3),
+        neither(2 * 2 * 4, 5);
+    // Both packs have it: the first's (1x, 11) wins, the second's (2x, 22) is hidden.
+    write_png(first.path / name_of(both, 2, 2), opaque(2 * 2 * 4, 11), 2, 2);
+    write_png(second.path / name_of(both, 2, 2), opaque(4 * 4 * 4, 22), 4, 4);
+    // The first's file is no PNG: rejected, the second's answers.
+    write_bytes(first.path / name_of(broken, 2, 2), {'n', 'o', 'p', 'e'});
+    write_png(second.path / name_of(broken, 2, 2), opaque(4 * 4 * 4, 33), 4, 4);
+    // Only the second has it (packs of different k mix).
+    write_png(second.path / name_of(only2, 2, 2), opaque(6 * 6 * 4, 44), 6, 6);
+    REQUIRE(mt_texpack_add(first.str().c_str()) == 2);
+    REQUIRE(mt_texpack_add(second.str().c_str()) == 3);
+    CHECK(mt_texpack_pack_count() == 2);
+    CHECK(mt_gfx_replace_hook_count() == 1); // one hook walks both packs
+
+    u32 w = 0, h = 0;
+    CHECK(texels_of(upload(both, 2, 2), &w, &h) == opaque(2 * 2 * 4, 11));
+    CHECK(w == 2);
+    CHECK(texels_of(upload(broken, 2, 2), &w, &h) == opaque(4 * 4 * 4, 33));
+    CHECK(w == 4);
+    CHECK(texels_of(upload(broken, 2, 2), &w, &h) == opaque(4 * 4 * 4, 33));
+    CHECK(texels_of(upload(only2, 2, 2), &w, &h) == opaque(6 * 6 * 4, 44));
+    CHECK(w == 6);
+    CHECK(texels_of(upload(neither, 2, 2), &w, &h) == neither);
+    CHECK(fresh.count("is no PNG") == 1); // logged once, never read again
+
+    const mt_texpack_stats s = mt_texpack_get_stats();
+    CHECK(s.files == 5);
+    CHECK(s.uploads == 5);
+    CHECK(s.replaced == 4);
+    CHECK(s.missing == 1);
+    CHECK(s.rejected == 0); // each upload with a file got one
+    mt_pack_use u{};
+    REQUIRE(mt_texpack_pack_use(0, &u) == 0);
+    CHECK(std::string(u.dir) == first.str());
+    CHECK(u.replaced == 1);
+    CHECK(u.rejected == 2);
+    CHECK(u.hidden == 0);
+    REQUIRE(mt_texpack_pack_use(1, &u) == 0);
+    CHECK(std::string(u.dir) == second.str());
+    CHECK(u.replaced == 3);
+    CHECK(u.rejected == 0);
+    CHECK(u.hidden == 1);
+    CHECK(u.hidden_by[0] == 1);
+    CHECK(mt_texpack_pack_use(2, &u) == -1);
+
+    // At most MT_PACKS_MAX; the 17th is refused, logged.
+    for (u32 i = 2; i < MT_PACKS_MAX; ++i) {
+        REQUIRE(mt_texpack_add(second.str().c_str()) == 3);
+    }
+    CHECK(mt_texpack_add(second.str().c_str()) == -1);
+    CHECK(fresh.count("at most 16 texture packs at once") == 1);
+    // Open is the pack alone again.
+    REQUIRE(mt_texpack_open(second.str().c_str()) == 3);
+    CHECK(mt_texpack_pack_count() == 1);
+    CHECK(mt_texpack_get_stats().uploads == 0);
+    CHECK(texels_of(upload(both, 2, 2), &w, &h) == opaque(4 * 4 * 4, 22));
+    mt_texpack_close();
+    CHECK(mt_texpack_pack_count() == 0);
+    CHECK(mt_gfx_replace_hook_count() == 0);
 }

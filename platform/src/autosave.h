@@ -32,8 +32,13 @@
 //     guest has turned.
 //   - the exit to the main menu (#179): Yes on the popup menu's "exit" popup 14, at the entry
 //     of Game_ExitToMainMenu 0x54BF9 (hooked), which never saves; the popup guard lets that
-//     popup through. The death popup's "Go to main menu" (CStateGame::OnKeyPressed 0x8D4C9) and
-//     a scene's exit (0x83C71) do not pass there: they leave without a save, as the game does.
+//     popup through.
+//   - the death popup's "Go to main menu" (#336): Yes on its popup 0x6D, at the entry of
+//     CStateGame::OnKeyPressed 0x8D4C9 (hooked), which never saves either; the popup guard lets
+//     0x6D through. The hero is dead there, so the dying guard always refuses: the check runs
+//     so that the log says why, and the game's rules decide as at every other exit.
+//   A scene's exit to the main menu (the scene runner 0x83C71's command 28 with p1 = -1) is not
+//   hooked: no scene of 1.5 uses it, and in a scene (game mode 9) the scene guard refuses.
 // The pair writes through the runtime's atomic file replacement (mt_saves_replace_file) and the
 // backup hook on SaveQuestData (#148), as the game's own saves do. A skip logs the guard.
 #ifndef MAPLETHIEF_PLATFORM_AUTOSAVE_H
@@ -60,7 +65,10 @@ inline constexpr std::uint32_t kAutosaveSaveData = 0x38711;   // CDataMgr::SaveS
 inline constexpr std::uint32_t kAutosaveSaveQuests = 0x38F55; // CDataMgr::SaveQuestData
 // The exit to the main menu (#179; Game_ExitToMainMenu, MT_HOOK_FN_GAME_EXIT_TO_MAIN_MENU):
 // its popup 14, and the open popup's widget (+0x14: 0 when Yes is picked).
-inline constexpr std::int32_t kAutosaveExitPopup = 14;          // "exit to the main menu"
+inline constexpr std::int32_t kAutosaveExitPopup = 14; // "exit to the main menu"
+// The death popup's exit (#336; CStateGame::OnKeyPressed, MT_HOOK_FN_STATE_GAME_ON_KEY): B on the
+// death popup 0x68 opens 0x6D, "Do you really want to go MainMenu?", in game mode 0.
+inline constexpr std::int32_t kAutosaveDeathExitPopup = 0x6D;
 inline constexpr std::uint32_t kAutosavePopupWidget = 0x11A96C; // the popup's widget*
 
 enum class AutosaveGuard : std::uint8_t {
@@ -113,9 +121,12 @@ AutosaveCheck check_autosave(const GuestRead32 &read, std::int32_t open_popup = 
 // On the game's memory (an image segment or the committed heap; nothing else is read).
 AutosaveCheck check_autosave(const mt_cpu *cpu, std::int32_t open_popup = -1);
 
-// Whether Game_ExitToMainMenu's `key` leaves for the main menu (#179): popup 14 is open, the
-// key is OK (-5 or '5') and Yes is picked, the branch at 0x5521C (docs/re/autosave.md).
-bool is_exit_to_menu_confirm(const GuestRead32 &read, std::int32_t key);
+// Whether `key` leaves for the main menu from `popup`: that popup is open, the key is OK (-5 or
+// '5') and Yes is picked. Popup 14 is Game_ExitToMainMenu's branch at 0x5521C (#179); popup 0x6D
+// is CStateGame::OnKeyPressed's at 0x8F3C0, reached only in game mode 0 (#336;
+// docs/re/autosave.md).
+bool is_exit_to_menu_confirm(const GuestRead32 &read, std::int32_t key,
+                             std::int32_t popup = kAutosaveExitPopup);
 
 struct AutosaveResult {
     bool saved = false;
@@ -129,7 +140,7 @@ struct AutosaveResult {
 AutosaveResult autosave_now(mt_cpu *cpu, const char *trigger, double t,
                             std::int32_t open_popup = -1);
 
-// The turn hook's part, and the exit to the main menu's hook.
+// The turn hook's part, and the exits to the main menu's hooks.
 class Autosaver {
   public:
     Autosaver() = default;
@@ -137,13 +148,15 @@ class Autosaver {
     Autosaver &operator=(const Autosaver &) = delete;
     ~Autosaver() { uninstall_exit_to_menu(); }
 
-    // Hooks Game_ExitToMainMenu (#179): with *mode on_quit, Yes on its popup 14 autosaves
-    // before the game leaves for the main menu. `mode` (the settings in effect) and `clock` (the
-    // log's seconds) are kept and read at each call.
+    // Hooks Game_ExitToMainMenu (#179) and CStateGame::OnKeyPressed (#336): with *mode on_quit,
+    // Yes on popup 14 or on the death popup's 0x6D autosaves (behind every guard) before the
+    // game leaves for the main menu. `mode` (the settings in effect) and `clock` (the log's
+    // seconds) are kept and read at each call.
     void install_exit_to_menu(const Autosave *mode, std::function<double()> clock);
     void uninstall_exit_to_menu();
-    // The hook's part: autosave_now if `key` confirms the exit and *mode is on_quit.
-    bool exit_to_menu(mt_cpu *cpu, std::int32_t key);
+    // The hooks' part: autosave_now if `key` confirms the exit from `popup` (14 or 0x6D) and
+    // *mode is on_quit.
+    bool exit_to_menu(mt_cpu *cpu, std::int32_t key, std::int32_t popup = kAutosaveExitPopup);
 
     // With `mode` on_quit and a resign or a quit queued in `lifecycle` (Lifecycle::leaving),
     // autosave_now once for this turn (`turn`: the turn hook's count). Returns whether it saved.

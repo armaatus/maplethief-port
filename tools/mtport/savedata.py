@@ -29,7 +29,15 @@ Command line::
 
     python3 -m mtport.savedata dump FILE...           # print each file as JSON
     python3 -m mtport.savedata new-character OUT_DIR --hp N --mp N [--slot S]
+    python3 -m mtport.savedata build DESCRIPTION OUT_DIR [--slot S] [--app APP] [--language L]
+                                     [--base DIR]
+    python3 -m mtport.savedata describe THEIF QUEST [--app APP] [--language L]
     python3 -m mtport.savedata names [OUT]            # work/re/names/save.json
+
+``build`` writes the pair a JSON description names (docs/formats/save.md, "Building a save"),
+after the port's own save checks pass; ``describe`` prints the description of a pair. With
+``--base`` the description is laid over the description of the pair in DIR (a raised level
+levels the hero up by the game's rules, :func:`level_up`).
 """
 
 from __future__ import annotations
@@ -40,7 +48,7 @@ import json
 import re
 import struct
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -49,6 +57,7 @@ from mtport import ghidra_common as gc
 from mtport.bytereader import FormatError
 
 SLOTS = 3
+SKIPPED = 77  # the exit code of build and describe when --app names no bundle
 EMPTY = 0xFF  # item id / record kind of an empty slot
 
 CHARACTER_SIZE = 0x464
@@ -510,12 +519,13 @@ def encode_quest(save: QuestSave) -> bytes:
 class Config:
     """``config``: 6 option bytes, kept in memory at ``*0x11A98C`` (loader 0x38611)."""
 
-    sound: int = 3  # 0x37C79: bit 0 music, bit 1 effects (probable)
-    speed: int = 1  # 0 / 1 / 2 -> 65 / 50 / 40 (table 0x108C58), probably the tick in ms
-    unknown_2: int = 0
-    unknown_3: int = 1  # 0x37BD1: 0 = off, else passed on as a level
-    unknown_4: int = 1  # cleared by 0x3EAA1 in state 0x68
-    unknown_5: int = 1  # index into {0, 1, 3} (0x37B85)
+    # The meanings: docs/formats/save.md (config); the unknown_* names are kept.
+    sound: int = 3  # 0x37C79: bit 0 effects, bit 1 music
+    speed: int = 1  # 0 / 1 / 2 -> a 65 / 50 / 40 ms tick (table 0x108C58)
+    unknown_2: int = 0  # walking: 0 while held, 1 a press starts it (0x817F1, 0x807B9)
+    unknown_3: int = 1  # vibration (0x37BD1): 0 off, else on
+    unknown_4: int = 1  # shortcut window shown: run-time state (HUD_Paint 0x5A465)
+    unknown_5: int = 1  # information lines: index into {0, 1, 3} (0x37B85)
 
 
 def parse_config(data: bytes) -> Config:
@@ -676,6 +686,442 @@ def to_jsonable(value: Any) -> Any:
     return value
 
 
+# -- building a save from a description (#297) ----------------------------------------------
+#
+# A description is a JSON object naming the state of one character (docs/formats/save.md,
+# "Building a save"); every key is optional and an unset one keeps the new character's value
+# (new_character). build() turns it into the (theif, quest) pair; describe() is the reverse, so
+# a state a run reached can be captured and built again.
+
+DESCRIPTION_KEYS = frozenset(
+    (
+        "level", "branch", "job_tier", "exp", "sp", "hp", "mp", "meso", "map", "position",
+        "flags", "action", "caption", "equip_inventory", "etc_inventory", "equipped",
+        "skills", "skill_levels", "shortcuts", "chapter", "main", "side", "records",
+    )
+)  # fmt: skip
+EQUIP_FIELDS = tuple(f.name for f in dataclasses.fields(EquipItem))
+QUEST_STATES = range(3)  # 0 not started, 1 in progress, 2 done
+
+
+def _int(desc: Mapping[str, Any], key: str, default: int, lo: int, hi: int) -> int:
+    value = desc.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
+        raise SaveDataError(f"description: {key} {value!r} is not an integer in {lo}..{hi}")
+    return value
+
+
+def _pair(value: Any, what: str) -> tuple[int, int]:
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) != 2
+        or not all(isinstance(v, int) and not isinstance(v, bool) for v in value)
+    ):
+        raise SaveDataError(f"description: {what} {value!r} is not a pair of integers")
+    return int(value[0]), int(value[1])
+
+
+def _slots(value: Any, n: int, what: str) -> list[Any]:
+    if not isinstance(value, list) or len(value) > n:
+        raise SaveDataError(f"description: {what} is not a list of at most {n} slots")
+    return value + [None] * (n - len(value))
+
+
+def _equip(value: Any, what: str) -> EquipItem:
+    if value is None:
+        return EquipItem()
+    if not isinstance(value, Mapping) or "id" not in value or set(value) - set(EQUIP_FIELDS):
+        raise SaveDataError(f"description: {what} {value!r} is not an item ({EQUIP_FIELDS})")
+    return EquipItem(**{k: int(v) for k, v in value.items()})
+
+
+def _equip_json(item: EquipItem) -> dict[str, int] | None:
+    if item == EquipItem():
+        return None
+    return {
+        f: v for f, v in zip(EQUIP_FIELDS, dataclasses.astuple(item), strict=True) if f == "id" or v
+    }
+
+
+def _requirement(value: Mapping[str, Any]) -> Requirement:
+    if "item" in value:
+        table, item = _pair(value["item"], "requirement item")
+        return Requirement(0, table, item, int(value.get("count", 1)))
+    if "mob" in value:
+        return Requirement(
+            1,
+            target=int(value["mob"]),
+            needed=int(value.get("needed", 0)),
+            progress=int(value.get("progress", 0)),
+        )
+    if "meso" in value:
+        return Requirement(2, value=int(value["meso"]))
+    raise SaveDataError(f"description: requirement {value!r} has no item, mob or meso")
+
+
+def _reward(value: Mapping[str, Any]) -> Reward:
+    if "item" in value:
+        table, item = _pair(value["item"], "reward item")
+        return Reward(0, table, item, int(value.get("count", 1)))
+    if "meso" in value:
+        return Reward(1, value_1=int(value["meso"]))
+    if "exp" in value:
+        return Reward(2, value_2=int(value["exp"]))
+    raise SaveDataError(f"description: reward {value!r} has no item, meso or exp")
+
+
+def _record(value: Any) -> QuestRecord:
+    if not isinstance(value, Mapping):
+        raise SaveDataError(f"description: quest record {value!r} is not an object")
+    reqs = [_requirement(r) for r in value.get("requirements", [])]
+    rewards = [_reward(r) for r in value.get("rewards", [])]
+    if len(reqs) > 5 or len(rewards) > 5:
+        raise SaveDataError("description: a quest record holds at most 5 requirements and rewards")
+    return QuestRecord(
+        key_a=_int(value, "kind", 0, 0, EMPTY - 1),
+        key_b=_int(value, "number", 0, 0, 255),
+        extra=_int(value, "npc", 0, 0, 255),
+        title=fixed(str(value.get("title", "")), 64),
+        description=fixed(str(value.get("description", "")), 256),
+        requirements=tuple(reqs + [Requirement()] * (5 - len(reqs))),
+        rewards=tuple(rewards + [Reward()] * (5 - len(rewards))),
+    )
+
+
+def _states(value: Any, what: str) -> bytes:
+    out = bytearray(100)
+    if not isinstance(value, Mapping):
+        raise SaveDataError(f"description: {what} is not an object of quest number -> state")
+    for number, state in value.items():
+        n = int(number)
+        if not 0 <= n < 100 or state not in QUEST_STATES:
+            raise SaveDataError(f"description: {what} quest {number}: state {state!r}")
+        out[n] = state
+    return bytes(out)
+
+
+def _caption(value: Any, strings: Mapping[str, str] | None) -> bytes:
+    if isinstance(value, str):
+        return fixed(value, 64)
+    if isinstance(value, Mapping) and isinstance(value.get("key"), str):
+        if strings is None:
+            raise SaveDataError("description: a caption by key needs the game's strings (--app)")
+        if value["key"] not in strings:
+            raise SaveDataError(f"description: caption key {value['key']!r} is not in the strings")
+        return fixed(strings[value["key"]], 64)
+    raise SaveDataError(f"description: caption {value!r} is neither text nor {{'key': ...}}")
+
+
+def build(
+    desc: Mapping[str, Any],
+    skills: Sequence[SkillRow] | None = None,
+    strings: Mapping[str, str] | None = None,
+) -> tuple[CharacterSave, QuestSave]:
+    """The (theif, quest) pair a description names. ``skills`` (skill.dat's rows) places
+    ``skills`` by id (:func:`skill_slots`); ``strings`` (the language's ``Scripts`` and
+    ``ScriptExtra``) resolves a caption key. Raises SaveDataError on a malformed description."""
+    try:
+        return _build(desc, skills, strings)
+    except SaveDataError:
+        raise
+    except (TypeError, ValueError, AttributeError) as e:
+        raise SaveDataError(f"description: {e}") from e
+
+
+def _build(
+    desc: Mapping[str, Any],
+    skills: Sequence[SkillRow] | None,
+    strings: Mapping[str, str] | None,
+) -> tuple[CharacterSave, QuestSave]:
+    unknown = set(desc) - DESCRIPTION_KEYS
+    if unknown:
+        raise SaveDataError(f"description: unknown keys {sorted(unknown)}")
+    if "hp" not in desc or "mp" not in desc:
+        raise SaveDataError("description: hp and mp are required")
+    hp = _int(desc, "hp", 0, -0x8000, 0x7FFF)
+    mp = _int(desc, "mp", 0, -0x8000, 0x7FFF)
+    c = new_character(hp, mp)
+    branch = _int(desc, "branch", c.branch, 0, 255)
+    tier = _int(desc, "job_tier", c.job_tier, 0, 255)
+    if "skills" in desc and "skill_levels" in desc:
+        raise SaveDataError("description: skills and skill_levels both set")
+    levels = list(c.skill_levels)
+    if "skill_levels" in desc:
+        levels = [0 if v is None else int(v) for v in _slots(desc["skill_levels"], 13, "skills")]
+    elif "skills" in desc:
+        if skills is None:
+            raise SaveDataError("description: skills by id need skill.dat (--app)")
+        order = skill_slots(branch, tier, skills)
+        for sid, lv in desc["skills"].items():
+            if int(sid) not in order:
+                raise SaveDataError(f"description: skill {sid} has no slot at {branch}/{tier}")
+            levels[order.index(int(sid))] = int(lv)
+    equips = c.equip_inventory
+    if "equip_inventory" in desc:
+        slots = _slots(desc["equip_inventory"], 48, "equip_inventory")
+        equips = tuple(_equip(v, "equip_inventory") for v in slots)
+    etcs = c.etc_inventory
+    if "etc_inventory" in desc:
+        slots = _slots(desc["etc_inventory"], 48, "etc_inventory")
+        etcs = tuple(EtcItem() if v is None else EtcItem(*_pair(v, "etc item")) for v in slots)
+    worn = c.equipped
+    if "equipped" in desc:
+        worn = tuple(_equip(v, "equipped") for v in _slots(desc["equipped"], 5, "equipped"))
+    shortcuts = c.shortcuts
+    if "shortcuts" in desc:
+        slots = _slots(desc["shortcuts"], 5, "shortcuts")
+        shortcuts = tuple(
+            Shortcut() if v is None else Shortcut(*_pair(v, "shortcut")) for v in slots
+        )
+    area, number = _pair(desc.get("map", [c.area, c.map]), "map")
+    x, y = _pair(desc.get("position", [c.x, c.y]), "position")
+    character = dataclasses.replace(
+        c,
+        branch=branch,
+        job_tier=tier,
+        level=_int(desc, "level", c.level, 1, 255),
+        exp=_int(desc, "exp", c.exp, -(2**31), 2**31 - 1),
+        sp=_int(desc, "sp", c.sp, -0x8000, 0x7FFF),
+        meso=_int(desc, "meso", c.meso, -(2**31), 2**31 - 1),
+        equip_inventory=equips,
+        etc_inventory=etcs,
+        skill_levels=tuple(levels),
+        equipped=worn,
+        shortcuts=shortcuts,
+        area=area,
+        map=number,
+        x=x,
+        y=y,
+        flags=_int(desc, "flags", c.flags, 0, 255),
+        action=_int(desc, "action", c.action, 0, 255),
+        caption=_caption(desc["caption"], strings) if "caption" in desc else c.caption,
+    )
+    records = [_record(r) for r in desc.get("records", [])]
+    if len(records) > QUEST_RECORDS:
+        raise SaveDataError(f"description: at most {QUEST_RECORDS} quest records")
+    quest = QuestSave(
+        chapter=_int(desc, "chapter", 0, 0, 255),
+        flags_a=_states(desc.get("main", {}), "main"),
+        flags_b=_states(desc.get("side", {}), "side"),
+        records=tuple(records + [QuestRecord()] * (QUEST_RECORDS - len(records))),
+    )
+    return character, quest
+
+
+def _trim(slots: list[Any]) -> list[Any]:
+    while slots and slots[-1] is None:
+        slots.pop()
+    return slots
+
+
+def _requirement_json(r: Requirement) -> dict[str, Any]:
+    if r.kind == 0:
+        return {"item": [r.item_table, r.item_id], "count": r.item_count}
+    if r.kind == 1:
+        return {"mob": r.target, "needed": r.needed, "progress": r.progress}
+    return {"meso": r.value}
+
+
+def _reward_json(r: Reward) -> dict[str, Any]:
+    if r.kind == 0:
+        return {"item": [r.item_table, r.item_id], "count": r.item_count}
+    if r.kind == 1:
+        return {"meso": r.value_1}
+    return {"exp": r.value_2}
+
+
+def describe(
+    character: CharacterSave,
+    quest: QuestSave,
+    skills: Sequence[SkillRow] | None = None,
+    strings: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """The description :func:`build` makes this pair from, in every field the game writes.
+    With ``skills`` the skill levels are by skill id; with ``strings`` the caption is the key
+    whose text it is (the section titles ``CDataMgr.m_strQuestTitle.*`` first)."""
+    c, q = character, link_quest_records(quest)
+    out: dict[str, Any] = {
+        "level": c.level,
+        "branch": c.branch,
+        "job_tier": c.job_tier,
+        "exp": c.exp,
+        "sp": c.sp,
+        "hp": c.hp,
+        "mp": c.mp,
+        "meso": c.meso,
+        "map": [c.area, c.map],
+        "position": [c.x, c.y],
+        "flags": c.flags,
+        "action": c.action,
+    }
+    caption: Any = c.caption_text
+    if strings is not None:
+        keys = sorted(k for k, v in strings.items() if v == caption)
+        keys.sort(key=lambda k: not k.startswith("CDataMgr.m_strQuestTitle."))
+        if keys and fixed(strings[keys[0]], 64) == c.caption:
+            caption = {"key": keys[0]}
+    out["caption"] = caption
+    out["equip_inventory"] = _trim([_equip_json(e) for e in c.equip_inventory])
+    out["etc_inventory"] = _trim(
+        [None if e == EtcItem() else [e.id, e.count] for e in c.etc_inventory]
+    )
+    out["equipped"] = [_equip_json(e) for e in c.equipped]
+    order = skill_slots(c.branch, c.job_tier, skills) if skills is not None else None
+    if order is not None and all(
+        lv == 0 or sid >= 0 for sid, lv in zip(order, c.skill_levels, strict=True)
+    ):
+        out["skills"] = {str(sid): lv for sid, lv in zip(order, c.skill_levels, strict=True) if lv}
+    else:
+        out["skill_levels"] = list(c.skill_levels)
+    out["shortcuts"] = [None if s == Shortcut() else [s.kind, s.id] for s in c.shortcuts]
+    out["chapter"] = q.chapter
+    out["main"] = {str(i): s for i, s in enumerate(q.flags_a) if s}
+    out["side"] = {str(i): s for i, s in enumerate(q.flags_b) if s}
+    out["records"] = [
+        {
+            "kind": r.key_a,
+            "number": r.key_b,
+            "npc": r.extra,
+            "title": cstr(r.title),
+            "description": cstr(r.description),
+            "requirements": [_requirement_json(x) for x in r.requirements if x.kind != EMPTY],
+            "rewards": [_reward_json(x) for x in r.rewards if x.kind != EMPTY],
+        }
+        for r in q.records
+        if not r.empty
+    ]
+    return out
+
+
+def skill_points(level: int) -> int:
+    """The skill points ``CHero::LevelUp`` gives for reaching ``level`` (mechanics.md, "EXP and
+    level-up"): none for 2 to 9, 1 for 10 to 29, 2 from 30."""
+    return 0 if level < 10 else (1 if level < 30 else 2)
+
+
+def level_up(desc: Mapping[str, Any], level: int, gains: Sequence[tuple[int, int]]) -> dict:
+    """``desc`` with the hero levelled up to ``level`` as ``CHero::LevelUp`` does, one level at
+    a time: the skill points of each new level, EXP 0, HP and MP filled to the table maxima (the
+    sums of ``hero.dat``'s ``hp_gain`` and ``mp_gain`` over levels 1 to ``level``; ``gains[i]``
+    is level i + 1's pair). Masteries and equipment add to the maxima when the game loads it."""
+    old = int(desc.get("level", 1))
+    if not old < level <= len(gains):
+        raise SaveDataError(f"level up: {old} to {level} (hero.dat has {len(gains)} levels)")
+    out = dict(desc)
+    out["level"] = level
+    out["exp"] = 0
+    out["sp"] = int(desc.get("sp", 0)) + sum(skill_points(n) for n in range(old + 1, level + 1))
+    out["hp"] = sum(hp for hp, _ in gains[:level])
+    out["mp"] = sum(mp for _, mp in gains[:level])
+    return out
+
+
+def over_base(
+    base: Mapping[str, Any], overlay: Mapping[str, Any], gains: Sequence[tuple[int, int]]
+) -> dict:
+    """``overlay``'s keys laid over ``base`` (a :func:`describe` of an existing pair). A level
+    above the base's levels the hero up (:func:`level_up`) before the overlay's other keys, so
+    an overlay may still set EXP, SP, HP or MP itself."""
+    out = dict(base)
+    if "level" in overlay and int(overlay["level"]) != int(base.get("level", 1)):
+        out = level_up(out, int(overlay["level"]), gains)
+    out.update({k: v for k, v in overlay.items() if k != "level"})
+    return out
+
+
+def find_pair(directory: Path, slot: int = 0) -> tuple[Path, Path]:
+    """``theif<slot>`` and ``quest<slot>`` in ``directory``: a play test's output directory
+    (``data/saves`` or ``data/Documents``) or the directory holding them."""
+    for d in (directory / "data" / "saves", directory / "data" / "Documents", directory):
+        if (d / f"theif{slot}").is_file() and (d / f"quest{slot}").is_file():
+            return d / f"theif{slot}", d / f"quest{slot}"
+    raise SaveDataError(
+        f"{directory}: no theif{slot} + quest{slot} (nor in data/saves, data/Documents)"
+    )
+
+
+# The byte ranges the game never writes (heap garbage in a saved file): left out of a comparison.
+CHARACTER_UNWRITTEN = ((0x009, 0x00D), (GAP_315[0], GAP_315[0] + GAP_315[1]))
+QUEST_UNWRITTEN = ((QUEST_TAIL, QUEST_SIZE),)
+
+
+def written_diff(name: str, built: bytes, other: bytes) -> list[str]:
+    """Where two ``theif`` or ``quest`` files differ in a byte the game writes: one line per
+    differing top-level field (theif) or region (quest), empty when they agree."""
+    unwritten = CHARACTER_UNWRITTEN if name.startswith("theif") else QUEST_UNWRITTEN
+    if len(built) != len(other):
+        return [f"{name}: {len(built)} bytes, the other {len(other)}"]
+    skip = {i for lo, hi in unwritten for i in range(lo, hi)}
+    bad = [i for i in range(len(built)) if i not in skip and built[i] != other[i]]
+    if not bad:
+        return []
+    if name.startswith("theif"):
+        a, b = to_jsonable(parse_character(built)), to_jsonable(parse_character(other))
+        fields = sorted(
+            {f for off, size, f in CHARACTER_FIELDS for i in bad if off <= i < off + size}
+        )
+        return [f"{name}.{f}: built {a[f]!r}, other {b[f]!r}" for f in fields]
+    out = []
+    for i in bad:
+        if i < QUEST_HEAD:
+            where = (
+                "chapter"
+                if i == 0
+                else ("main" if i <= 100 else "side") + f" quest {(i - 1) % 100}"
+            )
+        else:
+            rec, off = divmod(i - QUEST_HEAD, QUEST_STRIDE)
+            where = f"record {rec} +0x{off:X}"
+        out.append(f"{name} 0x{i:X} ({where}): built {built[i]}, other {other[i]}")
+    return out
+
+
+def check_built(files: Mapping[str, bytes]) -> None:
+    """Run the port's own save checks (mtport.savecheck, the rules of the runtime's
+    ``mt_saves_check``) on a built set; raise SaveDataError unless every file passes."""
+    from mtport import savecheck
+
+    bad = {n: v for n, v in savecheck.check_set(files).items() if not v.ok}
+    if bad:
+        raise SaveDataError(
+            "the built save fails the port's checks: "
+            + "; ".join(f"{n}: {v.code} ({v.why})" for n, v in sorted(bad.items()))
+        )
+
+
+def build_files(
+    desc: Mapping[str, Any],
+    slot: int = 0,
+    skills: Sequence[SkillRow] | None = None,
+    strings: Mapping[str, str] | None = None,
+) -> dict[str, bytes]:
+    """``{"theif<slot>": ..., "quest<slot>": ...}`` from a description, checked."""
+    character, quest = build(desc, skills, strings)
+    files = {f"theif{slot}": encode_character(character), f"quest{slot}": encode_quest(quest)}
+    check_built(files)
+    return files
+
+
+def hero_gains(app: Path) -> list[tuple[int, int]]:
+    """hero.dat's (hp_gain, mp_gain) per level, level 1 first."""
+    from mtport import datatables as dt
+
+    rows = dt.load_dir(app / "English" / "data")["hero"].records
+    return [(int(r.hp_gain), int(r.mp_gain)) for r in rows]
+
+
+def bundle_inputs(app: Path, language: str = "en") -> tuple[list[Any], dict[str, str]]:
+    """skill.dat's rows and the language's Scripts + ScriptExtra strings from the bundle."""
+    from mtport import datatables as dt
+    from mtport import scriptout
+
+    rows = dt.load_dir(app / "English" / "data")["skill"].records
+    strings: dict[str, str] = {}
+    for name in ("Scripts", "ScriptExtra"):
+        strings.update(scriptout.load_strings(app / f"{language}.lproj" / f"{name}.strings"))
+    return list(rows), strings
+
+
 # -- Ghidra names (work/re/names/save.json) -------------------------------------------------
 
 NAMES_OUT = "work/re/names/save.json"
@@ -745,6 +1191,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     new.add_argument("--slot", type=int, default=0, choices=range(SLOTS))
     new.add_argument("--hp", type=int, required=True, help="hero.dat level 1 hp_gain")
     new.add_argument("--mp", type=int, required=True, help="hero.dat level 1 mp_gain")
+    bld = sub.add_parser("build", help="write theif<S> + quest<S> from a JSON description")
+    bld.add_argument("description", type=Path)
+    bld.add_argument("out_dir", type=Path)
+    bld.add_argument("--slot", type=int, default=0, choices=range(SLOTS))
+    bld.add_argument(
+        "--base",
+        type=Path,
+        help="lay the description over the pair in this directory (needs --app for a level)",
+    )
+    desc = sub.add_parser("describe", help="print the JSON description of a theif + quest pair")
+    desc.add_argument("theif", type=Path)
+    desc.add_argument("quest", type=Path)
+    for p in (bld, desc):
+        p.add_argument("--app", type=Path, help="MapleThief.app: skills by id, caption keys")
+        p.add_argument("--language", default="en", help="the strings' language (en or ko)")
     names = sub.add_parser("names", help=f"write the Ghidra names file (default {NAMES_OUT})")
     names.add_argument("out", nargs="?", default=NAMES_OUT)
     args = parser.parse_args(argv)
@@ -757,6 +1218,38 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.cmd == "new-character":
             for p in _write_new_character(Path(args.out_dir), args.slot, args.hp, args.mp):
                 print(f"wrote {p}")
+        elif args.cmd in ("build", "describe"):
+            if args.app and not args.app.is_dir():
+                # As the real-asset tests do: a CTest fixture that builds a start state skips.
+                print(f"skipped: {args.app} absent (scripts/bootstrap)")
+                return SKIPPED
+            skills, strings = bundle_inputs(args.app, args.language) if args.app else (None, None)
+            if args.cmd == "describe":
+                c = parse_character(args.theif.read_bytes())
+                q = parse_quest(args.quest.read_bytes())
+                print(json.dumps(describe(c, q, skills, strings), ensure_ascii=False, indent=1))
+                return 0
+            try:
+                description = json.loads(args.description.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as e:
+                raise SaveDataError(f"{args.description}: {e}") from e
+            if not isinstance(description, dict):
+                raise SaveDataError(f"{args.description}: not a JSON object")
+            if args.base is not None:
+                theif, quest = find_pair(args.base, args.slot)
+                base = describe(
+                    parse_character(theif.read_bytes()),
+                    parse_quest(quest.read_bytes()),
+                    skills,
+                    strings,
+                )
+                gains = hero_gains(args.app) if args.app else []
+                description = over_base(base, description, gains)
+            files = build_files(description, args.slot, skills, strings)
+            args.out_dir.mkdir(parents=True, exist_ok=True)
+            for name, data in files.items():
+                (args.out_dir / name).write_bytes(data)
+                print(f"wrote {args.out_dir / name}")
         else:
             out = Path(args.out)
             gc.write_text(out, names_json())

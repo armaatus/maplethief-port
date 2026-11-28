@@ -56,10 +56,14 @@
 //   right_touch = off
 //   # hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always | never
 //   hide_keypad = never
-//   # the gamepad rumbles on a vibration, a hit and a level-up: on | off
+//   # the gamepad rumbles on the game's vibration and, with rumble_events = all, a hit and a
+//   # level-up: on | off
 //   rumble = on
 //   # how strongly, 0 to 100 (percent)
 //   rumble_strength = 100
+//   # what rumbles: game (the game's own vibration only, as the phone) | all (also every hit
+//   # and a level-up)
+//   rumble_events = all
 //   # iOS: a light tap of the phone at each press of a touch key pad key: off | light | medium
 //   keypad_haptics = off  (light on iOS)
 //   # the frame-time overlay (F3 shows or hides it while the game runs): on | off
@@ -86,9 +90,11 @@
 //   pause_unfocused = off
 //   # the game's language: en | ko (MAPLETHIEF_LANGUAGE overrides it; from the next start)
 //   language = en
-//   # a directory of translated text in UTF-8 (python3 -m mtport.textpack export makes ...)
+//   # the port's menus: auto (the system's language) | en | ko | nl
+//   menu_language = auto
+//   # a directory of translated text in UTF-8 (the menu's Other tab: Export text makes ...)
 //   text_pack =
-//   # a directory of HD textures made from your own --dump-textures (python3 -m ...); empty: none
+//   # a directory of HD textures made from your own texture dump (the menu's Other tab: ...)
 //   texture_pack =
 //   # how textures are sampled at render scale 2 and up: game (smooth, the device's look) | ...
 //   texture_filter = game
@@ -108,6 +114,9 @@
 //   fast_forward = off
 //   # save the game when it quits or goes to the background, where the game's own Save ...
 //   autosave = off
+//   # keep a recovery point of the game at map loads, saves and every five minutes, offered
+//   # at the next start after a crash: on | off
+//   crash_recovery = off
 //   # how often the window shows the game: original (each game tick's frame, 20 a second) | ...
 //   frame_rate = original
 //   # how fast the menus' UIKit animations run: normal | fast | instant
@@ -123,8 +132,15 @@
 //   # the port's minimap of the map in the field (platforms, ladders, the hero, portals and NPCs):
 //   # off | border (beside the picture where there is room, else over it) | overlay
 //   minimap = off
+//   # the minimap's extras (#397): the map's live mobs as dots: on | off
+//   minimap_mobs = off
+//   # the minimap's extras (#397): the map's name along the box's top: on | off
+//   minimap_name = off
 //   # the hero's EXP to the next level as a percentage beside the HUD's bar: on | off
 //   exp_percent = off
+//   # the keys the game is being given, lit while held, in a corner (for videos and
+//   # practice): on | off
+//   input_display = off
 //   # Assist: the auto-run key (R, the left stick's click) keeps the hero walking: on | off
 //   auto_run = off
 //   # Assist: a press starts these held actions and the next one stops them: off | walk
@@ -146,6 +162,18 @@
 //   # once a day, ask github.com whether a newer version of the port is out (never in
 //   # Original; it downloads nothing): on | off
 //   update_check = off
+//   # the speedrun timer over the picture (run_timer.h): on | off
+//   run_timer = off
+//   # the timer's category: any | chapter_1, or a file of your own in <data dir>/categories
+//   run_category = any
+//   # record every session, from the start to quit, as a run file in runs/ that plays back
+//   # exactly (MapleThief --play-run FILE): on | off
+//   record_runs = off
+//   # send the run timer's start, splits and resets to LiveSplit's TCP server
+//   # (livesplit.h): off | HOST:PORT (localhost:16834)
+//   livesplit = off
+//   # with livesplit, LiveSplit's game time is the game's ticks (50 ms each): on | off
+//   livesplit_game_time = on
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -233,6 +261,13 @@ inline constexpr const char *kStickModeNames[] = {"4way", "8way"};
 //                             back the one held before it
 enum class DirectionPriority { kGame, kLast };
 inline constexpr const char *kDirectionPriorityNames[] = {"game", "last"};
+
+// rumble_events (#399, ADR 0053's addendum, rumble.h): which sources rumble the gamepad.
+//   RumbleEvents::kGame  the game's own vibration only (CMSoundPlayer::Vibrate, gated by the
+//                        game's vibration option), as the phone vibrated
+//   RumbleEvents::kAll   also the observed hit (CHero::TakeDamage) and level-up (CHero::LevelUp)
+enum class RumbleEvents { kGame, kAll };
+inline constexpr const char *kRumbleEventsNames[] = {"game", "all"};
 
 // keypad_haptics (#194, ADR 0055's addendum, keypad_haptics.h): on iOS, a haptic tap at each
 // press of a touch key pad key, by UIImpactFeedbackGenerator's light or medium style. The row
@@ -337,6 +372,11 @@ inline constexpr PlatformDefault kPlatformDefaults[] = {
     // on deko3d leaves out the GPU's own time; 1 holds the pace with headroom on both screens.
     {SettingsPlatform::kSwitch, "render_scale", "1",
      "auto's budget sees the CPU's time only, not the Switch GPU's"},
+    // #335 (ADR 0151): a point stalls play for an unmeasured 0.25 to 1.2 s on the Cortex-A57 and
+    // holds about 28 MB beside the game in applet mode. A console run measures it.
+    {SettingsPlatform::kSwitch, "crash_recovery", "off",
+     "a recovery point stalls play for an unmeasured 0.25 to 1.2 s on the Cortex-A57 and holds "
+     "about 28 MB in applet mode"},
 };
 // The value of `key` in `platform`'s rows; nullptr if it has none.
 constexpr const char *platform_value(std::string_view key,
@@ -390,6 +430,11 @@ inline constexpr const char *kFullscreenModeNames[] = {"desktop", "borderless"};
 // MAPLETHIEF_LANGUAGE overrides it.
 enum class Language { kEn, kKo };
 inline constexpr const char *kLanguageNames[] = {"en", "ko"};
+// menu_language (#373, ADR 0222): the language of the port's own menus, English or one of the
+// translations shipped in platform/lang/ (port_text.h; a test checks the names are those
+// folders). auto: the first of the system's preferred languages the port has, else English.
+enum class MenuLanguage { kAuto, kEn, kKo, kNl };
+inline constexpr const char *kMenuLanguageNames[] = {"auto", "en", "ko", "nl"};
 inline constexpr const char *kTextureFilterNames[] = {"game", "nearest"};
 // autosave (#150, autosave.h, docs/re/autosave.md): when the port saves the character in play
 // through the game's own save pair, and only where the game's menu Save would be allowed.
@@ -403,8 +448,10 @@ inline constexpr const char *kAutosaveNames[] = {"off", "on_quit"};
 //   auto  a 568 x 320 GL layer: in the field (and the NPC chat) on a map wider than 480 points
 //         the engine draws up to 568 points wide (as wide as the map), the touch key pad shown
 //         or not (#168); menus, the title and narrow maps keep the 3:2 picture, centred
-enum class Widescreen { kOff, kAuto };
-inline constexpr const char *kWidescreenNames[] = {"off", "auto"};
+//   fill  a 768 x 320 GL layer (#425, ADR 0214): as auto, up to as wide as the window (or the
+//         phone's safe area) at 320 points high, at most 768 (21:9 is 747)
+enum class Widescreen { kOff, kAuto, kFill };
+inline constexpr const char *kWidescreenNames[] = {"off", "auto", "fill"};
 // widescreen_hud (#168, ADR 0090's addendum): where the touch key pad and its GL icons go when
 // the field is wider than 3:2. The bar is drawn in the middle either way.
 //   edges   the key pad's groups move to the wide view's edges, their icons with them: the
@@ -490,6 +537,11 @@ const char *colorblind_filter_name(ColorblindFilter filter);
 inline constexpr std::uint32_t kMaxScreenShake = 100;
 // flashes' largest value (#186): the game's own full-screen flashes, in percent of their alpha.
 inline constexpr std::uint32_t kMaxFlashes = 100;
+// Text-to-speech (#390, ADR 0174, speech.h): speech_rate in percent of the voice's normal rate,
+// speech_volume in percent.
+inline constexpr std::uint32_t kSpeechRateMin = 50, kSpeechRateMax = 200, kSpeechRateStep = 10;
+inline constexpr std::uint32_t kSpeechRateDefault = 100;
+inline constexpr std::uint32_t kSpeechVolumeMax = 100, kSpeechVolumeStep = 10;
 // The picture adjustments (#187, ADR 0093's addendum, color_filter.h): brightness, contrast and
 // saturation in percent, gamma in hundredths (the file writes it as 0.80 ... 1.40). Video; not in
 // the presets (the player's screen, not the experience).
@@ -579,6 +631,8 @@ struct Settings {
     // Rumble (#72, rumble.h): the active gamepad on a vibration, a hit and a level-up.
     bool rumble = true;                  // rumble, --rumble (on | off)
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
+    // #399: rumble_events, --rumble-events (game | all); all without a settings file.
+    RumbleEvents rumble_events = RumbleEvents::kAll;
     // #194: keypad_haptics, --keypad-haptics (off | light | medium; iOS only).
     KeypadHaptics keypad_haptics = kKeypadHapticsDefault;
     // #184 (disconnect.h): the active pad going away pauses the game until a pad or a key.
@@ -610,11 +664,19 @@ struct Settings {
     // a minimise does (lifecycle.h).
     bool pause_unfocused = false;
     Language language = Language::kEn; // language, --language (en | ko)
+    // menu_language, --menu-language (auto | en | ko | nl; #373): the port's menus.
+    MenuLanguage menu_language = MenuLanguage::kAuto;
     // fix_original_bugs, --fix-original-bugs (on | off; #155, docs/re/original-bugs.md): the
     // original game's crashes and dead ends fixed through guest function hooks
     // (maplethief/hooks.h): the NGB portal items' exit(1), Play before the engine's main menu
     // (#122). Never balance: a fix that changes gameplay is an Assist.
     bool fix_original_bugs = false;
+    // restored_content, --restored-content (on | off; #389, ADR 0069's #379 addendum,
+    // docs/re/original-bugs.md "Unreachable content"): content the game ships but no path
+    // reaches (Monster Carnival, shops 0, 1 and 16, the unreached maps) made reachable, each
+    // by its own follow-up (#426 the shops, #427 Monster Carnival, #428 the maps 4.5 and 4.8;
+    // restored_content.h). Never a bug fix, so off in every preset; off is the original.
+    bool restored_content = false;
     // Texture packs (#153, ADR 0081, maplethief/texpack.h): texture_pack, --texture-pack DIR
     // (empty: none), a directory of replacements made from the player's own dump; and
     // texture_filter, --texture-filter (game | nearest).
@@ -624,6 +686,8 @@ struct Settings {
     // none), a folder of the game's text and the port's own in UTF-8 that replace the
     // language's, by key; anything it lacks stays the original.
     std::string text_pack;
+    // #370 (ADR 0149, packs.h): each of texture_pack, audio_pack and text_pack is an ordered
+    // list of folders, '|' between them, first first; the packs screen writes it.
     // Offline polish (#154, ADR 0084, maplethief/offline.h): the title menu without its dead
     // online buttons (the banner, More Games, About's links; the Game Center button too while
     // local_game_center is off), and Game Center on this computer: the leaderboard screen and
@@ -652,7 +716,10 @@ struct Settings {
     GameSpeed game_speed = GameSpeed::kGame;      // game_speed, --game-speed
     FastForward fast_forward = FastForward::kOff; // fast_forward, --fast-forward (off | x2 | x3)
     Autosave autosave = Autosave::kOff;           // autosave, --autosave (off | on_quit; #150)
-    // The wider field (#86, ADR 0090): widescreen, --widescreen (off | auto).
+    // Crash recovery points (#335, ADR 0151, recovery.h): crash_recovery, --crash-recovery
+    // (on | off; off on the Switch: kPlatformDefaults).
+    bool crash_recovery = platform_switch("crash_recovery", false);
+    // The wider field (#86, ADR 0090): widescreen, --widescreen (off | auto | fill).
     Widescreen widescreen = Widescreen::kOff;
     // Where the HUD and the key pad go in the wide view (#168): widescreen_hud, --widescreen-hud.
     WidescreenHud widescreen_hud = WidescreenHud::kEdges;
@@ -663,6 +730,12 @@ struct Settings {
     std::uint32_t screen_shake = kMaxScreenShake;                // --screen-shake (0 to 100)
     // The full-screen flashes' alpha in percent (#186; mt_hooks_install_flashes; 100: original).
     std::uint32_t flashes = kMaxFlashes; // --flashes (0 to 100)
+    // Text-to-speech (#390, ADR 0174, speech.h): the game's text read by the system voice.
+    bool speech = false;                            // speech, --speech (on | off)
+    std::uint32_t speech_rate = kSpeechRateDefault; // --speech-rate (50 to 200, percent)
+    std::uint32_t speech_volume = kSpeechVolumeMax; // --speech-volume (0 to 100, percent)
+    // The notify lines (pick-ups, meso, EXP, the map's name) said too (#392, ADR 0191).
+    bool speech_notices = true; // speech_notices, --speech-notices (on | off)
     // The picture adjustments (#187): the present stage's colour step with the filter.
     std::uint32_t brightness = kPictureDefault; // --brightness (50 to 150, percent)
     std::uint32_t contrast = kPictureDefault;   // --contrast (50 to 150, percent)
@@ -681,8 +754,13 @@ struct Settings {
     bool skip_intros = false; // skip_intros, --skip-intros (on | off)
     // The port's minimap (#176, ADR 0098): minimap, --minimap (off | border | overlay).
     Minimap minimap = Minimap::kOff;
+    // Its extras (#397, ADR 0098's second addendum, minimap.h): the map's live mobs and its name.
+    bool minimap_mobs = false; // minimap_mobs, --minimap-mobs (on | off)
+    bool minimap_name = false; // minimap_name, --minimap-name (on | off)
     // The hero's EXP as a percentage beside the HUD's bar (#191, ADR 0109, exp_percent.h).
     bool exp_percent = false; // exp_percent, --exp-percent (on | off)
+    // The input display (#404, ADR 0156, input_display.h): off by default, in no preset.
+    bool input_display = false; // input_display, --input-display (on | off)
     // Controller extras (#172, ADR 0094, assists.h): two Assists, the auto-run action latching
     // the walk (auto_run) and presses toggling held actions (hold_toggle).
     bool auto_run = false;                     // auto_run, --auto-run (on | off)
@@ -695,6 +773,17 @@ struct Settings {
     // The opt-in update notice (#199, ADR 0137, update_check.h): off by default, in no preset,
     // and it never runs in the Original preset.
     bool update_check = false; // update_check, --update-check (on | off)
+    // The speedrun timer (#406, ADR 0156, run_timer.h): its overlay and run logs, and the
+    // category it times (a category file's name, without .mtcat). Outside the presets.
+    bool run_timer = false;           // run_timer, --run-timer (on | off)
+    std::string run_category = "any"; // run_category, --run-category (NAME)
+    // Run recording (#405, ADR 0156, run_recorder.h): every session from the start to quit into
+    // <data dir>/runs/, off by default and in no preset.
+    bool record_runs = false; // record_runs, --record-runs (on | off)
+    // The LiveSplit link (#407, ADR 0156, livesplit.h): HOST:PORT of LiveSplit's TCP server, empty
+    // for off; and whether it gets the game time. Desktop only, outside the presets.
+    std::string livesplit;           // livesplit, --livesplit (off | HOST:PORT)
+    bool livesplit_game_time = true; // livesplit_game_time, --livesplit-game-time (on | off)
 
     bool operator==(const Settings &) const = default;
 };
@@ -942,6 +1031,11 @@ inline constexpr const char *kFullscreenDisplayCurrent = "current";
 // (kCapPackFolders: the Switch; pack_folders.cpp's offer_pack_folders sets them at the start).
 // The menu then offers "" (none) and these; with none set it offers nothing, as before.
 void set_pack_choices(std::string_view key, std::vector<std::string> values);
+// run_category (#406, run_timer.h): the categories' names the settings menu offers (game.cpp
+// sets them from the shipped categories and the data folder's). Until then the menu offers the
+// shipped categories' names. A category's name is 1 to 32 of a-z, 0-9 and '_'.
+void set_run_category_choices(std::vector<std::string> names);
+inline constexpr std::size_t kMaxRunCategoryBytes = 32;
 
 // Every setting, in the order a new file lists them (after `preset`).
 std::span<const SettingInfo> settings_registry();

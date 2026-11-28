@@ -1,6 +1,6 @@
 // The port's text table (#189, ADR 0108, port_text.h): without a text pack every text is its
 // English literal (the overlays' drawing tests hold it byte for byte); with a synthetic pack's
-// Port.strings a row is the pack's, folded to the overlays' ASCII, a key the pack lacks keeps
+// Port.strings a row is the pack's UTF-8 (the overlays draw it, #372), a key the pack lacks keeps
 // its English, a translation whose places ({0}, ...) are not the English's is not used, and a
 // registry row's derived key (tr_key) answers too.
 #include <doctest/doctest.h>
@@ -68,8 +68,8 @@ TEST_CASE("Port text: without a pack every text is the English literal; keys are
     CHECK(fe::tr_key("setting.bindings.label", english) == english);
 }
 
-TEST_CASE("Port text: a pack's Port.strings, folded to ASCII; missing keys and bad places keep "
-          "the English") {
+TEST_CASE("Port text: a pack's Port.strings as UTF-8; missing keys and bad places keep the "
+          "English") {
     const Pack pack("folded", "/* synthetic */\n"
                               "\"menu_title\" = \"EINSTELLUNGEN\";\n"
                               "\"menu_preset\" = \"Voreinstellung für Größe\";\n"
@@ -79,19 +79,19 @@ TEST_CASE("Port text: a pack's Port.strings, folded to ASCII; missing keys and b
                               "\"setting.vsync.label\" = \"Vertikale Sync\";\n"
                               "\"action.quit.button\" = \"Beenden…\";\n");
     CHECK(std::string(fe::tr(Txt::menu_title)) == "EINSTELLUNGEN");
-    CHECK(std::string(fe::tr(Txt::menu_preset)) == "Voreinstellung fur Grosse");
+    // The overlays draw accents and Hangul (#372, ADR 0206): tr no longer folds.
+    CHECK(std::string(fe::tr(Txt::menu_preset)) == "Voreinstellung f\xC3\xBCr Gr\xC3\xB6\xC3\x9F"
+                                                   "e");
     CHECK(fe::tr(Txt::menu_set_in_ini, {"vsync", "on or off"}) ==
-          "on or off - setze vsync in settings.ini");
+          "on or off \xE2\x80\x93 setze vsync in settings.ini");
     CHECK(fe::tr(Txt::menu_not_in_build, {"Quit"}) == "Quit is not available in this build");
-    CHECK(std::string(fe::setting_group_name(fe::SettingGroup::kVideo)) == "Bild...");
+    CHECK(std::string(fe::setting_group_name(fe::SettingGroup::kVideo)) == "Bild\xE2\x80\xA6");
     CHECK(std::string(fe::tr(Txt::menu_yes)) == "Yes"); // not in the pack
     CHECK(std::string(fe::tr_key("setting.vsync.label", "VSync")) == "Vertikale Sync");
-    CHECK(std::string(fe::tr_key("action.quit.button", "Quit...")) == "Beenden...");
+    CHECK(std::string(fe::tr_key("action.quit.button", "Quit...")) == "Beenden\xE2\x80\xA6");
     CHECK(std::string(fe::tr_key("setting.fps.label", "Frame rate")) == "Frame rate");
-    // The raw value stays UTF-8 in the pack; only tr folds it.
-    CHECK(std::string(mt_textpack_lookup("Port", "menu_preset")) ==
-          "Voreinstellung f\xC3\xBCr Gr\xC3\xB6\xC3\x9F"
-          "e");
+    // The price line (SDL's debug font) folds what it shows.
+    CHECK(fe::ascii_fold(fe::tr(Txt::menu_preset)) == "Voreinstellung fur Grosse");
 }
 
 TEST_CASE("Port text: closing the pack brings the English back") {

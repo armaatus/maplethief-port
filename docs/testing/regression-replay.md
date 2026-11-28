@@ -15,6 +15,7 @@ scripts/regress                        # builds play_real_test (mac-debug), play
 scripts/regress --repeat 10            # ten plays: each passes, one digest
 scripts/regress --preset original      # MAPLETHIEF_SETTINGS=preset=original
 scripts/regress --settings turbo_attack=on --preset enhanced
+scripts/regress --native-script-vm shadow  # each script call run as the original and the host VM
 ```
 
 On Windows: `scripts\regress.ps1 --repeat 10` from a Visual Studio x64 developer shell.
@@ -84,6 +85,17 @@ The second fails if any checkpoint differs from the baseline and names the first
 hold hashes of our renders and stay in `work/` (never committed). The digests of two runs can
 also be compared by eye: the last line of each.
 
+`--native-script-vm on|off|shadow` sets `MAPLETHIEF_NATIVE_SCRIPT_VM` for the plays, which the
+driver applies as the game's `--native-script-vm` ([ADR 0226](../adr/0226-the-host-script-vm.md),
+#386, #430): the script VM's loop on the host (the default), the recompiled original, or the
+shadow runs, which run each outermost `Lua::execute` both ways from one state and fail the play
+on any difference (`maplethief/scriptvm.h`). A shadow play's summary line (`scriptvm shadow: N
+runs, M native calls replayed, 0 with a difference`) is repeated in the runner's output; each
+difference is written to the play's `stderr.txt` with the address, both words and the host VM's
+last opcodes. `on`, `off` and `shadow` give the same digest (`8a2f05733c8d4603`, 2026-11-27).
+The playthrough below takes the same variable from the environment
+(`MAPLETHIEF_NATIVE_SCRIPT_VM=shadow scripts/playthrough`).
+
 Which settings reach the run: those the driver applies as the game does. These are the Assists
 (`turbo_attack`, `auto_potion`, `auto_run`, `hold_toggle`, `auto_loot`), `skip_intros`,
 `ui_animations`, `menu_repeat`, `confirm_guard` and `game_speed`. The window's presentation
@@ -107,3 +119,71 @@ The bot plays the same way and writes the replay with its checkpoints and expect
 run gives the same `checkpoints.txt` as every replay of it (the replay is exact). Record again
 when a deliberate change moves the game's timing, for example a change in how the runtime runs
 the guest that shifts its ticks. A rendering change only changes the hashes: save new baselines.
+
+## The playthrough: the whole chain as a regression suite
+
+`scripts/playthrough` ([#306](https://github.com/armaatus/maplethief-port/issues/306)) turns the
+save-chained whole-game runs into a regression suite: one command plays them and tells whether a
+build behaves as the last one did. The chain is CTest's, as the chapter pages describe it:
+[chapter 1](chapter-1-quests.md)'s parts `play.chapter_1_a` to `_m`,
+[chapter 2](chapter-2-quests.md)'s main parts `play.chapter_2_a` to `_f` (from `starts.chapter_2`,
+with the raised starts their pages explain) and [chapter 3](chapter-3-quests.md)'s parts, the
+ending watched and skipped and the post-game's three processes. Chapter 2's side quests, crafts
+and shops branch off the chain and are not in it. Each part goes on from the save of the part
+before it; CTest's fixtures order them and bring a part's own start states along.
+
+```sh
+scripts/playthrough                                         # builds play_real_test (mac-release), plays the chain once
+scripts/playthrough --quick                                 # the first parts only (under 15 minutes)
+scripts/playthrough --save-baseline work/regress/chain.txt  # on one build
+scripts/playthrough --baseline work/regress/chain.txt       # on the other: names the first difference
+scripts/playthrough --quick --baseline work/regress/chain.txt  # a quick run against a full baseline
+scripts/playthrough --repeat 2                              # twice: one digest or a failure
+```
+
+On Windows: `scripts\playthrough.ps1 --quick` from a Visual Studio x64 developer shell (the
+`win-release` preset). It plays in Release (`mac-release`: one architecture, the host's;
+`linux-release` on Linux), several times faster than Debug; `--build-preset mac-debug` plays the
+Debug build. `--tests REGEX` picks other parts (a CTest regex).
+
+Each part runs with `MT_CHECKPOINTS=60000` (`--every`): `play_real_test` then hashes the audio
+from the part's start and takes this page's checkpoints (the screen, the audio, the GL frames and
+the state line) every virtual minute and one named `end` at the end of the turn the part is done
+in. It writes them to its output directory as `checkpoints_<mode>.txt` and prints their digest.
+The runner prints each part's status, real time and digest:
+
+```text
+run 1/1:
+  PASS    play.chapter_1_a                            …  s  <16 hex>
+  …
+run 1/1: N of N parts passed in … s, digest <16 hex>
+playthrough: digest <16 hex>
+```
+
+The chain's log (`build/test-output/<preset>/playthrough/run_NN/chain.txt`) is every part's
+checkpoint lines, each prefixed by its test's name; the last line's digest is FNV-1a 64 of it.
+`--baseline` compares each part this run played with the baseline's, in order, and names the
+first checkpoint that differs (the part, the checkpoint, both lines); a part the baseline does not
+have fails, and the baseline's parts this run did not play are left out, so a quick run compares
+with a full baseline. `--save-baseline` saves the first run's log, and only when all its parts
+passed. Baselines stay in `work/regress/`, never committed.
+
+`--nudge-tick STEP` (`MT_NUDGE_TICK`) is the deliberate change for checking the comparison: at
+that step of each part the virtual clock moves one game tick (50 ms) more. A run with it must
+fail against a baseline without it.
+
+### Times
+
+Measured on 2026-11-27 on the Mac (Apple silicon, `mac-release`, `--no-build`), with four other
+agents' builds and tests running on the same machine, so a quiet machine is faster:
+
+| Run | Parts | Time |
+| --- | --- | --- |
+| Full (`scripts/playthrough`) | 28 | 3778 s (63 min) |
+| Chapter 1, a to m | 13 | 2518 s; d 863 s, i 476 s, f 342 s, b 242 s |
+| Chapter 2, a to f | 6 | 918 s |
+| Chapter 3 and the postgame | 9 | 342 s |
+| Quick (`--quick`, chapter 1 a to c) | 3 | 427 s and 485 s (7 to 8 min) |
+
+The quick time includes `play.bot_world`, which CTest runs first as a fixture of part a. The build
+(`play_real_test` in Release) is not counted.

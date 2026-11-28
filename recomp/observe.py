@@ -31,6 +31,25 @@ OBSERVED: dict[int, tuple[str, str]] = {
         "CDataMgr::LoadSaveData",
         "(mgr, slot): a new-character event when the slot has no cached buffer, else a load",
     ),
+    # Run events (#403, ADR 0156): what a speedrun splits on.
+    0x996ED: (
+        "ScriptNative_clearAll",
+        "(vm): a chapter-end event with the chapter that ends (vm +0x04 -> +0x58 -> +0x04)",
+    ),
+    0x655AD: (
+        "CHero::SetClassUp",
+        "(hero, branch, tier): a job-advance event; its one caller is the native setClassUp",
+    ),
+    0x73349: ("CMob::Die", "(mob, hero): a boss-killed event for mob ids (+0xA0) 64 and 66-69"),
+    0x81369: (
+        "CMapleWorld::changeMap",
+        "(world, area, map, portal): a map-change event unless a warp is pending (+0xB4)",
+    ),
+    0x868D5: (
+        "CStateGame::LoadMap",
+        "(world): a map-change event for a scene's load (from the loader, a target changeMap "
+        "did not report)",
+    ),
 }
 
 OBSERVED_PTRS: frozenset[int] = frozenset(OBSERVED)

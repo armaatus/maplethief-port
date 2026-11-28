@@ -9,8 +9,9 @@
 #     the fast option on Apple silicon);
 #   - every apt package through an Ubuntu archive snapshot (snapshot.ubuntu.com), so a rebuild
 #     gets the same versions: GCC 15.2, clang with its sanitizer runtimes and llvm-symbolizer
-#     (the asan job, ADR 0157), Ninja 1.13.2, Python 3.14, Node.js and the SDL3 build
-#     dependencies of the README's list;
+#     (the asan job, ADR 0157), Ninja 1.13.2, Python 3.14, Node.js, the SDL3 build
+#     dependencies of the README's list, and Mesa's software Vulkan driver lavapipe with the
+#     loader, on which the gpu tests run like on CI's Linux debug job (#364, ADR 0202);
 #   - CMake from Kitware's release archive (ubuntu-latest has a Kitware CMake, not Ubuntu's),
 #     PowerShell from its release archive (ubuntu-latest has pwsh, and tests/test_bootstrap.py
 #     runs the .ps1 scripts when it is found), uv from its image by digest, each hash-checked.
@@ -60,6 +61,7 @@ RUN if [ -n "$UBUNTU_SNAPSHOT" ]; then \
         libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
         libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl1-mesa-dev \
         libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev libdbus-1-dev libudev-dev \
+        mesa-vulkan-drivers libvulkan1 \
     && rm -rf /var/lib/apt/lists/* \
     && echo "apt source: ${UBUNTU_SNAPSHOT:-live archive}" > /etc/maplethief-ci-image \
     && dpkg-query -W -f '${Package} ${Version}\n' >> /etc/maplethief-ci-image
@@ -102,7 +104,10 @@ RUN set -eu; \
 COPY --from=uv /uv /uvx /usr/local/bin/
 
 # Like CI: warnings are errors (CMakeLists.txt), and the tests run as a user without root.
+# MAPLETHIEF_GPU_TESTS and VK_DRIVER_FILES as on CI's Linux debug job: the gpu tests on lavapipe.
 ENV CI=true \
+    MAPLETHIEF_GPU_TESTS=1 \
+    VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json \
     UV_CACHE_DIR=/cache/uv \
     POWERSHELL_TELEMETRY_OPTOUT=1
 RUN useradd --create-home --uid 1001 runner && mkdir -p /cache/uv /src /out \

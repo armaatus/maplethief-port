@@ -1,8 +1,8 @@
 # Widescreen: where the engine allows a wider view
 
-Issues [#86](https://github.com/armaatus/maplethief-port/issues/86) (the field) and [#169](https://github.com/armaatus/maplethief-port/issues/169) (the screens over it), [ADR 0090](../adr/0090-widescreen.md). Read in the Ghidra decompile of every function (armv7 slice, 2,655 functions) and checked on real assets with `play.widescreen_off` / `play.widescreen_on` (`tests/cpp/play_real_test.cpp`).
+Issues [#86](https://github.com/armaatus/maplethief-port/issues/86) (the field), [#169](https://github.com/armaatus/maplethief-port/issues/169) (the screens over it) and [#396](https://github.com/armaatus/maplethief-port/issues/396) (the scenes), [ADR 0090](../adr/0090-widescreen.md). Read in the Ghidra decompile of every function (armv7 slice, 2,655 functions) and checked on real assets with `play.widescreen_off` / `play.widescreen_on` (`tests/cpp/play_real_test.cpp`).
 
-**Verdict:** the field can be drawn wider than 480 points with no change to gameplay. The screen width is read only by drawing code; nothing that updates the world reads it. The port draws the field up to 568 × 320 points (the iPhone 5's screen, 16:9 at 320 high) on every map wider than 30 tiles. The popup menu, the NPC shop, the map screen and the cash shop are drawn at 480 points in the middle of the wide field (#169, [below](#the-screens-over-the-field-169)). The title, the loading screens and the scripted scenes stay 3:2.
+**Verdict:** the field can be drawn wider than 480 points with no change to gameplay. The screen width is read only by drawing code; nothing that updates the world reads it. The port draws the field up to 568 × 320 points (the iPhone 5's screen, 16:9 at 320 high) on every map wider than 30 tiles. The popup menu, the NPC shop, the map screen and the cash shop are drawn at 480 points in the middle of the wide field (#169, [below](#the-screens-over-the-field-169)). Seven of the 21 scripted scenes keep the field's width, their speech box at 480 points in the middle (#396, [below](#scenes-at-the-fields-width)). The title, the loading screens and the other scenes stay 3:2.
 
 ## Where the width comes from
 
@@ -49,10 +49,10 @@ The sprite draw `Sprite_DrawClipped` `0x7CCD` clips every quad on the CPU, befor
   - everywhere else, E = 480.
 
   The port writes E into the surface (width and row bytes), `0x11AA8C`, `SkyCanvas +0x88` / `+0x90`, and the clip rect's x1 when the clip is the whole old screen. The original clamp then keeps the camera inside the map, and culling and clipping widen with E.
-- **The backdrop.** The field's sky (`CStateGame +0x454`, a fixed 480 × 320 image drawn at (0, 0) through `DrawImage` `0x24DC9`) is stretched to E columns by a host clip-space transform (`mt_gles_set_host_x_transform`) around that one call.
+- **The backdrop.** The field's sky (`CStateGame +0x454`, a fixed 480 × 320 image drawn at (0, 0) through `DrawImage` `0x24DC9`) is widened to E columns around that one call: tiled when it repeats every 160 points (drawn again at x = 480), else stretched by a host clip-space transform (#425, [below](#past-568-points-387); until #425 every backdrop was stretched).
 - **Presentation.** The UIKit screen image stays 480 × 320, so the key pad, every overlay, input mapping and screenshot work as before. It shows the GL frame's centre 480 points. The Presenter draws the whole GL frame in a 568-point placement behind it, so the extra columns show as wings on both sides (`platform/src/present.cpp`). Since #170 it composes the wings, the screen image and the key pad's strips into one picture first, so the colour-blind filter, the border's blur and the shader filters treat the wide picture as one image. #86 allowed the wide view only while the touch key pad was hidden; #168 keeps it on with the pad shown ([below](#with-the-touch-key-pad-168)).
 
-The game mode changes the view between field and the 3:2 screens: when a loading screen or a scripted scene starts, E drops to 480 at the next turn and the picture is 3:2 again. The popup menu, the shop, the map screen and the cash shop keep the field's E (#169). On a map change, the camera hook sees the new map's width before the first clamp.
+The game mode changes the view between field and the 3:2 screens: when a loading screen or an unlisted scripted scene starts, E drops to 480 at the next turn and the picture is 3:2 again. The popup menu, the shop, the map screen, the cash shop and the listed scenes keep the field's E (#169, #396). On a map change, the camera hook sees the new map's width before the first clamp.
 
 ## Measured on real assets
 
@@ -194,8 +194,8 @@ What the port does ([ADR 0090's addendum](../adr/0090-widescreen.md#addendum-the
 | 4 | NPC chat `CChatBox::paint` | its box centred on `+0x90` | — | wide (#86) | centred on the view |
 | 5 | a waiting box (`CStateGame +0xD4`, then `SetPigmeState(9)`) | centred on `+0x90` | — | 3:2 | no scripted run reaches it; left at the safe default |
 | 6, 7, 8 | loading | — | `Loading_Progress` `0x6AF09`: 480-point art | 3:2 | `Paint` returns before the field: no map to show beside it |
-| 9 | `PaintExitToMenu` `0x83C71`, then the switch's fades, speech box (`CChatBox::drawChatBox`) and letterbox bars | fades and bars over `+0x88` | — | 3:2 | scripted: its script places the actors and the camera for a 480-point stage; not widened without checking each scene |
-| 10 | letterbox bars, then the scene `0x853E5` | bars over `+0x88` | — | 3:2 | the same |
+| 9 | `PaintExitToMenu` `0x83C71`, then the switch's fades, speech box (`CChatBox::drawChatBox` `0x35189`) and letterbox bars | fades and bars over `+0x88`; the speech box's frame over `+0x88`, its lines wrapped at `+0x88` − 24 by the runner | — | **wide for 7 listed scenes** (#396), else 3:2; the speech box **centred** | [below](#scenes-at-the-fields-width): checked scene by scene |
+| 10 | letterbox bars, then the scene `0x853E5` | bars over `+0x88` | — | as mode 9 | the scene queued: the same list |
 | 0xB | cash shop | — (GL draws only the field and the popups) | the UIKit cash shop panel (9) | **wide field behind it**, nothing wrapped | the UIKit panel is in the screen image already |
 
 **Centred, how** (`runtime/src/hooks/widescreen_menus.cpp`). `mt_widescreen_decide` keeps the field's E in modes 1, 2, 3 and 0xB, so the field is drawn wide behind the screen and the camera doesn't jump when a screen opens. Hooks on the five paints wrap the original:
@@ -208,10 +208,100 @@ Inside the popup menu, a hook on `FillRect` `0x8079` matches the dim (0, 0, 480,
 
 Only drawing code reads the width. The paints see the same 480 as the original, and the key and touch handlers run outside `Paint` (they read no width), so gameplay is unchanged: `play.widescreen_on` opens all four screens and matches `play.widescreen_off` tick for tick.
 
+## Scenes at the field's width
+
+[#396](https://github.com/armaatus/maplethief-port/issues/396), [ADR 0090's addendum](../adr/0090-widescreen.md#addendum-scenes-at-the-fields-width-396-2026-11-27). Measured 2026-11-27 on the port's own runs (the window shots local only).
+
+**Where each scene plays.** A scene runs on the map that is loaded when it starts: the boss entrances (`QueueBossScene` `0x80965`, areas 3, 4, 7, 9, 10) on the boss maps 3.8, 4.17, 7.4, 9.5 and 10.5; the closing scenes (`CMob::Die` `0x73349`) on the same maps; the chapter cards 11–13 (`CQuestList::ClearAll` `0x7C61D` queues chapter + 10) on the map the chapter's last warp leads to (2.0, 4.1, 6.0); the map scripts' `runAnimation` (chapter 1's and 2's `PerionMap`: 15 and 20 on 1.0; chapter 3's `Humanoid3` on 8.4: 16); a scene's command 52 the next scene on its map (2 on 2.11, 17 on 8.6, 18 on 7.6, 19 on 8.4); the intro on 2.10 (`LoadGame`). **Every boss map is 30 tiles wide**, so every boss entrance and closing scene, and the chapter-2 card, is 480 points wide whatever the list says: the field there is 3:2 already, and nothing drops. (#376's note named 3.8 and the intro on 2.8; 3.8 is 30 tiles, and the intro plays on 2.10 and warps to 2.8.)
+
+**What a wider stage changes.** Only drawing code reads the width (ADR 0090), so no scene's state changes. What is seen changes in three places:
+
+- **Actors in the wings.** `python3 -m mtport.scenes stage` replays each scene's commands a step a frame (the hero, the scene NPCs and the scene sprites move by their speed each frame; the camera follows the hero, scrolls or is centred, clamped to the map) with a 480-point view and one of E, and lists every actor that only the wider view shows. The intro does it all through: its five NPCs wait at x 0 (and walk in from x 530–540) where the wider view's left and right columns show them before their entrances. Every other scene on a wide map shows nothing extra.
+- **The speech box.** The runner's command 50 wraps the box's text at `+0x88` − 24 (`Text_Wrap` `0x22EC5`, called at `0x85158`), and `drawChatBox` `0x35189` draws the frame over `+0x88`. At E = 568 a line wrapped to 544 points runs past the box's right edge and is cut (seen on 8.4, scene 16). The port wraps the runner's call at 456 points (E − 480 less) and draws the box as the menus are drawn ([above](#the-screens-over-the-field-169)): the engine's width at 480 for the call and a host offset of (E − 480) / 2 points, so the box is the 3:2 box in the middle of the view.
+- **The pictures.** A picture (commands 30–36) is a line of the scene's text drawn as an image at screen x `+0x4A0`; command 30 alone leaves it at alpha 0. Every picture a scene fades in (the intro's three captions, the chapter cards' titles, scene 16's time caption) is placed by its builder at `+0x88` / 2, read when `StartScene` builds the list. A scene queued from the field (game mode 10) is built with the listed scene's E, so the caption is centred in the wide view; the intro is built during the load, at 480.
+
+The letterbox bars (command 1) and the fades (29, 53) fill over `+0x88`, so they cover the whole view; the five shaking scenes move the camera in `Paint` (`+0x48C` / `+0x490`), whatever the width.
+
+**The decision** (the generated table below, `python3 -m mtport.scenes widescreen`): wide where the map is wider than 480 points and the stage shows nothing extra. `mt_widescreen_decide` keeps the field's E in game modes 9 and 10 when `CStateGame +0x1E4` is on the list (`k_wide_scenes`, `runtime/src/hooks/widescreen.cpp`; game mode 9 also needs the command list `+0x38`), else 480.
+
+<!-- BEGIN generated:scene_stage -->
+<!-- Generated by `python3 -m mtport.scenes widescreen`: do not edit by hand. -->
+| Scene | Builder | Map (points) | E | Boxes | Verdict | Why | Evidence |
+|---|---|---|---|---|---|---|---|
+| 0 | `makeAni1` `0x302F5` | 2.10 (640; LoadGame 0x86C1D, a new game) | 568 | 4 | 480 | NPC 0 before its entrance at x 0-35, steps 36-53, only in the wider view | stage: 20 hidden sightings |
+| 1 | `makeAniEndingZacum` `0x2BE55` | 10.5 (480; CMob::Die 0x73349, mob 69) | 480 | 11 | 480 | its map is 480 points wide: the view is 480 either way | the map's width |
+| 2 | `makeAniEndingHenesis` `0x26F89` | 2.11 (928; scene 1's end (command 52)) | 568 | 5 | **wide** | nothing staged where only the wider view shows it | stage: 0 sightings, none hidden; `play.widescreen_scene_2_on_synthetic` |
+| 3 | `makeAniMelodyIn` `0x2FE21` | 3.8 (480; QueueBossScene 0x80965, area 3 (MelodyMap)) | 480 | 3 | 480 | its map is 480 points wide: the view is 480 either way | the map's width |
+| 4 | `makeAniMelodyEnd` `0x2F825` | 3.8 (480; CMob::Die, Malady (mob 64)) | 480 | 2 | 480 | its map is 480 points wide: the view is 480 either way | the map's width |
+| 5 | `makeAniWolfIn` `0x2F319` | 4.17 (480; QueueBossScene, area 4 (WolfMap)) | 480 | 3 | 480 | its map is 480 points wide: the view is 480 either way | the map's width |
+| 6 | `makeAniWolfEnd` `0x2EDD9` | 4.17 (480; CMob::Die, mob 66) | 480 | 2 | 480 | its map is 480 points wide: the view is 480 either way | the map's width |
+| 7 | `makeAniYetiIn` `0x2E5E1` | 9.5 (480; QueueBossScene, area 9 (no map script names it: never played)) | 480 | 3 | 480 | its map is 480 points wide: the view is 480 either way | the map's width |
+| 8 | `makeAniYetiEnd` `0x2E03D` | 9.5 (480; CMob::Die, the Yeti (mob 68)) | 480 | 3 | 480 | its map is 480 points wide: the view is 480 either way | the map's width |
+| 9 | `makeAniHomunIn` `0x2DA85` | 7.4 (480; QueueBossScene, area 7 (HomunMap)) | 480 | 4 | 480 | its map is 480 points wide: the view is 480 either way | the map's width |
+| 10 | `makeAniHomunEnd` `0x2D351` | 7.4 (480; CMob::Die, mob 67) | 480 | 5 | 480 | its map is 480 points wide: the view is 480 either way | the map's width |
+| 11 | `makeAniChapter1` `0x2BA59` | 2.0 (816; CQuestList::ClearAll 0x7C61D, chapter 1 (portal281: 2.0)) | 568 | 0 | **wide** | nothing staged where only the wider view shows it | stage: 0 sightings, none hidden; `play.widescreen_scene_11_on_synthetic` |
+| 12 | `makeAniChapter2` `0x2B65D` | 4.1 (480; CQuestList::ClearAll, chapter 2 (Pirate: 4.1)) | 480 | 0 | 480 | its map is 480 points wide: the view is 480 either way | the map's width |
+| 13 | `makeAniChapter3` `0x2B261` | 6.0 (912; CQuestList::ClearAll, chapter 3 (Pirate_Orbis: 6.0)) | 568 | 0 | **wide** | nothing staged where only the wider view shows it | stage: 0 sightings, none hidden; `play.widescreen_scene_13_on_synthetic` |
+| 14 | `makeAniBalogIn` `0x2CBD1` | 10.5 (480; QueueBossScene, area 10 (BalogMap)) | 480 | 6 | 480 | its map is 480 points wide: the view is 480 either way | the map's width |
+| 15 | `makeAniChapter1Perion` `0x28521` | 1.0 (640; chapter 1's PerionMap, runAnimation(15)) | 568 | 7 | **wide** | nothing staged where only the wider view shows it | stage: 0 sightings, none hidden; `play.widescreen_scene_15_on_synthetic` |
+| 16 | `makeAniMagatiaHumanoid1` `0x291D9` | 8.4 (720; chapter 3's Humanoid3 (an NPC on 8.4), runAnimation(16)) | 568 | 3 | **wide** | nothing staged where only the wider view shows it | stage: 0 sightings, none hidden; `play.widescreen_scene_16_on_synthetic` |
+| 17 | `makeAniMagatiaHumanoid2` `0x2AAF5` | 8.6 (480; scene 16's end (command 52)) | 480 | 7 | 480 | its map is 480 points wide: the view is 480 either way | the map's width |
+| 18 | `makeAniMagatiaHumanoid3` `0x29765` | 7.6 (480; scene 17's end (command 52)) | 480 | 9 | 480 | its map is 480 points wide: the view is 480 either way | the map's width |
+| 19 | `makeAniMagatiaHumanoid4` `0x28D81` | 8.4 (720; scene 18's end (command 52)) | 568 | 3 | **wide** | nothing staged where only the wider view shows it | stage: 0 sightings, none hidden; `play.widescreen_scene_16_on_synthetic (after 17 and 18)` |
+| 20 | `makeAniChapter2Perion` `0x27AED` | 1.0 (640; chapter 2's PerionMap, runAnimation(20)) | 568 | 10 | **wide** | nothing staged where only the wider view shows it | stage: 0 sightings, none hidden; `play.widescreen_scene_20_on_synthetic` |
+
+7 of 21 scenes wide. Map: where the scene plays, its width and what starts it there. Boxes: its speech boxes (command 50). A sighting is an actor (the hero, a scene NPC, a scene sprite, a moved map object) at an x the E-point view shows and the 480-point one does not, over consecutive steps; hidden: before its entrance, never on stage, or standing where it went off.
+<!-- END generated:scene_stage -->
+
+**Measured** (`play.widescreen_scene_<n>_off_synthetic` / `_on_synthetic`, from built starts on each map: a scene queued from the field as `runAnimation` queues it, or played by the map's own script on entry). In every run the game state at every tick equals the 3:2 run's: scene 16 to 19 1,072 ticks, 15 288, 20 333, 2 595, 11 and 13 137 each, 12 137.
+
+- Scene 16 starts from the field of 8.4 and its chain ends in 19, back in the field of 8.4: E is 568 on the last field tick and the first scene tick, and on the last scene tick and the first field tick after. 17 (8.6) and 18 (7.6) are on 30-tile maps: 480.
+- 15 and 20 (PerionMap on entry to 1.0), 11 (2.0) and 13 (6.0) end in the field at 568 with no change at the edge; 2 (2.11) ends in its warp to 2.0.
+- 12, unlisted, queued on 2.0: the view drops to 480 at its start and widens again after it.
+- The window shots: the speech box at 480 points in the middle with its lines whole; the letterbox bars and the fades across the whole width; the chapter titles and scene 16's caption in the middle of the view.
+
 ## What stays 3:2, and why
 
 | Screen | Why |
 |---|---|
 | Title, main menu, character select | not a `CStateGame`; UIKit views laid out for 480 |
-| Loading (modes 6–8), the scripted modes 9 and 10, the waiting box (5) | see [the table above](#the-screens-over-the-field-169) |
+| Loading (modes 6–8), the waiting box (5) | see [the table above](#the-screens-over-the-field-169) |
+| 14 of the 21 scenes (modes 9 and 10) | 13 play on 30-tile maps, the intro stages actors in the wings ([below](#scenes-at-the-fields-width)) |
 | The field while the touch key pad shows | the pad is UIKit at 3:2; the GL quick slots would leave its keys (#168) |
+
+## Past 568 points (#387)
+
+[ADR 0214](../adr/0214-widescreen-past-568-points.md) decides it. Measured 2026-11-27 on the port's own runs (the window shots local only).
+
+**The engine has no limit at 568.** Every guest-side piece reads the configured width: the renderbuffer's storage (`eagl.cpp`), `mt_widescreen_decide`'s clamp, the backdrop's stretch k = E / 480 and the HUD's move of (E − 480) / 2 points. A local build with `MT_WIDESCREEN_WIDE` at 768 (not committed) ran `play.widescreen_on`: the view was 768 on 2.0 and 2.3 and 480 on 2.8 and 2.9, and the hero's and the mobs' state at every one of 2,985 ticks equalled the 3:2 run's. `play.widescreen_pad_on` at 768 held left, attack and right by touch, partly in the wings (touches at x −109 and 584 of the screen image): the hero equalled the off run's at all 119 ticks of the hold, and the d-pad and the right-hand groups sat at the 768-point picture's edges. Its only failure was the test's literal "groups 44 points out", which is (568 − 480) / 2.
+
+**What bounds it is data.** How many of the 90 maps fill each width (a map fills a view E when it is at least E points wide; tile steps of 16 points):
+
+| View width, points | Aspect at 320 high | Maps that fill it |
+|---:|---|---:|
+| 512 | 16:10 | 76 |
+| 568 … 576 | 16:9 | 74 |
+| 584 … 608 | | 70 |
+| 616 … 640 | | 65 |
+| 648 … 672 | | 55 |
+| 680 … 704 | 19.5:9 (iPhone X and later, 693) | 52 |
+| 712 … 720 | 20:9 (most Android phones, 711) | 51 |
+| 728 … 736 | | 35 |
+| 744 … 768 | 21:9 (747) | 32 |
+| 776 … 800 | | 21 |
+
+The tile widths behind it: 14 maps of 30 tiles, one each of 32 and 35, then 36 (4 maps), 38 (5), 40 (10), 42 (3), 44 (1), 45 (16), 46 (3), 48 (11), 50 (12), 51 (2), 54, 55 (3), 57, 58 and 60 (one each). A map narrower than the view is drawn as wide as it is, centred, with black wings beside it (today only maps 36 and 37). At 768 that is 42 maps between 36 and 47 tiles, each with its own picture width; on the 11 maps exactly 48 tiles wide the whole map fits and the camera stops scrolling sideways.
+
+**The backdrop tiles.** The 11 backdrops (`map/back/<n>.png`, each 480 × 320) were compared column by column with themselves shifted by 32 … 400 points. Nine (0, 1, 2, 3, 4, 6, 7, 9, 10) repeat exactly every 160 points: shifted by 160 the pixels are identical, and 480 is three periods, so a copy of the image drawn at x = 480 continues it with no seam and no distortion at any width. Backdrops 11 and 12 repeat exactly in their top 96 rows and their bottom rows but not in a middle band (rows 96 … 224, mean difference up to 19 per channel), so a copy beside them shows a step there. The options, judged on window shots of 2.3 at 768:
+
+| Option | At 568 | At 768 | Verdict |
+|---|---|---|---|
+| Stretch to E (today) | 18 % wider | 60 % wider: hills and trees visibly broad | fine for 11 and 12 |
+| Tile by the 160-point period | exact | exact, no seam (a local hook drawing the image again at x = 480) | **best** for the nine periodic backdrops |
+| Mirror at the edges | — | a symmetry axis at each edge of the 480-point image, obvious in clouds and cave roots | rejected |
+| Clamp or blur the edge column | — | horizontal streaks | rejected |
+| A per-area cap at 568 | — | the extra width wasted on the maps it would suit | not needed once the backdrop tiles |
+
+**What else reads 568:** `MT_WIDESCREEN_WIDE` (the renderbuffer, the start window's size in `game.cpp`, `mt_widescreen_configure`); the `widescreen` setting (`off` / `auto`) and its comment; the comments in `keypad_layout.h` and `minimap.h` (the corner's narrowing applies only below 568, so a wider view has more room); and the real-asset tests, which use the constant except for the literal 44-point offset ((568 − 480) / 2) in `play.widescreen_pad_on` and the key pad's label check (`hud_labels`), and the unit tests of the key pad's move (`keypad_layout_test`, `hud_labels_test`, `ui_scaling_test`) that are written at 568. `gl_screen_columns`, the presenter's wings and their pass (`upload_wings`), frame interpolation (it compares each tick's view width) and the key pad's move all take the width as a value. Bag, Cash and the compass are `UIButton`s in the 480-point screen image and stay at their 3:2 places: at 768 they sit 144 points in from the picture's edges.
+
+**Built (#425).** `widescreen = fill` gives the renderbuffer 768 points (`MT_WIDESCREEN_FILL`) and caps E each turn by the picture the window shows (`mt_widescreen_set_limit`, the Presenter's `fill_points` of the safe area at 320 points high). The backdrop hook reads the texels of the texture its draw binds (a draw filter around the original call) and checks the 160-point repeat once per texture; a repeating backdrop is drawn twice (at 0 and, by a host x offset, at 480), any other stretched, under `auto` too. The tests' literal 44s became (E − 480) / 2 and run at 568 and 768. Real-asset results are in [ADR 0214's addendum](../adr/0214-widescreen-past-568-points.md#addendum-as-built-425-2026-11-27).

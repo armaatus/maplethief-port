@@ -17,7 +17,8 @@
 //   size keys    Ctrl+1 ... Ctrl+5 (Cmd on macOS; bindings.ini's [window], #196): the window at
 //                exactly N times the picture (480 x 320, or 568 x 320 with widescreen),
 //                centred on its display, the largest N that fits its usable bounds
-//                (window_rect_for_scale), out of fullscreen and maximise first.
+//                (window_rect_for_scale), out of fullscreen and maximise first. Ctrl (attack)
+//                and Alt (jump) wait for the chord (keyboard.h, #381), so they never press too.
 //   window       <data dir>/window.ini (WindowState): the windowed size and position (never the
 //                fullscreen one) and whether it was maximised, written when the game ends and
 //                read before the window opens. Only in an interactive run (is_interactive_run)
@@ -174,6 +175,10 @@ int pick_display(std::string_view wanted, std::span<const std::string> names);
 // SDL's display for fullscreen_display `wanted`: 0 for `current` or a display that is not
 // connected (logged: "desktop: the display \"NAME\" is not connected: ...").
 SDL_DisplayID find_display(std::string_view wanted);
+// widescreen = fill (#425): the picture's width in points (fill_points, 480 ... `most`) for the
+// usable bounds of `window`'s display (the primary display's for nullptr): the window shape a
+// size key and the first start give. 480 without a display.
+int display_fill_points(SDL_Window *window, int most);
 
 // --- Screenshots ------------------------------------------------------------------------------
 

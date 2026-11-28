@@ -1,0 +1,36 @@
+// The Gradle project that packages the APK (ADR 0150, ADR 0163, issue #356). It never runs CMake:
+// platform/android/android.cmake builds libmain.so, draws the icon, then runs this project's
+// assembleDebug or assembleRelease with the -Pmaplethief.* properties that build.gradle reads.
+// The versions come from tools/containers/android/pins.env, the one file of the pins (read
+// below the plugin blocks, which Gradle wants first).
+
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+plugins {
+    // The pin is checked against pins.env in build.gradle; a plugins block can't read a variable.
+    id 'com.android.application' version '8.7.3' apply false
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+def pins = [:]
+file('../../tools/containers/android/pins.env').eachLine { line ->
+    if (line && !line.startsWith('#') && line.contains('=')) {
+        def i = line.indexOf('=')
+        pins[line.substring(0, i)] = line.substring(i + 1)
+    }
+}
+gradle.ext.maplethiefPins = pins
+
+rootProject.name = 'MapleThief'

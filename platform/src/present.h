@@ -217,6 +217,10 @@ class Presenter {
     // scales its points) and the screen image in its centre; placement() stays the screen
     // image's, so input, the focus highlight and check_readback's image are as before.
     void set_wide(std::uint32_t wide) { wide_ = wide; }
+    // widescreen = fill (#425, ADR 0214): each draw() sets wide() to the safe area's width at 320
+    // points high (fill_points), 480 ... `most` points; the caller hands it to the engine as its
+    // limit (mt_widescreen_set_limit). 0 (the default): wide() stays what set_wide gave.
+    void set_fill(std::uint32_t most) { fill_ = most; }
     // The veil (ADR 0103): with `alpha` > 0, draw() darkens widescreen's wings (wing_rects) with
     // black at that alpha over everything it draws there, as the port's overlays darken the
     // screen image (their backdrop, black at 170). 0 (the default): no veil.
@@ -301,7 +305,7 @@ class Presenter {
     PresentStage stage_;
     Border border_;
     // Widescreen (#86): the wide picture's points, its rectangle, the wings.
-    std::uint32_t wide_ = 0;
+    std::uint32_t wide_ = 0, fill_ = 0;
     Rect wide_rect_;
     std::uint8_t veil_ = 0;
     SDL_Texture *wings_ = nullptr;     // set_wings' (not owned) or wings_own_

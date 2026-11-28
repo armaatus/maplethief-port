@@ -39,6 +39,14 @@ The rules:
 * **the guest symbol table** (``# maplethief symbols`` text, recomp/symbols.py, ADR 0030):
   function names of the game, whatever the file is called.
 
+The Linux player AppImage and Flatpak bundle (ADR 0193), given on their own or found inside a
+kit, are opened the same way: an AppImage (``*.AppImage``) becomes ``<name>.AppImage``, its
+runtime, which must be the pinned one of :data:`APPIMAGE_RUNTIMES`, plus every file of its
+SquashFS image below ``<name>.AppImage/`` (mtport.squashfs); a ``*.flatpak`` bundle becomes
+every file of the tree it installs below ``<name>.flatpak/`` (mtport.flatpak_bundle, each
+object checked against its checksum), plus any other bytes its header carries below
+``<name>.flatpak/.bundle/``.
+
 A Nintendo Switch NRO (ADR 0138), given on its own or found inside a kit, is split into its
 parts first (mtport.nro, docs/formats/nro.md): ``<name>.nro`` stands for its code, and its
 icon, NACP and RomFS become ``<name>.nro/icon.jpg``, ``<name>.nro/control.nacp`` and
@@ -55,13 +63,31 @@ CLI::
     python3 -m mtport.release tag vX.Y.Z[-rc.N]         prints the version and release|prerelease
     python3 -m mtport.release kits VERSION              the expected kit file names, one a line
     python3 -m mtport.release players VERSION           the expected player build file names
+    python3 -m mtport.release linux-packages VERSION    the Linux AppImage and Flatpak bundle
                                                         (the three kits' platforms and switch)
     python3 -m mtport.release sha256 FILE...            writes FILE.sha256 next to each FILE
     python3 -m mtport.release sums OUT FILE.sha256...   merges them into OUT (SHA256SUMS)
     python3 -m mtport.release check SUMS                checks the files next to SUMS
+    python3 -m mtport.release known-issues [FILE] [--closed FILE]
+                                                        fails if FILE (docs/KNOWN_ISSUES.md)
+                                                        cites a closed issue (#309)
+    python3 -m mtport.release notes-check TAG [--previous TAG] [--target REF] [--notes FILE]
+                                                        fails if a merged pull request since
+                                                        the last tag is in "Other changes" (#313)
     python3 -m mtport.release itch TAG [--dry-run] [--platforms LIST] [--from DIR]
                                                         pushes the published release's player
                                                         builds to itch.io (mtport.itch, ADR 0146)
+
+The **known-issues pre-flight** reads ``docs/KNOWN_ISSUES.md``, whose rule is that an entry
+holds only while the issue it cites is open, and fails when it cites a closed issue: a
+``#N`` or a link to ``.../issues/N`` of this repository. The closed issues come from
+``gh issue list --state closed``, or from ``--closed FILE`` (a JSON list of numbers) in the
+tests.
+
+The **notes pre-flight** asks GitHub for the notes it would generate for TAG (the
+``generate-notes`` endpoint, which reads ``.github/release.yml`` and creates nothing) and fails
+when a pull request lands in the catch-all category, "Other changes": that pull request has no
+label of any category. ``--notes FILE`` reads the notes from a file instead (the tests).
 
 Checksum files use the ``sha256sum``/``shasum -a 256`` format, ``<hex>  <name>``, so
 ``sha256sum -c`` and ``shasum -a 256 -c`` read them.
@@ -71,8 +97,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import stat
+import subprocess
 import sys
 import tarfile
 import zipfile
@@ -80,7 +108,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from mtport import nro
+from mtport import flatpak_bundle, nro, squashfs
 
 REPO = Path(__file__).resolve().parents[2]
 # The directories derived from the IPA (CLAUDE.md "What goes in git"), checked by hash.
@@ -89,16 +117,20 @@ GEN_DISPATCH = "work/gen/dispatch.c"
 
 # vX.Y.Z or vX.Y.Z-rc.N (ADR 0024); the version is the tag without its "v".
 TAG = re.compile(r"v(?P<version>(?P<numeric>\d+\.\d+\.\d+)(?P<rc>-rc\.\d+)?)")
-# Kit file names per platform (cmake/Packaging.cmake), in the order a release lists them.
+# Kit file names per platform (cmake/Packaging.cmake), in the order a release lists them: the
+# ARM64 builds of Windows and Linux (#362, ADR 0194) after the x64 ones.
 KIT_PLATFORMS = (
     ("macos-universal", "zip"),
     ("linux-x86_64", "tar.gz"),
     ("windows-x64", "zip"),
+    ("linux-aarch64", "tar.gz"),
+    ("windows-arm64", "zip"),
 )
 # The player builds (MAPLETHIEF_PLAYER_BUILD, ADR 0125) use the same platforms, without "-kit",
 # plus the Nintendo Switch's (#243, ADR 0138), whose zip holds switch/maplethief/MapleThief.nro.
-# The release has no Switch kit: the kits are release.yml's three.
+# The release has no Switch kit: the kits are release.yml's.
 PLAYER_PLATFORMS = (*KIT_PLATFORMS, ("switch", "zip"))
+LINUX_PACKAGES = ("AppImage", "flatpak")  # beside the Linux player tarball (ADR 0193)
 MODES = ("kit", "player")
 
 # The port's own icon files (platform/icon/, drawn by tools/mtport/appicon.py, ADR 0125): the
@@ -118,7 +150,28 @@ ICON_ALLOWLIST = {
     "switch/maplethief/MapleThief.nro/icon.jpg": (
         "29463fb64a285adce4ec8d4c4e1a258513353ccb0728ab61c59fdfe704f20dff"
     ),
+    # platform/icon/icon.png again, where the AppImage and the Flatpak name it (ADR 0193,
+    # mtport.linux_package): the AppDir's top-level icon, and the Flatpak's under files/share
+    # and export/share
+    "io.github.armaatus.maplethief.png": (
+        "cf86db67e6aa23f8b24a63bf8a52da77ba4f5df9cc9c650036f6e3286cf81786"
+    ),
+    "files/icon.png": "cf86db67e6aa23f8b24a63bf8a52da77ba4f5df9cc9c650036f6e3286cf81786",
+    "files/share/icons/hicolor/256x256/apps/io.github.armaatus.maplethief.png": (
+        "cf86db67e6aa23f8b24a63bf8a52da77ba4f5df9cc9c650036f6e3286cf81786"
+    ),
+    "export/share/icons/hicolor/256x256/apps/io.github.armaatus.maplethief.png": (
+        "cf86db67e6aa23f8b24a63bf8a52da77ba4f5df9cc9c650036f6e3286cf81786"
+    ),
 }
+# The AppImage runtimes an AppImage may carry, by SHA-256: AppImage/type2-runtime's release
+# 20251108 (x86_64, aarch64), pinned in tools/containers/linux-game/Dockerfile (ADR 0193).
+APPIMAGE_RUNTIMES = {
+    "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d": "20251108 x86_64",
+    "00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444": "20251108 aarch64",
+}
+APPIMAGE_SUFFIX = ".appimage"
+FLATPAK_SUFFIX = ".flatpak"
 
 FORBIDDEN_DIRS = {"work", "assets-out", "build", "dist", "CMakeFiles", "_deps", "Testing"}
 # The one build/ directory that is ours: the Markdown pages of the build docs, which a kit carries.
@@ -133,7 +186,8 @@ BUILD_TREE_FILES = {
     "compile_commands.json",
     "install_manifest.txt",
 }
-GENERATED_NAMES = {"mt_gen.h", "dispatch.c", "imports.c", "gen.cmake"}
+# The recompiler's files in work/gen/, and the per-file hash list bootstrap writes there (#350).
+GENERATED_NAMES = {"mt_gen.h", "dispatch.c", "imports.c", "gen.cmake", "ipa_files.inc"}
 GENERATED_UNIT = re.compile(r"fn_\d{3}\.c")
 C_SUFFIXES = {".c", ".h", ".cc", ".cpp", ".hpp", ".inc"}
 GENERATED_MARKERS = (b'#include "mt_gen.h"', b"Generated by recomp")
@@ -286,17 +340,63 @@ def nro_members(member: Member) -> list[Member]:
     return out
 
 
+def _member_of(name: str, kind: str, mode: int, data: bytes, target: str) -> Member:
+    if kind == "dir":
+        return Member(name, "dir")
+    if kind == "symlink":
+        return Member(name, "symlink", target=target)
+    if kind == "file" and stat.S_ISREG(mode):
+        return Member(name, "file", data)
+    return Member(name, "other")
+
+
+def appimage_members(member: Member) -> list[Member]:
+    """An AppImage split into its runtime (under its own name) and its files (below it)."""
+    try:
+        runtime, entries = squashfs.appimage_parts(member.data)
+    except squashfs.SquashfsError as e:
+        raise GuardError(f"{member.name}: not an AppImage the guard can read: {e}") from e
+    out = [Member(member.name, "file", runtime)]
+    for e in entries:
+        out.append(_member_of(f"{member.name}/{e.path}", e.kind, e.mode, e.data, e.target))
+    return out
+
+
+def flatpak_members(member: Member) -> list[Member]:
+    """A Flatpak bundle as the files of its tree (below its name) and the other bytes of its
+    header (below ``<name>/.bundle/``)."""
+    try:
+        bundle = flatpak_bundle.read(member.data)
+    except flatpak_bundle.BundleError as e:
+        raise GuardError(f"{member.name}: not a Flatpak bundle the guard can read: {e}") from e
+    out = [
+        _member_of(f"{member.name}/{e.path}", e.kind, e.mode, e.data, e.target)
+        for e in bundle.entries
+    ]
+    out += [
+        Member(f"{member.name}/.bundle/{k}", "file", v) for k, v in sorted(bundle.extra.items())
+    ]
+    return out
+
+
 def _expand_nros(entries: Iterable[Member]) -> Iterator[Member]:
     for m in entries:
-        if m.kind == "file" and m.name.lower().endswith(NRO_SUFFIX):
+        name = m.name.lower()
+        if m.kind == "file" and name.endswith(NRO_SUFFIX):
             yield from nro_members(m)
+        elif m.kind == "file" and name.endswith(APPIMAGE_SUFFIX):
+            yield from appimage_members(m)
+        elif m.kind == "file" and name.endswith(FLATPAK_SUFFIX):
+            yield from flatpak_members(m)
         else:
             yield m
 
 
 def members(path: Path) -> Iterator[Member]:
-    """The entries of a kit: a directory, a ``.zip`` or a tar archive (``.tar.gz``), or an NRO
-    on its own; every NRO among them split into its parts (:func:`nro_members`)."""
+    """The entries of a kit: a directory, a ``.zip`` or a tar archive (``.tar.gz``), or an NRO,
+    AppImage or Flatpak bundle on its own; every NRO, AppImage and Flatpak bundle among them
+    split into its parts (:func:`nro_members`, :func:`appimage_members`,
+    :func:`flatpak_members`)."""
     return _expand_nros(_members(path))
 
 
@@ -305,7 +405,7 @@ def _members(path: Path) -> Iterator[Member]:
         return _dir_members(path)
     if not path.is_file():
         raise GuardError(f"{path}: no such file")
-    if path.name.lower().endswith(NRO_SUFFIX):
+    if path.name.lower().endswith((NRO_SUFFIX, APPIMAGE_SUFFIX, FLATPAK_SUFFIX)):
         with path.open("rb") as f:
             return iter([Member(path.name, "file", _read_capped(f, path.name))])
     if zipfile.is_zipfile(path):
@@ -488,6 +588,11 @@ def check_member(
         return out
     if base in BUILD_TREE_FILES:
         found("path", "a CMake build-tree file")
+    if base.lower().endswith(APPIMAGE_SUFFIX) and member.kind == "file":
+        # appimage_members put the runtime under the AppImage's own name.
+        digest = hashlib.sha256(member.data).hexdigest()
+        if digest not in APPIMAGE_RUNTIMES:
+            found("path", f"an AppImage runtime other than the pinned ones (SHA-256 {digest})")
     if base.lower().endswith(ARCHIVE_SUFFIXES):
         found("path", "an IPA or nested archive (the guard can't look inside)")
     if base.lower().endswith(MEDIA_SUFFIXES) and not (
@@ -571,6 +676,12 @@ def player_names(version: str) -> list[str]:
     return [f"MapleThief-{version}-{plat}.{ext}" for plat, ext in PLAYER_PLATFORMS]
 
 
+def linux_package_names(version: str) -> list[str]:
+    """The Linux player AppImage and Flatpak bundle of a release (ADR 0193): the same files as
+    the Linux player tarball, repacked (mtport.linux_package). Not itch.io channels."""
+    return [f"MapleThief-{version}-linux-x86_64.{ext}" for ext in LINUX_PACKAGES]
+
+
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -637,6 +748,151 @@ def check_sums(sums_path: Path) -> list[str]:
         else:
             print(f"{name}: OK")
     return failures
+
+
+# --- Known issues ---------------------------------------------------------------------------
+
+GITHUB_REPO = "armaatus/maplethief-port"
+KNOWN_ISSUES = REPO / "docs" / "KNOWN_ISSUES.md"
+# A link to an issue of this repository, or a bare #N (not part of a word or a URL fragment).
+_ISSUE_LINK = re.compile(rf"github\.com/{re.escape(GITHUB_REPO)}/issues/(\d+)")
+_ISSUE_REF = re.compile(r"(?<![\w/#&])#(\d+)\b")
+
+
+def cited_issues(text: str) -> list[int]:
+    """The issue numbers ``text`` cites, sorted, each once."""
+    found = {int(n) for n in _ISSUE_LINK.findall(text)}
+    found |= {int(n) for n in _ISSUE_REF.findall(text)}
+    return sorted(found)
+
+
+def closed_issues_from_gh(repo: str = GITHUB_REPO) -> set[int]:
+    """Every closed issue of ``repo``, through the GitHub CLI."""
+    out = subprocess.run(
+        [
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            repo,
+            "--state",
+            "closed",
+            "--limit",
+            "10000",
+            "--json",
+            "number",
+            "--jq",
+            ".[].number",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    if out.returncode != 0:
+        raise OSError(f"gh issue list failed: {out.stderr.strip() or out.returncode}")
+    return {int(line) for line in out.stdout.split()}
+
+
+def closed_citations(text: str, closed: set[int]) -> list[int]:
+    """The issues ``text`` cites that are in ``closed``."""
+    return [n for n in cited_issues(text) if n in closed]
+
+
+def _cmd_known_issues(args: argparse.Namespace) -> int:
+    path = Path(args.file)
+    text = path.read_text(encoding="utf-8")
+    if args.closed:
+        closed = {int(n) for n in json.loads(Path(args.closed).read_text(encoding="utf-8"))}
+    else:
+        closed = closed_issues_from_gh()
+    cited = cited_issues(text)
+    stale = closed_citations(text, closed)
+    if stale:
+        print(
+            f"known issues: {path} cites {len(stale)} closed issue(s): "
+            f"{', '.join(f'#{n}' for n in stale)}. Remove each entry, or cite the open issue "
+            "that tracks it now.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"known issues: OK {path}: {len(cited)} cited issues, none closed")
+    return 0
+
+
+# --- Release notes --------------------------------------------------------------------------
+
+# The title of the catch-all category ("*") of .github/release.yml.
+OTHER_CHANGES = "Other changes"
+_NOTES_ENTRY = re.compile(
+    r"^\* (?P<title>.*?)(?: by @\S+)? in (?P<url>\S+/pull/(?P<number>\d+))\s*$"
+)
+
+
+@dataclass(frozen=True)
+class NotesEntry:
+    number: int
+    title: str
+
+
+def other_changes(notes: str) -> list[NotesEntry]:
+    """The pull requests listed under "Other changes" in GitHub's generated notes."""
+    found = []
+    inside = False
+    for line in notes.splitlines():
+        if line.startswith("#"):
+            inside = line.lstrip("#").strip() == OTHER_CHANGES
+            continue
+        if not inside:
+            continue
+        m = _NOTES_ENTRY.match(line.strip())
+        if m:
+            found.append(NotesEntry(int(m["number"]), m["title"]))
+        elif line.startswith("**"):  # **Full Changelog** or **New Contributors** ends it
+            inside = False
+    return found
+
+
+def generated_notes(
+    tag: str, target: str | None, previous: str | None, repo: str = GITHUB_REPO
+) -> str:
+    """The notes GitHub would generate for ``tag``, through the GitHub CLI (creates nothing)."""
+    cmd = ["gh", "api", f"repos/{repo}/releases/generate-notes", "-f", f"tag_name={tag}"]
+    if target:
+        cmd += ["-f", f"target_commitish={target}"]
+    if previous:
+        cmd += ["-f", f"previous_tag_name={previous}"]
+    out = subprocess.run(
+        [*cmd, "--jq", ".body"], capture_output=True, text=True, check=False, timeout=120
+    )
+    if out.returncode != 0:
+        raise OSError(f"gh api generate-notes failed: {out.stderr.strip() or out.returncode}")
+    return out.stdout
+
+
+def _cmd_notes_check(args: argparse.Namespace) -> int:
+    parse_tag(args.tag)
+    if args.notes:
+        source = args.notes
+        notes = Path(args.notes).read_text(encoding="utf-8")
+    else:
+        source = f"the notes GitHub generates for {args.tag}"
+        notes = generated_notes(args.tag, args.target, args.previous)
+        if args.print:
+            print(notes)
+    unlabelled = other_changes(notes)
+    if unlabelled:
+        print(
+            f"notes: {source} list {len(unlabelled)} pull request(s) under "
+            f'"{OTHER_CHANGES}": label each with its area (gh pr edit N --add-label '
+            "type:epic,area:...; .github/release.yml has the categories):",
+            file=sys.stderr,
+        )
+        for e in unlabelled:
+            print(f"  #{e.number} {e.title}", file=sys.stderr)
+        return 1
+    print(f'notes: OK {source}: no pull request under "{OTHER_CHANGES}"')
+    return 0
 
 
 # --- CLI -----------------------------------------------------------------------------------
@@ -706,6 +962,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("version")
     p = sub.add_parser("players", help="print the expected player build file names of VERSION")
     p.add_argument("version")
+    p = sub.add_parser(
+        "linux-packages", help="print the Linux AppImage's and Flatpak bundle's names of VERSION"
+    )
+    p.add_argument("version")
     p = sub.add_parser("sha256", help="write FILE.sha256 next to each FILE")
     p.add_argument("files", nargs="+", metavar="FILE")
     p = sub.add_parser("sums", help="merge .sha256 files into OUT")
@@ -713,6 +973,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("files", nargs="+", metavar="FILE.sha256")
     p = sub.add_parser("check", help="check the files next to SUMS (like sha256sum -c)")
     p.add_argument("sums")
+    p = sub.add_parser("known-issues", help="fail if KNOWN_ISSUES.md cites a closed issue")
+    p.add_argument("file", nargs="?", default=str(KNOWN_ISSUES), metavar="FILE")
+    p.add_argument(
+        "--closed", metavar="FILE", help="a JSON list of the closed issues (default: ask gh)"
+    )
+    p = sub.add_parser(
+        "notes-check", help='fail if a merged pull request since the last tag is in "Other changes"'
+    )
+    p.add_argument("tag", help="the release's tag (it need not exist yet)")
+    p.add_argument("--previous", metavar="TAG", help="the last release's tag (default: GitHub's)")
+    p.add_argument("--target", metavar="REF", help="the branch or commit (default: the tag's)")
+    p.add_argument("--notes", metavar="FILE", help="read the notes from FILE, not from GitHub")
+    p.add_argument("--print", action="store_true", help="also print the generated notes")
     from mtport import itch  # imports this module
 
     itch.add_parser(sub)
@@ -724,13 +997,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd == "guard":
             return _cmd_guard(args)
+        if args.cmd == "known-issues":
+            return _cmd_known_issues(args)
+        if args.cmd == "notes-check":
+            return _cmd_notes_check(args)
         if args.cmd == "tag":
             version, pre = parse_tag(args.tag)
             print(version)
             print("prerelease" if pre else "release")
-        elif args.cmd in ("kits", "players"):
+        elif args.cmd in ("kits", "players", "linux-packages"):
             parse_tag("v" + args.version)
-            names = kit_names if args.cmd == "kits" else player_names
+            names = {"kits": kit_names, "players": player_names}.get(args.cmd, linux_package_names)
             print("\n".join(names(args.version)))
         elif args.cmd == "sha256":
             for f in args.files:
@@ -746,7 +1023,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1 if failures else 0
     except (ValueError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
-        return 2 if args.cmd in ("tag", "kits", "players") else 1
+        return 2 if args.cmd in ("tag", "kits", "players", "linux-packages") else 1
     return 0
 
 

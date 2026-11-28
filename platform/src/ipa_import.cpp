@@ -8,6 +8,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <new>
 #include <set>
@@ -31,6 +32,17 @@ constexpr std::string_view kAppName = "MapleThief.app";
 constexpr std::string_view kExecutableName = "MapleThief";
 constexpr std::string_view kTmpPrefix = "game.tmp-";
 constexpr std::string_view kOldPrefix = "game.old-";
+
+#ifdef MT_IPA_FILES_INC
+// The per-file hash list this build was made with (mtport.ipa_files, MAPLETHIEF_IPA_FILES).
+struct IpaFileEntry {
+    const char *path;
+    const char *sha256;
+};
+constexpr IpaFileEntry kIpaFiles[] = {
+#include MT_IPA_FILES_INC
+};
+#endif
 
 // A path from a UTF-8 string, and back (on Windows a narrow string is not UTF-8).
 fs::path utf8_path(const std::string &s) { return fs::path(std::u8string(s.begin(), s.end())); }
@@ -174,8 +186,8 @@ class BinaryPlist {
         return true;
     }
 
-    // The value of `key` in the dictionary object `ref`, as a string.
-    bool dict_string(u64 ref, std::string_view key, std::string *value) const {
+    // The object that `key` maps to in the dictionary object `ref`.
+    bool dict_value(u64 ref, std::string_view key, u64 *value) const {
         u8 type = 0;
         u64 count = 0;
         std::size_t body = 0;
@@ -189,10 +201,27 @@ class BinaryPlist {
             if (!string(k, &name) || name != key) {
                 continue;
             }
-            const u64 v = be_uint(b_.data() + body + (count + i) * ref_size_, ref_size_);
-            return string(v, value);
+            *value = be_uint(b_.data() + body + (count + i) * ref_size_, ref_size_);
+            return true;
         }
         return false;
+    }
+
+    // The value of `key` in the dictionary object `ref`, as a string.
+    bool dict_string(u64 ref, std::string_view key, std::string *value) const {
+        u64 v = 0;
+        return dict_value(ref, key, &v) && string(v, value);
+    }
+
+    // The value of `key` in the dictionary object `ref`, as a bool (the markers 0x08 and 0x09).
+    bool dict_bool(u64 ref, std::string_view key, bool *value) const {
+        u64 v = 0;
+        const std::size_t at = dict_value(ref, key, &v) ? offset(v) : 0;
+        if (at == 0 || (b_[at] != 0x08 && b_[at] != 0x09)) {
+            return false;
+        }
+        *value = b_[at] == 0x09;
+        return true;
     }
 
   private:
@@ -258,6 +287,70 @@ std::set<std::string> app_folders(const std::vector<ZipItem> &items) {
 
 std::string short_hex(const Sha256 &d) { return sha256_hex(d).substr(0, 16) + "..."; }
 
+// The SHA-256 of the executable's armv7 slice; false if it has none.
+bool armv7_sha256(const std::vector<u8> &exe, Sha256 *digest) {
+    std::size_t off = 0, len = 0;
+    if (!find_armv7_slice(exe.data(), exe.size(), &off, &len, nullptr)) {
+        return false;
+    }
+    *digest = sha256_of(std::span<const u8>(exe).subspan(off, len));
+    return true;
+}
+
+// Whether `exe` is 1.5's executable: the same file, or the same armv7 slice (a repack's).
+bool known_executable(const std::vector<u8> &exe, const IpaExpected &expected) {
+    Sha256 slice{};
+    return sha256_of(exe) == expected.executable_sha256 ||
+           (armv7_sha256(exe, &slice) && slice == expected.armv7_sha256);
+}
+
+// A version 1.5 IPA with other bytes, taken as a repack (ADR 0135's addendum, #350): its
+// executable's armv7 slice and every file of expected.files must be 1.5's. `exe` is the
+// executable's bytes (null: there is none).
+IpaResult check_repack(std::span<const u8> ipa, const std::vector<ZipItem> &items,
+                       const std::string &app, const std::vector<u8> *exe,
+                       const std::string &version, const IpaExpected &expected) {
+    const auto modified = [&version](const std::string &what) {
+        IpaResult r = refuse(IpaProblem::kModified, "This is MapleThief " + version + ", but " +
+                                                        what + ": it is damaged or changed.");
+        r.version = version;
+        return r;
+    };
+    Sha256 slice{};
+    if (exe == nullptr) {
+        return modified("it has no game executable");
+    }
+    if (!armv7_sha256(*exe, &slice)) {
+        return modified("its game executable has no armv7 slice");
+    }
+    if (slice != expected.armv7_sha256) {
+        return modified("its game executable is not 1.5's (armv7 slice SHA-256 " +
+                        short_hex(slice) + "; expected " + short_hex(expected.armv7_sha256) + ")");
+    }
+    std::map<std::string, const ZipItem *> by_name;
+    for (const ZipItem &item : items) {
+        by_name.emplace(item.name, &item);
+    }
+    std::vector<u8> bytes;
+    for (const IpaFileHash &f : expected.files) {
+        const auto it = by_name.find(app + f.path);
+        if (it == by_name.end() || it->second->is_dir()) {
+            return modified("it has no " + f.path + ", which the game reads");
+        }
+        std::string why;
+        if (!zip_extract(ipa, *it->second, kMaxIpaEntryBytes, &bytes, &why)) {
+            return modified("its file " + f.path + " cannot be read (" + why + ")");
+        }
+        if (sha256_of(bytes) != f.sha256) {
+            return modified("its file " + f.path + " is not 1.5's");
+        }
+    }
+    IpaResult r;
+    r.version = version;
+    r.repack = true;
+    return r;
+}
+
 // Why a file that is not the expected IPA is not: see ipa_import.h.
 IpaResult diagnose(std::span<const u8> ipa, const IpaExpected &expected) {
     std::vector<ZipItem> items;
@@ -298,12 +391,13 @@ IpaResult diagnose(std::span<const u8> ipa, const IpaExpected &expected) {
             }
         }
     }
+    std::vector<u8> bytes;
+    bool have_exe = false;
     if (const ZipItem *exe = find_item(items, app + executable)) {
-        std::vector<u8> bytes;
         std::size_t off = 0, len = 0;
         u32 cryptid = 0;
-        if (zip_extract(ipa, *exe, kMaxIpaEntryBytes, &bytes, nullptr) &&
-            find_armv7_slice(bytes.data(), bytes.size(), &off, &len, nullptr) &&
+        have_exe = zip_extract(ipa, *exe, kMaxIpaEntryBytes, &bytes, nullptr);
+        if (have_exe && find_armv7_slice(bytes.data(), bytes.size(), &off, &len, nullptr) &&
             macho_cryptid(std::span<const u8>(bytes).subspan(off, len), &cryptid) && cryptid != 0) {
             IpaResult r = refuse(IpaProblem::kEncryptedApp,
                                  "This IPA's game executable is encrypted (cryptid " +
@@ -324,6 +418,9 @@ IpaResult diagnose(std::span<const u8> ipa, const IpaExpected &expected) {
                                                             std::string(kIpaVersion) + ".");
         r.version = version;
         return r;
+    }
+    if (!expected.files.empty()) {
+        return check_repack(ipa, items, app, have_exe ? &bytes : nullptr, version, expected);
     }
     IpaResult r = refuse(IpaProblem::kModified,
                          "This is MapleThief " + version + ", but not the known " +
@@ -482,8 +579,9 @@ bool write_file(const fs::path &path, const std::vector<u8> &bytes) {
     return static_cast<bool>(out);
 }
 
+// Extracts the app's members (a repack's: only the executable and the files of expected.files).
 IpaResult extract(std::span<const u8> ipa, const std::string &data_dir, const IpaExpected &expected,
-                  const IpaProgress &progress) {
+                  bool repack, const IpaProgress &progress) {
     std::vector<ZipItem> items;
     std::string why;
     if (!zip_list(ipa, &items, &why)) {
@@ -492,6 +590,21 @@ IpaResult extract(std::span<const u8> ipa, const std::string &data_dir, const Ip
     std::vector<Member> members;
     if (IpaResult r = safe_members(items, &members); !r.ok()) {
         return r;
+    }
+    if (repack) {
+        // Files the list does not name are left out: the game reads only listed ones, and an
+        // added file (another language's .lproj, say) must not be found by a bundle lookup.
+        std::set<std::string> listed = {std::string(kExecutableName)};
+        for (const IpaFileHash &f : expected.files) {
+            listed.insert(f.path);
+        }
+        std::erase_if(members, [&listed](const Member &m) {
+            std::string rel;
+            for (const std::string &p : m.rel) {
+                rel += (rel.empty() ? "" : "/") + p;
+            }
+            return m.item->is_dir() || listed.count(rel) == 0;
+        });
     }
     if (data_dir.empty()) {
         return refuse(IpaProblem::kWriteFailed, "There is no data directory to import into.");
@@ -552,7 +665,7 @@ IpaResult extract(std::span<const u8> ipa, const std::string &data_dir, const Ip
     }
     std::vector<u8> exe;
     const fs::path exe_path = tmp / std::string(kExecutableName);
-    if (!read_whole_file(exe_path, &exe) || sha256_of(exe) != expected.executable_sha256) {
+    if (!read_whole_file(exe_path, &exe) || !known_executable(exe, expected)) {
         return failed(IpaProblem::kWrongExecutable,
                       "This IPA's MapleThief executable is not version 1.5's.");
     }
@@ -581,6 +694,7 @@ IpaResult extract(std::span<const u8> ipa, const std::string &data_dir, const Ip
     IpaResult r;
     r.version = std::string(kIpaVersion);
     r.game_dir = path_utf8(game);
+    r.repack = repack;
     return r;
 }
 
@@ -591,6 +705,16 @@ IpaExpected ipa_expected() {
     e.size = kIpaSize;
     parse_sha256(kIpaSha256, &e.ipa_sha256);
     parse_sha256(kExecutableSha256, &e.executable_sha256);
+    parse_sha256(kArmv7Sha256, &e.armv7_sha256);
+#ifdef MT_IPA_FILES_INC
+    e.files.reserve(std::size(kIpaFiles));
+    for (const IpaFileEntry &f : kIpaFiles) {
+        IpaFileHash h;
+        h.path = f.path;
+        parse_sha256(f.sha256, &h.sha256);
+        e.files.push_back(std::move(h));
+    }
+#endif
     return e;
 }
 
@@ -649,11 +773,12 @@ IpaResult check_ipa(const std::string &path, const IpaExpected &expected,
 
 IpaResult import_ipa_bytes(std::span<const std::uint8_t> ipa, const std::string &data_dir,
                            const IpaExpected &expected, const IpaProgress &progress) {
-    if (IpaResult r = check_ipa_bytes(ipa, expected); !r.ok()) {
-        return r;
+    const IpaResult checked = check_ipa_bytes(ipa, expected);
+    if (!checked.ok()) {
+        return checked;
     }
     try {
-        return extract(ipa, data_dir, expected, progress);
+        return extract(ipa, data_dir, expected, checked.repack, progress);
     } catch (const std::bad_alloc &) {
         return refuse(IpaProblem::kWriteFailed, "There is not enough memory to import.");
     } catch (const fs::filesystem_error &e) {
@@ -815,6 +940,35 @@ bool plist_string(std::span<const std::uint8_t> plist, std::string_view key, std
         return false;
     }
     return xml_plist_string(text, key, value);
+}
+
+bool plist_bool(std::span<const std::uint8_t> plist, std::string_view key, bool *value) {
+    BinaryPlist binary(plist);
+    if (binary.open()) {
+        return binary.dict_bool(binary.top(), key, value);
+    }
+    const std::string_view xml(reinterpret_cast<const char *>(plist.data()), plist.size());
+    if (xml.find("<plist") == std::string_view::npos) {
+        return false;
+    }
+    const std::string open = "<key>" + std::string(key) + "</key>";
+    const std::size_t at = xml.find(open);
+    if (at == std::string_view::npos) {
+        return false;
+    }
+    std::size_t p = at + open.size();
+    while (p < xml.size() &&
+           (xml[p] == ' ' || xml[p] == '\t' || xml[p] == '\r' || xml[p] == '\n')) {
+        p++;
+    }
+    for (const bool b : {true, false}) {
+        const std::string_view tag = b ? "<true/>" : "<false/>";
+        if (xml.substr(p, tag.size()) == tag) {
+            *value = b;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool macho_cryptid(std::span<const std::uint8_t> macho, std::uint32_t *cryptid) {

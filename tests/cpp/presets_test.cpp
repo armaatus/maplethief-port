@@ -58,6 +58,7 @@ const Expected kExpected[] = {
     {"hide_keypad", {"never", "auto", "auto"}},
     {"rumble", {"on", "on", "on"}},
     {"rumble_strength", {nullptr, nullptr, nullptr}},
+    {"rumble_events", {"game", "game", "all"}},      // #399: Original rumbles where the phone did
     {"keypad_haptics", {nullptr, nullptr, nullptr}}, // #194: iOS only
     {"perf_overlay", {"off", "off", "off"}},
     {"cash_shop", {"off", "off", "off"}},
@@ -70,8 +71,10 @@ const Expected kExpected[] = {
     {"vsync", {"on", "on", "on"}},
     {"pause_unfocused", {"off", "on", "on"}},
     {"language", {nullptr, nullptr, nullptr}},
+    {"menu_language", {nullptr, nullptr, nullptr}},
     {"text_pack", {nullptr, nullptr, nullptr}},
     {"fix_original_bugs", {"off", "off", "on"}},
+    {"restored_content", {"off", "off", "off"}}, // #389: never a fix, off in Enhanced too
     {"texture_pack", {nullptr, nullptr, nullptr}},
     {"texture_filter", {"game", "game", "nearest"}},
     {"hide_online_ui", {"off", "on", "on"}},
@@ -88,11 +91,16 @@ const Expected kExpected[] = {
     {"game_speed", {"game", "game", "game"}},
     {"fast_forward", {"off", "off", "off"}},
     {"autosave", {"off", "off", "on_quit"}},
+    {"crash_recovery", {"off", "off", "on"}},
     {"widescreen", {"off", "off", "auto"}},
     {"widescreen_hud", {"edges", "edges", "edges"}},
     {"colorblind_filter", {nullptr, nullptr, nullptr}},
     {"screen_shake", {nullptr, nullptr, nullptr}},
     {"flashes", {nullptr, nullptr, nullptr}},
+    {"speech", {nullptr, nullptr, nullptr}},
+    {"speech_rate", {nullptr, nullptr, nullptr}},
+    {"speech_volume", {nullptr, nullptr, nullptr}},
+    {"speech_notices", {nullptr, nullptr, nullptr}},
     {"brightness", {nullptr, nullptr, nullptr}},
     {"contrast", {nullptr, nullptr, nullptr}},
     {"saturation", {nullptr, nullptr, nullptr}},
@@ -103,7 +111,10 @@ const Expected kExpected[] = {
     {"auto_potion", {"off", "off", "off"}},
     {"skip_intros", {"off", "off", "off"}},
     {"minimap", {"off", "off", "off"}},
+    {"minimap_mobs", {"off", "off", "off"}},
+    {"minimap_name", {"off", "off", "off"}},
     {"exp_percent", {"off", "off", "on"}},
+    {"input_display", {nullptr, nullptr, nullptr}}, // #404: the input display, in no preset
     {"auto_run", {"off", "off", "off"}},
     {"hold_toggle", {"off", "off", "off"}},
     {"auto_loot", {"off", "off", "off"}},
@@ -112,6 +123,11 @@ const Expected kExpected[] = {
     {"stick_mode", {"4way", "4way", "4way"}},
     {"direction_priority", {"game", "game", "last"}},
     {"update_check", {nullptr, nullptr, nullptr}}, // #199: opt-in, in no preset
+    {"run_timer", {nullptr, nullptr, nullptr}},    // #406: the speedrun timer, in no preset
+    {"run_category", {nullptr, nullptr, nullptr}},
+    {"record_runs", {nullptr, nullptr, nullptr}}, // #405: opt-in, in no preset
+    {"livesplit", {nullptr, nullptr, nullptr}},   // #407: the LiveSplit link, in no preset
+    {"livesplit_game_time", {nullptr, nullptr, nullptr}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
@@ -128,6 +144,12 @@ std::string other_value(const SettingInfo &info, const std::string &not_this) {
     }
     if (std::string_view(info.key) == "save_dir") {
         return not_this == "/saves/a" ? "/saves/b" : "/saves/a";
+    }
+    if (std::string_view(info.key) == "run_category") {
+        return not_this == "any" ? "chapter_1" : "any";
+    }
+    if (std::string_view(info.key) == "livesplit") {
+        return not_this == "off" ? "localhost:16834" : "off";
     }
     if (std::string(info.key) == "keypad_layout") {
         return not_this == "original" ? "dpad=80,10,-10,60" : "original";
@@ -249,6 +271,25 @@ TEST_CASE("presets: the registry matches #89's table; each preset sets exactly i
     CHECK(fe::matching_preset(o) == Preset::kOriginal);
     CHECK(fe::matching_preset(oc) == Preset::kOriginalController);
     CHECK(fe::matching_preset(en) == Preset::kEnhanced);
+}
+
+TEST_CASE("presets: restored_content is off in every column; Enhanced never turns it on (#389)") {
+    // ADR 0069's #379 addendum: restoring unreachable content is never a bug fix, so unlike
+    // fix_original_bugs no preset opens it, and a preset turns off a player's on.
+    const SettingInfo *info = fe::find_setting("restored_content");
+    REQUIRE(info != nullptr);
+    CHECK(info->group == SettingGroup::kGameplay);
+    CHECK(std::string(info->flag) == "--restored-content");
+    CHECK_FALSE(Settings{}.restored_content);
+    for (const Preset p : kColumns) {
+        CAPTURE(fe::preset_name(p));
+        REQUIRE(info->presets[p] != nullptr);
+        CHECK(std::string(info->presets[p]) == "off");
+        Settings s;
+        s.restored_content = true;
+        fe::apply_preset(&s, p);
+        CHECK_FALSE(s.restored_content);
+    }
 }
 
 TEST_CASE("presets: changing one key it controls makes it custom; other keys do not") {
@@ -385,9 +426,41 @@ TEST_CASE("presets: Assists are off in every column; check_registry catches a ba
                     "file writes it");
 }
 
-TEST_CASE("presets: no settings file is today's defaults: Original but for hide_keypad") {
+TEST_CASE("presets: rumble_events is the game's vibration in both Originals, all in Enhanced "
+          "and without a file (#399)") {
+    // ADR 0070's planned row: the phone vibrated only through CMSoundPlayer::Vibrate; the hit
+    // and level-up rumbles the port observes (ADR 0053) are Enhanced's. Without a settings
+    // file it stays all, the behaviour since #72.
+    const SettingInfo *info = fe::find_setting("rumble_events");
+    REQUIRE(info != nullptr);
+    CHECK(info->group == SettingGroup::kControls);
+    CHECK(std::string(info->flag) == "--rumble-events");
+    CHECK(info->applies == fe::Applies::kAtOnce);
+    CHECK(Settings{}.rumble_events == fe::RumbleEvents::kAll);
+    const fe::RumbleEvents want[] = {fe::RumbleEvents::kGame, fe::RumbleEvents::kGame,
+                                     fe::RumbleEvents::kAll};
+    for (std::size_t i = 0; i < 3; i++) {
+        CAPTURE(fe::preset_name(kColumns[i]));
+        Settings s;
+        s.rumble_events =
+            want[i] == fe::RumbleEvents::kAll ? fe::RumbleEvents::kGame : fe::RumbleEvents::kAll;
+        fe::apply_preset(&s, kColumns[i]);
+        CHECK(s.rumble_events == want[i]);
+    }
+    // The row sits after rumble_strength, in Controls.
+    const auto &rows = fe::settings_registry();
+    for (std::size_t i = 0; i + 1 < rows.size(); i++) {
+        if (std::string_view(rows[i + 1].key) == "rumble_events") {
+            CHECK(std::string_view(rows[i].key) == "rumble_strength");
+        }
+    }
+}
+
+TEST_CASE("presets: no settings file is today's defaults: Original but for hide_keypad and "
+          "rumble_events") {
     // ADR 0070: a run without a settings file keeps the defaults it always had. They are the
-    // Original column except hide_keypad (auto since #71; Original keeps the key pad shown).
+    // Original column except hide_keypad (auto since #71; Original keeps the key pad shown) and
+    // rumble_events (all since #72; Original rumbles only where the phone vibrated, #399).
     // Since #145 they are no longer the Original + controller column: the keys below are on
     // there and off without a file, as the game always was (pause_unfocused, ADR 0077: a run
     // without a file has never paused when the window lost focus; hide_online_ui, ADR 0084;
@@ -397,16 +470,17 @@ TEST_CASE("presets: no settings file is today's defaults: Original but for hide_
     CHECK_FALSE(defaults.preset.has_value());
     const std::vector<const SettingInfo *> diff =
         fe::preset_differences(defaults, Preset::kOriginal);
-    REQUIRE(diff.size() == 1);
+    REQUIRE(diff.size() == 2);
     CHECK(std::string(diff[0]->key) == "hide_keypad");
+    CHECK(std::string(diff[1]->key) == "rumble_events");
     std::vector<std::string> controller_keys;
     for (const SettingInfo *info : fe::preset_differences(defaults, Preset::kOriginalController)) {
         controller_keys.emplace_back(info->key);
     }
-    CHECK(controller_keys == std::vector<std::string>{"pause_unfocused", "hide_online_ui",
-                                                      "menu_repeat", "confirm_guard",
-                                                      "button_prompts", "pad_pointer",
-                                                      "pause_on_disconnect"});
+    CHECK(controller_keys == std::vector<std::string>{"rumble_events", "pause_unfocused",
+                                                      "hide_online_ui", "menu_repeat",
+                                                      "confirm_guard", "button_prompts",
+                                                      "pad_pointer", "pause_on_disconnect"});
     CHECK_FALSE(fe::matching_preset(defaults).has_value());
     // #145's keys without a file: windowed, vsync on, no pause when unfocused, English.
     CHECK_FALSE(defaults.fullscreen);
@@ -458,6 +532,17 @@ TEST_CASE("presets: platform rows set the Switch's defaults and its preset colum
     CHECK(std::string(fe::preset_column(*fullscreen, Preset::kEnhanced,
                                         SettingsPlatform::kDesktop)) == "on");
     CHECK(fe::preset_column(*scale, Preset::kCustom, SettingsPlatform::kSwitch) == nullptr);
+    // #335 (ADR 0151): crash_recovery is off on the Switch in every column, Enhanced's on
+    // included, until a console run measures a point's stall; the desktop keeps Enhanced's on.
+    static_assert(!fe::platform_switch("crash_recovery", true, SettingsPlatform::kSwitch));
+    const SettingInfo *recovery = fe::find_setting("crash_recovery");
+    REQUIRE(recovery != nullptr);
+    for (const Preset p : kColumns) {
+        CAPTURE(fe::preset_name(p));
+        CHECK(std::string(fe::preset_column(*recovery, p, SettingsPlatform::kSwitch)) == "off");
+    }
+    CHECK(std::string(
+              fe::preset_column(*recovery, Preset::kEnhanced, SettingsPlatform::kDesktop)) == "on");
     // This build: Settings{} has its platform's values, and every preset keeps them.
     const Settings defaults;
     CHECK(defaults.scale_mode ==

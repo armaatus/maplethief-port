@@ -1,0 +1,11 @@
+--- !tapi-tbd
+# The guest program's link stub (#385, ADR 0213): the symbols it imports, under the install
+# name the game imports them from. Written by hand; no SDK file.
+tbd-version: 4
+targets: [ armv7-ios ]
+install-name: '/System/Library/Frameworks/OpenGLES.framework/OpenGLES'
+exports:
+  - targets: [ armv7-ios ]
+    symbols: [ _glBindFramebufferOES, _glBindRenderbufferOES, _glCheckFramebufferStatusOES, _glColor4x, _glDisable, _glDrawArrays, _glEnableClientState, _glFramebufferRenderbufferOES, _glGenFramebuffersOES, _glGenRenderbuffersOES, _glGetRenderbufferParameterivOES, _glLoadIdentity, _glMatrixMode, _glOrthox, _glVertexPointer, _glViewport, _kEAGLColorFormatRGBA8, _kEAGLDrawablePropertyColorFormat, _kEAGLDrawablePropertyRetainedBacking ]
+    objc-classes: [ EAGLContext ]
+...

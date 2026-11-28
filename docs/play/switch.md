@@ -2,7 +2,7 @@
 
 MapleThief runs on the Nintendo Switch (the original model, OLED and Lite) as a homebrew app, `MapleThief.nro`, started from the Homebrew Menu. You copy it to the SD card with your own copy of the game, and the first start imports the game from it ([ADR 0138](../adr/0138-nintendo-switch-homebrew-target.md)).
 
-> **Not checked on a console yet.** The Switch build is new: the import and the first map on real hardware are still to be confirmed ([#243](https://github.com/armaatus/maplethief-port/issues/243), [#245](https://github.com/armaatus/maplethief-port/issues/245), [the checklist](../testing/switch-checklist.md)). If you try it, please tell us how it goes.
+> **Preview.** The Switch build ships with v1.0 and plays, but has not been signed off on the device yet. The label comes off when the sign-off on a real console, handheld and docked, is done ([#245](https://github.com/armaatus/maplethief-port/issues/245), [the checklist](../testing/switch-checklist.md)); the import and the first map on real hardware are still to be confirmed ([#243](https://github.com/armaatus/maplethief-port/issues/243)). What that means: [Known issues, Preview](../KNOWN_ISSUES.md#preview). If you try it, please tell us how it goes.
 
 ## What you need
 
@@ -45,7 +45,7 @@ If the import screen says **No IPA found**, the file isn't in that folder: copy 
 - not an IPA, or not MapleThief's;
 - another version than 1.5;
 - an encrypted copy: the port can't run an encrypted game executable;
-- version 1.5, but damaged or changed: copy the file again, and check its SHA-256 on a computer ([Your game file](your-ipa.md)).
+- version 1.5, but damaged or changed: copy the file again, and check its SHA-256 on a computer ([Your game file](your-ipa.md)). A repacked copy is fine; if a file inside it differs, the message names that file.
 
 Nothing is kept from a file that is refused. To import again later (another copy, or after deleting `game/`), delete `sdmc:/switch/maplethief/game/`, put the IPA back and start MapleThief. Your saves and settings are kept.
 
@@ -70,12 +70,14 @@ Everything is on the SD card, in `sdmc:/switch/maplethief/` ([ADR 0127](../adr/0
 - **Back up** by copying `data/` to a computer. To restore, put it back while MapleThief is closed.
 - **Move saves between the Switch and a computer:** the settings menu's Saves tab exports a zip into `data/exports/`; copy it to the computer and import it there. The other way, put a zip of saves in the Switch's `data/import/` and choose **Import saves…** in the Saves tab, from the title screen. [Saves](saves.md#moving-saves-to-another-computer) has the details.
 - **Updating to a new version:** copy the new `MapleThief.nro` over the old one. `data/` and `game/` stay.
+- **Resetting or removing it:** [Uninstall and reset](uninstall-and-reset.md#nintendo-switch).
 
 ## Troubleshooting
 
 - **"Running short of memory" on screen, or the game closes on a map:** you started it from the Album. Start the Homebrew Menu through a game (hold R while starting one) and start MapleThief from there.
 - **The import screen comes back on every start:** the import didn't finish (the console went to sleep or MapleThief was closed during it), or `game/` was deleted. Let it run to the end; nothing half-imported is kept.
 - **The import says there is not enough memory:** the same as above: start through a game.
+- **After a crash** the next start asks in the window whether to start with default settings (no packs, the software renderer) or normally: Up/Down and A, or B for **Start normally**, or tap a choice. [Saves](saves.md#after-a-crash-recovery-points) explains the choices.
 - **Something else:** the log of each run is in `sdmc:/switch/maplethief/data/logs/MapleThief-<time>.log`, and a crash report in `sdmc:/switch/maplethief/crash.txt` and `data/crashes/`. Attach them to an [issue](https://github.com/armaatus/maplethief-port/issues). More in [Troubleshooting](troubleshooting.md).
 
 ## A HOME menu icon

@@ -142,6 +142,8 @@ class Actions {
     static constexpr double kDiagonalSeconds = 0.08;
     // Lifts every control `source` holds (a gamepad unplugged, the window losing focus).
     void release_source(InputSource source);
+    // How many times release_source(`source`) ran (Keyboard: a held-back modifier dies with it).
+    std::uint64_t lifts(InputSource source) const;
     // Once per run-loop turn: moves the synthetic touches on.
     void turn();
 
@@ -196,6 +198,7 @@ class Actions {
     std::vector<Gesture> gestures_;
     std::uint32_t next_gesture_id_ = 0;
     std::uint64_t presses_[2][MT_ACTION_COUNT] = {}; // by Context, then action
+    std::uint64_t lifts_[static_cast<int>(InputSource::kPointer) + 1] = {}; // by InputSource
 };
 
 } // namespace maplethief::frontend

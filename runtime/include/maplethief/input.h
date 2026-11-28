@@ -34,8 +34,9 @@
  * The context: mt_input_panel() is the key pad's panel (EAGLView.statusOfTouchKeyPad, ivar
  * +92: -1 none, 0 the game pad, 1 popup menu, 3 cut scene, 5 NPC chat, 6 shop, 7 popup, 8 map,
  * 9 cash shop, 10 help), read at every turn. Where the status is -1 while the key pad still
- * shows a panel (a popup over the shop, closed by disableAlertKey, #127), it is that panel. The
- * platform's bindings switch on it (field: 0; menus and popups: everything else).
+ * shows a panel (a popup over the shop, closed by disableAlertKey, #127), it is that panel; where
+ * it shows none but the game pad is still live (a script's alert from the NPC chat, #299), it is
+ * 0. The platform's bindings switch on it (field: 0; menus and popups: everything else).
  *
  * Single guest thread: every function runs on the guest's main thread (the frontend's turn
  * hook and its event pump), never on another. Trace: MAPLETHIEF_TRACE=input. C17 that also
@@ -76,12 +77,14 @@ typedef enum mt_input_action {
     /* The port's own actions (#151): bound, remapped and saved like the others, but the
      * frontend handles them (platform/src/actions.h) and they never reach the guest:
      * mt_input_press ignores them. */
-    MT_ACTION_FAST_FORWARD, /* held: the game runs faster (fast_forward, ADR 0087) */
-    MT_ACTION_AUTO_RUN,     /* pressed: the walk goes on by itself (auto_run, ADR 0094) */
-    MT_ACTION_PAGE,         /* held: up / down page a list a view at a time (ADR 0114) */
-    MT_ACTION_POINTER_TAP,  /* held: the gamepad pointer's touch (pad_pointer, ADR 0107) */
-    MT_ACTION_QUICK_SAVE,   /* pressed: a save state of the game now (save_states, ADR 0105) */
-    MT_ACTION_QUICK_LOAD,   /* pressed: the save state back (save_states, ADR 0105) */
+    MT_ACTION_FAST_FORWARD,  /* held: the game runs faster (fast_forward, ADR 0087) */
+    MT_ACTION_AUTO_RUN,      /* pressed: the walk goes on by itself (auto_run, ADR 0094) */
+    MT_ACTION_PAGE,          /* held: up / down page a list a view at a time (ADR 0114) */
+    MT_ACTION_POINTER_TAP,   /* held: the gamepad pointer's touch (pad_pointer, ADR 0107) */
+    MT_ACTION_QUICK_SAVE,    /* pressed: a save state of the game now (save_states, ADR 0105) */
+    MT_ACTION_QUICK_LOAD,    /* pressed: the save state back (save_states, ADR 0105) */
+    MT_ACTION_PRACTICE_PICK, /* pressed: the next split with a practice state (ADR 0189) */
+    MT_ACTION_PRACTICE_LOAD, /* pressed: the picked split's practice state back (ADR 0189) */
     MT_ACTION_COUNT
 } mt_input_action;
 
@@ -116,6 +119,10 @@ void mt_input_release_all(void) MT_NOEXCEPT;
 int32_t mt_input_panel(void) MT_NOEXCEPT;
 /* 1 if the pad was live at the last turn (TouchKeyPadView.touchKeyPadEnable). */
 int mt_input_pad_live(void) MT_NOEXCEPT;
+/* The live pad's ten key BOOLs (onLeftKey ... onShort4Key) as bits 1 << action, read at the
+ * last turn and after its touches, 0 while the pad is off: the keys a finger on the touch key
+ * pad holds, and the pad actions delivered through them. Read only (the input display, #404). */
+uint32_t mt_input_pad_keys(void) MT_NOEXCEPT;
 
 /* The key pad's panel container `index` (TouchKeyPadView.subviews[index], 0 the game pad ...
  * 10 help: docs/controls/keypad.md) of the pad seen at the last turn, or 0. The platform's

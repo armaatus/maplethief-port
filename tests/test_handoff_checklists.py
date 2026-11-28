@@ -29,6 +29,13 @@ def test_the_shared_hand_offs_are_on_two_pages():
     assert set(listed[264]) == {"windows", "mac", "linux"}
 
 
+def test_the_android_hand_offs_have_their_own_page():
+    # #395 chose a page over waiting for the Android epic (#292) to finish.
+    listed = handoffs.committed_list(readme_text())
+    assert "android" in handoffs.DEVICES
+    assert {n for n, d in listed.items() if "android" in d} == {358, 360, 361}
+
+
 @pytest.mark.skipif(
     os.environ.get("MAPLETHIEF_LIVE_GH") != "1" or shutil.which("gh") is None,
     reason="live check: set MAPLETHIEF_LIVE_GH=1 with gh logged in",
@@ -56,6 +63,38 @@ def test_every_open_hand_off_on_github_has_a_gate_mark():
     marked = set(handoffs.gate_marks(readme))
     errors = [e for e in handoffs.live_diff(set(), open_now, marked)[0] if "gate mark" in e]
     assert not errors, "\n".join(errors)
+
+
+# What #312 brought onto the checklists from closed issues: each has a row, or a reason.
+CLOSED_312 = {
+    # device or real-game comparison
+    59, 64, 76, 81, 88, 83,
+    # look and feel, optional ones last
+    144, 89, 145, 146, 151, 153, 157, 159, 87, 168, 170, 174, 175, 204,
+    # real pads
+    67, 72,
+    # calls for Joris
+    156, 162,
+}  # fmt: skip
+
+
+def readme_text() -> str:
+    return (handoffs.ROOT / handoffs.HANDOFFS / "README.md").read_text(encoding="utf-8")
+
+
+def test_every_check_312_brought_from_a_closed_issue_has_a_row_or_a_reason():
+    closed = handoffs.closed_list(readme_text())
+    assert set(closed) == CLOSED_312
+    assert set(closed[156]) == {"playthrough"}
+    assert set(closed[162]) == {"playthrough"}
+    assert set(closed[145]) == {"mac", "windows", "linux"}
+
+
+def test_the_closed_checks_are_not_hand_offs_and_have_no_gate_mark():
+    readme = readme_text()
+    closed = set(handoffs.closed_list(readme))
+    assert not closed & set(handoffs.committed_list(readme))
+    assert not closed & set(handoffs.gate_marks(readme))
 
 
 def test_the_v1_gates_follow_adr_0147():
@@ -94,7 +133,7 @@ def root(tmp_path):
     return tmp_path
 
 
-def write_list(root, lines: str, gates: str | None = None) -> None:
+def write_list(root, lines: str, gates: str | None = None, closed: str = "") -> None:
     if gates is None:
         gates = "".join(
             f"- #{n}: not a gate (x)\n"
@@ -102,7 +141,8 @@ def write_list(root, lines: str, gates: str | None = None) -> None:
         )
     (root / handoffs.HANDOFFS / "README.md").write_text(
         f"# Hand-offs\n\n{handoffs.BEGIN}\n{lines}{handoffs.END}\n\n"
-        f"{handoffs.GATES_BEGIN}\n{gates}{handoffs.GATES_END}\n",
+        f"{handoffs.GATES_BEGIN}\n{gates}{handoffs.GATES_END}\n\n"
+        f"{handoffs.CLOSED_BEGIN}\n{closed}{handoffs.CLOSED_END}\n",
         encoding="utf-8",
     )
 
@@ -180,6 +220,57 @@ def test_the_list_is_parsed():
 def test_a_bad_list_is_refused(block):
     with pytest.raises(ValueError):
         handoffs.committed_list(f"{handoffs.BEGIN}\n{block}{handoffs.END}")
+
+
+def test_a_closed_issue_with_its_sections_passes(root):
+    write_list(root, "- #10: windows (one)\n- #20: windows, mac (two)\n", closed="- #50: mac (x)\n")
+    append(root, "mac", "\n## #50: Five\n")
+    assert handoffs.check(root) == []
+
+
+def test_a_closed_issue_without_its_section_is_found(root):
+    write_list(root, "- #10: windows (one)\n- #20: windows, mac (two)\n", closed="- #50: mac (x)\n")
+    assert handoffs.check(root) == ["#50: the README lists mac, sections are in no page"]
+
+
+def test_a_dropped_issue_with_a_section_is_found(root):
+    write_list(
+        root,
+        "- #10: windows (one)\n- #20: windows, mac (two)\n",
+        closed="- #50: dropped (covered by #10)\n",
+    )
+    assert handoffs.check(root) == []
+    append(root, "linux", "\n## #50: Five\n")
+    assert handoffs.check(root) == ["#50: has a section in linux but is dropped"]
+
+
+def test_an_issue_on_both_lists_is_found(root):
+    write_list(root, "- #10: windows (one)\n- #20: windows, mac (two)\n", closed="- #10: windows\n")
+    assert "#10: in both the hand-off list and the closed list" in handoffs.check(root)
+
+
+def test_the_closed_list_is_parsed():
+    readme = f"{handoffs.CLOSED_BEGIN}\n- #1: mac (a)\n- #2: dropped (b)\n{handoffs.CLOSED_END}"
+    assert handoffs.closed_list(readme) == {1: ("mac",), 2: ("dropped",)}
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        "- #1: dropped\n",
+        "- #1: dropped ()\n",
+        "- #1: mac, dropped (a)\n",
+        "- #1: mac\n- #1: linux\n",
+    ],
+)
+def test_a_bad_closed_list_is_refused(block):
+    with pytest.raises(ValueError):
+        handoffs.closed_list(f"{handoffs.CLOSED_BEGIN}\n{block}{handoffs.CLOSED_END}")
+
+
+def test_the_live_diff_notes_a_closed_issue_that_is_open_again():
+    _, notes = handoffs.live_diff({1}, {1, 2}, closed={2, 3})
+    assert "#2: on the closed list, but an open needs-human issue" in notes
 
 
 def test_the_live_diff_errs_on_missing_and_notes_extra():

@@ -27,7 +27,7 @@ The list shows every action twice: first **in the field** (the game pad, panel 0
 - A control that another action had in that context leaves it. The status line names that action, and warns if it has no key or gamepad control left.
 - F1 or Guide stops waiting; after 5 s nothing changes.
 
-F1 and Guide always open the settings menu (or the overlay, in a scripted run), so they can't be bound. The stick clicks can: a stick click bound to an action sends it, and pressing the other stick too still opens the menu.
+F1 and Guide always open the settings menu (or the overlay, in a scripted run), so they can't be bound ([#381](https://github.com/armaatus/maplethief-port/issues/381)): they are the one way back to every setting, these bindings included, that no file or remap can take away. A `bindings.ini` that gave F1 to attack would leave a keyboard player with no menu to undo it from (the gear is drawn on touch screens only), and one that gave Guide away would do the same to a pad player. The stick clicks can: a stick click bound to an action sends it, and pressing the other stick too still opens the menu.
 
 ## Button glyphs
 
@@ -96,8 +96,8 @@ The overlay writes this file with the defaults unchanged:
 # by the Xbox layout's positions, back start leftshoulder rightshoulder leftstick
 # rightstick ...), hold NAME (a button held 0.3 s while the pad pointer shows),
 # trigger lefttrigger | righttrigger, direction up | down | left | right
-# (the d-pad and the left stick). F1 and the gamepad's Guide button open the remap
-# overlay and cannot be bound.
+# (the d-pad and the left stick). F1 and the gamepad's Guide button open the settings
+# menu and cannot be bound.
 
 # A Nintendo pad's face buttons by position (SDL's way: the bottom one is 'a') or by
 # label (its A is 'a'): position | label
@@ -124,6 +124,8 @@ auto_run = button leftstick, key R
 pointer_tap = button touchpad, hold rightstick
 quick_save = key F5
 quick_load = key F9
+practice_pick = key F7
+practice_load = key F8
 
 # In menus, popups and every other screen
 [menu]
@@ -144,6 +146,8 @@ page = trigger lefttrigger, key Left Shift, key Right Shift
 pointer_tap = button touchpad, hold rightstick
 quick_save = key F5
 quick_load = key F9
+practice_pick = key F7
+practice_load = key F8
 
 # The window's size (the port's keys, everywhere): size_Nx sets it to N times the game's
 # picture. A key with its modifiers: key Ctrl+3 (Ctrl Alt Shift Cmd)
@@ -172,7 +176,7 @@ slot1 = key Q
 - `nintendo_buttons = position | label` may stand before the first section.
 - `[field]` and `[menu]` (also `[menus]`) start a context; `[window]` holds the window's size keys ([below](#the-windows-size-keys)).
 - `action = control, control, …` gives the action exactly these controls in that context; `action = none` leaves it with none (with a warning). Names and controls are case-insensitive.
-- **Actions**: `up down left right jump attack slot1 slot2 slot3 slot4 ok back menu map cash_shop minus plus revive grade_revive`, and the port's own `fast_forward` (held for `fast_forward = x2 | x3` in `settings.ini`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); it does nothing while that is `off`) `auto_run` (pressed, for `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); it does nothing while that is `off`) `page` (held in menus: up / down page a list, [ADR 0114](../adr/0114-paging-lists-quantity-repeat-crisp-prompts-price-line.md)) `pointer_tap` (held: the gamepad pointer's touch, [above](#the-gamepad-pointer); it does nothing while the pointer isn't shown) and `quick_save` / `quick_load` (pressed: a save state, for `save_states = on`, [keyboard.md](keyboard.md#save-states); F5 / F9 in both contexts, no pad button by default). Leaving any of them with no control gives no warning. Which of the game's actions do something in which context is the game's business: see [keyboard.md](keyboard.md).
+- **Actions**: `up down left right jump attack slot1 slot2 slot3 slot4 ok back menu map cash_shop minus plus revive grade_revive`, and the port's own `fast_forward` (held for `fast_forward = x2 | x3` in `settings.ini`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); it does nothing while that is `off`) `auto_run` (pressed, for `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); it does nothing while that is `off`) `page` (held in menus: up / down page a list, [ADR 0114](../adr/0114-paging-lists-quantity-repeat-crisp-prompts-price-line.md)) `pointer_tap` (held: the gamepad pointer's touch, [above](#the-gamepad-pointer); it does nothing while the pointer isn't shown) `quick_save` / `quick_load` (pressed: a save state, for `save_states = on`, [keyboard.md](keyboard.md#save-states); F5 / F9 in both contexts, no pad button by default) and `practice_pick` / `practice_load` (pressed: the speedrun timer's practice states, for `save_states = on`, [speedrun.md](../play/speedrun.md#practice-from-a-split); F7 / F8 in both contexts, no pad button by default). Leaving any of them with no control gives no warning. Which of the game's actions do something in which context is the game's business: see [keyboard.md](keyboard.md).
 - **Controls**, by SDL's names:
 
 | Control | Names |
@@ -201,7 +205,7 @@ The game never refuses the file. Each problem is logged with the file and the li
 ```text
 bindings.ini:4: unknown key 'Nonsense': skipped
 bindings.ini:7: unknown action 'atack'
-bindings.ini:9: key F1 opens the remap overlay and cannot be bound: skipped
+bindings.ini:9: key F1 opens the settings menu and cannot be bound: skipped
 bindings.ini:12: attack in the field is already set on line 5: this line is skipped
 bindings.ini:14: key Q is already bound to slot1 in the field on line 13: skipped here
 bindings.ini: attack has no gamepad control in the field

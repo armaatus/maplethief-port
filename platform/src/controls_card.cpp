@@ -45,14 +45,18 @@ bool is_direction(std::uint32_t action) {
 }
 
 std::vector<Control> device_controls(const std::vector<Binding> &table, Context context,
-                                     std::uint32_t action, PromptDevice device) {
+                                     std::uint32_t action, PromptDevice device,
+                                     SDL_GamepadType type) {
     std::vector<Control> out;
     if (device == PromptDevice::kNone) {
         return out;
     }
     const Device want = device == PromptDevice::kKeyboard ? Device::kKeyboard : Device::kGamepad;
+    const bool touchpad = pad_type_has_touchpad(type);
     for (const Control &c : controls_for(table, context, action)) {
-        if (device_of(c) == want) {
+        const bool click =
+            c.kind == ControlKind::kGamepadButton && c.code == SDL_GAMEPAD_BUTTON_TOUCHPAD;
+        if (device_of(c) == want && (touchpad || !click)) {
             out.push_back(c);
         }
     }
@@ -86,11 +90,9 @@ std::string fit(const std::string &s, int w) {
     if (Canvas::text_width(s) <= w) {
         return s;
     }
-    std::string t = s;
-    while (!t.empty() && Canvas::text_width(t + "~") > w) {
-        t.pop_back();
-    }
-    return t + "~";
+    // Whole characters only (a translation's, #372).
+    const int cells = std::max(0, (w + 1) / 6 - 1);
+    return s.substr(0, Canvas::fit_columns(s, cells)) + "~";
 }
 
 // The action a control does in the field (MT_ACTION_NONE: nothing).
@@ -266,7 +268,7 @@ void draw_keyboard(Canvas &c, const std::vector<Binding> &table) {
 
 // The two lists, field and menus.
 void draw_lists(Canvas &c, const PromptStyle &style, const std::vector<Binding> &table) {
-    const std::vector<CardLine> lines = controls_card_lines(table, style.device);
+    const std::vector<CardLine> lines = controls_card_lines(table, style.device, style.type);
     std::size_t counts[2] = {0, 0};
     for (const CardLine &l : lines) {
         counts[l.context == Context::kField ? 0 : 1]++;
@@ -380,7 +382,15 @@ void draw_touch(Canvas &c, const KeypadLayout &layout) {
     };
     int y = 112;
     for (const char *s : notes) {
-        c.text(200 - Canvas::text_width(s) / 2, y, s, kDim);
+        // Centred on x 200, cut short of the names on either side (a translation, #372).
+        int half = 200 - kPanelX - 2;
+        for (const Box &b : names) {
+            if (b.y < y + Canvas::kGlyphHeight && y < b.y + b.h) {
+                half = std::min(half, b.x >= 200 ? b.x - 4 - 200 : 200 - (b.x + b.w) - 4);
+            }
+        }
+        const std::string t = fit(s, 2 * std::max(0, half));
+        c.text(200 - Canvas::text_width(t) / 2, y, t, kDim);
         y += 12;
     }
 }
@@ -410,7 +420,8 @@ std::string card_title(Context context, std::uint32_t action) {
     }
 }
 
-std::vector<CardLine> controls_card_lines(const std::vector<Binding> &table, PromptDevice device) {
+std::vector<CardLine> controls_card_lines(const std::vector<Binding> &table, PromptDevice device,
+                                          SDL_GamepadType type) {
     static const std::vector<Binding> defaults = default_bindings();
     std::vector<CardLine> out;
     const std::vector<ActionSlot> slots = action_slots(table);
@@ -424,7 +435,7 @@ std::vector<CardLine> controls_card_lines(const std::vector<Binding> &table, Pro
                       false};
         bool merged = device != PromptDevice::kNone;
         for (const std::uint32_t a : kDirectionActions) {
-            const std::vector<Control> c = device_controls(table, context, a, device);
+            const std::vector<Control> c = device_controls(table, context, a, device, type);
             if (c.empty()) {
                 merged = false;
                 break;
@@ -441,14 +452,14 @@ std::vector<CardLine> controls_card_lines(const std::vector<Binding> &table, Pro
             // Only what the device can do there: a control of it now or by default (the pad has
             // no field OK, the keyboard no menus auto-run); one it lost shows "unbound".
             if (device != PromptDevice::kNone &&
-                device_controls(table, context, s.action, device).empty() &&
-                device_controls(defaults, context, s.action, device).empty()) {
+                device_controls(table, context, s.action, device, type).empty() &&
+                device_controls(defaults, context, s.action, device, type).empty()) {
                 continue;
             }
             CardLine line{context,
                           s.action,
                           card_title(context, s.action),
-                          device_controls(table, context, s.action, device),
+                          device_controls(table, context, s.action, device, type),
                           false,
                           false};
             if (line.controls.size() > kCardMaxControls) {
@@ -497,7 +508,6 @@ void draw_controls_card(Canvas &c, const PromptStyle &style, const std::vector<B
     c.fill(0, 0, c.width(), c.height(), kBackdrop);
     c.fill(kPanelX, kPanelY, kPanelW, kPanelH, kPanel);
     c.frame(kPanelX, kPanelY, kPanelW, kPanelH, 1, kBorder);
-    c.text(20, 13, tr(Txt::card_title), kText, 2);
     std::string device, closes;
     switch (style.device) {
     case PromptDevice::kKeyboard:
@@ -513,6 +523,11 @@ void draw_controls_card(Canvas &c, const PromptStyle &style, const std::vector<B
         closes = tr(Txt::card_tap_closes);
         break;
     }
+    // The device and the way out keep the right half; the title gets what is left of the line.
+    device = fit(device, kRight - 240);
+    closes = fit(closes, kRight - 240);
+    const int right = kRight - std::max(Canvas::text_width(device), Canvas::text_width(closes));
+    c.text(20, 13, Canvas::fit_width(tr(Txt::card_title), right - 8 - 20, 2), kText, 2);
     c.text(kRight - Canvas::text_width(device), 12, device, kHeader);
     c.text(kRight - Canvas::text_width(closes), 22, closes, kDim);
     switch (style.device) {

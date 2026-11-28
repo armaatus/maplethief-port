@@ -3,13 +3,18 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <array>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <vector>
 
+#include "canvas.h"
 #include "maplethief/textpack.h"
+#include "settings.h"
+#include "settings_menu.h"
 
 namespace maplethief::frontend {
 
@@ -70,14 +75,35 @@ std::optional<std::set<int>> places(std::string_view s) {
     return out;
 }
 
+// The open pack's texts, looked up once each: the text, or nullopt where the pack has none.
 struct Cache {
-    std::array<std::optional<std::string>, static_cast<std::size_t>(Txt::kCount)> ids;
-    std::map<std::string, std::string> keys;
+    std::array<std::optional<std::optional<std::string>>, static_cast<std::size_t>(Txt::kCount)>
+        ids;
+    std::map<std::string, std::optional<std::string>> keys;
     std::set<std::string> refused; // logged once
 };
 Cache g_cache;
 
-// The pack's text for `key` folded to ASCII, if it has one with the English's places.
+// The menu language's texts (nullptr: English): never freed, so a text stays valid when the
+// language changes.
+struct MenuTexts {
+    std::string tag;
+    std::array<const char *, static_cast<std::size_t>(Txt::kCount)> ids{};
+    std::map<std::string, std::string, std::less<>> keys;
+};
+const MenuTexts *g_language = nullptr;
+std::string g_language_tag = "en";
+
+// The menu language's text for `key`, else `english`.
+const char *shipped(const std::string_view key, const char *english) {
+    if (g_language == nullptr) {
+        return english;
+    }
+    const auto it = g_language->keys.find(key);
+    return it != g_language->keys.end() ? it->second.c_str() : english;
+}
+
+// The pack's text for `key`, if it has one with the English's places.
 std::optional<std::string> packed(const char *key, const char *english) {
     if (mt_textpack_is_open() == 0) {
         return std::nullopt;
@@ -86,8 +112,8 @@ std::optional<std::string> packed(const char *key, const char *english) {
     if (v == nullptr) {
         return std::nullopt;
     }
-    const std::string folded = ascii_fold(v);
-    if (places(folded) != places(english)) {
+    const std::string text = v;
+    if (places(text) != places(english)) {
         if (g_cache.refused.insert(key).second) {
             SDL_Log("textpack: Port.strings \"%s\": its places ({0}, ...) are not the English "
                     "text's: the English kept",
@@ -95,7 +121,7 @@ std::optional<std::string> packed(const char *key, const char *english) {
         }
         return std::nullopt;
     }
-    return folded;
+    return text;
 }
 
 } // namespace
@@ -104,15 +130,18 @@ const char *port_text_key(Txt id) { return kTable[static_cast<std::size_t>(id)].
 const char *port_text_english(Txt id) { return kTable[static_cast<std::size_t>(id)].english; }
 
 const char *tr(Txt id) {
-    const Entry &e = kTable[static_cast<std::size_t>(id)];
-    if (mt_textpack_is_open() == 0) {
-        return e.english;
+    const auto i = static_cast<std::size_t>(id);
+    const Entry &e = kTable[i];
+    if (mt_textpack_is_open() != 0) {
+        std::optional<std::optional<std::string>> &slot = g_cache.ids[i];
+        if (!slot) {
+            slot = packed(e.key, e.english);
+        }
+        if (*slot) {
+            return (*slot)->c_str();
+        }
     }
-    std::optional<std::string> &slot = g_cache.ids[static_cast<std::size_t>(id)];
-    if (!slot) {
-        slot = packed(e.key, e.english).value_or(e.english);
-    }
-    return slot->c_str();
+    return g_language != nullptr && g_language->ids[i] != nullptr ? g_language->ids[i] : e.english;
 }
 
 std::string tr(Txt id, std::initializer_list<std::string_view> args) {
@@ -142,17 +171,203 @@ std::string tr(Txt id, std::initializer_list<std::string_view> args) {
 }
 
 const char *tr_key(const std::string &key, const char *english) {
-    if (mt_textpack_is_open() == 0 || english == nullptr) {
+    if (english == nullptr) {
         return english;
     }
-    auto it = g_cache.keys.find(key);
-    if (it == g_cache.keys.end()) {
-        it = g_cache.keys.emplace(key, packed(key.c_str(), english).value_or(english)).first;
+    if (mt_textpack_is_open() != 0) {
+        auto it = g_cache.keys.find(key);
+        if (it == g_cache.keys.end()) {
+            it = g_cache.keys.emplace(key, packed(key.c_str(), english)).first;
+        }
+        if (it->second) {
+            return it->second->c_str();
+        }
     }
-    return it->second.c_str();
+    return shipped(key, english);
 }
 
 void reload_port_text() { g_cache = Cache{}; }
+
+const std::vector<std::pair<std::string, std::string>> &port_text_rows() {
+    static const std::vector<std::pair<std::string, std::string>> rows = [] {
+        std::vector<std::pair<std::string, std::string>> out;
+        std::set<std::string> keys;
+        const auto add = [&](std::string key, const char *english) {
+            if (english != nullptr && keys.insert(key).second) {
+                out.emplace_back(std::move(key), english);
+            }
+        };
+        for (std::size_t i = 0; i < static_cast<std::size_t>(Txt::kCount); ++i) {
+            add(kTable[i].key, kTable[i].english);
+        }
+        for (const SettingInfo &r : settings_registry()) {
+            add(std::string("setting.") + r.key + ".label", r.label);
+            add(std::string("setting.") + r.key + ".help", r.help);
+            add(std::string("setting.") + r.key + ".help_pad", r.help_pad);
+        }
+        for (const MenuActionInfo &a : menu_actions()) {
+            const std::string base = std::string("action.") + a.key + ".";
+            add(base + "label", a.label);
+            add(base + "help", a.help);
+            add(base + "help_pad", a.help_pad);
+            add(base + "button", a.button);
+            add(base + "confirm", a.confirm);
+        }
+        return out;
+    }();
+    return rows;
+}
+
+const std::vector<ShippedLanguage> &shipped_port_languages() {
+    static const std::vector<ShippedLanguage> languages = [] {
+        std::map<std::string, std::string, std::less<>> english;
+        for (const auto &[key, text] : port_text_rows()) {
+            english.emplace(key, text);
+        }
+        std::vector<ShippedLanguage> out;
+        for (const ShippedLanguageFiles &f : shipped_port_language_files()) {
+            ShippedLanguage l;
+            l.tag = f.tag;
+            using Map = std::map<std::string, std::string>;
+            const auto parse = [&l](std::string_view bytes, const char *file, Map *entries) {
+                char why[256] = {};
+                const int n = mt_textpack_parse(
+                    bytes.data(), static_cast<std::uint32_t>(bytes.size()),
+                    [](void *user, const char *k, const char *v) {
+                        static_cast<Map *>(user)->emplace(k, v);
+                    },
+                    entries, why, sizeof why);
+                if (n < 0 && l.error.empty()) {
+                    l.error = std::string(file) + ": " + why;
+                }
+                return n >= 0;
+            };
+            Map manifest;
+            Map port;
+            if (parse(f.manifest, "textpack.strings", &manifest) &&
+                parse(f.port, "Port.strings", &port)) {
+                l.name = manifest["name"];
+                l.description = manifest["description"];
+                if (manifest["language"] != l.tag) {
+                    l.error = "textpack.strings: its language is not " + l.tag;
+                }
+                l.entries = port.size();
+                for (auto &[key, text] : port) {
+                    const auto en = english.find(key);
+                    if (en == english.end()) {
+                        l.unknown.push_back(key);
+                    } else if (places(text) != places(en->second)) {
+                        l.wrong_places.push_back(key);
+                    } else {
+                        l.texts.emplace_back(key, std::move(text));
+                    }
+                }
+            }
+            if (!l.error.empty()) {
+                l.texts.clear();
+                SDL_Log("menu language %s: %s: refused", l.tag.c_str(), l.error.c_str());
+            }
+            out.push_back(std::move(l));
+        }
+        return out;
+    }();
+    return languages;
+}
+
+std::vector<std::string> menu_languages() {
+    std::vector<std::string> out{"en"};
+    for (const ShippedLanguage &l : shipped_port_languages()) {
+        out.push_back(l.tag);
+    }
+    return out;
+}
+
+bool set_menu_language(std::string_view tag) {
+    static std::map<std::string, std::unique_ptr<MenuTexts>, std::less<>> loaded;
+    if (tag == g_language_tag) {
+        return true;
+    }
+    if (tag == "en") {
+        g_language = nullptr;
+        g_language_tag = "en";
+        SDL_Log("menu language: en");
+        return true;
+    }
+    const auto &shipped_list = shipped_port_languages();
+    const auto l = std::find_if(shipped_list.begin(), shipped_list.end(),
+                                [tag](const ShippedLanguage &s) { return s.tag == tag; });
+    if (l == shipped_list.end()) {
+        return false;
+    }
+    auto it = loaded.find(tag);
+    if (it == loaded.end()) {
+        auto made = std::make_unique<MenuTexts>();
+        made->tag = l->tag;
+        for (const auto &[key, text] : l->texts) {
+            made->keys.emplace(key, text);
+        }
+        for (std::size_t i = 0; i < static_cast<std::size_t>(Txt::kCount); ++i) {
+            const auto k = made->keys.find(std::string_view(kTable[i].key));
+            made->ids[i] = k != made->keys.end() ? k->second.c_str() : nullptr;
+        }
+        it = loaded.emplace(l->tag, std::move(made)).first;
+    }
+    g_language = it->second.get();
+    g_language_tag = l->tag;
+    SDL_Log("menu language: %s (%zu of %zu texts)", l->tag.c_str(), l->texts.size(),
+            port_text_rows().size());
+    return true;
+}
+
+const std::string &menu_language() { return g_language_tag; }
+
+std::string apply_menu_language(MenuLanguage setting) {
+    const auto i = static_cast<std::size_t>(setting);
+    const std::string tag = setting == MenuLanguage::kAuto || i >= std::size(kMenuLanguageNames)
+                                ? system_menu_language()
+                                : kMenuLanguageNames[i];
+    if (!set_menu_language(tag)) {
+        set_menu_language("en");
+    }
+    return menu_language();
+}
+
+std::string menu_language_name(std::string_view tag) {
+    if (tag == "auto") {
+        return tr(Txt::menu_language_auto, {menu_language_name(system_menu_language())});
+    }
+    if (tag == "en") {
+        return "English";
+    }
+    for (const ShippedLanguage &l : shipped_port_languages()) {
+        if (l.tag == tag && !l.name.empty()) {
+            return l.name;
+        }
+    }
+    return std::string(tag);
+}
+
+std::string system_menu_language() {
+    const std::vector<std::string> ours = menu_languages();
+    int count = 0;
+    SDL_Locale **locales = SDL_GetPreferredLocales(&count);
+    std::string out = "en";
+    for (int i = 0; locales != nullptr && i < count; ++i) {
+        if (locales[i] == nullptr || locales[i]->language == nullptr) {
+            continue;
+        }
+        std::string language = locales[i]->language;
+        std::transform(language.begin(), language.end(), language.begin(), [](char c) {
+            return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+        });
+        if (std::find(ours.begin(), ours.end(), language) != ours.end()) {
+            out = language;
+            break;
+        }
+    }
+    SDL_free(locales);
+    return out;
+}
 
 std::string ascii_fold(std::string_view s) {
     std::string out;
@@ -165,28 +380,11 @@ std::string ascii_fold(std::string_view s) {
             continue;
         }
         // One UTF-8 character (strict), else one '?' for the byte.
-        std::size_t len = 0;
-        std::uint32_t cp = 0, min = 0;
-        if (c >= 0xC2 && c <= 0xDF) {
-            len = 2, cp = c & 0x1Fu, min = 0x80;
-        } else if (c >= 0xE0 && c <= 0xEF) {
-            len = 3, cp = c & 0x0Fu, min = 0x800;
-        } else if (c >= 0xF0 && c <= 0xF4) {
-            len = 4, cp = c & 0x07u, min = 0x10000;
-        }
-        bool ok = len != 0 && i + len <= s.size();
-        for (std::size_t k = 1; ok && k < len; k++) {
-            const auto b = static_cast<unsigned char>(s[i + k]);
-            ok = (b & 0xC0u) == 0x80u;
-            cp = (cp << 6) | (b & 0x3Fu);
-        }
-        ok = ok && cp >= min && cp <= 0x10FFFF && !(cp >= 0xD800 && cp < 0xE000);
-        if (!ok) {
+        const std::int32_t cp = next_code_point(s, &i);
+        if (cp < 0) {
             out.push_back('?');
-            i++;
             continue;
         }
-        i += len;
         if (cp >= 0xA0 && cp < 0x180) {
             out += kFold[cp - 0xA0];
         } else if (cp == 0x2018 || cp == 0x2019 || cp == 0x201A || cp == 0x2032) {

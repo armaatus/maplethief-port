@@ -161,3 +161,160 @@ def test_the_real_builders():
         doc, {sc.BLOCK: sc.table(cmds)}, "python3 -m mtport.scenes generate", sc.DOC
     )
     assert rendered == doc, "docs/re/qol.md is stale: python3 -m mtport.scenes generate"
+
+
+@pytest.mark.real_assets
+def test_no_scene_exits_to_the_main_menu():
+    """A scene's exit to the main menu (#336, docs/re/autosave.md): the runner's command 28 goes
+    to the main menu when p1 = -1, which would leave without a save. No shipped scene uses it:
+    the two command-28 ends are the intro's warp to 2.8 and the Henesys ending's to 2.0, so the
+    autosave has nothing to cover there. Skipped without the slice."""
+    if not SLICE.exists():
+        pytest.skip("work/slices/MapleThief.armv7 absent (run scripts/bootstrap)")
+    pytest.importorskip("capstone")
+    ends = [(c.function, c.p1, c.p2) for c in sc.scan_slice(SLICE) if c.command == 28]
+    assert ends == [(0x26F89, 2, 0), (0x302F5, 2, 8)]
+    assert all(p1 is not None and p1 != -1 for _, p1, _ in ends)
+
+
+# --- the stage at the field's width (#396) -------------------------------------------------------
+
+BALOG = 0x2CBD1  # scene 14
+
+
+def test_every_scene_has_its_map_and_the_list_is_the_runtime_s():
+    assert sorted(sc.SCENE_MAPS) == [n for n, _, _ in sc.SCENES]
+    assert all(why for _, _, why in sc.SCENE_MAPS.values())
+    # runtime/src/hooks/widescreen.cpp's k_wide_scenes is the module's list.
+    source = (REPO / "runtime" / "src" / "hooks" / "widescreen.cpp").read_text(encoding="utf-8")
+    block = re.search(r"k_wide_scenes\[\] = \{(.*?)\};", source, re.S)
+    assert block
+    listed = {int(n) for n in re.findall(r"(\d+)u,", block.group(1))}
+    assert listed == set(sc.WIDE_SCENES)
+    tests = (REPO / "tests" / "CMakeLists.txt").read_text(encoding="utf-8")
+    runs = re.search(r"set\(_wide_scenes ([^)]*)\)", tests)
+    assert runs
+    played = {int(pair.split(":")[0]) for pair in runs.group(1).split()}
+    for n, run in sc.WIDE_SCENES.items():
+        assert run.startswith("play.widescreen_scene_")
+        assert int(run.split("_")[2]) in played, (n, run)
+
+
+def test_a_480_point_map_is_never_wide():
+    cmds = [cmd(BALOG, 1, 5, 0, 900), cmd(BALOG, 1, 22, 0, 240), cmd(BALOG, 2, 58)]
+    st = sc.stage(cmds, 14, 480)
+    assert st.view == 480 and st.sightings == ()
+    assert sc.verdict(st) == (False, "its map is 480 points wide: the view is 480 either way")
+    assert sc.stage(cmds, 14, 560).view == 560 and sc.stage(cmds, 14, 960).view == sc.WIDE
+
+
+def test_an_npc_waiting_in_the_wings_for_its_entrance_keeps_the_scene_narrow():
+    # Map 800 points wide, the camera centred on 400: the 480 view is 160 ... 640, the 568 one
+    # 116 ... 684. NPC 0 waits at 660 (seen only wide), then walks left onto the stage.
+    cmds = [
+        cmd(BALOG, 1, 22, 0, 400),
+        cmd(BALOG, 1, 12, 0, 5),
+        cmd(BALOG, 1, 13, 0, 660),
+        cmd(BALOG, 10, 15, 0, 10),
+        cmd(BALOG, 10, 16, 0, 1),
+        cmd(BALOG, 20, 17, 0, 3),
+        cmd(BALOG, 30, 58),
+    ]
+    st = sc.stage(cmds, 14, 800)
+    assert st.view == 568 and st.camera_from == 1
+    (s,) = st.sightings
+    assert (s.actor, s.first, s.last, s.why, s.hidden) == (
+        "NPC 0",
+        1,
+        11,
+        "before its entrance",
+        True,
+    )
+    assert s.xs == (640, 660)  # it moves 10 a frame from step 10 and crosses 640 at step 12
+    wide, why = sc.verdict(st)
+    assert not wide and why.startswith("NPC 0 before its entrance at x 640-660, steps 1-11")
+
+
+def test_an_actor_walking_off_is_seen_longer_but_not_hidden():
+    # The hero walks right off the 480 stage (camera fixed at 160 ... 640) and keeps walking.
+    cmds = [
+        cmd(BALOG, 1, 22, 0, 400),
+        cmd(BALOG, 1, 5, 0, 600),
+        cmd(BALOG, 1, 7, 0, 10),
+        cmd(BALOG, 1, 9, 0, 0),
+        cmd(BALOG, 20, 58),
+    ]
+    st = sc.stage(cmds, 14, 800)
+    (s,) = st.sightings
+    assert (s.actor, s.why, s.parked, s.hidden) == ("hero", "after its exit", False, False)
+    assert sc.verdict(st) == (True, "nothing staged where only the wider view shows it")
+    # Stopped in the wings after its exit, it is parked there: hidden.
+    st = sc.stage([*cmds[:-1], cmd(BALOG, 6, 10), cmd(BALOG, 20, 58)], 14, 800)
+    assert [(s.why, s.hidden) for s in st.sightings] == [("after its exit", True)]
+
+
+def test_the_camera_follows_and_scrolls_clamped_to_the_map():
+    # Followed: the hero at 100 on a 640-point map, both views clamped at 0: nothing extra
+    # but the right edge 480 ... 568, where a sprite at 500 is seen only wide (off stage). Then
+    # scrolled to the map's right end (160 ... 640 and 72 ... 640): the hero, standing at 100,
+    # only in the wider view.
+    cmds = [
+        cmd(BALOG, 1, 5, 0, 100),
+        cmd(BALOG, 1, 21),
+        cmd(BALOG, 2, 42, 0, 7),
+        cmd(BALOG, 2, 43, 0, 500),
+        cmd(BALOG, 2, 47, 0, 0),
+        cmd(BALOG, 5, 48, 0, 0),  # hidden again
+        cmd(BALOG, 6, 27),
+        cmd(BALOG, 6, 24, 0, 100),  # scrolled to the map's right end: both views end at 640
+        cmd(BALOG, 9, 58),
+    ]
+    st = sc.stage(cmds, 14, 640)
+    assert [(s.actor, s.first, s.last, s.why) for s in st.sightings] == [
+        ("sprite 0", 2, 4, "off stage"),
+        ("hero", 7, 9, "after its exit"),
+    ]
+    # Unknown until the scene places the camera: nothing is judged.
+    late = [cmd(BALOG, 1, 12, 0, 5), cmd(BALOG, 1, 13, 0, 500), cmd(BALOG, 5, 22, 0, 240)]
+    assert sc.stage([*late, cmd(BALOG, 6, 58)], 14, 640).camera_from == 5
+
+
+def test_a_picture_is_counted_only_when_faded_in_at_a_set_x():
+    cmds = [
+        cmd(BALOG, 4, 30, 0, 0),
+        cmd(BALOG, 4, 31, 0, None),
+        cmd(BALOG, 4, 35, 0, 10),
+        cmd(BALOG, 6, 30, 1, 1),  # alpha 0: never seen
+        cmd(BALOG, 6, 50, 0, 3),
+        cmd(BALOG, 9, 58),
+    ]
+    st = sc.stage(cmds, 14, 640)
+    assert st.pictures == ((4, 0),) and st.boxes == 1
+
+
+@pytest.mark.real_assets
+def test_the_scene_stages_and_docs_widescreen_table():
+    """Each scene's verdict as runtime/src/hooks/widescreen.cpp lists it, and
+    docs/re/widescreen.md's block is the one `widescreen` writes. Skipped without the slice or
+    the bundle."""
+    app = REPO / sc.APP
+    if not SLICE.exists() or not app.exists():
+        pytest.skip("work/ (slice, bundle) absent (run scripts/bootstrap)")
+    pytest.importorskip("capstone")
+    cmds = sc.scan_slice(SLICE)
+    widths = sc.map_widths(app)
+    assert sc.wide_problems(cmds, widths) == []
+    # Every boss map is 30 tiles wide: the boss scenes are 480 whatever the list.
+    for n in (1, 3, 4, 5, 6, 7, 8, 9, 10, 14):
+        assert widths[sc.SCENE_MAPS[n][:2]] == 480, n
+    # The intro waits its NPCs in the wings: narrow.
+    intro = sc.stage(cmds, 0, widths[(2, 10)])
+    assert intro.view == 568 and any(s.hidden for s in intro.sightings)
+    doc = (REPO / sc.WIDE_DOC).read_text(encoding="utf-8")
+    rendered = gc.render_blocks(
+        doc,
+        {sc.WIDE_BLOCK: sc.stage_table(cmds, widths)},
+        "python3 -m mtport.scenes widescreen",
+        sc.WIDE_DOC,
+    )
+    assert rendered == doc, "docs/re/widescreen.md is stale: python3 -m mtport.scenes widescreen"

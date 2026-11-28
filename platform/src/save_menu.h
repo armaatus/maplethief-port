@@ -24,9 +24,11 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "file_dialog.h"
+#include "ios_backup.h"
 #include "save_tools.h"
 #include "settings_menu.h"
 
@@ -114,6 +116,72 @@ std::string import_saves_list_action(const SaveLocation &loc,
                                      const std::function<std::int32_t()> &panel,
                                      const std::function<std::string()> &stamp,
                                      const std::function<void(MenuList)> &open);
+
+// --- An iPhone backup, the checks, another folder (#374, ADR 0078's addendum) -------------------
+//
+// Lists driven with the controller like Backups, on every platform:
+//
+//   iPhone backup...  every backup in the places Finder, iTunes and Apple Devices keep them
+//                     (default_ios_backup_roots) and in <data>/import/, newest first. Choosing one
+//                     asks (No focused), then reads the game's files out of it (ios_backup.h) and
+//                     imports them (import_save_set: checked, what they replace backed up first).
+//   Check saves       every file in saves/ with its verdict (check_save_set); choosing a row
+//                     shows its reason. Nothing is written.
+//   Saves from another folder...  the other data folder (the per-user folder, or the game
+//                     folder's data/) and every folder in <data>/import/ that holds saves (itself,
+//                     its saves/ or its Documents/), each imported as above. --migrate-from stays
+//                     the way to bring a whole data folder (settings, backups) over.
+//
+// The imports run only with no character loaded (`panel` < 0), as every import does.
+
+// The backups in `roots` and in <data>/import/, newest first (the manifest's time, then path).
+std::vector<IosBackupInfo> ios_backup_sources(const SaveLocation &loc,
+                                              const std::vector<std::string> &roots);
+// Reads the backup at `dir` and imports its saves; the status line ("Imported 7 files from
+// <label>", or "Not imported: <why>").
+std::string import_ios_backup_status(const SaveLocation &loc, const std::string &dir,
+                                     const std::string &stamp);
+MenuList ios_backup_list(const SaveLocation &loc, std::vector<IosBackupInfo> backups,
+                         std::function<std::int32_t()> panel, std::function<std::string()> stamp);
+// The iPhone backup... row: refused with a character loaded or without a data folder; with no
+// backup, what to do (import/ is made); else `open` gets ios_backup_list and "" is returned.
+std::string ios_backup_action(const SaveLocation &loc, const std::vector<std::string> &roots,
+                              const std::function<std::int32_t()> &panel,
+                              const std::function<std::string()> &stamp,
+                              const std::function<void(MenuList)> &open);
+
+// The Check saves list for the files in loc.documents_dir (empty rows when there are none).
+MenuList check_saves_list(const SaveLocation &loc);
+// The Check saves row: with no save, says so; else `open` gets check_saves_list and "" is returned.
+std::string check_saves_action(const SaveLocation &loc, const std::function<void(MenuList)> &open);
+
+struct OtherSaveFolder {
+    std::string path;   // the folder shown
+    std::string source; // where its saves are: path, path/saves or path/Documents
+    std::string name;   // the row's label: the folder's name, or the data folder's place
+    std::string where;  // the row's value: "import/", or the folder's path
+};
+// The folders with saves: each of `other_data_dirs` that is not loc.data_dir, then the folders in
+// <data>/import/ (newest first); a folder counts when read_save_source finds a game file in
+// source. `other_data_dirs` pairs a folder with the label it shows.
+std::vector<OtherSaveFolder>
+other_save_folders(const SaveLocation &loc,
+                   const std::vector<std::pair<std::string, std::string>> &other_data_dirs);
+MenuList other_folders_list(const SaveLocation &loc, std::vector<OtherSaveFolder> folders,
+                            std::function<std::int32_t()> panel,
+                            std::function<std::string()> stamp);
+// The other data folder (ADR 0127), labelled: the per-user folder when the data is in the game
+// folder, the game folder's data/ when it is in the per-user folder; none elsewhere (iOS, the
+// Switch, MAPLETHIEF_DATA_DIR). `user_dir` is user_data_dir(false) (asked only when needed).
+std::vector<std::pair<std::string, std::string>> other_data_dirs(
+    const DataLocation &loc,
+    const std::function<std::string()> &user_dir = [] { return user_data_dir(false); });
+// The Saves from another folder... row, as ios_backup_action.
+std::string other_folder_action(const SaveLocation &loc,
+                                const std::vector<std::pair<std::string, std::string>> &other_dirs,
+                                const std::function<std::int32_t()> &panel,
+                                const std::function<std::string()> &stamp,
+                                const std::function<void(MenuList)> &open);
 
 // Open data folder: the data folder (made if missing) in the file manager.
 std::string open_data_folder_action(FileDialogs &dialogs, const SaveLocation &loc);

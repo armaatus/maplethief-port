@@ -1,11 +1,14 @@
 # Releases (ADR 0126, ADR 0024, ADR 0125). A release is a pull request from dev into main
 # titled "Release vX.Y.Z" (or "Release vX.Y.Z-rc.N", a pre-release):
 #
-#   while it is open    `title` checks that it comes from dev, that its title names a tag, and
-#                       that the tag doesn't exist yet. CI (ci.yml) runs the full profile on it.
+#   while it is open    `title` checks that it comes from dev, that its title names a tag,
+#                       that the tag doesn't exist yet, and that it carries the type:release
+#                       label, which keeps it out of the generated notes (.github/release.yml,
+#                       #313). CI (ci.yml) runs the full profile on it.
 #   once it is merged   `tag` creates the annotated tag on the merge commit and the draft
 #                       release (the committed notes header above generated notes); `kits`
-#                       builds the three kits of ADR 0024 on hosted runners from the tag, checks
+#                       builds the kits of ADR 0024 on hosted runners from the tag (macOS
+#                       universal; Windows and Linux on x64 and on ARM64, ADR 0194), checks
 #                       them (macOS: lipo, codesign; every OS: --version reports the tag), runs
 #                       the content guard and uploads each with its .sha256 to the draft.
 #
@@ -13,7 +16,7 @@
 # has (ADR 0100). They are built locally and added to the same draft:
 # `scripts/release build TAG --players-only` on the Mac and
 # `scripts\release.ps1 build TAG -PlayersOnly` on the Windows PC; then
-# `scripts/release publish TAG` checks all six files, writes SHA256SUMS and publishes.
+# `scripts/release publish TAG` checks every kit and player build, writes SHA256SUMS and publishes.
 #
 # Third-party actions are pinned to full commit SHAs (the tag is in the comment), as in ci.yml.
 
@@ -22,7 +25,7 @@ name: Release
 on:
   pull_request:
     branches: [main]
-    types: [opened, edited, reopened, synchronize, closed]
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled, closed]
 
 permissions:
   contents: read
@@ -60,8 +63,13 @@ jobs:
             echo "::error::The tag $tag exists already; pick the next version."
             exit 1
           fi
+          if [ "$RELEASE_LABEL" != true ]; then
+            echo "::error::Label this pull request type:release (gh pr edit N --add-label type:release), so the release notes leave it out (#313)."
+            exit 1
+          fi
           echo "OK: merging this releases $tag"
         env:
+          RELEASE_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'type:release') }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
 
@@ -136,14 +144,26 @@ jobs:
         include:
           - os: macos-latest
             kit: macos-universal.zip
+            arch: universal
           - os: windows-latest
             kit: windows-x64.zip
+            arch: amd64
           - os: ubuntu-latest
             kit: linux-x86_64.tar.gz
+            arch: amd64
+          # ARM64 (#362, ADR 0194): the hosted ARM64 runners, free for a public repository.
+          - os: windows-11-arm
+            kit: windows-arm64.zip
+            arch: arm64
+          - os: ubuntu-24.04-arm
+            kit: linux-aarch64.tar.gz
+            arch: arm64
     env:
       TAG: ${{ needs.tag.outputs.tag }}
       MAPLETHIEF_VERSION: ${{ needs.tag.outputs.version }}
       KIT: MapleThief-kit-${{ needs.tag.outputs.version }}-${{ matrix.kit }}
+      # The Linux container's platform (scripts/test-linux --arch): the runner's own.
+      ARCH: ${{ matrix.arch }}
       CI: "true"
       GH_TOKEN: ${{ github.token }}
       HOMEBREW_NO_AUTO_UPDATE: "1"
@@ -176,11 +196,11 @@ jobs:
         if: runner.os == 'macOS'
         run: command -v ninja >/dev/null || brew install ninja
 
-      - name: Set up the Visual Studio x64 developer environment (Windows)
+      - name: Set up the Visual Studio developer environment (Windows; x64, or ARM64 native)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
-          arch: x64
+          arch: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
 
       - name: Build, test and package (macOS, Windows)
         if: runner.os != 'Linux'
@@ -192,14 +212,14 @@ jobs:
           New-Item -ItemType Directory -Force -Path out | Out-Null
           Copy-Item -LiteralPath "build/$env:PRESET/$env:KIT" -Destination out/
         env:
-          PRESET: ${{ runner.os == 'macOS' && 'mac-release-universal' || 'win-release' }}
+          PRESET: ${{ runner.os == 'macOS' && 'mac-release-universal' || runner.arch == 'ARM64' && 'win-arm64-release' || 'win-release' }}
 
       - name: Build, test and package in the Linux container (ADR 0023, ADR 0065)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          scripts/test-linux HEAD --release
+          scripts/test-linux HEAD --release --arch "$ARCH"
           mkdir -p out
           cp "build/linux-release/$KIT" out/
 
@@ -237,8 +257,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          image="$(scripts/test-linux --image-name)"
-          got="$(docker run --rm -v "$PWD/out:/kits:ro" "$image" bash -c 'set -eu
+          image="$(scripts/test-linux --image-name --arch "$ARCH")"
+          got="$(docker run --rm --platform "linux/$ARCH" -v "$PWD/out:/kits:ro" "$image" bash -c 'set -eu
             mkdir /tmp/kit; untar "/kits/$1" /tmp/kit
             "$(ls /tmp/kit/*/bin/MapleThief)" --version' bash "$KIT")"
           echo "--version: $got"

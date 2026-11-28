@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Install and start MapleThief.apk on the arm64 Android emulator of this Mac (ADR 0150, issue
+# #356): the agent's device. Creates the AVD for the chosen image if needed, boots it without a
+# window, `adb install`s the APK, starts MapleThiefActivity, waits for the start-up log line,
+# takes a screenshot and stops the emulator.
+#
+# Usage: scripts/android-run [APK] [--image 4k|16k] [--seconds S] [--keep]
+#
+#   APK          default build/android-release/MapleThief.apk
+#   --image      the system image: 4k (default, 4 KiB pages) or 16k (16 KiB pages); install it
+#                first with scripts/android-sdk install --image 4k|16k
+#   --seconds S  how long to wait for the log line after the start (default 60)
+#   --keep       leave the emulator running (stop it with: adb -s emulator-5580 emu kill)
+#
+# Outputs, below build/android-run/<image>/ (git-ignored; screenshots of our own runs never go
+# into git): logcat.txt (the app's log), screenshot.png, and the lines it waited for. Exits 0
+# only if the APK installed, the activity started, its process logged MapleThief's start-up
+# line ("... the placeholder" without the generated code, "... the game" with it) and the
+# device reports the expected page size.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SDK="${MAPLETHIEF_ANDROID_SDK:-$REPO/build/_android-sdk}"
+PACKAGE=io.github.armaatus.maplethief
+ACTIVITY="$PACKAGE/.MapleThiefActivity"
+
+apk="$REPO/build/android-release/MapleThief.apk"
+image=4k
+seconds=60
+keep=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --image) image="${2:?}"; shift 2 ;;
+        --seconds) seconds="${2:?}"; shift 2 ;;
+        --keep) keep=1; shift ;;
+        -h | --help) sed -n '/^# Usage:/,/^# Outputs/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+        -*) echo "scripts/android-run: unknown option: $1" >&2; exit 2 ;;
+        *) apk="$1"; shift ;;
+    esac
+done
+case "$image" in
+    4k | 16k) ;;
+    *) echo "scripts/android-run: --image is 4k or 16k" >&2; exit 2 ;;
+esac
+if [ ! -e "$apk" ]; then
+    echo "scripts/android-run: $apk is missing (cmake --workflow --preset android-release)" >&2
+    exit 2
+fi
+
+adb="$SDK/platform-tools/adb"
+serial="$("$REPO/scripts/android-emulator" serial "$image")"
+out="$REPO/build/android-run/$image"
+mkdir -p "$out"
+rm -f "$out"/*
+
+# shellcheck disable=SC2329 # run by the trap below
+stop() {
+    [ "$keep" -eq 1 ] || "$REPO/scripts/android-emulator" stop "$image"
+}
+trap stop EXIT
+
+# Boots the AVD (scripts/android-emulator) and checks the image's page size.
+status=0
+"$REPO/scripts/android-emulator" start "$image" "$out/emulator.txt" || status=$?
+[ "$status" -ne 2 ] || exit 2
+"$adb" -s "$serial" get-state >/dev/null 2>&1 || exit 1
+
+echo "== adb install $apk"
+"$adb" -s "$serial" install -r "$apk"
+"$adb" -s "$serial" logcat -c
+# Landscape, as the manifest asks; the emulator's screen is a portrait phone.
+"$adb" -s "$serial" shell am start -W -n "$ACTIVITY"
+line=""
+for _ in $(seq 1 "$seconds"); do
+    "$adb" -s "$serial" logcat -d >"$out/logcat.txt"
+    line="$(grep -E ', SDL [0-9.]+, video driver android' "$out/logcat.txt" | head -n 1 || true)"
+    [ -z "$line" ] || break
+    sleep 1
+done
+sleep 3 # a few presented frames before the screenshot
+"$adb" -s "$serial" exec-out screencap -p >"$out/screenshot.png"
+"$adb" -s "$serial" logcat -d >"$out/logcat.txt"
+pid="$("$adb" -s "$serial" shell pidof "$PACKAGE" | tr -d '\r' || true)"
+if [ -z "$line" ]; then
+    echo "scripts/android-run: no start-up line from MapleThief in ${seconds} s (see $out/logcat.txt)" >&2
+    status=1
+else
+    echo "== Log line: ${line#*: }"
+fi
+if [ -z "$pid" ]; then
+    echo "scripts/android-run: $PACKAGE is not running any more (see $out/logcat.txt)" >&2
+    status=1
+else
+    echo "== Running: pid $pid"
+fi
+echo "== Screenshot: build/android-run/$image/screenshot.png"
+echo "== scripts/android-run ($image): $([ "$status" -eq 0 ] && echo passed || echo FAILED)"
+exit "$status"

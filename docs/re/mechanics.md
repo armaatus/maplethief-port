@@ -78,11 +78,11 @@ The attack key (`CHero::onAttack` `0x605FD`) starts the current skill's action. 
 
 The skill ids are `skill.dat` rows. `@etc` is the skill's etc value (see [Skills](#skills-values-mp-buffs-and-passives)).
 
-**Weapons.** `CSkill::setActiveSkill` `0x7EFF1` lets a skill be used only with the weapon its branch needs: a claw (`weapon_type` 1) for star skills, a dagger (2) for Bandit skills. The refusal texts are the `CSkill.setActiveSkill.N` strings. With a dagger the basic attack picks one of two swing animations at random (`0x7E9A1`); both hit the same way. With a claw, the basic attack punches instead of throwing when a mob is right next to the hero or when the hero has no stars; a punch always does 1 damage.
+**Weapons.** `CSkill::setActiveSkill` `0x7EFF1` lets an attack skill be used only with the weapon its branch needs: a claw (`weapon_type` 1) for star skills, a dagger (2) for Double Step and the Bandit's attack skills. The refusal texts are the `CSkill.setActiveSkill.N` strings. Buffs and passives are exempt: an Assassin wearing no weapon and a Bandit with a claw learn every passive of their branch with its rule and cast every buff (`play.skills_weapon_*_synthetic`, [testing/skills-and-jobs.md](../testing/skills-and-jobs.md#the-weapon-rules-of-passives-and-buffs), #307). With a dagger the basic attack picks one of two swing animations at random (`0x7E9A1`); both hit the same way. With a claw, the basic attack punches instead of throwing when a mob is right next to the hero or when the hero has no stars; a punch always does 1 damage.
 
 **Stars.** A star skill needs as many stars as it uses (`CHero::isSpear` `0x5FF3D` counts all stacks). `CHero::UseStars` `0x67005` takes them from the first stack that holds enough, and that stack's star decides the damage bonus. An empty star stack stays in the inventory with count 0, ready to be recharged at a shop.
 
-**Shadow Web** (`CSkill::ShadowWeb` `0x7EB8D`) does no damage: each mob in the box is bound (mob `+0xD4`) for `@etc` ticks and cannot move.
+**Shadow Web** (`CSkill::ShadowWeb` `0x7EB8D`) does no damage: each mob in the box is bound for `@etc` ticks and cannot move. It sets the mob's bind state (`+0xD4`) to 1, which the mob's own tick moves on to 2 while bound, and its bind ticks (`+0xD8`) to `@etc` (`play.skills_assassin_synthetic` reads 60 at level 2).
 
 Example: a claw Assassin with Shadow Partner on throws Lucky Seven: four stars leave, four damage rolls are made against the one target, and four stars are taken from the first stack with at least four.
 
@@ -169,13 +169,13 @@ A high defense therefore never makes contact harmless: the damage falls to betwe
 
 **A mob** (`CMob::TakeHit` `0x73715`, after the checks above):
 
-- Drain (7) heals the hero by damage × `@etc` / 100, up to max HP (`CSkill::Drain` `0x7D4A5`).
+- Drain (7) heals the hero by damage × `@etc` / 100, up to max HP (`CSkill::Drain` `0x7D4A5`). The damage is the rolled one: on a killing blow it can be more than the HP the mob had left, and so is the heal.
 - With Pickpocket (19) on, `CSkill::Pickpocket` `0x7EB35` drops meso with `Rand_Percent`(`@etc`): an amount from `mob meso` / 18 − 5 to `mob meso` / 18, then the usual 80 % meso roll (see [Drops](#drops)).
 - HP drops by the damage. At 0 or below the mob [dies](#drops); otherwise it is knocked back (non-bosses, for a short while) and shows its HP bar.
 
 ## Drops
 
-`CMob::Die` `0x73349` handles a death. Bosses (mob ids 64, 66 to 69) count the kill for hunting quests (`Quest_CountKill`) and then queue their closing scene instead of giving EXP and drops: 64 scene 4, 66 scene 6, 67 scene 10, 68 scene 8, 69 scene 1 (the first ending scene, see [docs/re/qol.md](qol.md#which-steps-change-state)). Any other mob, outside [Monster Carnival](#monster-carnival-the-level-scaling-mode):
+`CMob::Die` `0x73349` (mob, hero) handles a death; every death goes through it (called from `CMob::TakeHit` `0x73715`, the contact check `0x65F05` and `CMob::Flush` `0x7458D`), and it has no guard of its own. Bosses (mob ids, mob `+0xA0`, 64, 66 to 69) count the kill for hunting quests (`Quest_CountKill`) and then queue their closing scene instead of giving EXP and drops: 64 scene 4, 66 scene 6, 67 scene 10, 68 scene 8, 69 scene 1 (the first ending scene, see [docs/re/qol.md](qol.md#which-steps-change-state)). Any other mob, outside [Monster Carnival](#monster-carnival-the-level-scaling-mode):
 
 1. gives its `exp` to the hero (`CHero::setExp`, see [EXP](#exp-and-level-up));
 2. counts toward hunting quests (`Quest_CountKill` `0x7B5A9`);
@@ -214,7 +214,7 @@ Drops are skipped entirely in Monster Carnival.
 
 The mode where monster levels follow the hero is Spiegelman's Monster Carnival. Its flag is `CStateGame +0x404`.
 
-**Start.** The scripts `common/Spiegelman1.out`, `Spiegelman2.out` and `Spiegelman3.out` take a ticket (`item_etc` 47, 48 or 49), call the native `initMonCa` (`0x99545` to `CStateGame::StartMonsterCarnival` `0x82271`) with mode 0, 1 or 2 (`+0x40C`), and move the hero to map 0.5, 4.18 or 6.3. The round lasts 3 minutes (`+0x430` = 180 s).
+**Start.** The scripts `common/Spiegelman1.out`, `Spiegelman2.out` and `Spiegelman3.out` take a ticket (`item_etc` 47, 48 or 49), call the native `initMonCa` (`0x99545` to `CStateGame::StartMonsterCarnival` `0x82271`) with mode 0, 1 or 2 (`+0x40C`), and move the hero to map 0.5, 4.18 or 6.3. The round lasts 3 minutes (`+0x430` = 180 s). The start sets the flag, the phase `+0x400` (−1 until the room has loaded), the mode, the counters `+0x410`–`+0x42C` and the clock, and takes the first kind-42 object of the current map as the way back (`+0x43C`–`+0x448`); it does not set the score `+0x434`, which only the result box's close (`CStateGame::OnKeyPressed` `0x8D4C9`, at `0x92CFA`) sets to 0 after a round, so a run's first round starts from whatever the state's memory held ([original-bugs.md](original-bugs.md#monster-carnival-restored-427)). No shipped map places the NPC; `restored_content` adds one in three towns.
 
 **Scaling** (in `CMob::LoadStats` `0x73B51`, while the flag is set). Let H = (hero attack + hero defense), halved by a right shift.
 
@@ -266,7 +266,9 @@ The best score of each mode is kept in the data manager (`+0x438`, `+0x43C`, `+0
 
 So the first scroll on any item always works, and a fixed-stat item can take at most 5 successful scrolls (its sixth and seventh chances are 0 %).
 
-**Special items (type 7).** 128 gives a level-up; 129 resets the skills (every point spent comes back, stats are recomputed); 131 gives 20 % of the current level's need as EXP; 132 gives one skill point. Item 130 ("Reverse") revives the hero from the death popup instead of returning to town ([cash-shop.md](cash-shop.md)).
+**From the item tab.** The checks are the item tab's, not `UseItem`'s: OK on a scroll's sub-list row 0 (`CDataMgr::keyPopupItemInven` `0x5285D`) opens popup 10 with no item in the target slot, popup `0x67` ("can't upgrade any more") with no slot left, and otherwise question `0x65`, whose Yes calls `UseItem`. `UseItem` stores the worn item at `CDataMgr +0x104` and the result at `+0x109` (1 success, 0 failure), sets `+0x108`, and plays the effect; `CHero::Flush` `0x62ADD` then shows popup `0x66` (success or failure text) and clears `+0x108`. A scroll's sub-list has two rows, use and throw away, so a scroll cannot go on a quick slot; `CHero::KeyAttack` `0x66DD9` would call `UseItem` from a quick slot with none of the checks. `play.systems2_scrolls_success_synthetic` and `_failure_synthetic` (real assets) use all ten scrolls: every one succeeds on items with no success yet, the five type-3 scrolls fail and the five type-8 ones succeed on items with 5 successes, each uses one slot, and with no slot left both kinds are refused with `0x67`.
+
+**Special items (type 7).** 128 gives a level-up; 129 resets the skills (every point spent comes back, stats are recomputed); 131 gives 20 % of the current level's need as EXP; 132 gives one skill point. Item 130 ("Reverse", type 5) is used only by the handler of popup `0x6B`, which revives the hero in place; nothing opens that popup, and no shop or monster gives the item ([Death](#death), [original-bugs.md](original-bugs.md#unreachable-content)).
 
 **Stars.** A star stack refills at a shop for its `unknown_84` × (`max_stack` − count) / 10 meso (`Shop_OnKey` `0x46DB9`); selling a stack pays its price plus `unknown_84` × count / 10. So `unknown_84` is the price of one star in tenths of a meso.
 
@@ -281,7 +283,7 @@ Each skill's value columns in `skill.dat` give `base + (skill level − 1) × pe
 - **`@dmg`** (`CSkill::DamageValue` `0x7D551`): `damage_base`, `damage_per_level` (but see the level used by [The hero's damage](#the-heros-damage)).
 - **Duration** (`CSkill::Duration` `0x7EC3D`): `time_base`, `time_per_level`, in ticks, for buffs (type 2) only. 600 ticks is 30 s at the default speed.
 
-**Buffs** (type 2). `CSkill::CastBuff` `0x7F749` pays the MP and adds the buff to the list at skills `+0xD64` (skill id, ticks left). Casting a buff that is already on only refreshes its timer; the stats are not added twice. `CSkill::TickBuffs` `0x7F669` counts the timers down from `CHero::Flush`, and `CSkill::EndBuff` `0x7F581` removes the buff and its stats. The icon blinks in the last 30 ticks (`CSkill::IsBuffEnding` `0x7ED51`).
+**Buffs** (type 2). `CSkill::CastBuff` `0x7F749` pays the MP and adds the buff to the list at skills `+0xD64` (skill id `+0x00`, ticks on `+0x04`). Casting a buff that is already on only refreshes its timer; the stats are not added twice. `CSkill::TickBuffs` `0x7F669` counts each buff's ticks up from `CHero::Flush` (not while a menu is open), and when they reach the duration `CSkill::EndBuff` `0x7F581` removes the buff and its stats: the last value seen is the duration (`play.skills_*_synthetic`). The icon blinks in the last 30 ticks (`CSkill::IsBuffEnding` `0x7ED51`).
 
 - Concentration (12 and 21): attack plus `@dmg`, accuracy plus `@etc`.
 - Dark Sight (5): the hero turns translucent and contact does no harm; attacking ends it.
@@ -321,7 +323,7 @@ The values (`CHero` constructor `0x68A59` and the shared physics globals set in 
 The death popup (texts `CStateGame.OnKeyPressed.1` to `6`) offers:
 
 - **Return to town** (`0x8D4C9`): EXP minus the penalty (0 below level 10 or before the advancement), meso minus a tenth, then the hero goes to the nearest town (the same choice as return scroll 24) and is revived (`CHero::Revive` `0x6140D` restores full HP and MP).
-- **Revive here**, with Reverse (item 130) or a paid revive; see [cash-shop.md](cash-shop.md).
+- **Revive here**, a paid revive; see [cash-shop.md](cash-shop.md). The popup's Return to town (−5) always asks `0x69`, even with Reverse (item 130) in the bag: the Reverse's revive is the handler of popup `0x6B`, which none of `Popup_Open` `0x3EAA1`'s callers opens. `play.systems2_cash_tiles_synthetic` (real assets) falls with one Reverse: popups `0x68` and `0x69`, the hero back in town with a tenth of its meso gone, the Reverse still in the bag.
 
 In Monster Carnival a death costs carnival points instead (see above).
 

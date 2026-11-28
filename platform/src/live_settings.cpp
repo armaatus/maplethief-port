@@ -24,6 +24,7 @@
 #include "present.h"
 #include "rumble.h"
 #include "save_tools.h"
+#include "speech.h"
 
 namespace maplethief::frontend {
 
@@ -115,11 +116,11 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
         t.keypad->set_mode(s.hide_keypad, t.now);
         return true;
     }
-    if (is(row, "rumble") || is(row, "rumble_strength")) {
+    if (is(row, "rumble") || is(row, "rumble_strength") || is(row, "rumble_events")) {
         if (t.rumble == nullptr) {
             return false;
         }
-        t.rumble->configure(s.rumble, s.rumble_strength);
+        t.rumble->configure(s.rumble, s.rumble_strength, s.rumble_events);
         return true;
     }
     if (is(row, "perf_overlay")) {
@@ -186,6 +187,24 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
         mt_hooks_install_flashes(s.flashes);
         return true;
     }
+    if (is(row, "speech") || is(row, "speech_rate") || is(row, "speech_volume")) {
+        if (t.speech == nullptr) {
+            return false;
+        }
+        // The voice as set, keeping its language; then a sample, so that the player hears
+        // what they chose (nothing while off, or without a voice).
+        t.speech->set_voice(speech_voice(s, t.speech->voice().language));
+        t.speech->set_enabled(s.speech);
+        t.speech->say(SpeechKind::kMenu, tr(Txt::speech_sample), speech_clock());
+        SDL_Log("speech: %s, rate %u%%, volume %u%% (%s)", s.speech ? "on" : "off",
+                static_cast<unsigned>(s.speech_rate), static_cast<unsigned>(s.speech_volume),
+                t.speech->backend_name());
+        return true;
+    }
+    if (is(row, "menu_language")) { // the next draw (#373)
+        apply_menu_language(s.menu_language);
+        return true;
+    }
     if (is(row, "auto_loot")) {
         install_auto_loot(s.auto_loot);
         return true;
@@ -197,14 +216,16 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
         t.keypad_layout(s.keypad_layout);
         return true;
     }
-    for (const char *key : {"menu_repeat",         "confirm_guard",  "focus_highlight",
-                            "button_prompts",      "button_labels",  "game_speed",
-                            "fast_forward",        "autosave",       "frame_rate",
-                            "widescreen_hud",      "ui_animations",  "turbo_attack",
-                            "auto_potion",         "skip_intros",    "minimap",
-                            "exp_percent",         "auto_run",       "hold_toggle",
-                            "pause_on_disconnect", "keypad_haptics", "pad_pointer",
-                            "save_states",         "stick_mode",     "direction_priority"}) {
+    for (const char *key :
+         {"menu_repeat",         "confirm_guard",      "focus_highlight", "button_prompts",
+          "button_labels",       "game_speed",         "fast_forward",    "autosave",
+          "frame_rate",          "widescreen_hud",     "ui_animations",   "turbo_attack",
+          "auto_potion",         "skip_intros",        "minimap",         "minimap_mobs",
+          "minimap_name",        "exp_percent",        "auto_run",        "hold_toggle",
+          "pause_on_disconnect", "keypad_haptics",     "pad_pointer",     "save_states",
+          "stick_mode",          "direction_priority", "crash_recovery",  "run_timer",
+          "run_category",        "speech_notices",     "livesplit",       "livesplit_game_time",
+          "input_display"}) {
         if (is(row, key)) {
             return t.turn_reads_settings;
         }

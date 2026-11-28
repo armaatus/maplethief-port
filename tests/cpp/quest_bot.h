@@ -65,6 +65,12 @@ inline bool standing(const Hero &h) { return h.addr != 0 && (h.flags & 0x17) == 
 inline bool on_ladder(const Hero &h) { return (h.flags & 0x04) != 0; }
 
 inline bool trace_on() { return std::getenv("MT_NAV_TRACE") != nullptr; }
+// The item on quick slot n (kind 1, hero +0xE0 + 8 n / +0xE4 + 8 n), -1 for none: slot 1 (Y) holds
+// the HP potion, slot 2 (B) the MP potion (Red and Blue Potions for a new character).
+inline i32 quick_slot_item(const mt_cpu *cpu, const Hero &h, u32 n) {
+    return h.addr != 0 && rdi(cpu, h.addr + 0xE0 + 8 * n) == 1 ? rdi(cpu, h.addr + 0xE4 + 8 * n)
+                                                               : -1;
+}
 
 // --- going places ------------------------------------------------------------------------------
 
@@ -79,12 +85,18 @@ struct Nav {
     wm::Edge edge{};
     int from = -1, from_y = 0, map_key = -1;
     double start = 0;
-    bool left = false; // the hero left the ground during the move
+    bool left = false;     // the hero left the ground during the move
+    bool hopped = false;   // a rope jump's hop off the ladder is under way (since `hop`)
+    bool grabbing = false; // a rope jump's jump onto a rope beside the platform is under way
+    double hop = 0;
     int last_x = INT32_MIN, last_y = INT32_MIN;
     double still = 0, drink = -10;
     double moved = 0, jumped = -10, settled = -1, stuck_since = -1;
     int idle_x = INT32_MIN, idle_y = INT32_MIN;
     double idle = 0;
+    u64 tick = 0, tap = 0;
+    int tick_x = INT32_MIN, vx = 0, prev_vx = 0;
+    bool ice = false;                                    // the hero slid while standing on this map
     std::map<std::tuple<int, int, int, int>, int> fails; // (map, from, to, move) -> count
     std::set<std::tuple<int, int, int, int>> banned;
     std::string said; // the last trace line (printed once)
@@ -218,10 +230,109 @@ inline void act(Run &r, Nav &n, const wm::Map &m, const Hero &h, double el, int 
             n.still = el;
         }
         const bool again = on_ladder(h) && el - n.still > 0.3 && std::fmod(el - n.still, 0.6) < 0.1;
-        hold(r, up ? UP : DOWN, !again);
+        const int off = m.ladders[static_cast<std::size_t>(n.edge.ladder)].x() - h.x;
+        // On ice up is let go on the ground: there a held up never let the jump start (9.1).
+        const double ph = std::fmod(t, 1.5);
+        const bool ground = up && !on_ladder(h) && stand;
+        hold(r, up ? UP : DOWN, !again && !(n.ice && ground));
+        hold(r, A, ground && ph >= 0.1 && ph < (n.ice ? 0.25 : 0.2));
+        // Slid past the ladder without catching it (ice): try again from the walk.
+        const bool missed = stand && !on_ladder(h) && t > 0.6 && std::abs(off) > 6;
+        if ((stand && !on_ladder(h) && (up ? h.y < n.from_y - 8 : h.y > n.from_y + 8)) || missed ||
+            t > 15) {
+            end_move(r, n, m, h, key);
+        }
+        break;
+    }
+    case wm::Move::rope_jump: {
+        // Onto the ladder (up from its foot, a jump for a rope hanging above it; down from its
+        // top), along it until the feet are a little above the platform beside it, then the
+        // direction and jump: the side jump hops off onto it.
+        const int want = m.platforms[static_cast<std::size_t>(n.edge.to)].y();
+        if (n.hopped) {
+            // The direction and jump together are the game's diagonal jump key ('1' / '3'):
+            // held for a few ticks, as a switch of keys takes two (keypad.md, SkyCanvas::Tick).
+            const bool pressing = el - n.hop < 0.25;
+            hold(r, UP, false);
+            hold(r, DOWN, false);
+            hold(r, A, pressing);
+            hold(r, LEFT, (pressing || !stand) && n.edge.dir < 0);
+            hold(r, RIGHT, (pressing || !stand) && n.edge.dir > 0);
+            if ((stand && !on_ladder(h)) || t > 15) {
+                end_move(r, n, m, h, key);
+            }
+            break;
+        }
+        if (h.y != n.last_y) {
+            n.last_y = h.y;
+            n.still = el;
+        }
+        if (on_ladder(h) && h.y <= want - 1 && h.y >= want - 12) {
+            n.hopped = true;
+            n.hop = el;
+            release_all(r);
+            hold(r, LEFT, n.edge.dir < 0);
+            hold(r, RIGHT, n.edge.dir > 0);
+            hold(r, A, true);
+            break;
+        }
+        // A rope beside the platform, not over it (world_map.h: caught in the air): a jump
+        // toward it, the direction held until the hero is over it, then up, as a rope grab.
+        const int lx = m.ladders[static_cast<std::size_t>(n.edge.ladder)].x();
+        const int toward = lx < h.x ? -1 : 1;
+        if (!on_ladder(h) && (stand ? std::abs(lx - h.x) > 6 : n.grabbing)) {
+            n.grabbing = n.grabbing || !stand;
+            const bool short_of = (lx - h.x) * toward > 4;
+            hold(r, UP, !stand && !short_of);
+            hold(r, DOWN, false);
+            hold(r, A, stand && t < 0.12);
+            hold(r, LEFT, (stand ? t < 0.12 : short_of) && toward < 0);
+            hold(r, RIGHT, (stand ? t < 0.12 : short_of) && toward > 0);
+            if ((stand && t > 0.3) || t > 15) {
+                end_move(r, n, m, h, key);
+            }
+            break;
+        }
+        const bool up = on_ladder(h) ? h.y > want - 1 : h.y > want;
+        const bool again = on_ladder(h) && el - n.still > 0.3 && std::fmod(el - n.still, 0.6) < 0.1;
+        hold(r, LEFT, false);
+        hold(r, RIGHT, false);
+        hold(r, UP, up && !again);
+        hold(r, DOWN, !up && !again);
         hold(r, A,
              up && !on_ladder(h) && stand && std::fmod(t, 1.5) >= 0.1 && std::fmod(t, 1.5) < 0.2);
-        if ((stand && !on_ladder(h) && (up ? h.y < n.from_y - 8 : h.y > n.from_y + 8)) || t > 15) {
+        if (t > 15) {
+            end_move(r, n, m, h, key);
+        }
+        break;
+    }
+    case wm::Move::rope_grab: {
+        // A jump toward the rope, the direction held until the hero is over it, then up alone
+        // (the pad sends one key a tick and a direction outranks up: keypad.md): up in the air
+        // catches the rope. Then up it as a climb.
+        const int lx = m.ladders[static_cast<std::size_t>(n.edge.ladder)].x();
+        if (h.y != n.last_y) {
+            n.last_y = h.y;
+            n.still = el;
+        }
+        if (on_ladder(h)) {
+            const bool again = el - n.still > 0.3 && std::fmod(el - n.still, 0.6) < 0.1;
+            hold(r, LEFT, false);
+            hold(r, RIGHT, false);
+            hold(r, A, false);
+            hold(r, UP, !again);
+        } else if (t < 0.12) {
+            hold(r, LEFT, n.edge.dir < 0);
+            hold(r, RIGHT, n.edge.dir > 0);
+            hold(r, A, true);
+        } else {
+            const bool short_of = (lx - h.x) * n.edge.dir > 4;
+            hold(r, A, false);
+            hold(r, LEFT, short_of && n.edge.dir < 0);
+            hold(r, RIGHT, short_of && n.edge.dir > 0);
+            hold(r, UP, !short_of);
+        }
+        if ((stand && !on_ladder(h) && t > 0.3) || t > 15) {
             end_move(r, n, m, h, key);
         }
         break;
@@ -236,8 +347,49 @@ inline void act(Run &r, Nav &n, const wm::Map &m, const Hero &h, double el, int 
     }
 }
 
+// On ice (area 9: mechanics.md, Movement; the bot wears no Snowshoes) the hero speeds up 1 px a
+// tick each tick, to 5, and slides on after the d-pad is let go, about v * v px, a tick late; a
+// jump keeps the slide's speed and the air has no steering. Walking straight at a spot swings
+// past it and back for ever (9.1's ladder at x 192 between x 175 and 205; Alchester on 9.0
+// between 345 and 374). So the approach coasts when the slide reaches near the spot, then taps
+// the d-pad for single ticks from rest. One turn of it toward d px away: false once the hero
+// rests within tol, true while it is still on the way.
+// With the d-pad let go the slide only slows; a slide that still speeds up means the game still
+// walks (a tap's release was lost: 9.0's portal900, the hero ran on into the wall). Then the
+// other direction for a tick, which the game takes as a new key and so a release (keypad.md).
+inline int brake(const Nav &n) {
+    return std::abs(n.vx) > std::abs(n.prev_vx) && n.vx != 0 ? (n.vx > 0 ? -1 : 1) : 0;
+}
+
+inline bool ice_approach(Run &r, Nav &n, const Hero &h, double el, int d, int tol) {
+    const int toward = n.vx * (d > 0 ? 1 : -1);
+    if (std::abs(d) > tol) {
+        bool press = toward < 0 || toward * toward + toward < std::abs(d) - 16;
+        if (!press && std::abs(d) <= 24 && n.vx == 0 && r.ticks > n.tap + 1) {
+            n.tap = r.ticks;
+        }
+        press = press || r.ticks == n.tap;
+        n.stuck_since = -1;
+        walk_toward(r, n, h, el, press ? (d > 0 ? 1 : -1) : brake(n));
+        hold(r, A, false);
+        return true;
+    }
+    if (n.vx != 0) {
+        walk_toward(r, n, h, el, brake(n));
+        hold(r, A, false);
+        return true;
+    }
+    return false;
+}
+
+// Every requirement of active quest (sort, n) met (below).
+inline bool requirements_met(mt_cpu *cpu, i32 sort, i32 n);
+// The item_equip id worn in slot `slot` (below).
+inline i32 worn(mt_cpu *cpu, i32 slot);
+
 // One turn toward goal g. True once the hero stands within g.tol of g.x on g's platform. On
-// another map it goes to the portal toward g's map (links()) and up through it; `closed` lists
+// another map it goes to the portal toward g's map (wm::links() of the hero's chapter) and up
+// through it; `closed` lists
 // portal links it may not take ((area * 100 + map, kind)).
 inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
                   const std::vector<std::pair<int, int>> &closed = {}) {
@@ -271,6 +423,15 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
         release_all(r);
         return false;
     }
+    // The hero's speed a tick. Area 9's ground is ice (mechanics.md, Movement), unless the hero
+    // wears Snowshoes (shoes 52), which turn the slide off.
+    if (r.ticks != n.tick) {
+        n.prev_vx = n.vx;
+        n.vx = n.tick_x == INT32_MIN ? 0 : h.x - n.tick_x;
+        n.tick_x = h.x;
+        n.tick = r.ticks;
+    }
+    n.ice = h.area == 9 && worn(cpu, 4) != 52;
     const wm::Map &m = wm::get(h.area, h.map);
     if (!m.ok) {
         say(n, "no map data for " + std::to_string(h.area) + "." + std::to_string(h.map));
@@ -279,21 +440,23 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     int tx = g.x, ty = g.y, tol = g.tol;
     bool enter = false;
     if (!h.on(g.area, g.map)) {
-        // The portals whose scripts check a quest (script/chapter1/portal*.out) are closed
-        // until it allows them: portal201 (2.0) main 9 done, portal212 (2.1) side 25 active,
-        // portal240 (2.4) side 7 done, portal371 (3.7) main 18 active. Chapter 1's quest
-        // numbers: a later chapter runs common/'s portal scripts, and its quests are others.
+        // The portals whose warps have conditions (the generated tables' gates: in chapter 1
+        // portal201 on 2.0 wants main 9 done, portal212 on 2.1 side 25 active, portal240 on 2.4
+        // side 7 done, portal371 on 3.7 main 18 active; in chapter 2 the boss maps' portal4111
+        // and portal942 want their quest active and its kill not made yet, checkRequire) are
+        // shut until the quest states allow them. Each chapter has its own links and gates.
         std::vector<std::pair<int, int>> shut = closed;
-        const auto gate = [&](int area, int map, int kind, u32 sort, u32 n, i32 state) {
-            if (h.chapter == 1 && quest_state(cpu, h, sort, n) != state) {
-                shut.push_back({area * 100 + map, kind});
+        for (const wm::Link &l : wm::links()) {
+            if (l.chapter == h.chapter && !l.gate.empty() &&
+                !wm::open(l, [&](int kind, int n, bool require) {
+                    return require
+                               ? (requirements_met(cpu, kind, n) ? 1 : 0)
+                               : quest_state(cpu, h, static_cast<u32>(kind), static_cast<u32>(n));
+                })) {
+                shut.push_back({l.area * 100 + l.map, l.kind});
             }
-        };
-        gate(2, 0, 1, 0, 9, 2);
-        gate(2, 1, 2, 1, 25, 1);
-        gate(2, 4, 2, 1, 7, 2);
-        gate(3, 7, 1, 0, 18, 1);
-        const int kind = wm::next_portal(h.area, h.map, g.area, g.map, shut);
+        }
+        const int kind = wm::next_portal(h.chapter, h.area, h.map, g.area, g.map, shut);
         const wm::Object *p = kind >= 0 ? m.portal(kind) : nullptr;
         if (p == nullptr) {
             say(n, "no way from " + std::to_string(h.area) + "." + std::to_string(h.map) + " to " +
@@ -309,8 +472,10 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
         act(r, n, m, h, el, key);
         return false;
     }
-    // A Red Potion (Y, quick slot 1) under 40 % of HP, standing, the d-pad let go.
-    if (el - n.drink > 1.5 && h.hp * 5 < h.max_hp * 2 && standing(h) && item_count(cpu, h, 3) > 0) {
+    // The HP potion (Y, quick slot 1) under 40 % of HP, standing, the d-pad let go.
+    const i32 potion = quick_slot_item(cpu, h, 1);
+    if (el - n.drink > 1.5 && h.hp * 5 < h.max_hp * 2 && standing(h) && potion >= 0 &&
+        item_count(cpu, h, potion) > 0) {
         n.drink = el;
     }
     if (el - n.drink < 0.3) {
@@ -347,6 +512,10 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     }
     if (here == there) {
         const int d = tx - h.x;
+        if (n.ice && ice_approach(r, n, h, el, d, tol)) {
+            n.settled = -1;
+            return false;
+        }
         if (std::abs(d) <= tol) {
             walk_toward(r, n, h, el, 0);
             hold(r, A, false);
@@ -364,7 +533,15 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
         return false;
     }
     n.settled = -1;
-    const std::vector<wm::Step> path = route(m, n, key, here, h.x, there);
+    std::vector<wm::Step> path = route(m, n, key, here, h.x, there);
+    if (path.empty() && !wm::route(m, here, h.x, there).empty()) {
+        // Only the bans stand in the way (a climb a mob knocked the hero off three times): lift
+        // this map's bans and try again, rather than stand at a dead end.
+        std::erase_if(n.banned, [key](const auto &b) { return std::get<0>(b) == key; });
+        std::erase_if(n.fails, [key](const auto &f) { return std::get<0>(f.first) == key; });
+        say(n, "map " + std::to_string(key) + ": the bans leave no route; lifted");
+        path = route(m, n, key, here, h.x, there);
+    }
     if (path.empty()) {
         say(n, "no route on map " + std::to_string(key) + " from platform " + std::to_string(here) +
                    " to " + std::to_string(there) + "; walking toward x " + std::to_string(tx));
@@ -378,7 +555,8 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
         walk_toward(r, n, h, el, e.x + e.dir * 16 > h.x ? 1 : -1);
         return false;
     }
-    const bool ladder = e.move == wm::Move::climb_up || e.move == wm::Move::climb_down;
+    const bool ladder = e.move == wm::Move::climb_up || e.move == wm::Move::climb_down ||
+                        e.move == wm::Move::rope_jump || e.move == wm::Move::rope_grab;
     const int step_tol = ladder ? 2 : 4;
     const int d = e.x - h.x;
     if (trace_on()) {
@@ -391,9 +569,16 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     // the hero past the end (2.2's platform 4: off it, and down two floors). Within one tick's
     // walk (7 px) of the edge's x: from 11 px early the jump from 1.0's platform 7 to 5 (33 px
     // across, 16 up) passed the far end 1 px short.
+    // A long hop (wm::k_jump_level: from the very end, 40 px or more across) starts within 4 px:
+    // from 7 px early the hero came down 1 px short (9.9's platform 17 to 18), and a walk's 5 px
+    // steps still meet those 5 px before the end.
     const bool on_the_run = e.move == wm::Move::jump && e.dir != 0 && d * e.dir >= 0 &&
-                            std::abs(d) <= 7 && h.state != 2;
-    if (std::abs(d) > step_tol && !on_the_run) {
+                            std::abs(d) <= (e.long_hop ? 4 : 7) && h.state != 2;
+    if (n.ice && !on_the_run) {
+        if (ice_approach(r, n, h, el, d, ladder ? 4 : step_tol)) {
+            return false;
+        }
+    } else if (std::abs(d) > step_tol && !on_the_run) {
         n.stuck_since = -1;
         walk_toward(r, n, h, el, d > 0 ? 1 : -1);
         return false;
@@ -419,6 +604,8 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     n.from_y = h.y;
     n.start = el;
     n.left = false;
+    n.hopped = false;
+    n.grabbing = false;
     n.last_y = h.y;
     n.still = el;
     return false;
@@ -455,6 +642,27 @@ inline void then_go(Run &r, std::string what, Goal g, double timeout = 300,
     });
 }
 
+// Drinks the potion of quick slot 1 (Y) every 1.5 s, standing, until HP is at least `pct` % of
+// the maximum (before a boss map: the way there costs HP).
+inline void then_heal(Run &r, std::string what, i32 pct, double timeout = 120) {
+    auto last = std::make_shared<double>(-10);
+    then(r, "heal: " + what, timeout, [&r, last, pct](mt_cpu *cpu, double el) {
+        const Hero h = hero(cpu);
+        if (interrupted(r, cpu, el)) {
+            return false;
+        }
+        release_all(r);
+        if (h.hp * 100 >= h.max_hp * pct) {
+            return true;
+        }
+        if (el - *last >= 1.5 && standing(h)) {
+            *last = el;
+        }
+        hold(r, Y, el - *last >= 0.1 && el - *last < 0.2);
+        return false;
+    });
+}
+
 // The position of the object named `name` on (area, map), as a goal (an NPC: stand on it).
 inline Goal at_object(int area, int map, const std::string &name, int tol = 6) {
     const wm::Map &m = wm::get(area, map);
@@ -465,6 +673,16 @@ inline Goal at_object(int area, int map, const std::string &name, int tol = 6) {
         return {area, map, 0, 0, tol};
     }
     return {area, map, o->x, o->y, tol};
+}
+
+// The shop NPC on a map of `area` who sells `id` (an other item, or with `equip` equipment), from
+// the generated shop tables, as a goal; area -1 when no shop of the area sells it.
+inline Goal shop_goal(int area, i32 id, bool equip = false) {
+    const wm::Shop *s = wm::shop_selling(area, equip ? 0 : 1, id);
+    if (s == nullptr) {
+        return Goal{};
+    }
+    return at_object(s->area, s->map, s->npc, 6);
 }
 
 // The map's live objects (CMMap, *(*0xF13C0); docs/formats/obj.md): the width in tiles +0x20,
@@ -502,17 +720,28 @@ inline bool live_object(const mt_cpu *cpu, const std::string &name, int &x, int 
 // A through the pages; on a list of rows it picks the row whose value is `choose` (any row
 // when -1), with up / down, and A. Accept / Refuse: A (Accept). With a list of choices, the
 // n-th list of one chat takes the n-th (the last for the lists after it): an NPC whose list
-// leads to another (the chapter-2 smith: the kind, then the item).
+// leads to another (the chapter-2 smith: the kind, then the item). With `min_talks`, `done` counts
+// only after that many chats (a talk that changes nothing the predicate could see).
+inline void then_talk_to(Run &r, std::string what, const Goal &g, const std::string &npc,
+                         std::vector<int> choices, Pred done, double timeout = 300,
+                         int min_talks = 0);
 inline void then_talk_to(Run &r, std::string what, int area, int map, const std::string &npc,
-                         std::vector<int> choices, Pred done, double timeout = 300) {
+                         std::vector<int> choices, Pred done, double timeout = 300,
+                         int min_talks = 0) {
+    then_talk_to(r, std::move(what), at_object(area, map, npc, 6), npc, std::move(choices),
+                 std::move(done), timeout, min_talks);
+}
+// The same at goal `g`: an NPC the map files do not place (restored_content, #427).
+inline void then_talk_to(Run &r, std::string what, const Goal &g, const std::string &npc,
+                         std::vector<int> choices, Pred done, double timeout, int min_talks) {
     struct S {
         Nav nav;
         double chat = -1, field = -1, pressed = -10;
-        int talks = 0;
+        int talks = 0, min_talks = 0;
         std::size_t lists = 0; // the lists answered in this chat
     };
     auto s = std::make_shared<S>();
-    const Goal g = at_object(area, map, npc, 6);
+    s->min_talks = min_talks;
     if (choices.empty()) {
         choices.push_back(-1);
     }
@@ -572,7 +801,7 @@ inline void then_talk_to(Run &r, std::string what, int area, int map, const std:
         if (s->field < 0) {
             s->field = el;
         }
-        if (el - s->field >= 0.5 && done(cpu)) {
+        if (el - s->field >= 0.5 && s->talks >= s->min_talks && done(cpu)) {
             release_all(r);
             std::printf("talk done after %d talk(s): %s\n", s->talks, where(cpu).c_str());
             return true;
@@ -604,10 +833,10 @@ inline bool in_shop(mt_cpu *cpu) {
     return mt_input_panel() == 6 && game_mode(cpu) == 2 && popup_id(cpu) == -1;
 }
 
-// Buys other item `id` (its row on the Buy tab) one at a time from the shop NPC `npc` on (area,
-// map) until the hero carries `want` of it or has less than `keep` meso left after one more: goes
-// there, up opens the shop, down to the row, A (popup 5 / 3: how many, buy?), A (popup 111:
-// bought), A; B closes the shop.
+// Buys other item `id` (its row on the Buy tab) one at a time from a shop NPC until the hero
+// carries `want` of it or has less than `keep` meso left after one more: goes there, up opens the
+// shop, down to the row, A (popup 5 / 3: how many, buy?), A (popup 111: bought), A; B closes the
+// shop.
 // The stock-up's state between turns.
 struct Stock {
     Nav nav;
@@ -673,12 +902,104 @@ inline bool stock_turn(Run &r, mt_cpu *cpu, double el, Stock &s, const Goal &g, 
     return false;
 }
 
-inline void then_stock(Run &r, std::string what, int area, int map, const std::string &npc, i32 id,
-                       i32 want, i32 keep = 0, double timeout = 240) {
+// Buys other item `id` up to `want` from the shop of `area` that sells it (shop_goal).
+inline void then_stock(Run &r, std::string what, int area, i32 id, i32 want, i32 keep = 0,
+                       double timeout = 240) {
     auto s = std::make_shared<Stock>();
-    const Goal g = at_object(area, map, npc, 6);
+    const Goal g = shop_goal(area, id);
+    if (g.area < 0) {
+        std::printf("FAIL: no shop of area %d sells item %d\n", area, id);
+        g_failures++;
+    }
     then(r, "stock: " + what, timeout, [&r, s, g, id, want, keep](mt_cpu *cpu, double el) {
         return stock_turn(r, cpu, el, *s, g, id, want, keep);
+    });
+}
+
+// Sells the materials (other items of type 5, item +0x8C) outside `keep` at the shop of `area`
+// that sells item `shop_item`: the bag's 48 other-item slots fill up with chapter 1's and 2's
+// drops (part E's 9.1 farm picked up nothing more). The Sell tab (right from Buy) lists the other
+// items (hero +0xD8) up to the first empty entry (ADR 0102). A on a row opens popup 6, how many:
+// 1 at first, and left from 1 goes round to the whole stack; A sells, then popup 111.
+struct Sell {
+    Nav nav;
+    double pressed = -10;
+    bool closing = false;
+    i32 popup = -2;
+    bool whole = false;
+};
+inline i32 sell_row(mt_cpu *cpu, const std::vector<i32> &keep, i32 &id) {
+    const Hero h = hero(cpu);
+    const u32 items = h.addr != 0 ? rd(cpu, h.addr + 0xD8) : 0;
+    for (u32 i = 0; items != 0 && i < 48; i++) {
+        const u32 it = rd(cpu, items + 4 * i);
+        if (it == 0) {
+            break;
+        }
+        id = rdi(cpu, it + 0x90);
+        if (rdi(cpu, it + 0x8C) == 5 && std::find(keep.begin(), keep.end(), id) == keep.end()) {
+            return static_cast<i32>(i);
+        }
+    }
+    return -1;
+}
+inline void then_sell(Run &r, std::string what, int area, i32 shop_item, std::vector<i32> keep,
+                      double timeout = 600) {
+    auto s = std::make_shared<Sell>();
+    const Goal g = shop_goal(area, shop_item);
+    then(r, "sell: " + what, timeout, [&r, s, g, keep](mt_cpu *cpu, double el) {
+        const Hero h = hero(cpu);
+        const auto press = [&](SDL_GamepadButton b) {
+            if (el - s->pressed >= 0.5) {
+                s->pressed = el;
+            }
+            hold(r, b, el - s->pressed < 0.1);
+        };
+        i32 id = -1;
+        const i32 row = sell_row(cpu, keep, id);
+        if (game_mode(cpu) == 2) {
+            hold(r, UP, false);
+            if (popup_id(cpu) != s->popup) {
+                s->popup = popup_id(cpu);
+                if (s->popup == 6) {
+                    std::printf("sell: item %d (%d in the bag), meso %d\n", id,
+                                item_count(cpu, h, id), h.meso);
+                }
+            }
+            if (in_shop(cpu)) {
+                const Shop sh = shop(cpu);
+                if (s->closing || row < 0) {
+                    s->closing = true;
+                    press(B);
+                } else if (sh.tab != 1) {
+                    press(RIGHT);
+                } else if (sh.selected != row) {
+                    press(sh.selected < row ? DOWN : UP);
+                } else {
+                    press(A);
+                }
+            } else if (popup_id(cpu) == 6 && !s->whole) {
+                s->whole = el - s->pressed >= 0.5;
+                press(LEFT);
+            } else {
+                s->whole = s->whole && popup_id(cpu) == 6;
+                press(A);
+            }
+            return false;
+        }
+        if (interrupted(r, cpu, el)) {
+            return false;
+        }
+        if (row < 0 || s->closing) {
+            release_all(r);
+            std::printf("sell done: meso %d\n", h.meso);
+            return true;
+        }
+        if (!drive(r, cpu, el, s->nav, g)) {
+            return false;
+        }
+        press(UP);
+        return false;
     });
 }
 
@@ -783,12 +1104,16 @@ inline void then_equip(Run &r, std::string what, i32 id, i32 slot) {
     });
 }
 
-// Buys equipment `id` from the equip shop NPC `npc` on (area, map), keeping at least `keep` meso,
-// and wears it in item_equip slot `slot`. Short of meso it buys nothing and goes on.
-inline void then_gear(Run &r, std::string what, int area, int map, const std::string &npc, i32 id,
-                      i32 slot, i32 keep = 0, double timeout = 240) {
+// Buys equipment `id` from the equip shop of `area` that sells it (shop_goal), keeping at least
+// `keep` meso, and wears it in item_equip slot `slot`. Short of meso it buys nothing and goes on.
+inline void then_gear(Run &r, std::string what, int area, i32 id, i32 slot, i32 keep = 0,
+                      double timeout = 240) {
     auto s = std::make_shared<Stock>();
-    const Goal g = at_object(area, map, npc, 6);
+    const Goal g = shop_goal(area, id, true);
+    if (g.area < 0) {
+        std::printf("FAIL: no shop of area %d sells equipment %d\n", area, id);
+        g_failures++;
+    }
     then(r, "gear: " + what, timeout, [&r, s, g, id, keep](mt_cpu *cpu, double el) {
         return stock_turn(r, cpu, el, *s, g, id, 1, keep, true);
     });
@@ -983,9 +1308,20 @@ struct Restock {
 // A flying boss (`reach_up` above 6): a mob counts as on the hero's floor while its anchor is up
 // to `reach_up` px above the hero's feet (its body is that tall), and the hero follows it along
 // the floor it stands on instead of over the platforms.
+// A thrower (`keep` above 0) stands between `keep` and `keep` + 90 px from its mob: a claw's
+// attack on a mob right next to the hero is a punch. `no_attack` walks to the mobs and stands
+// among them without attacking (a Dark Sight check).
 struct FarmStyle {
     SDL_GamepadButton skill = SDL_GAMEPAD_BUTTON_INVALID;
-    i32 min_mp = 0, hp_pct = 33, mp_pct = 25, reach_up = 6;
+    // A buff skill on a quick slot's button, cast again every buff_every seconds with buff_mp MP.
+    SDL_GamepadButton buff = SDL_GAMEPAD_BUTTON_INVALID;
+    double buff_every = 20;
+    i32 buff_mp = 0;
+    i32 min_mp = 0, hp_pct = 33, mp_pct = 25, reach_up = 6, keep = 0;
+    bool no_attack = false;
+    // No attack starts while the hero is knocked back (CHero +0x119): a boss killed then leaves
+    // its end scene's box deaf to every key (docs/re/original-bugs.md, 19).
+    bool land_first = false;
     std::vector<Restock> restock{Restock{}};
 };
 
@@ -1003,7 +1339,7 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
     struct S {
         Nav nav;
         int facing = 1, falls = 0;
-        double attack = -10, drink = -10, turn = -10, report = 0;
+        double attack = -10, drink = -10, turn = -10, report = 0, cast = -1e9;
         SDL_GamepadButton potion = Y;
         bool away = false;
         u32 chase = 0;
@@ -1013,10 +1349,13 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
         std::size_t restock_index = 0;
     };
     auto s = std::make_shared<S>();
-    // Out of Red Potions with meso to spare: more from the area's town shop (Etc00 in Kerning
-    // City, Etc10 in Perion, Etc20 in Henesys, Etc30 on 3.0), then back.
-    static const char *const k_shops[] = {"Etc00", "Etc10", "Etc20", "Etc30"};
-    const Goal shop_at = area >= 0 && area <= 3 ? at_object(area, 0, k_shops[area]) : Goal{};
+    // Out of a restocked item with meso to spare: more from the shop of the area that sells it
+    // (the generated shop tables: Etc00 in Kerning City, Etc10 in Perion, Etc20 in Henesys,
+    // Etc30 on 3.0 for the potions), then back. None in the area: no restock.
+    std::vector<Goal> shop_at;
+    for (const Restock &w : style.restock) {
+        shop_at.push_back(shop_goal(area, w.id));
+    }
     then(r, "farm: " + what, timeout,
          [&r, s, area, map, ids, done, shop_at, style](mt_cpu *cpu, double el) {
              const Hero h = hero(cpu);
@@ -1031,11 +1370,11 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
                  s->falls++;
                  std::printf("farm: the hero fell at %.2f s (%s)\n", r.t, where(cpu).c_str());
              }
-             if (!s->restocking && shop_at.area >= 0 && h.addr != 0 && h.hp > 0 &&
-                 el >= s->restock_after) {
+             if (!s->restocking && h.addr != 0 && h.hp > 0 && el >= s->restock_after) {
                  for (std::size_t i = 0; i < style.restock.size() && !s->restocking; i++) {
                      const Restock &w = style.restock[i];
-                     if (item_count(cpu, h, w.id) < w.below && h.meso >= w.min_meso) {
+                     if (shop_at[i].area >= 0 && item_count(cpu, h, w.id) < w.below &&
+                         h.meso >= w.min_meso) {
                          s->restocking = true;
                          s->stock = Stock{};
                          s->restock_index = i;
@@ -1046,7 +1385,8 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
              }
              if (s->restocking) {
                  const Restock &w = style.restock[s->restock_index];
-                 if (stock_turn(r, cpu, el, s->stock, shop_at, w.id, w.want, w.keep)) {
+                 if (stock_turn(r, cpu, el, s->stock, shop_at[s->restock_index], w.id, w.want,
+                                w.keep)) {
                      s->restocking = false;
                      s->restock_after = el + 120;
                  }
@@ -1086,6 +1426,18 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
                  hold(r, s->potion, d >= 0.1 && d < 0.2);
                  return false;
              }
+             // A buff.
+             if (style.buff != SDL_GAMEPAD_BUTTON_INVALID && el - s->cast >= style.buff_every &&
+                 h.mp >= style.buff_mp && standing(h)) {
+                 s->cast = el;
+                 s->nav.acting = false;
+             }
+             if (el - s->cast < 0.3) {
+                 const double d = el - s->cast;
+                 release_all(r);
+                 hold(r, style.buff, d >= 0.1 && d < 0.2);
+                 return false;
+             }
              hold(r, Y, false);
              hold(r, B, false);
              if (s->nav.acting) { // a move between platforms goes on to its end
@@ -1117,9 +1469,12 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
              }
              if (target != nullptr) {
                  const int dx = target->x - h.x;
+                 const int reach = style.keep > 0 ? style.keep + 90 : 30;
                  int go = 0;
-                 if (std::abs(dx) > 30) {
+                 if (std::abs(dx) > reach) {
                      go = dx > 0 ? 1 : -1;
+                 } else if (std::abs(dx) < style.keep) {
+                     go = dx > 0 ? -1 : 1; // back off to throwing distance
                  } else if (s->facing != (dx >= 0 ? 1 : -1) && el - s->turn > 0.6) {
                      s->turn = el; // a short step to face it
                      s->facing = dx >= 0 ? 1 : -1;
@@ -1130,12 +1485,13 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
                  }
                  const int dir = go != 0 ? go : (turning ? s->facing : 0);
                  walk_toward(r, s->nav, h, el, dir);
-                 if (go == 0 && !turning && el - s->attack > 0.45) {
+                 if (go == 0 && !turning && el - s->attack > 0.45 &&
+                     !(style.land_first && h.knocked)) {
                      s->attack = el;
                  }
                  const bool skill =
                      style.skill != SDL_GAMEPAD_BUTTON_INVALID && h.mp >= style.min_mp;
-                 hold(r, X, go == 0 && !skill && el - s->attack < 0.1);
+                 hold(r, X, go == 0 && !skill && !style.no_attack && el - s->attack < 0.1);
                  if (style.skill != SDL_GAMEPAD_BUTTON_INVALID) {
                      hold(r, style.skill, go == 0 && skill && el - s->attack < 0.1);
                  }

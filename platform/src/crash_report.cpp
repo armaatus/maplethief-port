@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -34,6 +36,7 @@
 #include <switch.h>
 #else
 #include <spawn.h>
+#include <sys/wait.h>
 #endif
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -69,6 +72,7 @@ char g_exe[kPathMax];
 bool g_show_ui = false;
 CrashDialogFn g_dialog_for_test;
 SafeStartPrompt g_prompt_for_test;
+RecoveryPrompt g_recovery_prompt_for_test;
 
 // --- the crash path: only what a signal handler may do ---------------------------------------
 
@@ -150,7 +154,7 @@ File open_report() {
     return kNoFile;
 }
 
-// Starts `<this program> --crash-dialog <file>`. Not on iOS.
+// Starts `<this program> --crash-dialog <file>`. Not on iOS or Android.
 void spawn_dialog_helper() {
 #if defined(_WIN32)
     std::size_t n = 0;
@@ -182,7 +186,9 @@ void spawn_dialog_helper() {
     if (R_SUCCEEDED(errorApplicationCreate(&c, message, nullptr))) {
         errorApplicationShow(&c);
     }
-#elif !defined(SDL_PLATFORM_IOS)
+#elif !defined(SDL_PLATFORM_IOS) && !defined(__ANDROID__)
+    // Not on Android either: the process is the system's app_process, not a program this one
+    // can start again, and Bionic has posix_spawn only from API 28 (#356).
     char *argv[] = {g_exe, const_cast<char *>("--crash-dialog"), g_path, nullptr};
     pid_t pid = 0;
     posix_spawn(&pid, g_exe, nullptr, nullptr, argv, environ);
@@ -205,15 +211,15 @@ void find_own_path() {
 #endif
 }
 
-} // namespace
-
-void crash_report_write(const char *report, std::size_t len, bool in_signal) {
+// A report file: `title`, the header, `report` and the log's tail. kNoFile if there is no folder
+// or it cannot take one; else the file was written and closed (its name in g_path).
+File write_report(const char *title, const char *report, std::size_t len) {
     File f = kNoFile;
     if (g_dir[0] != '\0') {
         f = open_report();
     }
     if (f != kNoFile) {
-        puts_file(f, "MapleThief crash report\n");
+        puts_file(f, title);
         put(f, g_header, g_header_len);
         puts_file(f, "\n");
         put(f, report, len);
@@ -226,6 +232,13 @@ void crash_report_write(const char *report, std::size_t len, bool in_signal) {
         }
         close_file(f);
     }
+    return f;
+}
+
+} // namespace
+
+void crash_report_write(const char *report, std::size_t len, bool in_signal) {
+    const File f = write_report("MapleThief crash report\n", report, len);
     g_reported.store(true);
     if (in_signal && f != kNoFile && g_spawn) {
         spawn_dialog_helper();
@@ -349,6 +362,133 @@ int run_crash_dialog_tool(const std::string &path) {
     return 0;
 }
 
+// --- the hang report and its question (#337, hang_watchdog.h) ----------------------------------
+
+namespace {
+
+HangDialogFn g_hang_dialog_for_test;
+
+// Starts `<this program> --hang-dialog <file>` and waits for its answer: the exit status, or -1
+// if there is no helper to start (iOS, Android and the Switch have none).
+int run_hang_helper(const std::string &path) {
+#if defined(_WIN32)
+    std::wstring wpath(path.size() + 1u, L'\0');
+    const int n = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, wpath.data(),
+                                      static_cast<int>(wpath.size()));
+    if (n <= 0 || g_wexe[0] == L'\0') {
+        return -1;
+    }
+    wpath.resize(static_cast<std::size_t>(n - 1));
+    std::wstring cmd = L"\"" + std::wstring(g_wexe) + L"\" --hang-dialog \"" + wpath + L"\"";
+    STARTUPINFOW si{};
+    si.cb = sizeof si;
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(g_wexe, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si,
+                        &pi)) {
+        return -1;
+    }
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD code = 0;
+    GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return static_cast<int>(code);
+#elif defined(__SWITCH__) || defined(SDL_PLATFORM_IOS) || defined(__ANDROID__)
+    (void)path;
+    return -1;
+#else
+    if (g_exe[0] == '\0') {
+        return -1;
+    }
+    std::string file = path;
+    char *argv[] = {g_exe, const_cast<char *>("--hang-dialog"), file.data(), nullptr};
+    pid_t pid = 0;
+    if (posix_spawn(&pid, g_exe, nullptr, nullptr, argv, environ) != 0) {
+        return -1;
+    }
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) {
+            return -1;
+        }
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+#endif
+}
+
+// MAPLETHIEF_CRASH_DIALOG_LOG: "hang dialog: <path>" appended to the file; false if unset.
+bool log_hang_dialog(const std::string &path) {
+    const char *log = SDL_getenv(kCrashDialogLogEnv);
+    if (log == nullptr || log[0] == '\0') {
+        return false;
+    }
+    std::ofstream out(to_path(log), std::ios::app | std::ios::binary);
+    out << "hang dialog: " << path << '\n';
+    return true;
+}
+
+} // namespace
+
+std::string hang_report_write(const char *report, std::size_t len) {
+    char kept[sizeof g_path];
+    std::memcpy(kept, g_path, sizeof kept); // last_crash_file() stays the crash's
+    const File f = write_report("MapleThief hang report\n", report, len);
+    std::string path = f != kNoFile ? std::string(g_path) : std::string();
+    std::memcpy(g_path, kept, sizeof kept);
+    return path;
+}
+
+HangChoice ask_hang_choice(const std::string &path) {
+    if (g_hang_dialog_for_test) {
+        return g_hang_dialog_for_test(path);
+    }
+    if (log_hang_dialog(path)) {
+        return HangChoice::kKeepWaiting;
+    }
+    if (!g_show_ui) {
+        SDL_Log("hang: report written to %s (no dialog in a scripted run)", path.c_str());
+        return HangChoice::kKeepWaiting;
+    }
+    const int status = run_hang_helper(path);
+    if (status < 0) {
+        SDL_Log("hang: report written to %s (no dialog helper here)", path.c_str());
+        return HangChoice::kKeepWaiting;
+    }
+    return status == kHangHelperQuit ? HangChoice::kQuit : HangChoice::kKeepWaiting;
+}
+
+void set_hang_dialog_for_test(HangDialogFn fn) { g_hang_dialog_for_test = std::move(fn); }
+
+std::string hang_question_text(const std::string &path) {
+    return "MapleThief has stopped responding.\n\nA report was written to:\n" + path +
+           "\n\nIt may still recover. Please attach the report and the newest file in logs/ to "
+           "a bug report.";
+}
+
+int run_hang_dialog_tool(const std::string &path) {
+    if (log_hang_dialog(path)) {
+        return 0;
+    }
+    const std::string text = hang_question_text(path);
+    const SDL_MessageBoxButtonData buttons[] = {
+        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT | SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0,
+         "Keep waiting"},
+        {0, 1, "Quit"},
+    };
+    SDL_MessageBoxData box{};
+    box.flags = SDL_MESSAGEBOX_WARNING;
+    box.title = "MapleThief is not responding";
+    box.message = text.c_str();
+    box.numbuttons = 2;
+    box.buttons = buttons;
+    int pressed = 0;
+    if (!SDL_ShowMessageBox(&box, &pressed)) {
+        SDL_Log("hang: cannot show the dialog: %s", SDL_GetError());
+        return 0;
+    }
+    return pressed == 1 ? kHangHelperQuit : 0;
+}
+
 // --- the marker and the safe start -------------------------------------------------------------
 
 LastRun crash_marker_begin(const std::string &crashes_dir) {
@@ -392,18 +532,52 @@ Settings safe_start_settings(const Settings &settings) {
     return safe;
 }
 
-namespace {
+const char *start_choice_label(SafeStartChoice choice) {
+    return choice == SafeStartChoice::kDefaults ? "Start with default settings" : "Start normally";
+}
 
-SafeStartChoice ask_safe_start(const std::string &crash_file) {
+const char *start_choice_label(RecoveryChoice choice) {
+    switch (choice) {
+    case RecoveryChoice::kResume:
+        return "Resume";
+    case RecoveryChoice::kResumeDefaults:
+        return "Resume with default settings";
+    case RecoveryChoice::kStartDefaults:
+        return "Start with default settings";
+    case RecoveryChoice::kStartNormal:
+        break;
+    }
+    return "Start normally";
+}
+
+std::string safe_start_question_text(const std::string &crash_file) {
     std::string text = "MapleThief did not close cleanly last time.";
     if (!crash_file.empty()) {
         text += "\n\nThe report is at:\n" + crash_file;
     }
-    text += "\n\nStart with default settings (no texture or audio packs, software renderer)?\nYour "
-            "settings file is not changed.";
+    return text + "\n\nStart with default settings (no texture or audio packs, software "
+                  "renderer)?\nYour settings file is not changed.";
+}
+
+std::string recovery_question_text(const std::string &crash_file, const RecoveryOffer &offer) {
+    std::string text = "MapleThief did not close cleanly last time.";
+    if (!crash_file.empty()) {
+        text += "\n\nThe report is at:\n" + crash_file;
+    }
+    return text + "\n\n" + recovery_offer_text(offer) +
+           " Resume plays on from it once you load that character.\n\nDefault settings mean "
+           "no texture or audio packs and the software renderer; your settings file is not "
+           "changed.";
+}
+
+namespace {
+
+SafeStartChoice ask_safe_start(const std::string &crash_file) {
+    const std::string text = safe_start_question_text(crash_file);
     const SDL_MessageBoxButtonData buttons[] = {
-        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Start with default settings"},
-        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Start normally"},
+        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1,
+         start_choice_label(SafeStartChoice::kDefaults)},
+        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, start_choice_label(SafeStartChoice::kNormal)},
     };
     SDL_MessageBoxData box{};
     box.flags = SDL_MESSAGEBOX_WARNING;
@@ -419,21 +593,95 @@ SafeStartChoice ask_safe_start(const std::string &crash_file) {
     return pressed == 1 ? SafeStartChoice::kDefaults : SafeStartChoice::kNormal;
 }
 
+RecoveryChoice ask_recovery(const std::string &crash_file, const RecoveryOffer &offer) {
+    const std::string text = recovery_question_text(crash_file, offer);
+    const SDL_MessageBoxButtonData buttons[] = {
+        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 0, start_choice_label(RecoveryChoice::kResume)},
+        {0, 1, start_choice_label(RecoveryChoice::kResumeDefaults)},
+        {0, 2, start_choice_label(RecoveryChoice::kStartDefaults)},
+        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 3,
+         start_choice_label(RecoveryChoice::kStartNormal)},
+    };
+    SDL_MessageBoxData box{};
+    box.flags = SDL_MESSAGEBOX_WARNING;
+    box.title = "MapleThief";
+    box.message = text.c_str();
+    box.numbuttons = 4;
+    box.buttons = buttons;
+    int pressed = 3;
+    if (!SDL_ShowMessageBox(&box, &pressed)) {
+        SDL_Log("safe start: cannot ask: %s", SDL_GetError());
+        return RecoveryChoice::kStartNormal;
+    }
+    switch (pressed) {
+    case 0:
+        return RecoveryChoice::kResume;
+    case 1:
+        return RecoveryChoice::kResumeDefaults;
+    case 2:
+        return RecoveryChoice::kStartDefaults;
+    default:
+        return RecoveryChoice::kStartNormal;
+    }
+}
+
 } // namespace
+
+void set_recovery_prompt_for_test(RecoveryPrompt prompt) {
+    g_recovery_prompt_for_test = std::move(prompt);
+}
+
+std::string recovery_offer_text(const RecoveryOffer &offer) {
+    std::string text = "A recovery point of character " + std::to_string(offer.slot + 1);
+    if (offer.minutes_before >= 0) {
+        const long minutes = std::lround(offer.minutes_before);
+        text += ", taken " +
+                (minutes < 1 ? std::string("less than a minute")
+                             : std::to_string(minutes) + (minutes == 1 ? " minute" : " minutes")) +
+                " before the crash";
+    }
+    return text + ", is kept.";
+}
+
+StartDecision decide_start(bool flag, const LastRun &last, bool interactive,
+                           const RecoveryOffer &offer, const StartPrompts &ask) {
+    StartDecision d;
+    if (flag || !last.crashed || !offer.offered) {
+        d.safe_start = decide_safe_start(flag, last, interactive, ask.safe_start);
+        return d;
+    }
+    if (!interactive && !g_recovery_prompt_for_test) {
+        return d;
+    }
+    const RecoveryChoice choice = g_recovery_prompt_for_test
+                                      ? g_recovery_prompt_for_test(last.crash_file, offer)
+                                  : ask.recovery ? ask.recovery(last.crash_file, offer)
+                                                 : ask_recovery(last.crash_file, offer);
+    d.safe_start =
+        choice == RecoveryChoice::kResumeDefaults || choice == RecoveryChoice::kStartDefaults;
+    d.resume = choice == RecoveryChoice::kResume || choice == RecoveryChoice::kResumeDefaults;
+    return d;
+}
+
+bool start_asks(bool flag, const LastRun &last, bool interactive) {
+    return !flag && last.crashed && interactive;
+}
 
 void set_safe_start_prompt_for_test(SafeStartPrompt prompt) {
     g_prompt_for_test = std::move(prompt);
 }
 
-bool decide_safe_start(bool flag, const LastRun &last, bool interactive) {
+bool decide_safe_start(bool flag, const LastRun &last, bool interactive,
+                       const SafeStartPrompt &ask) {
     if (flag) {
         return true;
     }
     if (!last.crashed || (!interactive && !g_prompt_for_test)) {
         return false;
     }
-    const SafeStartChoice choice =
-        g_prompt_for_test ? g_prompt_for_test(last.crash_file) : ask_safe_start(last.crash_file);
+    const SafeStartChoice choice = g_prompt_for_test ? g_prompt_for_test(last.crash_file)
+                                   : ask             ? ask(last.crash_file)
+                                                     : ask_safe_start(last.crash_file);
     return choice == SafeStartChoice::kDefaults;
 }
 

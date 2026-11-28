@@ -34,8 +34,10 @@
 #include "gamepad.h"
 #include "gfx_backend.h"
 #include "gpu_screen.h"
+#include "hang_watchdog.h"
 #include "hud_labels.h"
 #include "input.h"
+#include "input_display.h"
 #include "ipa_import.h"
 #include "keyboard.h"
 #include "keypad_editor.h"
@@ -45,6 +47,7 @@
 #include "lifecycle.h"
 #include "list_keys.h"
 #include "live_settings.h"
+#include "livesplit.h"
 #include "local_game_center.h"
 #include "maplethief/audio.h"
 #include "maplethief/cashshop.h"
@@ -59,7 +62,10 @@
 #include "maplethief/input.h"
 #include "maplethief/memory.h"
 #include "maplethief/offline.h"
+#include "maplethief/runtape.h"
 #include "maplethief/saves.h"
+#include "maplethief/scriptvm.h"
+#include "maplethief/snapshot.h"
 #include "maplethief/stubs.h"
 #include "maplethief/texpack.h"
 #include "maplethief/textpack.h"
@@ -69,22 +75,32 @@
 #include "minimap.h"
 #include "pacing.h"
 #include "pack_folders.h"
+#include "pack_tools.h"
+#include "packs.h"
 #include "pad_pointer.h"
 #include "perf_overlay.h"
 #include "perf_session.h"
 #include "port_text.h"
+#include "practice_state.h"
 #include "present.h"
 #include "price_line.h"
 #include "prompts.h"
 #include "quick_state.h"
 #include "remap.h"
 #include "render_scale.h"
+#include "restored_content.h"
 #include "rumble.h"
+#include "run_recorder.h"
+#include "run_timer.h"
+#include "run_verify.h"
 #include "save_menu.h"
 #include "save_state_input.h"
 #include "save_tools.h"
 #include "scene_skip.h"
 #include "settings_menu.h"
+#include "speech.h"
+#include "speech_menus.h"
+#include "speech_text.h"
 #include "update_check.h"
 
 namespace maplethief::frontend {
@@ -167,7 +183,8 @@ bool scripted_run(const GameOptions &options) {
     return options.frames != 0 || options.seconds > 0 || !options.capture_dir.empty() ||
            !options.capture_at.empty() || !options.shots.empty() || !options.taps.empty() ||
            options.fixed_step_us != 0 || !options.audio_capture.empty() ||
-           !options.suspends.empty() || options.quit_at >= 0;
+           !options.suspends.empty() || options.quit_at >= 0 || options.run_file != nullptr ||
+           !options.pad_steps.empty();
 }
 
 bool valid_shot_name(const std::string &name) {
@@ -394,6 +411,39 @@ constexpr double kAnimationSeconds = 1.0 / 60;
 // that keeps presenting without returning to the run loop ends the run without it after this.
 constexpr Uint64 kQuitGraceNs = 2000000000ull;
 
+// The speedrun timer's clocks (#406, run_timer.h): the host's monotonic clock and the game's
+// ticks; the local wall-clock time a run starts at. While a run tape records or plays (#408),
+// the real time is the guest's clock as the guest last read it, which the tape holds: a replay
+// then recomputes the live timer's times exactly. It is the paced clock, within half a tick and
+// a refresh of the host's (pacing.h); after the tape stops, its last value.
+RunInstant run_clock_now() {
+    static bool taped = false;
+    static std::uint64_t taped_us = 0;
+    if (mt_runtape_get_mode() != MT_RUNTAPE_OFF) {
+        taped = true;
+        if (const std::uint64_t us = mt_runtape_guest_clock_us(); us != 0) {
+            taped_us = us;
+        }
+    }
+    if (taped) {
+        return RunInstant{static_cast<double>(taped_us) / 1e6, mt_input_get_stats().ticks};
+    }
+    return RunInstant{static_cast<double>(SDL_GetTicksNS()) / 1e9, mt_input_get_stats().ticks};
+}
+
+std::string run_clock_stamp() {
+    const std::time_t now = std::time(nullptr);
+    std::tm tm{};
+#if defined(_WIN32)
+    localtime_s(&tm, &now);
+#else
+    localtime_r(&now, &tm);
+#endif
+    char b[32];
+    std::strftime(b, sizeof b, "%Y-%m-%d %H:%M:%S", &tm);
+    return b;
+}
+
 // The run's state, shared by the hooks (one thread).
 struct Game {
     const GameOptions *options = nullptr;
@@ -412,6 +462,7 @@ struct Game {
     bool track_lit = true;
     std::vector<std::uint8_t> gpu_px, gpu_gl; // GPU presentation's downloads
 
+    std::string bundle;          // the game's MapleThief.app (the pack tools read it, #371)
     bool quit = false;           // the window closed or the user quit
     bool host_ended = false;     // the turn hook ended the run
     bool failed = false;         // a check failed or presentation broke
@@ -426,9 +477,16 @@ struct Game {
     std::uint64_t first_lit_present = 0;    // the first window present that is not black
     std::uint64_t first_lit_gl_present = 0; // the first that shows a GL frame that is not black
     std::size_t tap_index = 0;              // options->taps: the next one to deliver
+    SDL_Joystick *script_pad = nullptr;     // --pad's virtual pad (#405), or nullptr
+    std::size_t pad_index = 0;              // options->pad_steps: the next one to set
     std::uint32_t tap_phase = 0;            // and its next phase (0 down, drags, up)
     VirtualClock *clock = nullptr;          // the fixed-step mode's clock, or nullptr
-    PacedClock *paced = nullptr;   // real time with pacing = display (pacing.h), or nullptr
+    // Run recording and playback (#405, ADR 0156, run_recorder.h). While a run file plays its
+    // tape is the clock and the turn hook never waits, as in the fixed-step mode.
+    RunRecorder runs;
+    bool replay = false;
+    std::vector<RunRecord> replayed_runs; // the replay's timer's runs (#408)
+    PacedClock *paced = nullptr;          // real time with pacing = display (pacing.h), or nullptr
     LaunchClock *launch = nullptr; // real time with pacing = wall (clock.h, #155), or nullptr
     // game_speed in guest memory (game_speed.h, #151): a change of g.settings' applies at the
     // next turn. fast-forward: the guest clock's rate now, and the host time spent faster.
@@ -444,6 +502,10 @@ struct Game {
     Uint64 last_present_host = 0;    // when the last window present returned (SDL_GetTicksNS)
     PresentHold hold;                // locked: the present point after each wake (pacing.h)
     OverloadGuard overload;          // locked: the wall clock while starved (pacing.h, #163)
+    // The display, rate and tick the lockable rates were last logged for (lock_advice, #410).
+    SDL_DisplayID advised_display = 0;
+    double advised_hz = 0;
+    std::int64_t advised_tick = 0;
     // frame_rate = smooth (#87, ADR 0091, frame_interp.h): the last two ticks' draws, the
     // fraction of the last tick the window shows, and the latency that costs.
     FrameInterpolator interp;
@@ -498,6 +560,9 @@ struct Game {
     ControlsCard card{&actions, &gamepads};          // the controls card (controls_card.h, #193)
     bool card_pending = false; // the preset picker's "Show controls": opens at a turn (#193)
     PadPointer pointer{&input, &actions}; // pad_pointer: the right stick's, touchpads (#185)
+    Speech speech;          // text-to-speech (speech.h, #390): what #391-#393 feed; off by default
+    SpeechText speech_text; // the dialogue and the scenes' speech boxes for it (#391)
+    SpeechMenus speech_menus; // the menus for it (#393)
     // The settings in effect (options->settings at the start), which the settings menu and the
     // fullscreen hotkeys change (#89, ADR 0076; #145): every setting is read from here.
     Settings settings;
@@ -526,20 +591,23 @@ struct Game {
     // The key pad's haptics (keypad_haptics.h, #194): iOS's sink, nullptr elsewhere.
     std::unique_ptr<HapticsSink> haptics_sink;
     KeypadHapticsTracker haptics;
-    KeypadEditor keypad_editor;            // the key pad editor (keypad_editor.h, #159)
-    bool keypad_edit_pending = false;      // asked for: opens at a turn once the pad exists
-    std::uint64_t keypad_edit_version = 0; // the editor's layout installed
-    Lifecycle lifecycle;                   // the delegate's lifecycle (lifecycle.h, #128)
-    Autosaver autosaver;                   // autosave = on_quit before a resign or quit (#150)
-    AppletWatch applet;                    // the Switch's memory and CPU boost (#240)
-    std::uint64_t backgrounds = 0;         // lifecycle.backgrounds() at the last turn
-    Assists assists;                       // turbo_attack and auto_potion (#90, ADR 0092)
-    SceneSkip scene_skip;                  // skip_intros (#174, ADR 0096)
-    QuickStates quick;                     // save_states: quick-save, quick-load (#204)
-    double ui_animation_scale = 1;         // ui_animations (#90) as given to the runtime
-    MinimapLayer minimap;                  // the port's minimap (#176, minimap.h)
+    KeypadEditor keypad_editor;              // the key pad editor (keypad_editor.h, #159)
+    bool keypad_edit_pending = false;        // asked for: opens at a turn once the pad exists
+    std::uint64_t keypad_edit_version = 0;   // the editor's layout installed
+    Lifecycle lifecycle;                     // the delegate's lifecycle (lifecycle.h, #128)
+    Autosaver autosaver;                     // autosave = on_quit before a resign or quit (#150)
+    AppletWatch applet;                      // the Switch's memory and CPU boost (#240)
+    std::uint64_t backgrounds = 0;           // lifecycle.backgrounds() at the last turn
+    Assists assists;                         // turbo_attack and auto_potion (#90, ADR 0092)
+    SceneSkip scene_skip;                    // skip_intros (#174, ADR 0096)
+    QuickStates quick;                       // save_states: quick-save, quick-load (#204)
+    RecoveryPoints recovery;                 // crash_recovery: the recovery points (#335)
+    std::optional<RecoveryOps> recovery_ops; // made once: it hashes the binary
+    double ui_animation_scale = 1;           // ui_animations (#90) as given to the runtime
+    MinimapLayer minimap;                    // the port's minimap (#176, minimap.h)
     float compass_dx = 0;        // the minimap's corner: the compass's host move now, screen points
     ExpPercentLayer exp_percent; // the EXP percentage beside the HUD's bar (#191, ADR 0109)
+    InputDisplayLayer input_display; // the keys the game is given (#404, input_display.h)
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
     std::size_t restore_index = 0; // the next --restore-backup (#192)
@@ -549,6 +617,16 @@ struct Game {
     FrameStats stats;              // frame telemetry (frame_stats.h, ADR 0071)
     PerfCsv csv;                   // --perf-csv
     PerfOverlay perf;              // the frame-time overlay (perf_overlay.h)
+    // The speedrun timer (#406, run_timer.h): its run, the categories it can time and the one
+    // loaded (run_category as last applied; empty: none yet).
+    RunTimer run_timer{RunClock{run_clock_now, run_clock_stamp}};
+    std::vector<RunCategory> run_categories;
+    std::string run_category_loaded;
+    // The LiveSplit link (#407, livesplit.h): the timer's starts, splits and resets, and the game
+    // time, to LiveSplit's TCP server while livesplit names one.
+    LiveSplitLink livesplit{[](const std::string &line) { SDL_Log("%s", line.c_str()); },
+                            [] { return static_cast<double>(SDL_GetTicksNS()) / 1e9; }};
+    PracticeStates practice; // its practice states, with save_states (#409, practice_state.h)
     // --perf-session (#244, perf_session.h): a line per second; the scene and the screen as of
     // the last run-loop turn.
     PerfSession session;
@@ -558,6 +636,9 @@ struct Game {
     // writes images. A new scale waits for the next run-loop turn.
     RenderScaleGovernor scale_gov;
     bool govern = false;
+    // The GPU's time per GL frame for the governor (#365): one GL frame in a few is timed.
+    GpuFrameTimer gpu_timer;
+    bool gpu_timing_env = false;     // MAPLETHIEF_GFX_GPU_TIMING=1: the backend times every frame
     std::uint32_t pending_scale = 0; // 0: none
     std::uint32_t scale_changes = 0;
     std::string notice; // the guard's warning in the window, until notice_until (SDL ns)
@@ -605,6 +686,26 @@ double display_refresh_hz(SDL_Window *window) {
         return static_cast<double>(m->refresh_rate_numerator) / m->refresh_rate_denominator;
     }
     return static_cast<double>(m->refresh_rate);
+}
+
+// The refresh rates of the window's display's modes (SDL_GetFullscreenDisplayModes; none on the
+// dummy driver), for lock_advice (#410).
+std::vector<double> display_mode_rates(SDL_DisplayID display) {
+    std::vector<double> rates;
+    int count = 0;
+    SDL_DisplayMode **modes = SDL_GetFullscreenDisplayModes(display, &count);
+    if (modes == nullptr) {
+        return rates;
+    }
+    for (int i = 0; i < count; i++) {
+        const SDL_DisplayMode *m = modes[i];
+        rates.push_back(m->refresh_rate_numerator > 0 && m->refresh_rate_denominator > 0
+                            ? static_cast<double>(m->refresh_rate_numerator) /
+                                  m->refresh_rate_denominator
+                            : static_cast<double>(m->refresh_rate));
+    }
+    SDL_free(modes);
+    return rates;
 }
 
 // The game's tick interval in ms: CMTimer's frame interval, the i64 at 0x11A478
@@ -732,13 +833,14 @@ LiveTargets live_targets(Game &g) {
     t.vsync = &g.vsync;
     t.stats = &g.stats;
     t.lifecycle = &g.lifecycle;
+    t.speech = &g.speech;
     t.render_scale = [&g](std::uint32_t n) { return request_render_scale(g, n); };
     t.keypad_layout = [](const KeypadLayout &layout) {
         install_keypad_layout(layout);
         SDL_Log("input: keypad_layout %s", keypad_layout_text(layout).c_str());
     };
     t.turn_reads_settings = true; // menu_repeat, ..., autosave: on_turn reads g.settings
-    t.now = mt_cf_absolute_time();
+    t.now = mt_runtape_host_time();
     return t;
 }
 
@@ -776,13 +878,17 @@ void set_fullscreen_setting(Game &g, bool on) {
 }
 
 // A size key (#196): out of fullscreen (the setting's change, as F11's: one request), then the
-// window at `n` times the picture, 568 points wide with widescreen (ADR 0090; the start's
-// setting, which applies from the next start).
+// window at `n` times the picture, 568 points wide with widescreen = auto (ADR 0090), the
+// display's shape up to 768 with fill (#425, ADR 0214; the start's setting, which applies from
+// the next start).
 void size_window(Game &g, int n) {
     set_fullscreen_setting(g, false);
-    const bool wide = g.options != nullptr && g.options->settings.widescreen == Widescreen::kAuto;
-    g.desktop->size_window(n, wide ? static_cast<int>(MT_WIDESCREEN_WIDE) : kScreenWidth,
-                           kScreenHeight);
+    const Widescreen ws = g.options != nullptr ? g.options->settings.widescreen : Widescreen::kOff;
+    const int w = ws == Widescreen::kAuto ? static_cast<int>(MT_WIDESCREEN_WIDE)
+                  : ws == Widescreen::kFill
+                      ? display_fill_points(g.window, static_cast<int>(MT_WIDESCREEN_FILL))
+                      : kScreenWidth;
+    g.desktop->size_window(n, w, kScreenHeight);
 }
 
 // The mouse wheel (#145): in a menu, a notch is the gamepad's Up or Down (lists, shops and the
@@ -902,6 +1008,9 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
             g.screenshot_wanted = true;
         }
         if (r.consumed) {
+            if (e.type == SDL_EVENT_KEY_DOWN) {
+                g.keyboard.chord_taken(e.key.mod); // Ctrl+1 never attacks (#381)
+            }
             return;
         }
     }
@@ -961,6 +1070,7 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     if (!was_open && g.menu.is_open()) {
         g.menu.set_frame_cost(g.stats.recent()); // the game's last second, before the pause
     }
+    g.speech_menus.settings_turn(g.menu, g.speech, speech_clock()); // its row said (#393)
     if (is_screen_finger_down(e)) {
         g.touch_screen = true;
     }
@@ -986,6 +1096,7 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
 }
 
 void pump_events(Game &g) {
+    hang_watchdog_beat(); // a loop that pumps is alive (#337)
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         handle_event(g, e);
@@ -1033,12 +1144,13 @@ void run_script(Game &g, double t) {
 // goes straight to the next scripted event (or --seconds), in whole steps, with the capture's
 // audio up to it; with nothing scripted to come, only a quit ends the wait.
 void wait_hidden(Game &g) {
-    const double from = mt_cf_absolute_time();
+    const HangPause background; // hidden is not hung (#337)
+    const double from = mt_runtape_host_time();
     SDL_Log("lifecycle: hidden at %.3f s: nothing is presented, the guest waits (window frame "
             "%llu, GL frame %u)",
             from - g.first_turn, static_cast<unsigned long long>(g.presents), gl_frame(g));
     while (g.lifecycle.hidden() && !g.lifecycle.terminating() && !g.quit && !g.failed) {
-        const double t = mt_cf_absolute_time() - g.first_turn;
+        const double t = mt_runtape_host_time() - g.first_turn;
         if (g.options->seconds > 0 && t >= g.options->seconds) {
             SDL_Log("game: --seconds %g: the run ends %.3f s after the first run-loop turn",
                     g.options->seconds, t);
@@ -1078,9 +1190,9 @@ void wait_hidden(Game &g) {
                 g.failed = true;
             }
         }
-        run_script(g, mt_cf_absolute_time() - g.first_turn);
+        run_script(g, mt_runtape_host_time() - g.first_turn);
     }
-    const double to = mt_cf_absolute_time();
+    const double to = mt_runtape_host_time();
     g.hidden_seconds += to - from;
     g.presenter.set_veil(0);
     g.stats.gap(SDL_GetTicksNS(), gfx_total_ns()); // a pause, not a slow frame
@@ -1088,6 +1200,55 @@ void wait_hidden(Game &g) {
             "%u)",
             g.lifecycle.hidden() ? "the wait ends" : "shown again", to - g.first_turn, to - from,
             static_cast<unsigned long long>(g.presents), gl_frame(g));
+}
+
+// --pad (#405): a virtual Xbox 360 pad, attached before the first turn, its buttons set when
+// they are due; SDL's next event pump sends them as a real pad's events.
+void attach_script_pad(Game &g) {
+    if (g.options->pad_steps.empty()) {
+        return;
+    }
+    SDL_VirtualJoystickDesc desc;
+    SDL_INIT_INTERFACE(&desc);
+    desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+    desc.vendor_id = 0x045E; // Microsoft: an Xbox 360 pad
+    desc.product_id = 0x028E;
+    desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
+    desc.nbuttons = SDL_GAMEPAD_BUTTON_DPAD_RIGHT + 1;
+    desc.button_mask = (1u << desc.nbuttons) - 1u;
+    desc.axis_mask = (1u << desc.naxes) - 1u;
+    desc.name = "MapleThief --pad";
+    const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
+    g.script_pad = id != 0 ? SDL_OpenJoystick(id) : nullptr;
+    if (g.script_pad == nullptr) {
+        SDL_Log("game: --pad: no virtual pad: %s", SDL_GetError());
+        return;
+    }
+    // A virtual axis starts at raw 0, a half-pulled trigger: released, as a real pad's rest.
+    SDL_SetJoystickVirtualAxis(g.script_pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, -32768);
+    SDL_SetJoystickVirtualAxis(g.script_pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, -32768);
+    SDL_Log("game: --pad: a virtual Xbox 360 pad, %zu button changes scripted",
+            g.options->pad_steps.size());
+}
+
+void detach_script_pad(Game &g) {
+    if (g.script_pad != nullptr) {
+        const SDL_JoystickID id = SDL_GetJoystickID(g.script_pad);
+        SDL_CloseJoystick(g.script_pad);
+        SDL_DetachVirtualJoystick(id);
+        g.script_pad = nullptr;
+    }
+}
+
+void deliver_pad(Game &g, double t) {
+    const std::vector<GameOptions::PadStep> &steps = g.options->pad_steps;
+    while (g.script_pad != nullptr && g.pad_index < steps.size() && steps[g.pad_index].at <= t) {
+        const GameOptions::PadStep &s = steps[g.pad_index++];
+        SDL_SetJoystickVirtualButton(g.script_pad, s.button, s.down);
+        SDL_Log("game: --pad %s %s at %.3f s",
+                SDL_GetGamepadStringForButton(static_cast<SDL_GamepadButton>(s.button)),
+                s.down ? "down" : "up", t);
+    }
 }
 
 // The scripted taps and swipes (--tap, --swipe) take real input's path (ADR 0047): a left-button
@@ -1428,10 +1589,30 @@ void stop_hd_text() {
     mt_cg_set_text_scale(1);
 }
 
+// A pack the runtime would not open (it logged why): shown on the title screen too.
+void pack_not_opened(const std::string &path) {
+    queue_data_notice(tr(Txt::notice_pack_refused,
+                         {pack_value_text(path, ""), "it could not be opened (the log says why)"}));
+}
+
+// Opens the accepted packs of `kind`'s list in order (#421, ADR 0149: the first wins, entry by
+// entry); one that does not open is shown on the title screen.
+void start_packs(const GameOptions &o, PackKind kind) {
+    const std::vector<std::string> paths = packs_to_open(o.settings, kind, MT_VERSION);
+    const std::vector<std::string> failed = open_packs(kind, paths);
+    for (const std::string &path : failed) {
+        pack_not_opened(path);
+    }
+    if (paths.size() > failed.size()) {
+        SDL_Log("packs: %zu %s packs open, the first wins", paths.size() - failed.size(),
+                pack_kind_name(kind));
+    }
+}
+
 // Texture packs and dumps (#153, ADR 0081, maplethief/texpack.h): --dump-textures DIR writes
-// every upload once, texture_pack = DIR replaces the uploads it has files for. Both before the
-// boot, so they see the first upload; both live in the textures, so a render scale change
-// (#152) keeps them.
+// every upload once, texture_pack = DIR|DIR2... replaces the uploads they have files for. Both
+// before the boot, so they see the first upload; both live in the textures, so a render scale
+// change (#152) keeps them.
 void start_texture_packs(const GameOptions &o) {
     if (!o.dump_textures.empty()) {
         if (mt_texpack_dump_open(o.dump_textures.c_str()) == 0) {
@@ -1439,18 +1620,12 @@ void start_texture_packs(const GameOptions &o) {
                     o.dump_textures.c_str());
         }
     }
-    const std::string &pack = o.settings.texture_pack;
-    if (!pack.empty()) {
-        const int files = mt_texpack_open(pack.c_str());
-        if (files >= 0) {
-            SDL_Log("texpack: texture_pack %s: %d files", pack.c_str(), files);
-        }
-    }
+    start_packs(o, PackKind::kTexture);
 }
 
 void stop_texture_packs(const GameOptions &o) {
     const mt_texpack_stats s = mt_texpack_get_stats();
-    if (!o.dump_textures.empty()) {
+    if (!o.dump_textures.empty() || mt_texpack_dump_is_open() != 0) { // the flag or the menu
         SDL_Log("texpack: dump: %llu textures and %llu UIKit images written, %llu not written",
                 static_cast<unsigned long long>(s.dumped),
                 static_cast<unsigned long long>(s.dumped_ui),
@@ -1465,33 +1640,84 @@ void stop_texture_packs(const GameOptions &o) {
             static_cast<unsigned long long>(s.ui_images),
             static_cast<unsigned long long>(s.ui_replaced),
             static_cast<unsigned long long>(s.ui_rejected));
+        log_pack_uses(PackKind::kTexture, MT_VERSION);
     }
     mt_texpack_close();
     mt_texpack_dump_close();
 }
 
-// Audio packs (#188, ADR 0106, maplethief/audio.h): audio_pack = DIR replaces the game's sound
-// files it has files for. Before the boot, which decodes the effects and opens the players.
-void start_audio_pack(const GameOptions &o) {
-    const std::string &pack = o.settings.audio_pack;
-    if (!pack.empty()) {
-        const int files = mt_audio_pack_open(pack.c_str());
-        if (files >= 0) {
-            SDL_Log("audiopack: audio_pack %s: %d files", pack.c_str(), files);
+// Audio packs (#188, ADR 0106, maplethief/audio.h): audio_pack = DIR|DIR2... replaces the
+// game's sound files they have files for. Before the boot, which decodes the effects and opens
+// the players.
+void start_audio_pack(const GameOptions &o) { start_packs(o, PackKind::kAudio); }
+
+// Text-to-speech (#390, ADR 0174, speech.h): the backend MAPLETHIEF_SPEECH names (the system
+// voice by default; none where the platform has no kCapSpeech), the voice in the game's language
+// or the open text pack's. After the text pack opens.
+void start_speech(Game &g, const GameOptions &options, const char *game_language) {
+    SpeechBackendChoice choice = SpeechBackendChoice::kNone;
+    if (platform_has(kCapSpeech)) {
+        const char *env = SDL_getenv("MAPLETHIEF_SPEECH");
+        const std::optional<SpeechBackendChoice> parsed = parse_speech_backend(env);
+        if (!parsed) {
+            SDL_Log("speech: MAPLETHIEF_SPEECH must be system, log or none, not %s: system", env);
         }
+        choice = parsed.value_or(SpeechBackendChoice::kSystem);
+    }
+    const Settings &set = options.settings;
+    // Opened whether speech is on or not: the rows need to know whether a voice loads, and
+    // the menu can turn speech on. Speech Dispatcher connects (and may start its daemon) only at
+    // the first utterance.
+    g.speech.set_backend(open_speech_backend(choice));
+    const char *pack = mt_textpack_is_open() != 0 ? mt_textpack_manifest("language") : nullptr;
+    g.speech.set_voice(speech_voice(set, speech_language(game_language, pack)));
+    g.speech.set_enabled(set.speech);
+    if (set.speech || choice == SpeechBackendChoice::kLog) {
+        SDL_Log("speech: %s, %s, voice %s, rate %u%%, volume %u%%", set.speech ? "on" : "off",
+                g.speech.backend_name(), g.speech.voice().language.c_str(),
+                static_cast<unsigned>(g.speech.voice().rate),
+                static_cast<unsigned>(g.speech.voice().volume));
+    }
+    if (set.speech && !g.speech.available()) {
+        SDL_Log("speech: on, but this platform has no system voice: nothing is spoken");
     }
 }
 
-// Text packs (#189, ADR 0108, maplethief/textpack.h): text_pack = DIR replaces the game's text
-// and the port's own by key. Before the boot, which reads the data tables.
-void start_text_pack(const GameOptions &o) {
-    const std::string &pack = o.settings.text_pack;
-    if (!pack.empty()) {
-        const int entries = mt_textpack_open(pack.c_str());
-        if (entries >= 0) {
-            SDL_Log("textpack: text_pack %s: %d entries", pack.c_str(), entries);
-        }
+void stop_speech(Game &g) {
+    const SpeechStats &st = g.speech.stats();
+    if (st.said != 0 || st.ignored != 0) {
+        SDL_Log("speech: %llu said, %llu spoken, %llu interrupted, %llu dropped, %llu ignored, "
+                "%llu failed",
+                static_cast<unsigned long long>(st.said),
+                static_cast<unsigned long long>(st.spoken),
+                static_cast<unsigned long long>(st.interrupted),
+                static_cast<unsigned long long>(st.dropped),
+                static_cast<unsigned long long>(st.ignored),
+                static_cast<unsigned long long>(st.failed));
     }
+    g.speech.set_backend(nullptr);
+}
+
+// The menus read aloud (#393, speech_menus.h): once per run-loop turn, after the focus; reads
+// the labels and the popup menu or the shop only while speech is on.
+void speak_menus(Game &g, mt_cpu *cpu) {
+    const double now = speech_clock();
+    if (!SpeechMenus::listening(g.speech)) {
+        g.speech_menus.shell_turn(g.focus, {}, g.speech, now);
+        g.speech_menus.spot_turn(MenuSpot{}, SpotText{}, g.speech, now);
+        return;
+    }
+    g.speech_menus.shell_turn(g.focus,
+                              g.focus.active() ? runtime_labels(cpu) : std::vector<ScreenLabel>{},
+                              g.speech, now);
+    const MenuSpot spot = read_menu_spot(cpu);
+    g.speech_menus.spot_turn(spot, spot_text(cpu, spot), g.speech, now);
+}
+
+// Text packs (#189, ADR 0108, maplethief/textpack.h): text_pack = DIR|DIR2... replaces the
+// game's text and the port's own by key. Before the boot, which reads the data tables.
+void start_text_pack(const GameOptions &o) {
+    start_packs(o, PackKind::kText);
     reload_port_text();
 }
 
@@ -1502,6 +1728,7 @@ void stop_text_pack(const GameOptions &o) {
                 static_cast<unsigned long long>(s.lookups),
                 static_cast<unsigned long long>(s.replaced), static_cast<unsigned>(s.fields),
                 static_cast<unsigned>(s.overflows));
+        log_pack_uses(PackKind::kText, MT_VERSION);
     }
     mt_textpack_close();
     reload_port_text();
@@ -1514,6 +1741,7 @@ void stop_audio_pack(const GameOptions &o) {
                 static_cast<unsigned>(s.effects), static_cast<unsigned>(s.effects_replaced),
                 static_cast<unsigned>(s.music), static_cast<unsigned>(s.music_replaced),
                 static_cast<unsigned>(s.rejected));
+        log_pack_uses(PackKind::kAudio, MT_VERSION);
     }
     mt_audio_pack_close();
 }
@@ -1596,8 +1824,29 @@ bool request_render_scale(Game &g, std::uint32_t n) {
     return true;
 }
 
+// The GPU's time for the governor (#365, ADR 0203): after a window frame that showed a new GL
+// frame, the timed GL frame's GPU time goes to the GpuFrameTimer, and timing goes on for the
+// next one when the timer asks for it (its fence wait stalls only that frame's flushes).
+void time_gpu_frame(Game &g, const FrameRecord &record, Uint64 now_ns) {
+    if (!record.tick || mt_gfx_gpu_installed() == 0) {
+        return;
+    }
+    const double now = static_cast<double>(now_ns) / 1e9;
+    if (g.gpu_timing_env) {
+        g.gpu_timer.add(mt_gfx_gpu_get_stats().last_frame_gpu_ns, now);
+        return;
+    }
+    if (g.gpu_timer.armed()) {
+        g.gpu_timer.add(mt_gfx_gpu_get_stats().last_frame_gpu_ns, now);
+        mt_gfx_gpu_set_timing(0);
+    }
+    if (g.govern && g.gpu_timer.arm()) {
+        mt_gfx_gpu_set_timing(1);
+    }
+}
+
 // render_scale = auto and the frame-budget guard (#152): after a window frame, the governor
-// gets the image's place (a resize) and the last second's telemetry.
+// gets the image's place (a resize), the last second's telemetry and the GPU's time (#365).
 void govern_render_scale(Game &g) {
     if (!g.govern) {
         return;
@@ -1607,7 +1856,9 @@ void govern_render_scale(Game &g) {
     const Rect &r = g.presenter.placement().rect;
     std::uint32_t n = g.scale_gov.set_cap(render_scale_cap(r.w, r.h), now);
     if (n == 0) {
-        n = g.scale_gov.update(g.stats.recent(), now);
+        RecentStats recent = g.stats.recent();
+        recent.gpu_ms = g.gpu_timer.ms(now);
+        n = g.scale_gov.update(recent, now);
     }
     if (n != 0) {
         g.pending_scale = n;
@@ -1763,7 +2014,7 @@ void follow_frame_rate(Game &g) {
 void smooth_tick(Game &g, mt_cpu *cpu, const mt_gles_frame &frame) {
     const std::int64_t ms = g.clock == nullptr ? g.tick_ms : game_tick_ms(cpu);
     const double interval = ms > 0 ? static_cast<double>(ms) / 1000.0 : 0.05;
-    double t = mt_cf_absolute_time();
+    double t = mt_runtape_host_time();
     if (g.locked && g.hold.pending()) {
         const std::uint64_t now_g = g.paced->guest_ns();
         const std::uint64_t woke = g.paced->guest_at(g.hold.start());
@@ -1786,7 +2037,7 @@ void smooth_tick(Game &g, mt_cpu *cpu, const mt_gles_frame &frame) {
 // refresh boundary it is held to; on the wall clock the next refresh (one period on, in guest
 // time: fast-forward's rate too); fixed-step, the next 60 Hz present.
 double smooth_shown_time(Game &g) {
-    const double now = mt_cf_absolute_time();
+    const double now = mt_runtape_host_time();
     if (g.clock != nullptr) {
         return now + kAnimationSeconds;
     }
@@ -2054,7 +2305,8 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     // The minimap (#176, minimap.h): the window only, after the read-back and captures, under
     // the port's other window furniture; not over the settings menu or the remap overlay.
     if (g.settings.minimap != Minimap::kOff && !overlay_open(g)) {
-        const MinimapView view = read_minimap(guest_span(cpu));
+        const MinimapView view = read_minimap(
+            guest_span(cpu), MinimapExtras{g.settings.minimap_mobs, g.settings.minimap_name});
         g.minimap.draw(g.renderer, view, minimap_place(g, view));
     }
     // The EXP percentage beside the HUD's bar (#191, exp_percent.h): the window only, likewise;
@@ -2137,6 +2389,18 @@ bool present(Game &g, mt_cpu *cpu, double now) {
             g.update_rect = PerfOverlay::notice_rect(line, text);
         }
     }
+    // The speedrun timer (#406, run_timer.h): top right, the window only, like the overlay.
+    if (g.settings.run_timer) {
+        PerfOverlay::draw_lines(g.renderer, g.run_timer.overlay_lines(), text,
+                                TextCorner::kTopRight);
+    }
+    // The input display (#404, input_display.h): the window only, like the overlay; under the
+    // port's own overlays, which take the input.
+    if (g.settings.input_display && !overlay_open(g)) {
+        const Rect picture = g.presenter.wide_rect();
+        g.input_display.draw(g.renderer, input_display_place(picture, text.area, text.scale),
+                             input_display_lit_now());
+    }
     // The cash shop's price line (#156, price_line.h): the window only, like the overlay.
     if (mt_cash_shop_mode() == MT_CASH_SHOP_MESO) {
         draw_price_line(g.renderer, mt_cash_shop_view(), text, g.presenter.wide_rect());
@@ -2186,6 +2450,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     if (g.locked && record.tick && record.tick_ns != 0) {
         g.overload.add(presented, record.tick_ns, g.paced->plan()); // #163
     }
+    time_gpu_frame(g, record, presented);
     govern_render_scale(g);
     g.shown_gl = gl_frame(g);
     g.last_present = now;
@@ -2278,7 +2543,7 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
                 static_cast<double>(kQuitGraceNs) / 1e9);
         g.quit = true;
     }
-    return present_and_decide(g, cpu, mt_cf_absolute_time(), !ff_skip(g, cpu)) ? 1 : 0;
+    return present_and_decide(g, cpu, mt_runtape_host_time(), !ff_skip(g, cpu)) ? 1 : 0;
 }
 
 // The remap overlay (#70, ADR 0054), the settings menu (#89, ADR 0076) or the disconnect pause
@@ -2301,6 +2566,7 @@ void run_overlays(Game &g) {
     g.presenter.set_veil(kOverlayBackdropAlpha);
     bool redraw = true;
     while (overlay_open(g) && !g.quit && !g.lifecycle.terminating()) {
+        hang_watchdog_beat(); // the overlay holds the turn, a menu may sit idle (#337)
         redraw = redraw || g.remap.dirty() || g.menu.dirty() || g.disconnect.dirty() ||
                  g.card.dirty() || g.event_seen;
         g.event_seen = false;
@@ -2423,6 +2689,7 @@ void run_keypad_editor(Game &g, mt_cpu *cpu, double now) {
     g.rumble.stop();
     bool redraw = true;
     while (g.keypad_editor.is_open() && !g.quit && !g.lifecycle.terminating()) {
+        hang_watchdog_beat(); // the editor holds the turn (#337)
         if (g.keypad_editor.version() != g.keypad_edit_version) {
             g.keypad_edit_version = g.keypad_editor.version();
             install_keypad_layout(g.keypad_editor.layout());
@@ -2471,7 +2738,7 @@ void run_keypad_editor(Game &g, mt_cpu *cpu, double now) {
 void wait_locked(Game &g, double next, double cap) {
     const Uint64 start = SDL_GetTicksNS();
     Uint64 deadline = start;
-    const double guest_wait = next - mt_cf_absolute_time();
+    const double guest_wait = next - mt_runtape_host_time();
     if (guest_wait > 0) {
         // The guest reads whole microseconds. On a grid, a fire date a rounding past a whole
         // millisecond is that millisecond's (kGridFireTolerance, as the run loop sees it).
@@ -2545,6 +2812,24 @@ void set_fast_forward(Game &g, double t) {
     }
 }
 
+// A display that cannot lock the tick (#410, after #366): which of its own rates would, logged
+// once per display, rate and tick. The 1 ms grid keeps the speed exact, but a tick of 7.2
+// refreshes is shown for 7 or 8 whatever the clock.
+void advise_lockable_rates(Game &g, const PacingPlan &plan) {
+    const SDL_DisplayID display = SDL_GetDisplayForWindow(g.window);
+    const double hz = g.stats.refresh_hz();
+    if (display == g.advised_display && hz == g.advised_hz && g.tick_ms == g.advised_tick) {
+        return;
+    }
+    if (lock_advice(plan, hz, {}).empty()) {
+        return; // locked, or the grid for another reason: no advice, and no mode list read
+    }
+    SDL_Log("pacing: %s", lock_advice(plan, hz, display_mode_rates(display)).c_str());
+    g.advised_display = display;
+    g.advised_hz = hz;
+    g.advised_tick = g.tick_ms;
+}
+
 // The guest clock's rate in real time at run time `t` (#151): fast-forward from its action, and
 // with pacing = display the paced clock's plan for it and the display (pacing.h, ADR 0075).
 void follow_clock_rate(Game &g, double t) {
@@ -2553,9 +2838,10 @@ void follow_clock_rate(Game &g, double t) {
     }
     if (g.paced != nullptr) {
         // The overload guard (#163): the wall clock for a while when the lock costs speed.
-        const PacingPlan plan = g.overload.apply(
-            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms, g.ff_rate),
-            SDL_GetTicksNS());
+        const PacingPlan planned =
+            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms, g.ff_rate);
+        advise_lockable_rates(g, planned);
+        const PacingPlan plan = g.overload.apply(planned, SDL_GetTicksNS());
         if (g.paced->set_plan(plan)) {
             SDL_Log("pacing: %s, at %.3f s", describe(plan).c_str(), t);
         }
@@ -2575,7 +2861,7 @@ void follow_clock_rate(Game &g, double t) {
 // true if the run ends.
 bool present_smooth_locked(Game &g, mt_cpu *cpu, double next) {
     Uint64 deadline = SDL_GetTicksNS();
-    const double guest_wait = next - mt_cf_absolute_time();
+    const double guest_wait = next - mt_runtape_host_time();
     if (guest_wait > 0) {
         const std::uint64_t us = g.paced->guest_ns() / 1000u +
                                  static_cast<std::uint64_t>(std::ceil(guest_wait * 1e6 - 1e-3));
@@ -2587,7 +2873,7 @@ bool present_smooth_locked(Game &g, mt_cpu *cpu, double next) {
             break;
         }
         g.smooth_at = at;
-        const bool end = present_and_decide(g, cpu, mt_cf_absolute_time(), true);
+        const bool end = present_and_decide(g, cpu, mt_runtape_host_time(), true);
         g.smooth_at = 0;
         if (end) {
             return true;
@@ -2624,36 +2910,246 @@ void rebase_guest_clock(void *user, std::uint64_t unix_us) {
     }
 }
 
+// The frontend's layers let go before a restore (save_state_input.h): a quick-load's and a
+// recovery point's.
+void release_layers(Game &g, double t) {
+    RestoreInput layers;
+    layers.input = &g.input;
+    layers.actions = &g.actions;
+    layers.gamepads = &g.gamepads;
+    layers.pointer = &g.pointer;
+    layers.menu = &g.menu_input;
+    layers.assists = &g.assists;
+    layers.scene_skip = &g.scene_skip;
+    release_for_restore(layers, t);
+    g.speech_text.restart(); // a box the restore shows is said again (#391)
+}
+
 // save_states (#204, quick_state.h): a quick_save or quick_load pressed since the last turn, here
 // in the turn hook. The port's overlays hold the turn while open (run_overlays), so none is open
 // here. The notice says what happened. After a load, the frontend's own per-tick state follows
 // the restored game: the interpolated frames start over, and game_speed (the player's setting,
 // not the state's) is written again into the restored guest memory.
-void run_quick_state(Game &g, mt_cpu *cpu, double now) {
+// --verify-run's report (#408) on its own stream (GameOptions::report), else stdout.
+void print_run_report(const GameOptions &options, const std::string &text) {
+    std::FILE *out = options.report != nullptr ? options.report : stdout;
+    std::fputs(text.c_str(), out);
+    std::fflush(out);
+}
+
+// The speedrun timer's game-event listener (#406): every event, while run_timer is on.
+void run_timer_event(void *user, const mt_game_event *e) {
+    Game &g = *static_cast<Game *>(user);
+    if (g.settings.run_timer) {
+        g.run_timer.on_event(*e);
+    }
+}
+
+// The speedrun timer's finished and reset runs to <data dir>/runs/ (run_timer.h), each logged;
+// a new personal best becomes the one the timer compares with. A best segment that improved
+// (#409) writes runs/<category>.segments again.
+void write_run_records(Game &g) {
+    if (g.run_timer.take_segments_changed()) {
+        std::string why;
+        if (!write_run_segments(data_dir(), g.run_timer.segments(), &why)) {
+            SDL_Log("run: cannot write the best segments: %s", why.c_str());
+        }
+    }
+    for (RunRecord &r : g.run_timer.take_records()) {
+        if (g.replay) {
+            g.replayed_runs.push_back(r); // --verify-run's report (#408)
+        }
+        std::string path, why;
+        bool best = false;
+        const std::optional<RunRecord> &old = g.run_timer.best();
+        if (!write_run(data_dir(), r, old ? &*old : nullptr, &path, &best, &why)) {
+            SDL_Log("run: cannot write the %s run: %s", r.category.c_str(), why.c_str());
+            continue;
+        }
+        SDL_Log("run: %s %s in %s (%llu ticks), %zu of %zu splits, %s%s: %s", r.category.c_str(),
+                r.finished ? "finished" : "reset", format_run_time(r.end.ms).c_str(),
+                static_cast<unsigned long long>(r.end.ticks), r.times.size(), r.splits.size(),
+                r.clean() ? "clean" : "assisted", best ? ", a new personal best" : "",
+                path.c_str());
+        if (best) {
+            g.run_timer.set_best(std::move(r));
+        }
+    }
+}
+
+// run_timer and run_category as in effect now (#406): another category (or the timer turned
+// off) ends a run in progress as reset; then the clean check of this turn. livesplit and
+// livesplit_game_time (#407) too: the link follows its address, then sends the game time.
+void follow_run_timer(Game &g) {
+    std::optional<LiveSplitAddress> livesplit;
+    if (platform_has(kCapLiveSplit) && !g.settings.livesplit.empty()) {
+        livesplit = parse_livesplit_address(g.settings.livesplit);
+    }
+    g.livesplit.configure(livesplit, g.settings.livesplit_game_time);
+    if (!g.settings.run_timer) {
+        if (g.run_timer.state() != RunTimer::State::kWaiting) {
+            g.run_timer.reset();
+        }
+    } else if (g.settings.run_category != g.run_category_loaded) {
+        g.run_category_loaded = g.settings.run_category;
+        const auto it =
+            std::find_if(g.run_categories.begin(), g.run_categories.end(),
+                         [&](const RunCategory &c) { return c.id == g.settings.run_category; });
+        if (it == g.run_categories.end()) {
+            SDL_Log("run: no category '%s' (shipped or in categories/): the timer waits",
+                    g.settings.run_category.c_str());
+            g.run_timer.set_category(RunCategory{}, std::nullopt);
+            g.practice.forget();
+        } else {
+            std::optional<RunRecord> best = load_run_best(data_dir(), it->id);
+            SDL_Log("run: the timer times %s (%zu splits)%s", it->title.c_str(), it->splits.size(),
+                    best ? (", the best " + format_run_time(best->end.ms)).c_str() : "");
+            g.run_timer.set_category(*it, std::move(best), load_run_segments(data_dir(), it->id));
+            g.practice.forget();
+            g.runs.category(it->id, run_category_text(*it)); // into the run file (#408)
+        }
+    }
+    g.run_timer.turn();
+    // A practice (#409) is never a run: LiveSplit hears nothing of it.
+    g.livesplit.turn(g.run_timer.state() == RunTimer::State::kRunning && !g.run_timer.practice(),
+                     g.run_timer.elapsed());
+    write_run_records(g);
+}
+
+// After a save state was loaded (a quick-load's or a practice state's): the frontend's own per-tick
+// state follows the restored game: the interpolated frames start over, and game_speed (the
+// player's setting, not the state's) is written again into the restored guest memory.
+void after_state_load(Game &g, mt_cpu *cpu) {
+    g.interp.forget();
+    g.ff_presents.restart();
+    apply_game_speed(cpu, g.settings.game_speed);
+    g.game_speed = g.settings.game_speed;
+}
+
+bool run_quick_state(Game &g, mt_cpu *cpu, double now) {
     const QuickRequest r = g.quick.take(g.actions, g.settings.save_states);
     if (r == QuickRequest::kNone) {
-        return;
+        return false;
     }
     const double t = now - g.first_turn;
-    const QuickOps ops = game_quick_ops(
-        cpu,
-        [&g, t] {
-            RestoreInput layers;
-            layers.input = &g.input;
-            layers.actions = &g.actions;
-            layers.gamepads = &g.gamepads;
-            layers.pointer = &g.pointer;
-            layers.menu = &g.menu_input;
-            layers.assists = &g.assists;
-            layers.scene_skip = &g.scene_skip;
-            release_for_restore(layers, t);
-        },
-        rebase_guest_clock, &g);
+    const QuickOps ops =
+        game_quick_ops(cpu, [&g, t] { release_layers(g, t); }, rebase_guest_clock, &g);
     const QuickResult res = g.quick.run(r, ops, data_dir());
     g.notice = res.notice;
     g.notice_until = SDL_GetTicksNS() + kStateNoticeNs;
     g.event_seen = true;
     if (res.done && r == QuickRequest::kLoad) {
+        after_state_load(g, cpu);
+    }
+    return true;
+}
+
+// The speedrun timer's practice states (#409, practice_state.h), after run_quick_state: a split
+// reached since the last turn arms a state, taken at this turn if it is safe (never in a
+// quick-save's or quick-load's turn); practice_pick and practice_load pressed since the last turn.
+// True if a state was saved or loaded.
+bool run_practice_state(Game &g, mt_cpu *cpu, double now, bool quick_ran) {
+    const PracticeRequest r = g.practice.take(g.actions, g.settings.save_states);
+    const std::optional<std::size_t> reached = g.run_timer.take_reached();
+    const RunCategory &c = g.run_timer.category();
+    const bool on = g.settings.save_states && g.settings.run_timer && !c.splits.empty();
+    if (!on) {
+        g.practice.forget();
+    } else if (reached) {
+        g.practice.reached(*reached, c.splits.size());
+    }
+    if (!on && r == PracticeRequest::kNone) {
+        return false;
+    }
+    const double t = now - g.first_turn;
+    const QuickOps ops =
+        game_quick_ops(cpu, [&g, t] { release_layers(g, t); }, rebase_guest_clock, &g);
+    const auto notice = [&g](const std::string &text) {
+        g.notice = text;
+        g.notice_until = SDL_GetTicksNS() + kStateNoticeNs;
+        g.event_seen = true;
+    };
+    bool ran = false;
+    if (on && !quick_ran && g.practice.armed()) {
+        const std::size_t split = *g.practice.armed();
+        const QuickResult res = g.practice.take_armed(ops, data_dir(), c.id);
+        if (res.done) {
+            notice(tr(Txt::practice_saved, {c.splits[split - 1].title}));
+            ran = true;
+        }
+    }
+    if (r == PracticeRequest::kNone) {
+        return ran;
+    }
+    if (!on) {
+        notice(tr(Txt::state_load_refused, {tr(Txt::practice_why_no_timer)}));
+        SDL_Log("practice: refused: the speedrun timer is off or has no category");
+        return ran;
+    }
+    std::optional<std::size_t> split = g.run_timer.picked();
+    if (r == PracticeRequest::kPick || !split) {
+        split =
+            g.practice.pick(split, c.splits.size(), ops, data_dir(), c.id, practice_state_exists);
+        g.run_timer.set_picked(split);
+        if (!split) {
+            notice(tr(Txt::practice_none));
+            SDL_Log("practice: no practice state of %s for this character", c.id.c_str());
+            return ran;
+        }
+        if (r == PracticeRequest::kPick) {
+            notice(tr(Txt::practice_picked, {c.splits[*split - 1].title}));
+            return ran;
+        }
+    }
+    const QuickResult res = g.practice.load(ops, data_dir(), c.id, *split);
+    notice(res.notice);
+    if (res.done) {
+        after_state_load(g, cpu);
+        g.run_timer.start_practice(*split);
+        write_run_records(g); // a run in progress ended as reset
+        ran = true;
+    }
+    return ran;
+}
+
+// crash_recovery (#335, recovery.h): a recovery point at the first safe turn after a map load,
+// a game save or five minutes of play (the guest's clock: `now`), never in the turn of a
+// quick-save or quick-load; and an armed point restored once its character is in the field.
+// The Switch in applet mode takes a point only with room for it beside the margin (ADR 0141).
+void run_recovery(Game &g, mt_cpu *cpu, double now, bool quick_ran) {
+    if (!g.settings.crash_recovery && !g.recovery.armed()) {
+        RecoveryOps where_only;
+        where_only.where = [cpu] {
+            const AutosaveCheck c = check_autosave(cpu);
+            return RecoveryWhere{c.mode, c.area, c.map, c.slot};
+        };
+        g.recovery.turn(where_only, false, now, game_saves_seen());
+        return;
+    }
+    if (!g.recovery_ops) {
+        RecoveryOps ops = game_recovery_ops(
+            cpu, [&g] { release_layers(g, mt_runtape_host_time() - g.first_turn); },
+            rebase_guest_clock, &g);
+        if (g.applet.applet_mode()) {
+            ops.heap_free = [&g]() -> std::optional<std::uint64_t> {
+                const std::optional<MemorySample> &s = g.applet.last();
+                if (!s) {
+                    return std::nullopt;
+                }
+                return s->heap_size > s->heap_used ? s->heap_size - s->heap_used : 0;
+            };
+            ops.heap_margin = kAppletMarginBytes;
+        }
+        g.recovery_ops = std::move(ops);
+    }
+    const RecoveryTurn res = g.recovery.turn(*g.recovery_ops, g.settings.crash_recovery, now,
+                                             game_saves_seen(), quick_ran);
+    if (!res.notice.empty()) {
+        g.notice = res.notice;
+        g.notice_until = SDL_GetTicksNS() + kStateNoticeNs;
+        g.event_seen = true;
+    }
+    if (res.resumed) { // as after a quick-load
         g.interp.forget();
         g.ff_presents.restart();
         apply_game_speed(cpu, g.settings.game_speed);
@@ -2667,6 +3163,7 @@ void run_quick_state(Game &g, mt_cpu *cpu, double now) {
 int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     Game &g = *static_cast<Game *>(user);
     const HostCall host(g.stats);
+    hang_watchdog_beat(); // the run loop turns (#337)
     if (g.turns++ == 0) {
         g.first_turn = now;
         if (g.audio != nullptr) {
@@ -2675,6 +3172,11 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
+    // A run file that plays (#405): the settings changed at this turn of the recording, applied
+    // as the settings menu applies them.
+    for (const SettingInfo *row : g.runs.turn_begin(&g.settings)) {
+        apply_live_setting(live_targets(g), *row, g.settings);
+    }
     // --force-crash (#198): what a real crash does, on purpose.
     if (!g.options->force_crash.empty() && now - g.first_turn >= g.options->force_crash_at) {
         if (g.options->force_crash == "host") {
@@ -2684,6 +3186,13 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         } else {
             SDL_Log("game: --force-crash trap: a guest trap");
             mt_trap(cpu, MT_TRAP_UDF, cpu->r[MT_LR], 0x7E57u);
+        }
+    }
+    // --force-hang (#337): what a hang does, on purpose: this turn never ends.
+    if (g.options->force_hang && now - g.first_turn >= g.options->force_crash_at) {
+        SDL_Log("game: --force-hang: the run-loop turn never ends");
+        for (;;) {
+            SDL_Delay(100);
         }
     }
     g.game_center.tick(SDL_GetTicksNS()); // the leaderboard's state, the next toast (#154)
@@ -2730,7 +3239,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     g.lifecycle.deliver(cpu, now - g.first_turn);
     if (g.lifecycle.hidden() && !g.lifecycle.terminating() && !g.quit) {
         wait_hidden(g);
-        now = mt_cf_absolute_time();
+        now = mt_runtape_host_time();
         g.lifecycle.deliver(cpu, now - g.first_turn);
     }
     if (g.lifecycle.terminating()) {
@@ -2765,14 +3274,18 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
         g.data_notice_until = 0;
     }
-    // save_states (#204): a quick-save or quick-load asked for, at this safe turn.
-    run_quick_state(g, cpu, now);
+    // save_states (#204): a quick-save or quick-load asked for, at this safe turn; then
+    // crash_recovery's point (#335).
+    const bool quick_ran = run_quick_state(g, cpu, now);
+    const bool practice_ran = run_practice_state(g, cpu, now, quick_ran); // #409
+    run_recovery(g, cpu, now, quick_ran || practice_ran);
     // stick_mode and direction_priority (#138, ADR 0128), as in effect now; the clock a menu's
     // diagonal is timed by.
-    g.actions.set_clock([](void *) { return mt_cf_absolute_time(); }, nullptr);
+    g.actions.set_clock([](void *) { return mt_runtape_host_time(); }, nullptr);
     g.gamepads.set_stick_mode(g.settings.stick_mode);
     g.actions.set_direction_priority(g.settings.direction_priority);
     g.gamepads.turn(now);   // a button held back for its hold (R3's pointer tap, ADR 0107)
+    g.keyboard.turn(now);   // a modifier held back for the desktop's chords (#381)
     g.actions.turn();       // the synthetic touches of actions without a key code
     g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
     g.at_title = g.update.has_notice() && focus_engine_at_title(cpu); // the update notice (#199)
@@ -2789,13 +3302,18 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // UIKit animations' speed (ui_animations), as in effect now.
     g.assists.turn(cpu, g.settings, g.actions, now - g.first_turn);
     g.scene_skip.turn(cpu, g.settings, now - g.first_turn); // skip_intros (#174)
+    follow_run_timer(g);                                    // run_timer (#406)
     follow_ui_animations(g);
     g.hints.turn(cpu, g.focus, mt_input_panel(), g.settings.button_prompts,
                  g.settings.focus_highlight); // prompts and markers (#146), as in effect now
-    g.rumble.turn();          // what the game's vibration and events asked for since the last turn
-    g.game_options.turn(now); // the settings menu's "Game options" (#89): one step a turn
-    g.file_dialogs.poll();    // a file dialog answered after the menu closed (#192)
+    g.rumble.turn(); // what the game's vibration and events asked for since the last turn
+    g.speech_text.turn(g.speech, g.settings, speech_clock()); // dialogue said (#391)
+    speak_menus(g, cpu); // the focused control, the popup menu's and the shop's row (#393)
+    g.speech.turn(speech_clock()); // the next queued utterance, once the last is done (#390)
+    g.game_options.turn(now);      // the settings menu's "Game options" (#89): one step a turn
+    g.file_dialogs.poll();         // a file dialog answered after the menu closed (#192)
     deliver_taps(g, now - g.first_turn);
+    deliver_pad(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
     g.keypad.turn(now, g.input.live());
     // The key pad's haptics (#194): taps only with the game pad shown and in use.
@@ -2808,6 +3326,9 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // pad's touches come in the engine's x, and may begin in the wings.
     if (mt_widescreen_width() > MT_WIDESCREEN_NARROW) {
         const bool narrow = g.settings.widescreen_hud == WidescreenHud::kNarrow;
+        // fill (#425): no wider than the picture the window shows (the presenter's last draw).
+        mt_widescreen_set_limit(mt_widescreen_width() > MT_WIDESCREEN_WIDE ? g.presenter.wide()
+                                                                           : 0u);
         mt_widescreen_turn(cpu, 1);
         g.input.set_side_margin(keypad_widescreen_turn(
             keypad_wide(mt_widescreen_view(), mt_widescreen_width(), !narrow)));
@@ -2852,7 +3373,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // composited) then depends only on the virtual clock.
     // Nor does a UIKit animation more often than about 60 times a virtual second (a turn is
     // then far shorter than a display frame).
-    const bool fixed = g.clock != nullptr;
+    const bool fixed = g.clock != nullptr || g.replay;
     const bool animation_due = (mt_uikit_animation_count(now) > 0 || g.keypad.fading(now)) &&
                                (!fixed || now - g.last_present >= kAnimationSeconds);
     // frame_rate = smooth (#87) between two ticks: fixed-step, a present about 60 times a
@@ -2876,9 +3397,20 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     if (due && g.grid && gl_frame(g) == g.shown_gl && g.last_present_host != 0) {
         due = SDL_GetTicksNS() - g.last_present_host + 500000 >= refresh_period_ns(g);
     }
+    // The run's recording or replay (#405): the guest's part of this turn is whole (a present
+    // runs no guest code); a replay ends with the recording's last whole turn.
+    g.runs.turn_end(cpu, g.settings);
+    if (g.runs.done()) {
+        g.quit = true;
+        g.host_ended = true;
+        return 1;
+    }
     due = due && !ff_skip(g, cpu); // fast-forward: a refresh apart, and before the gate
     if (present_and_decide(g, cpu, now, due)) {
         return 1;
+    }
+    if (g.replay) {
+        return 0; // the tape is the clock: no wait, as fast as the host goes
     }
     if (fixed) {
         // No wait: the next turn's time is one step later, however long this one took. The
@@ -2916,7 +3448,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         return 0;
     }
     // The guest's time to its next timer, on the host's clock (fast-forward runs it faster).
-    double guest_wait = next - mt_cf_absolute_time();
+    double guest_wait = next - mt_runtape_host_time();
     if (g.ff_rate > 1) {
         // Fast-forward: when the game's gate opens within a poll after that timer, the poll at
         // the timer would find it shut and the next one come a whole poll late (1 ms of the
@@ -2944,6 +3476,14 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     }
     g.stats.add(Phase::kWait, SDL_GetTicksNS() - wait_start);
     return 0;
+}
+
+// The folder whose texture-packs/, audio-packs/ and text-packs/ the packs screen lists and the
+// pack tools write to (#370, #371): <base>, or, where there is none (iOS), the folder that holds
+// game/.
+std::string packs_base() {
+    const DataLocation &loc = data_location();
+    return !loc.base.empty() ? loc.base : loc.bundle_parent();
 }
 
 // The settings menu (#89, ADR 0076): over the live settings, applying a change at once where
@@ -2995,6 +3535,19 @@ void start_menu(Game &g, const GameOptions &options) {
         g.menu.open_list(std::move(list));
         return std::string();
     });
+    // #374 (save_menu.h): an iPhone backup, the checks and another folder's saves, as lists the
+    // controller drives on every platform.
+    const auto open_list = [&g](MenuList list) { g.menu.open_list(std::move(list)); };
+    g.menu.set_action("ios_backup", [open_list] {
+        return ios_backup_action(save_location(), default_ios_backup_roots(), mt_input_panel,
+                                 backup_stamp_now, open_list);
+    });
+    g.menu.set_action("check_saves",
+                      [open_list] { return check_saves_action(save_location(), open_list); });
+    g.menu.set_action("other_saves", [open_list] {
+        return other_folder_action(save_location(), other_data_dirs(data_location()),
+                                   mt_input_panel, backup_stamp_now, open_list);
+    });
     // #241 (platform_caps.h, ADR 0142): with neither dialogs nor the Files app (the Switch), the
     // import is a list to choose from with the controller (save_menu.h), and the pack rows offer
     // their folders beside game/ (pack_folders.h).
@@ -3011,6 +3564,51 @@ void start_menu(Game &g, const GameOptions &options) {
     }
     if constexpr (platform_has(kCapPackFolders)) {
         offer_pack_folders(data_location().base);
+    }
+    // The packs screen (#370, packs.h): the texture, audio and text pack rows open it, on every
+    // platform, at their kind; its changes are the menu's, saved with them.
+    // #422 (pack_add.h): where a dialog can show, "Add a pack..." opens a folder picker whose
+    // answer goes to the list as a drop does; a folder or zip dropped while it is open is added.
+    const auto packs = std::make_shared<PacksScreen>(packs_base(), MT_VERSION);
+    const auto pick_pack_folder = [&g] {
+        FileDialogRequest req;
+        req.kind = FileDialogRequest::Kind::kOpenFolder;
+        req.title = "add a pack";
+        std::string why;
+        const bool shown = g.file_dialogs.show(
+            g.window, req,
+            [&g](const FileDialogResult &r) {
+                if (r.outcome == FileDialogResult::Outcome::kFailed) {
+                    g.menu.set_status(tr(Txt::packs_add_failed, {r.why}));
+                } else if (r.outcome == FileDialogResult::Outcome::kChosen &&
+                           !g.menu.drop_on_list(r.path)) {
+                    SDL_Log("packs: %s was chosen after the packs screen closed; not added",
+                            r.path.c_str());
+                }
+            },
+            &why);
+        return shown ? std::string() : tr(Txt::packs_add_cannot, {why});
+    };
+    for (const PackKind kind : kPackKinds) {
+        g.menu.set_setting_opener(pack_kind_key(kind), [&g, packs, kind, pick_pack_folder] {
+            packs->set_add_row(platform_has(kCapFileDialogs) &&
+                               dialog_route(dialog_place(g.window)) == DialogRoute::kDialog);
+            packs->scan(g.settings);
+            g.menu.open_list(packs_menu_list(
+                packs, kind,
+                [&g](const std::string &key, const std::string &value) {
+                    return g.menu.change_setting(key, value) ? &g.settings : nullptr;
+                },
+                [&g]() -> const Settings & { return g.settings; }, pick_pack_folder));
+            return std::string();
+        });
+    }
+    // Text-to-speech (#390, ADR 0174): the rows say "not available" where no system voice loaded
+    // (Linux without libspeechd). The Switch's menu has no speech rows (kCapSpeech).
+    for (const char *key : {"speech", "speech_rate", "speech_volume", "speech_notices"}) {
+        g.menu.set_setting_unavailable(key, [&g] {
+            return g.speech.available() ? std::string() : std::string(tr(Txt::speech_unavailable));
+        });
     }
 #if !defined(SDL_PLATFORM_IOS)
     // The data folder (#263, ADR 0127, data_switch.h): the Saves tab's note shows it, the Data
@@ -3064,6 +3662,34 @@ void start_menu(Game &g, const GameOptions &options) {
     // The local achievements (#154): the summary, then at each choice the next one.
     g.menu.set_action("achievements", [&g, shown = std::size_t{0}]() mutable {
         return achievements_status(achievement_rows(), shown++, g.game_center.enabled());
+    });
+    // The pack tools (#371, ADR 0205, pack_tools.h): beside game/, in the pack folders. The dump
+    // starts and stops here (the game is paused: no upload meets a half-made hook).
+    g.menu.set_action("dump_textures", [] {
+        return dump_textures_action(pack_tool_places(packs_base(), Language::kEn).dump);
+    });
+    g.menu.set_action_view("dump_textures", [] {
+        const bool on = dumping_textures();
+        const MenuActionInfo *a = find_menu_action("dump_textures");
+        return SettingsMenu::ActionView{on ? tr(Txt::packs_dump_button_stop)
+                                           : tr(Txt::packs_dump_button_start),
+                                        tr_key("action.dump_textures.help", a->help)};
+    });
+    g.menu.set_action("build_texture_pack", [] {
+        const PackToolPlaces p = pack_tool_places(packs_base(), Language::kEn);
+        return build_texture_pack_action(p.dump, p.built_pack);
+    });
+    g.menu.set_action("export_text", [&g] {
+        return export_text_action(g.bundle, g.settings.language,
+                                  pack_tool_places(packs_base(), g.settings.language).text_export);
+    });
+    g.menu.set_action("check_packs", [&g] {
+        MenuList list = check_packs_list(g.settings, packs_base(), g.bundle);
+        if (list.rows.empty()) {
+            return std::string(tr(Txt::packs_none_to_check));
+        }
+        g.menu.open_list(std::move(list));
+        return std::string();
     });
     // The touch key pad's editor (#159): it opens at this turn if the game shows its pad (the
     // menu closes for it), else once it does.
@@ -3169,6 +3795,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // A fallback to the per-user folder (#263): its title notice, once per reason.
     post_data_fallback_notice(data_location());
     install_save_backups();
+    install_game_save_counter(); // crash_recovery's game-save trigger (#335)
 
     if (!options.capture_dir.empty()) {
         std::error_code ec;
@@ -3204,6 +3831,9 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     }
     g.scale_gov = RenderScaleGovernor(auto_scale, scale);
     g.govern = perf_overlay_allowed(options) && (auto_scale || scale > 1);
+    if (const char *t = SDL_getenv("MAPLETHIEF_GFX_GPU_TIMING")) {
+        g.gpu_timing_env = t[0] != '\0' && std::strcmp(t, "0") != 0; // as the backend reads it
+    }
     if (auto_scale) {
         SDL_Log("render: render_scale auto: %s",
                 g.govern ? "from 1x up to the largest that keeps a frame within the budget and "
@@ -3238,8 +3868,9 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
                                        std::chrono::system_clock::now().time_since_epoch())
                                        .count());
+    const bool playing = options.run_file != nullptr;
     const bool paced_run =
-        options.fixed_step_us == 0 && options.settings.pacing == PacingMode::kDisplay;
+        options.fixed_step_us == 0 && !playing && options.settings.pacing == PacingMode::kDisplay;
     PacedClock paced(host_now_ns, host_sleep_ns, nullptr,
                      paced_run ? paced_start_unix_us(wall_us) : wall_us);
     if (paced_run) {
@@ -3255,9 +3886,43 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                                    "rate is a multiple of the tick rate)"
                                  : ": the wall clock");
     LaunchClock launch_clock;
-    if (options.fixed_step_us == 0 && g.paced == nullptr) {
+    if (options.fixed_step_us == 0 && g.paced == nullptr && !playing) {
         launch_clock.install();
         g.launch = &launch_clock;
+    }
+    // Runs (#405, ADR 0156, run_recorder.h): a run file plays with its tape as the clock;
+    // record_runs = on records this session around the clocks installed above. Both before the
+    // process loads, as the clocks are.
+    set_run_recorder(&g.runs);
+    if (playing) {
+        std::array<std::uint8_t, 32> sha{};
+        mt_sha256(file.data() + offset, length, sha.data());
+        if (const std::string m = run_binding_mismatch(*options.run_file, sha); !m.empty()) {
+            SDL_Log("game: --play-run: this file cannot play here: %s", m.c_str());
+            set_run_recorder(nullptr);
+            if (options.verify_run) { // the refusal on stdout (#408)
+                RunVerification v;
+                v.path = options.run_path;
+                v.refused = m;
+                print_run_report(options, run_verify_report(v));
+                return kExitRunDiffers;
+            }
+            return kExitNoGame;
+        }
+        if (!g.runs.play(*options.run_file, &why)) {
+            SDL_Log("game: --play-run: %s", why.c_str());
+            set_run_recorder(nullptr);
+            return kExitNoGame;
+        }
+        g.replay = true;
+        SDL_Log("game: --play-run: the tape is the clock (%llu turns, %zu events, %zu "
+                "checkpoints to compare)",
+                static_cast<unsigned long long>(options.run_file->turns),
+                options.run_file->events.size(), options.run_file->checkpoints.size());
+    } else if (options.settings.record_runs) {
+        std::array<std::uint8_t, 32> sha{};
+        mt_sha256(file.data() + offset, length, sha.data());
+        g.runs.start(sha, options.settings, saves.documents_dir);
     }
     // The Assists of #151 (game_speed.h, ADR 0087).
     SDL_Log("game: game_speed = %s, fast_forward = %s%s",
@@ -3268,7 +3933,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         SDL_Log("game: fast-forward does nothing in the fixed-step mode (its virtual clock is not "
                 "paced)");
     }
-    if (options.fixed_step_us == 0) {
+    if (options.fixed_step_us == 0 && !playing) {
         const std::uint64_t shift_us =
             g.paced != nullptr ? LaunchClock::shift_for(wall_us) : launch_clock.shift_us();
         const std::uint64_t guest_us =
@@ -3311,13 +3976,19 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.renderer = renderer;
     g.vsync = vsync;
     // Widescreen (#86, ADR 0090): the GL layer's width, set before the boot makes its storage;
-    // the window shows a 568-point picture with the 480-point screen image in its centre.
-    mt_widescreen_configure(options.settings.widescreen == Widescreen::kAuto ? MT_WIDESCREEN_WIDE
-                                                                             : 0u);
+    // the window shows a 568-point picture with the 480-point screen image in its centre. fill
+    // (#425, ADR 0214): a 768-point layer, the picture as wide as the window (its safe area) at
+    // 320 points high, which caps the engine's view each turn.
+    const Widescreen ws = options.settings.widescreen;
+    mt_widescreen_configure(ws == Widescreen::kAuto   ? MT_WIDESCREEN_WIDE
+                            : ws == Widescreen::kFill ? MT_WIDESCREEN_FILL
+                                                      : 0u);
     g.presenter.set_wide(mt_widescreen_width() > MT_WIDESCREEN_NARROW ? mt_widescreen_width() : 0u);
-    SDL_Log("game: widescreen %s", mt_widescreen_width() > MT_WIDESCREEN_NARROW
-                                       ? "auto: a 568 x 320 GL layer, wide in the field"
-                                       : "off");
+    g.presenter.set_fill(ws == Widescreen::kFill ? MT_WIDESCREEN_FILL : 0u);
+    SDL_Log("game: widescreen %s",
+            ws == Widescreen::kAuto   ? "auto: a 568 x 320 GL layer, wide in the field"
+            : ws == Widescreen::kFill ? "fill: a 768 x 320 GL layer, as wide as the window"
+                                      : "off");
     start_presentation(g, renderer, options);
     if (g.presenter.texture() == nullptr) {
         return kExitSdlInitFailed;
@@ -3383,10 +4054,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     }
     SDL_Log("input: %zu binding rows, Nintendo face buttons by %s", options.bindings.table.size(),
             face_buttons_name(options.bindings.face));
+    attach_script_pad(g);
     g.gamepads.open_connected();
     // The lifecycle: the app events by SDL's event watch; in the fixed-step mode only the
     // script's (lifecycle.h).
-    g.lifecycle.set_real(g.clock == nullptr);
+    g.lifecycle.set_real(g.clock == nullptr && !g.replay);
     // The desktop conveniences (#145): the settings in effect, applied at once from here on
     // (the window's fullscreen and vsync are main.cpp's already; pause_unfocused here).
     g.desktop = options.desktop;
@@ -3394,14 +4066,17 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // autosave = on_quit at the exit to the main menu too (#179): Game_ExitToMainMenu's hook
     // reads the settings in effect at each call.
     g.autosaver.install_exit_to_menu(&g.settings.autosave,
-                                     [&g] { return mt_cf_absolute_time() - g.first_turn; });
+                                     [&g] { return mt_runtape_host_time() - g.first_turn; });
     follow_frame_rate(g); // frame_rate = smooth (#87): records from the first tick
     g.lifecycle.watch();
     g.applet.configure(options.applet_mode, options.applet_memory, options.applet_boost);
+    g.recovery.set_data_dir(data_dir());
+    g.recovery.arm(options.recovery); // a resume chosen at the start (#335)
     g.script = lifecycle_script(options);
-    g.rumble.configure(set.rumble, set.rumble_strength);
+    g.rumble.configure(set.rumble, set.rumble_strength, set.rumble_events);
     // Frame telemetry (#137, ADR 0071): the overlay.
     g.perf = PerfOverlay(set.perf_overlay, perf_overlay_allowed(options));
+    g.bundle = bundle;
     start_menu(g, options);
     const double refresh_hz = display_refresh_hz(window);
     SDL_Log("perf: display %.2f Hz, vsync %s; the frame-time overlay is %s (F3%s)%s%s", refresh_hz,
@@ -3421,8 +4096,9 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 setting_text(set, *find_setting("fast_forward")).c_str(),
                 options.display_mode ? options.display_mode().c_str() : "desktop");
     }
-    SDL_Log("input: rumble %s, strength %u%%", set.rumble ? "on" : "off",
-            static_cast<unsigned>(set.rumble_strength));
+    SDL_Log("input: rumble %s, strength %u%%, on %s", set.rumble ? "on" : "off",
+            static_cast<unsigned>(set.rumble_strength),
+            kRumbleEventsNames[static_cast<int>(set.rumble_events)]);
     if (set.right_touch.on) {
         SDL_Log("input: the right mouse button touches (%u, %u)",
                 static_cast<unsigned>(set.right_touch.x), static_cast<unsigned>(set.right_touch.y));
@@ -3447,6 +4123,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                                                                 : "the language setting");
     }
     mt_cf_configure(&cf);
+    start_speech(g, options, cf.language);
     mt_diag_configure_from_env();
     mt_gles_config gl{};
     gl.present = on_gl_present;
@@ -3464,23 +4141,79 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     cfg.app_user = &ui;
 
     int status = kExitOk;
+    std::optional<RunVerification> verification; // --verify-run (#408)
     g.rumble.install();
+    // The speedrun timer (#406): the categories (shipped and the data folder's), the settings it
+    // checks, and its listener beside rumble's hook.
+    {
+        std::vector<std::string> problems;
+        g.run_categories = load_run_categories(data_dir(), &problems);
+        for (const std::string &p : problems) {
+            SDL_Log("run: category %s", p.c_str());
+        }
+        std::vector<std::string> names;
+        for (const RunCategory &c : g.run_categories) {
+            names.push_back(c.id);
+        }
+        set_run_category_choices(std::move(names));
+        g.run_timer.attach(&g.settings);
+        g.run_timer.set_listener([&g](RunSignal signal, const RunTime &t) {
+            g.livesplit.on_signal(signal, t);
+            // A split into the run file, or the replay's for the verifier (#408).
+            const std::size_t n = g.run_timer.times().size();
+            if (signal == RunSignal::kSplit && n != 0 &&
+                n <= g.run_timer.category().splits.size()) {
+                const RunTime &at = g.run_timer.times()[n - 1];
+                g.runs.split(g.run_timer.category().splits[n - 1].title,
+                             static_cast<std::uint64_t>(at.ms) * 1000, at.ticks);
+            }
+        });
+        if (mt_game_events_add_listener(run_timer_event, &g) != 0) {
+            SDL_Log("run: no room for the timer's game-event listener: it never starts");
+        }
+    }
     // Guest function hooks (maplethief/hooks.h, #143): registered for the whole run, each on or
     // off as its setting says. fix_original_bugs (#155, docs/re/original-bugs.md): the portal
-    // items' exit(1) and Play before the engine's main menu (#122).
+    // items' exit(1), Play before the engine's main menu (#122) and portal620's warp (#388).
     mt_hooks_install_original_bug_fixes(options.settings.fix_original_bugs ? 1 : 0);
+    mt_cf_set_missing_key_fallback(options.settings.fix_original_bugs ? 1 : 0); // bug 15
     // The port's keys reach the popup menu's quest tab, which the device's never did (#167):
     // OK there opens a quest's page the engine then cannot paint. Fixed in every mode.
     mt_hooks_install_quest_page_fix(1);
+    // A word wider than a text box makes Text_Wrap run off memory's end (#419, bug 15's key in
+    // Korean): the guard cuts the word at the box's width instead. Every mode (ADR 0228).
+    mt_hooks_install_text_wrap_guard(1);
     // screen_shake (#158, ADR 0093): the scenes' camera shake scaled; off at 100 (the original).
     mt_hooks_install_screen_shake(options.settings.screen_shake);
     // flashes (#186): the full-screen flashes' alpha scaled; off at 100 (the original).
     mt_hooks_install_flashes(options.settings.flashes);
+    // --native-script-vm (#386, ADR 0226): the script VM's opcode loop on the host (the default
+    // since #430 and #431); off: the recompiled original; shadow (#430): both, compared at each
+    // call.
+    if (options.native_script_vm_shadow) {
+        mt_scriptvm_shadow_install(1, nullptr);
+        SDL_Log("game: the script VM runs both ways, compared (--native-script-vm shadow)");
+    } else {
+        mt_hooks_install_native_script_vm(options.native_script_vm ? 1 : 0);
+    }
+    if (!options.native_script_vm && !options.native_script_vm_shadow) {
+        SDL_Log("game: the script VM runs the recompiled loop (--native-script-vm off)");
+    }
     // auto_loot (#175, assists.h): the drops' contact test widened near the hero; off: no hook.
     install_auto_loot(options.settings.auto_loot);
     SDL_Log("game: the original bugs are %s", options.settings.fix_original_bugs
                                                   ? "fixed (fix_original_bugs = on)"
                                                   : "kept, as the original");
+    // restored_content (#389, docs/re/original-bugs.md "Unreachable content"): off in every
+    // preset. Shops 0, 1 and 16 from three merchants (#426), Monster Carnival from a Spiegelman
+    // NPC in three towns (#427), the unreached maps 4.5 and 4.8 from a portal on 4.3 (#428).
+    install_restored_shops(options.settings.restored_content);
+    install_restored_carnival(options.settings.restored_content);
+    install_restored_maps(options.settings.restored_content);
+    SDL_Log("game: restored content is %s",
+            options.settings.restored_content
+                ? "on (shops 0, 1 and 16, Monster Carnival, the maps 4.5 and 4.8)"
+                : "off, as the original");
     // The offline cash shop (#156, ADR 0072): sold for meso, or cancelled as the original
     // without a server (off, every preset).
     const bool cash_meso = options.settings.cash_shop == CashShop::kMeso;
@@ -3488,13 +4221,17 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     SDL_Log("game: the cash shop %s",
             cash_meso ? "sells for meso (cash_shop = meso)" : "is off: every payment is cancelled");
     // Offline polish (#154, ADR 0084): the title menu's dead online buttons, and Game Center on
-    // this computer. Without the local leaderboard the Game Center button is dead too.
+    // this computer. Without the local leaderboard the Game Center button is dead too, and
+    // without the cash shop the Cash button and the death popup's revives (#400).
     const bool local_gc = options.settings.local_game_center;
     std::uint32_t hide = 0;
     if (options.settings.hide_online_ui) {
         hide = MT_OFFLINE_HIDE_LINKS;
         if (!local_gc) {
             hide |= MT_OFFLINE_HIDE_GAME_CENTER;
+        }
+        if (!cash_meso) {
+            hide |= MT_OFFLINE_HIDE_CASH;
         }
     }
     mt_offline_ui_configure(hide);
@@ -3506,6 +4243,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                                     "Center)"),
             local_gc ? "on this computer (the leaderboard, achievements)"
                      : "closes at once, as offline");
+    SDL_Log("game: the Cash button and the death popup's revives %s",
+            (hide & MT_OFFLINE_HIDE_CASH) != 0
+                ? "are hidden, their keys send nothing (hide_online_ui, cash_shop = off)"
+                : "are shown, as the original");
     mt_process *p = mt_process_load(&cfg, program.program, file.data() + offset, length);
     if (p == nullptr) {
         SDL_Log("game: the boot could not load the slice");
@@ -3523,7 +4264,17 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         follow_ui_animations(g);
         const Uint64 started = SDL_GetTicksNS();
         g.stats.start(started, refresh_hz, g.vsync, gfx_total_ns());
+        // The hang watchdog (#337): from the boot to the end of the run, never the import.
+        hang_watchdog_start(mt_process_cpu(p),
+                            hang_watch_seconds(options.hang_seconds, options.fixed_step_us != 0,
+                                               options.force_hang));
         const std::uint32_t outcome = mt_process_run(p);
+        hang_watchdog_stop();
+        if (const HangStats hang = hang_watchdog_stats(); hang.seconds > 0) {
+            SDL_Log("hang: the longest run-loop turn took %.2f s (the watchdog waits %g s); %u "
+                    "hang report(s)",
+                    hang.longest_gap, hang.seconds, hang.hangs);
+        }
         const mt_process_result *r = mt_process_result_of(p);
         const double seconds = static_cast<double>(SDL_GetTicksNS() - started) / 1e9;
         const mt_gles_stats stats = mt_gles_get_stats();
@@ -3703,6 +4454,56 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     static_cast<unsigned long long>(g.presents),
                     static_cast<unsigned long long>(options.frames));
         }
+        // The recovery points (#335): a write in progress finishes; a run without a crash
+        // report deletes them with #198's marker, a crashed one keeps them for the next start.
+        if (crash_reported()) {
+            g.recovery.wait();
+        } else {
+            g.recovery.clean_exit();
+        }
+        // The run's file (#405): written; or the replay's verdict.
+        if (g.runs.mode() == RunRecorder::Mode::kRecording) {
+            g.runs.finish(clean ? RunEnd::kQuit : RunEnd::kFailed,
+                          clean ? "" : outcome_name(outcome),
+                          path_utf8(utf8_path(saves.data_dir) / "runs"), mt_process_cpu(p));
+        } else if (g.runs.mode() == RunRecorder::Mode::kPlaying) {
+            const bool reached = g.runs.done();
+            g.runs.finish(RunEnd::kQuit, "", "", nullptr);
+            const std::uint64_t missed = g.runs.missed();
+            SDL_Log("game: --play-run: %s; %llu checkpoints compared, %s%s",
+                    reached ? "every recorded turn played" : "the replay ended early",
+                    static_cast<unsigned long long>(g.runs.compared()),
+                    g.runs.first_difference().empty()
+                        ? "all the same"
+                        : ("first difference at " + g.runs.first_difference()).c_str(),
+                    missed != 0 ? (", " + std::to_string(missed) + " not reached").c_str() : "");
+            const mt_runtape_stats ts = mt_runtape_get_stats();
+            if (ts.overrun != 0) {
+                SDL_Log("game: --play-run: %llu clock reads past the tape's end",
+                        static_cast<unsigned long long>(ts.overrun));
+            }
+            if (!reached || !g.runs.first_difference().empty() || missed != 0 || !clean) {
+                status = kExitRunDiffers;
+            }
+            if (options.verify_run) {
+                const RunFile &f = g.runs.file();
+                verification.emplace();
+                verification->path = options.run_path;
+                verification->port_version = f.port_version;
+                verification->turns = f.turns;
+                verification->events = f.events.size();
+                verification->checkpoints = f.checkpoints.size();
+                verification->categories = f.categories;
+                verification->recorded = f.splits;
+                verification->reached = reached;
+                verification->guest_ok = clean;
+                verification->compared = g.runs.compared();
+                verification->missed = missed;
+                verification->first_difference = g.runs.first_difference();
+                verification->replayed = g.runs.replayed_splits();
+            }
+        }
+        set_run_recorder(nullptr);
         mt_process_destroy(p);
     }
     // How long the device stream ran, for the frames it pulled (a soak, #124: they should
@@ -3711,6 +4512,18 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         g.audio_start_ns != 0 ? static_cast<double>(SDL_GetTicksNS() - g.audio_start_ns) / 1e9 : 0;
     audio.close();
     g.rumble.uninstall();
+    // A run in progress ends as reset with the game (#406).
+    mt_game_events_remove_listener(run_timer_event, &g);
+    g.run_timer.reset();
+    g.livesplit.pump(); // the reset, if the socket takes it now
+    write_run_records(g);
+    // --verify-run's report (#408, run_verify.h), with the runs the replay's timer ended.
+    if (verification) {
+        verification->runs = g.replayed_runs;
+        print_run_report(options, run_verify_report(*verification));
+        status = run_verified(*verification) ? kExitOk : kExitRunDiffers;
+    }
+    detach_script_pad(g);
     g.rumble.stop();
     g.game_center.install(false); // its hook points at `g`
     mt_offline_ui_configure(0);
@@ -3797,13 +4610,21 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             static_cast<unsigned long long>(rs.requests), static_cast<unsigned long long>(rs.sent),
             static_cast<unsigned long long>(rs.no_pad), static_cast<unsigned long long>(rs.ignored),
             static_cast<unsigned long long>(rs.failed));
+        SDL_Log("game: run events: %llu chapter ends, %llu job advances, %llu bosses killed, "
+                "%llu map changes",
+                static_cast<unsigned long long>(ev.chapter_ends),
+                static_cast<unsigned long long>(ev.job_advances),
+                static_cast<unsigned long long>(ev.boss_kills),
+                static_cast<unsigned long long>(ev.map_changes));
     }
+    stop_speech(g);
     g.applet.finish(); // the boost off, the peak's line (#240)
     g.lifecycle.unwatch();
     g.interp.stop(); // its target, before mt_gfx's backend goes
     g.gear.stop();
     g.minimap.stop();
     g.exp_percent.stop();
+    g.input_display.stop();
     g.gpu.stop();
     g.hint_layer.stop();
     g.hud_labels.stop();

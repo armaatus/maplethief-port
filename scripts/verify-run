@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Verify a shared run file (#408, ADR 0156, docs/play/speedrun.md#verifying-a-run): runs
+# `MapleThief --verify-run FILE`, which replays it with no window and no audio device, compares
+# every checkpoint, recomputes the split times from its clock tape and the clean-run status from
+# its recorded settings, and prints a report. It needs the game build that recorded the file (the
+# same port version) and your own copy of the game (the same binary).
+#
+#   scripts/verify-run [--game EXE] FILE.mtrun
+#     --game EXE   the MapleThief to run (default: $MAPLETHIEF_GAME, then dist/mac or
+#                  dist/linux as scripts/build stages them, then build/mac-debug or
+#                  build/linux-debug)
+#
+# Exit status: MapleThief's: 0 verified, 6 not verified (or refused), 4 no game; 2 usage.
+# Windows: scripts/verify-run.ps1.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage() {
+    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+game="${MAPLETHIEF_GAME:-}"
+file=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+    --game)
+        game="${2:?--game needs a path}"
+        shift 2
+        ;;
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    -*)
+        echo "verify-run: unknown option $1" >&2
+        usage >&2
+        exit 2
+        ;;
+    *)
+        [ -z "$file" ] || {
+            echo "verify-run: one run file at a time" >&2
+            exit 2
+        }
+        file="$1"
+        shift
+        ;;
+    esac
+done
+[ -n "$file" ] || {
+    usage >&2
+    exit 2
+}
+
+if [ -z "$game" ]; then
+    candidates=(
+        "$REPO/dist/mac/MapleThief.app/Contents/MacOS/MapleThief"
+        "$REPO/dist/mac/debug/MapleThief.app/Contents/MacOS/MapleThief"
+        "$REPO/build/mac-debug/platform/MapleThief.app/Contents/MacOS/MapleThief"
+        "$REPO/build/linux-debug/platform/MapleThief"
+    )
+    for sh in "$REPO"/dist/linux/MapleThief-game-*-linux-*/MapleThief.sh; do
+        [ -f "$sh" ] && candidates=("$sh" "${candidates[@]}")
+    done
+    for c in "${candidates[@]}"; do
+        if [ -x "$c" ]; then
+            game="$c"
+            break
+        fi
+    done
+fi
+[ -n "$game" ] || {
+    echo "verify-run: no MapleThief found: build one (scripts/build) or pass --game EXE" >&2
+    exit 4
+}
+exec "$game" --verify-run "$file"

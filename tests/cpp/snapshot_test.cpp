@@ -863,6 +863,69 @@ TEST_CASE("snapshot: a state round-trips through a second restore unchanged") {
     }
 }
 
+TEST_CASE("snapshot: a stored state re-packed deflated is the deflated save's file (#335)") {
+    World w;
+    mt_cpu &cpu = w.cpu;
+    const u32 items[1] = {mt_cf::string_create(&cpu, u"two", false)};
+    mt_ns::array_create(&cpu, items, 1, false);
+    std::memset(cpu.mem + k_segment + 0x200, 0x3C, 0x4000);
+    const Bytes stored = save(w, MT_SNAPSHOT_STORE, 2);
+    const Bytes deflated = save(w, 0, 2);
+    const auto repack = [](const Bytes &in, std::string *why_out) {
+        u8 *bytes = nullptr;
+        std::size_t n = 0;
+        char why[256] = {};
+        const int rc = mt_snapshot_deflate(in.data(), in.size(), &bytes, &n, why, sizeof why);
+        *why_out = why;
+        Bytes out;
+        if (rc == 0) {
+            out.assign(bytes, bytes + n);
+            std::free(bytes);
+        } else {
+            CHECK(bytes == nullptr);
+            CHECK(n == 0);
+        }
+        return out;
+    };
+    std::string why;
+    const Bytes packed = repack(stored, &why);
+    INFO(why);
+    REQUIRE(!packed.empty());
+    CHECK(packed.size() < stored.size());
+    // The same header as the deflated save (but for the guest's time) and the same sections.
+    mt_snapshot_header a{}, b{};
+    REQUIRE(mt_snapshot_read_header(packed.data(), packed.size(), nullptr, &a, nullptr, 0) == 0);
+    REQUIRE(mt_snapshot_read_header(deflated.data(), deflated.size(), nullptr, &b, nullptr, 0) ==
+            0);
+    CHECK((a.flags & MT_SNAPSHOT_STORE) == 0u);
+    CHECK(a.flags == b.flags);
+    CHECK(a.slot == 2u);
+    CHECK(a.sections == b.sections);
+    CHECK(std::string(a.port_version) == b.port_version);
+    CHECK(std::memcmp(a.binary_sha256, b.binary_sha256, 32) == 0);
+    const std::vector<mt_snap::Section> sa = sections_of(packed), sb = sections_of(deflated),
+                                        ss = sections_of(stored);
+    REQUIRE(sa.size() == sb.size());
+    for (std::size_t i = 0; i < sa.size(); i++) {
+        CAPTURE(sa[i].name);
+        CHECK(sa[i].name == sb[i].name);
+        CHECK(sa[i].bytes == sb[i].bytes);
+        CHECK(sa[i].bytes == ss[i].bytes);
+    }
+    // Byte for byte: a deflated file re-packed is itself (the writer is deterministic).
+    CHECK(repack(packed, &why) == packed);
+    CHECK(repack(deflated, &why) == deflated);
+    // It restores.
+    CHECK(restore_why(w, packed).empty());
+    // A damaged file is refused with the reader's reason, and nothing is made.
+    Bytes bad = stored;
+    bad[bad.size() - 10] ^= 0xFF;
+    CHECK(repack(bad, &why).empty());
+    CHECK(why.find("CRC") != std::string::npos);
+    CHECK(repack(Bytes{1, 2, 3}, &why).empty());
+    CHECK(why == "not a save state (wrong magic)");
+}
+
 // --- #203: the graphics, audio and UIKit host state ----------------------------------------------
 
 TEST_CASE("snapshot: a restore lets go of the input the present holds") {
@@ -950,6 +1013,35 @@ TEST_CASE("snapshot: textures come back with their texels; textures made since a
     CHECK(again == later);
     mt_gfx_texture_destroy(again);
     mt_gfx_texture_destroy(tex);
+}
+
+TEST_CASE("snapshot: a state with three silent effects and two empty music voices restores") {
+    // #409: the audio section asked 30 bytes an effect voice and 43 a music voice, more than the
+    // smallest ones take (26, 39): a state with several such voices and little after them was
+    // refused ("a count of 2 runs past the section").
+    namespace mix = mt_audio::mix;
+    World w;
+    mix::Voices v;
+    for (u32 k = 1; k <= 3; k++) {
+        mix::Voices::Effect e;
+        e.key = k;
+        v.effects.push_back(e);
+    }
+    for (u32 k = 1; k <= 2; k++) {
+        mix::Voices::Music m;
+        m.key = k;
+        m.ended = true;
+        v.music.push_back(m);
+    }
+    save(w); // the audio state's first use in this process stops the voices before it
+    mix::voices_replace(v);
+    const Bytes state = save(w);
+    mix::reset();
+    CHECK(restore_why(w, state).empty());
+    const mix::Voices back = mix::voices_copy();
+    CHECK(back.effects.size() == 3);
+    CHECK(back.music.size() == 2);
+    mix::reset();
 }
 
 TEST_CASE("snapshot: the mixer's voices, copied and put back, play the same samples") {

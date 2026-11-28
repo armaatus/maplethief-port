@@ -51,6 +51,13 @@ def test_allowlist_pins_the_committed_files():
     sources = {
         "MapleThief.app/Contents/Resources/MapleThief.icns": ICON_DIR / "MapleThief.icns",
         "icon.png": ICON_DIR / "icon.png",
+        # The same icon where the AppImage and the Flatpak bundle name it (ADR 0193).
+        "io.github.armaatus.maplethief.png": ICON_DIR / "icon.png",
+        "files/icon.png": ICON_DIR / "icon.png",
+        "files/share/icons/hicolor/256x256/apps/io.github.armaatus.maplethief.png": ICON_DIR
+        / "icon.png",
+        "export/share/icons/hicolor/256x256/apps/io.github.armaatus.maplethief.png": ICON_DIR
+        / "icon.png",
     }
     # Drawn by the Switch build: the NRO alone or in a kit, and in the Switch player zip (#243).
     built = {
@@ -74,6 +81,18 @@ def test_switch_icon_cli_writes_the_file(tmp_path):
     out = tmp_path / "sub" / "icon.jpg"
     assert appicon.main(["switch-icon", str(out)]) == 0
     assert out.read_bytes() == appicon.switch_icon()
+
+
+def test_android_icons_are_the_plate_at_each_launcher_density(tmp_path):
+    icons = appicon.android_icons()
+    assert set(icons) == {f"mipmap-{d}/ic_launcher.png" for d in appicon.ANDROID_ICON_SIZES}
+    for density, size in appicon.ANDROID_ICON_SIZES.items():
+        img = png.decode(icons[f"mipmap-{density}/ic_launcher.png"])
+        assert (img.width, img.height) == (size, size)
+        assert img.rgba == appicon.render(size).rgba
+    assert appicon.main(["android-icons", str(tmp_path / "res")]) == 0
+    for name, data in icons.items():
+        assert (tmp_path / "res" / name).read_bytes() == data
 
 
 def test_render_shapes():

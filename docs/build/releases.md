@@ -4,7 +4,7 @@ How a release is cut. The step-by-step version, with what each step checks and w
 
 ## What a release holds
 
-A release is a GitHub Release with, for each desktop platform, a **player build** and a **port kit**, plus a `.sha256` for each, one `SHA256SUMS` over all of them, and generated release notes ([ADR 0024](../adr/0024-release-contents-and-flow.md), [ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md)).
+A release is a GitHub Release with, for each desktop platform, a **player build** and a **port kit**, and for the Nintendo Switch a player build only (no kit), plus a `.sha256` for each, one `SHA256SUMS` over all of them, and generated release notes ([ADR 0024](../adr/0024-release-contents-and-flow.md), [ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md)).
 
 - A **player build** is what people download to play: the game with its code recompiled, and none of the game's art, music, maps or text. On first launch the player imports their own `MapleThief-1.5.ipa`, and the game copies the game's files into `game/` next to itself. Saves and settings go in `data/` beside it ([ADR 0127](../adr/0127-data-folder-next-to-the-game.md), [Playing MapleThief](../play/README.md)).
 - A **kit** holds only our own code, built from the tag: the platform shell without the game, the runtime and SDL3 libraries and headers, the recompiler, the Python tools and scripts, the docs and the licences. It never holds a game build. Each user builds that from their own IPA.
@@ -12,37 +12,57 @@ A release is a GitHub Release with, for each desktop platform, a **player build*
 | File | Built on | By |
 |---|---|---|
 | `MapleThief-<version>-macos-universal.zip` | the Mac | `scripts/release build TAG --players-only` |
-| `MapleThief-<version>-linux-x86_64.tar.gz` | the Mac, in the glibc 2.39 container | `scripts/release build TAG --players-only` |
+| `MapleThief-<version>-linux-x86_64.tar.gz`, `.AppImage`, `.flatpak` | the Mac, in the glibc 2.35 container (ADR 0193) | `scripts/release build TAG --players-only` |
 | `MapleThief-<version>-windows-x64.zip` | the Windows PC | `scripts\release.ps1 build TAG -PlayersOnly` |
+| `MapleThief-<version>-linux-aarch64.tar.gz` | the Mac, in the arm64 glibc 2.35 container (no AppImage or Flatpak) | `scripts/release build TAG --players-only` |
+| `MapleThief-<version>-windows-arm64.zip` | the Windows PC, cross-compiled | `scripts\release.ps1 build TAG -PlayersOnly -Arch arm64` |
+| `MapleThief-<version>-switch.zip` | the Mac, in the devkitA64 container | `scripts/release build TAG --players-only` |
 | `MapleThief-kit-<version>-macos-universal.zip` | hosted CI | `.github/workflows/release.yml` |
 | `MapleThief-kit-<version>-linux-x86_64.tar.gz` | hosted CI, in the Linux container | `.github/workflows/release.yml` |
 | `MapleThief-kit-<version>-windows-x64.zip` | hosted CI | `.github/workflows/release.yml` |
+| `MapleThief-kit-<version>-linux-aarch64.tar.gz` | hosted CI, ARM64 runner, in the Linux container | `.github/workflows/release.yml` |
+| `MapleThief-kit-<version>-windows-arm64.zip` | hosted CI, ARM64 runner | `.github/workflows/release.yml` |
 
-The player builds stay on local machines because they link the code recompiled from the IPA (`work/gen`), which CI never has ([ADR 0100](../adr/0100-public-repository-and-player-releases.md)).
+The ARM64 builds are [ADR 0194](../adr/0194-windows-arm64-and-linux-aarch64-builds.md)'s. The player builds stay on local machines because they link the code recompiled from the IPA (`work/gen`), which CI never has ([ADR 0100](../adr/0100-public-repository-and-player-releases.md)).
 
 A content guard (`python3 -m mtport.release guard`) checks every file before it's uploaded and again before publishing. Kits are checked in kit mode: no generated code, nothing from `work/`, `assets-out/` or `build/`, nothing identical to a file of the IPA, and no images or audio apart from the port's own icon. Player builds are checked in player mode: the recompiled code, but none of the game's files. The guard's rules are in [ADR 0024](../adr/0024-release-contents-and-flow.md) and [ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md).
 
 ## The flow
 
-Tags are annotated SemVer: `vX.Y.Z`, or `vX.Y.Z-rc.N` for a pre-release. A release starts as a pull request from `dev` into `main` ([ADR 0126](../adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md)):
+Tags are annotated SemVer: `vX.Y.Z`, or `vX.Y.Z-rc.N` for a pre-release. A release starts as a pull request from `dev` into `main` ([ADR 0126](../adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md)). Before opening it, check the notes:
 
 ```sh
-gh pr create --base main --head dev --title "Release TAG" --body "Release TAG"
+scripts/release notes TAG
+gh pr create --base main --head dev --title "Release TAG" --body "Release TAG" --label type:release
 ```
 
-CI runs every OS, Debug and Release, and packages the kits. A `release title` check fails unless the pull request comes from `dev`, its title is `Release vX.Y.Z[-rc.N]`, and that tag doesn't exist yet. Merge it with a merge commit when everything is green.
+The release notes are GitHub's, generated from the pull requests merged since the last release and grouped by their labels ([`.github/release.yml`](../../.github/release.yml): epics, recompiler, runtime, platforms, Nintendo Switch, reverse engineering, compendium, build and CI, enhancements, fixes, docs). A pull request with no label of any group lands in "Other changes". `scripts/release notes TAG` asks GitHub for the notes it would generate (it creates nothing) and fails, naming each one, while any pull request lands there (#313); `scripts/release start` runs the same check. Label an epic pull request with its epic's labels (`gh pr edit N --add-label type:epic,area:...`). The release pull request itself carries `type:release`, which keeps it out of the notes.
 
-The merge starts `release.yml`, which creates the annotated tag on the merge commit and the draft release, with the notes header ([`.github/release-notes-header.md`](../../.github/release-notes-header.md)) above GitHub's generated notes. It then builds the three kits from the tag on hosted runners, checks each, runs the guard, and uploads them to the draft.
+CI runs every OS, Debug and Release, and packages the kits. A `release title` check fails unless the pull request comes from `dev`, its title is `Release vX.Y.Z[-rc.N]`, that tag doesn't exist yet, and it carries the `type:release` label. Merge it with a merge commit when everything is green.
+
+## Branch rules
+
+`dev` and `main` carry repository rulesets ([ADR 0173](../adr/0173-branch-rulesets-ci-result-gate-and-merge-commits-only.md)), kept in [`.github/rulesets/`](../../.github/rulesets/) and applied with `scripts/rulesets apply` (`scripts/rulesets check` compares them with GitHub's):
+
+- Every change reaches either branch through a pull request. No force-push, no deletion, and nobody bypasses the rules, the owner included.
+- Pull requests are merged with a **merge commit**. Squash and rebase merging are off, so an epic's children stay visible in history and the release tag sits on the merge commit.
+- Into `dev`: `scope`, `lint + Python min/latest` and `CI result` must pass. `CI result` waits for every other CI job and fails if any failed or was cancelled; the jobs `scripts/ci-scope` skips on a documentation-only pull request count as passing.
+- Into `main`: every job of the full profile must pass by name (the ten Debug and Release builds, Windows and Linux on x64 and ARM64 included, ASan/UBSan, iOS, Switch, Android, clang-tidy, lint + Python, `CI result`), and `release title`, which fails unless the pull request comes from `dev`. On a pull request into `main` CI never skips a job.
+
+A new or renamed CI job goes into the rulesets' JSON in the same pull request (`tests/test_rulesets.py` fails otherwise); run `scripts/rulesets apply` after it merges.
+
+The merge starts `release.yml`, which creates the annotated tag on the merge commit and the draft release, with the notes header ([`.github/release-notes-header.md`](../../.github/release-notes-header.md): what's new for players, the downloads, going back to an older version) above GitHub's generated notes. It then builds the five kits from the tag on hosted runners (Windows and Linux on x64 and ARM64), checks each, runs the guard, and uploads them to the draft.
 
 Then build the player builds on the two machines that have `work/gen` (`scripts/bootstrap`, then `python3 -m recomp all`), and publish:
 
 ```sh
-scripts/release build TAG --players-only     # Mac: macOS universal and Linux x86_64
+scripts/release build TAG --players-only     # Mac: macOS universal, Linux x86_64 and aarch64, the Switch zip
 scripts\release.ps1 build TAG -PlayersOnly   # Windows PC, from the x64 developer environment
+scripts\release.ps1 build TAG -PlayersOnly -Arch arm64   # Windows PC, from the x64_arm64 one
 scripts/release publish TAG                  # Mac: every file present, SHA256SUMS, publish
 ```
 
-Each `build` works from a clean checkout of the tag, with `MAPLETHIEF_VERSION` taken from the tag, and unpacks every file to check it (`--version` prints the tag's version; `lipo` and `codesign` on the Mac; on Windows no MSVC runtime DLL in the player build). `publish` checks that all six files and their `.sha256` are on the draft, downloads and verifies them, guards each again, writes `SHA256SUMS` and publishes.
+Each `build` works from a clean checkout of the tag, with `MAPLETHIEF_VERSION` taken from the tag, and unpacks every file to check it (`--version` prints the tag's version; `lipo` and `codesign` on the Mac; on Windows no MSVC runtime DLL in the player build; the cross-compiled Windows ARM64 build, which the x64 PC can't run, has its PE machine checked instead). `publish` checks that `docs/KNOWN_ISSUES.md` at the tag cites no closed issue (`python3 -m mtport.release known-issues`, #309), that all twelve files (five kits, seven player builds) and their `.sha256` are on the draft, downloads and verifies them, guards each again, writes `SHA256SUMS` and publishes.
 
 Options: `--dry-run` runs every local step and prints the GitHub commands instead, so the flow can be rehearsed on a local tag. `--replace` (`-Replace`) replaces a file already on the draft. `--platforms` narrows what `build` makes and what `publish` requires. Everything also stays in `build/release/TAG/`.
 

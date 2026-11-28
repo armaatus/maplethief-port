@@ -36,7 +36,7 @@ Option 3 for the address space and (c) for the heap. The runtime's interface is 
 
 | Range | Use |
 |---|---|
-| 0x00000000–0x00000FFF | page zero (`__PAGEZERO`), never mapped |
+| 0x00000000–0x00000FFF | page zero (`__PAGEZERO`): read-only zeros once the image is sealed ([ADR 0250](0250-guest-page-zero-reads-as-zeros-on-every-host.md)) |
 | 0x00001000–0x00FFFFFF | the image: the Mach-O's segments at their vmaddr |
 | 0x01000000–0x1EFFFFFF | the guest heap (480 MiB), grown and committed on demand |
 | 0x1F000000–0x1FFFFFFF | guest stacks (16 MiB), each above a 64 KiB no-access guard |
@@ -64,7 +64,7 @@ The runtime library and the tests always compile with the header default, `MT_ME
 
 **Image.** `mt_macho_segments` reads the `LC_SEGMENT`s of a thin 32-bit ARM Mach-O. The file is untrusted, so the parser checks the header, the command sizes, the file ranges, `filesize <= vmsize` and address overflow. `mt_mem_map_segment` / `mt_mem_map_macho` commit each segment's pages, copy its file bytes to its vmaddr and leave the rest of vmsize zero (`__bss`). `__PAGEZERO` is skipped, and anything outside 0x1000–0x1000000 or overlapping another segment is refused. After the loader has written its fixups (#43), `mt_mem_seal_image` gives each committed host page the union of the `initprot` of the segments in it: read-only unless a segment in the page is writable. Host-page granularity has two effects:
 
-- On a 4 KiB host, `__TEXT` and `__LINKEDIT` are read-only exactly, and page zero is never mapped, so a null access faults.
+- On a 4 KiB host, `__TEXT` and `__LINKEDIT` are read-only exactly. Page zero was never mapped, so a null access faulted; since [ADR 0250](0250-guest-page-zero-reads-as-zeros-on-every-host.md) the seal commits it read-only, so a null read returns zero bytes and a null write faults, as on a 16 KiB host.
 - On a 16 KiB host, the page 0xF0000–0xF3FFF holds the end of `__TEXT` and the start of `__DATA` and stays writable. The page 0x0–0x3FFF holds page zero and the start of `__TEXT`, so a null read returns zero bytes and a null write faults.
 
 **Heap.** All bookkeeping lives on the host:

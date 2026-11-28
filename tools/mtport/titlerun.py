@@ -312,7 +312,7 @@ def parse_coverage(text: str) -> list[Covered]:
         raise ValueError("not a maplethief coverage file (no '# maplethief coverage 1' header)")
     out = []
     for i, line in enumerate(lines[1:], 2):
-        if not line.strip():
+        if not line.strip() or line.startswith("hit "):  # the run coverage's hits (#295)
             continue
         c = COVERAGE_LINE.match(line)
         if c is None:

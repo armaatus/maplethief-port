@@ -72,3 +72,136 @@ Both are recorded, RTA is shown. Which one a leaderboard ranks by is the communi
 - The end of a full-game run, mob 69's death, has never been reached in the port. Its event can be tested on a synthetic mob and with a save moved to the boss's map; a whole run to it waits for #285's verification chain.
 - Every port write into guest memory (the Assists, `game_speed`, the cash shop's counters, auto-loot's hook) must be recorded or refused by the recorder. The recorder's child inventories them as #202 did the host states, and a test fails by name on one it misses.
 - How we'd know this was wrong: a replay that fails to verify on the build that recorded it (a guest input or clock read the tape misses: the census or the clock hook is incomplete); a guest digest that differs between two presentations of one run (a presentation setting reaches the guest, and becomes a run variable); or runners who ignore the overlay for LiveSplit's own timer everywhere (then the overlay can shrink to the split name).
+
+## Addendum (#406): the timer, categories and run logs
+
+Built in [`platform/src/run_timer.h`](../../platform/src/run_timer.h) (no SDL) with `run_timer = off | on` and `run_category = NAME` (Other, outside the presets, applied at once). The calls this child made (delegated by Joris, 2026-11-26):
+
+- **Splits in order.** Only the next split's event counts; a later split's event before it does nothing. A category is a sequence, as in LiveSplit, so #407 can send `split` without a mapping.
+- **Starts and resets.** A new character starts a run, and a new character during a run ends that run as reset first. Turning the timer off, another category and quitting also reset it. Loading a saved character does not: a runner may reload after a death.
+- **The neutral value of an Assist** is its Original preset column (every column is the same for an Assist, `check_registry`). The check walks `settings_registry()` by group, so a new Assist is covered without a change to the timer.
+- **Run variables a category does not name** may only take their Original value. A run outside its category's values is timed, logged and shown, never a personal best.
+- **The personal best** is the fastest finished run that is clean and inside its category, by real time; it is stored as a run log (`runs/<category>.best`), and the overlay compares the last split reached with the best's.
+- **The category file and the run log** are `key = value` text ([docs/formats/run-category.md](../formats/run-category.md)). The shipped categories live in `platform/categories/` and are embedded in the binary by CMake; a player's own go in `<data dir>/categories/` and replace a shipped one of the same name.
+- **Any%'s splits** are the three chapter ends and the bosses the main quests need (64, 67, 69). Mob 66 is a side quest's boss and mob 68 has no fight in version 1.5, so splitting on them would leave a run waiting. (Wrong about 68: see the [#434 addendum](#addendum-434-any-splits-on-mob-68).)
+- **The overlay** is the frame-time overlay's box (ADR 0071) in the safe area's top right corner, drawn after every read-back, so never in a shot or a golden.
+
+The times are the host's monotonic clock (`SDL_GetTicksNS`) and the input layer's tick count (`mt_input_get_stats`). With #405's clock tape a replay can recompute both from the tape (#408); the timer takes its clock as a parameter for that.
+
+## Addendum: the recorder, its census and the file's size (#405, 2026-11-26)
+
+Accepted (delegated by Joris, 2026-11-26). #405 built the recorder and `--play-run`. The issue asked for this addendum on ADR 0147; it belongs here, with the replay it builds.
+
+**Where the tape sits.** In the runtime (`maplethief/runtape.h`), not the frontend:
+
+- *The clock tape* wraps whatever clocks the platform installed (the virtual, paced or launch clock as `mt_libc_config.clock`, and GCD's clock and sleep) and records every value the guest reads, run-length coded per stream. One more value reaches the guest from real time and is a third stream: `-[AVAudioPlayer isPlaying]`, since a player plays out on the audio device's thread.
+- *The boundary* is the runtime's own entry points: `mt_input_press`, `mt_input_release`, `mt_input_release_all`, `mt_uikit_touch`, `mt_uikit_lifecycle_event`, `mt_runloop_set_fire_tolerance` and `mt_runtape_poke` (a port write into guest memory) record each call at its run-loop turn. While a tape plays they take only the tape's calls, which UIApplicationMain's loop delivers after the turn's run-loop work and before the turn hook. So everything above them in the frontend (the devices, bindings, the focus engine, menu repeat, the Assists' latches, `skip_intros`' taps, `--tap`) is recorded without the frontend knowing, and plays back without its devices.
+- *The host's own reads of the time* (its waits, pacing, overlays, menu timing) go through `mt_runtape_host_time`, which is not taped: a replay runs on the fixed-step loop and makes none of them.
+
+**The replay** (`MapleThief --play-run FILE`, headless with `SDL_VIDEO_DRIVER=dummy`) puts the file's game files in a scratch data folder, takes the file's settings (only `fullscreen` and `vsync` from the command line), installs no platform clock, applies each recorded setting change at its turn through `apply_live_setting`, never waits, and compares a checkpoint (guest memory digest and state line) every 1,000 game ticks and at the recording's last whole turn. It refuses a file from another binary or port version. Exit status 6 if a checkpoint differs or the replay ends early.
+
+**The census** (`platform/src/run_census.cpp`, checked by `tests/test_run_census.py`, which scans `platform/src` and fails by file and call on a site it does not list). 54 sites in 21 files:
+
+| Kind | Sites | What |
+|---|---|---|
+| recorded | 15 | every action press and release (actions, gamepads, focus, menu repeat, the Assists' latches, `skip_intros`), touches, lifecycle messages, the 1 ms grid's fire tolerance |
+| pure | 35 | a function of guest state and the settings, which the file holds with every change: the hooks of `fix_original_bugs`, `screen_shake`, `flashes`, `auto_loot`, list keys, the list scroll, `keypad_layout`; `game_speed`'s table and interval; `ui_animations`; widescreen's view width and touch area; the key pad's and the minimap's host transforms; observers that pass through (haptics, crash recovery's save count, the backups' save hook); a save state's own file |
+| refused | 4 | `autosave`'s guest save (the window closes or hides, which a replay has no window for), a save state's load, a save import or backup restore, a data folder switch: the recording ends with the last whole turn before it (`END_`: refused, and which) |
+
+The Assists are not refused: their input goes through the boundary (turbo, auto-potion, auto-run) or they are pure (`game_speed`, `auto_loot`, fast-forward only changes the clock the tape records). The cash shop's counters are written by the runtime's own cash shop, inside the guest's calls, so they replay as the guest does. Whether an Assist makes a run *assisted* is #406's clean-run rule, not the recorder's.
+
+**Evidence** (local, real assets, Debug, Apple M4, 2026-11-26). A scripted real-time session of 120 s: the title, Play, a new character, the intro and the first map (2.8, the field), driven by `--tap` and a virtual Xbox 360 pad (`--pad`, 121 button changes taken from `tests/regress/title_to_combat.replay`'s timing), recorded with `record_runs = on`, then `--play-run` three times on each recording:
+
+| Pacing | Turns | Events | File | Checkpoints (ticks) | 3 replays |
+|---|---|---|---|---|---|
+| display (window, locked to 60 Hz) | 3,604 | 112 | 6,697 B | 1000, 2000, 2392 (map 2.8) | all equal |
+| `pacing = wall` (window) | 84,261 | 124 | 474,357 B | 1000 (2.8, an NPC chat), 2000, 2382 (2.9) | all equal |
+| the 1 ms grid (dummy display, ADR 0131) | 96,655 | 123 | 18,758 B | 1000, 2000, 2386 (map 2.8) | all equal |
+
+Each replay ran the 120 s in about 41 s (display) and reproduced every digest and state line. The three recordings reached different places (each is its own real-time run), so pacing does not matter to the replay: each plays back exactly.
+
+**Size per hour** (from those 120 s, the boot included): about **0.2 MB** locked to a display, **0.6 MB** on the 1 ms grid, **14 MB** with `pacing = wall`, where every read sees a new microsecond and the deltas do not repeat. The events are a few bytes each and do not matter at that scale. The default pacing is display, so a player's hour is under a megabyte.
+
+**Consequences.**
+
+- #408's `--verify-run` is `--play-run` with the split times recomputed; #406 writes the splits into `SPLT`; #409's practice states are save states, which the recorder refuses.
+- A new way into the guest from the frontend fails `test_run_census.py` until it is classified. A `pure` site that turns out to read host state (a device, the host's clock) is a replay that diverges at its first checkpoint: it becomes recorded (through `mt_runtape_poke` or a new event kind) or refused.
+- The file names actions by number, so it plays only on the version that recorded it, as this ADR already required.
+- How we'd know this was wrong: a replay that differs on the build that recorded it (a census site that is not what it says, or a clock read that does not go through the hooks); or `pacing = wall` files that players keep for hours (then the clock stream needs a coarser coding, for example the delta from the paced plan).
+
+## Addendum (#407): the LiveSplit link
+
+Built in [`platform/src/livesplit.h`](../../platform/src/livesplit.h) with `livesplit = off | HOST:PORT` and `livesplit_game_time = on | off` (Other, outside the presets, applied at once, `--livesplit`, `--livesplit-game-time`). The rows need `kCapLiveSplit` (ADR 0142), which only the desktop has. The calls this child made (delegated by Joris, 2026-11-27):
+
+- **LiveSplit's server, as of LiveSplit 1.8.37** (its latest release, 2026-02-15; `src/LiveSplit.Core/Server/CommandServer.cs` and its README). The TCP server listens on port 16834 by default and is started by the player (Control, Start TCP Server, or the server's startup setting). A command is one line ending in `\n`, with its argument after a space. `starttimer`, `split`, `reset`, `pausegametime` and `setgametime TIME` have no reply. TIME is `[-][[[d.]hh:]mm:]ss[.fffffff]`, and fields need not be padded. `LiveSplitState.SetGameTime` fixes the game time only while game time is paused; otherwise it runs on with real time. `TimerModel.Start` clears the game time, and `Reset` unpauses it.
+- **What a run sends.** On a start, `starttimer`. With game time, it then sends `pausegametime` and `setgametime 0:00:00.000`, so LiveSplit's game time moves only when the port sets it. On each split, `setgametime` with the split's ticks, then `split`. While a run is in progress, `setgametime` on every tick that changes the count. On a reset, `reset`. A finished run is reset (`reset`) before the next start, because LiveSplit ignores `starttimer` after a run ends. The game time is ticks × 50 ms as `H:MM:SS.mmm`. The timer tells the link through a listener (`RunTimer::set_listener`: start, split, reset), so the link needs `run_timer = on`. A category's splits map one to one onto the LiveSplit layout's segments, as the #406 addendum planned.
+- **A practice sends nothing** (#409, ADR 0189). A practice is never a run, so the timer gives the listener no start, split or game time for it. Loading a practice state during a run ends that run as reset, and a finished run is cleared first, so LiveSplit gets `reset` either way.
+- **Game time is on by default.** It changes nothing for a runner who compares by real time, because LiveSplit records both. Turning it off leaves LiveSplit's game time to LiveSplit.
+- **Addresses are typed, never looked up.** HOST is `localhost`, an IPv4 address or a bracketed IPv6 one. A name would need a DNS query, and a query can block. A second computer running LiveSplit on the network still works by its address.
+- **No turn waits.** The socket is non-blocking. A connect carries on across turns and gives up after 3 s. A refused or lost connection is retried every 3 s and logged once per run of failures. Lines are queued while connecting, up to 64 KiB (a full queue drops the connection), and dropped while there is no connection: LiveSplit then misses them. The link reads LiveSplit's replies only to notice that it closed. POSIX sockets, and Winsock (`ws2_32`) on Windows. The Switch build has no socket code (no capability, no row).
+- **Evidence.** `tests/cpp/livesplit_test.cpp` (CI) sets up a TCP server on 127.0.0.1 that receives the exact lines of a synthetic run (start, two splits, a reset, the game time) and of a finished run followed by the next start. A refused port and an address that never answers keep every turn under 50 ms, log one line and reconnect once a server is there. A headless game run against a local listener sent `starttimer`, `pausegametime`, a `setgametime` per tick and `reset` at the quit.
+
+## Addendum (#408): the verifier, splits in the file and the presentation check
+
+Accepted (delegated by Joris, 2026-11-27). Built in [`platform/src/run_verify.h`](../../platform/src/run_verify.h) and `MapleThief --verify-run FILE` (`scripts/verify-run`, `scripts/verify-run.ps1`). The calls this child made:
+
+- **`--verify-run` is `--play-run` with no window and no audio device** (`SDL_VIDEO_DRIVER=dummy`, `--no-audio`). Before it plays, it refuses a file that does not read (a flipped byte fails the packed body's CRC-32), one of another binary or port version, and one with a missing checkpoint or checkpoints out of turn order (`run_file_problem`). A checkpoint is required every 1,000 game ticks up to the last checkpoint's tick, and at every split's turn. It prints a report on the process's own stdout (the guest's printing goes to stderr for the run) and exits 0 when the file verifies, 6 when it does not, refusals included.
+- **Checkpoints are matched by turn.** A replay takes a checkpoint at every turn the file has one and compares the digest, the tick count and the state line. One where the replay's own triggers (a 1,000-tick mark, a split) ask for a checkpoint and the file has none is a difference too, so a cut or shortened file cannot verify. The recorder keeps at most one checkpoint a turn.
+- **Splits go into the file.** The recorder takes each split from the timer's listener: its title, its turn, its real time in the timer's whole milliseconds and its ticks (`SPLT`). It also takes a checkpoint at that turn. `SPLT` also holds the run categories the session timed (id and `run_category_text`), and `--play-run` writes them into its scratch `categories/`, so a player's own category travels with the file. The report says whether each one is the shipped category or the file's own. The format stays 1: #405's file was never released.
+- **One clock for the timer.** While a tape records or plays, the timer's real time is the guest's clock as the guest last read it (`mt_runtape_guest_clock_us`), which the tape holds, so the replay gives the recorded times to the microsecond. That clock is the paced clock, within half a tick and a refresh of the host's (pacing.h); without a tape the timer keeps the host's monotonic clock. The split times are recomputed and compared, never taken from the file. Clean or assisted is the replay's own timer's, from the recorded settings and every change.
+- **A run from a save.** A category may name its start: `start = EVENT`, a split's event or `load_character SLOT` (`MT_GAME_EVENT_LOAD_CHARACTER`). The run then starts there, and only while no run is in progress, in place of a new character. A loaded save fires no map change, so `load_character` is the way to time a stretch from a save.
+
+**Evidence** (local, real assets, Debug, Apple M4, 2026-11-27).
+
+- *Chapter 1's last stretch, from a save.* A save built from `play.chapter_1_k`'s (`mtport.savedata describe`/`build`, kept in a scratch folder): the hero on the Pirate's platform of map 2.0 with the Pirate's Request done, and a category `start = load_character 0`, `split chapter_end 1 = Orbis`. A real-time session in a window (display pacing at 60 Hz, `record_runs = on`, a virtual Xbox 360 pad from `--pad`: Play, the slot, Start, up to the Pirate, A through the chat) reached Orbis. The live timer showed **0:23.8** and logged 23,817 ms and 466 ticks. `scripts/verify-run` on the file (7,416 bytes, 1,006 turns, 37 input events, 2 checkpoints) printed `0:23.817 466 ticks` recorded and replayed, `same`, `clean`, 2 of 2 checkpoints the same and `verdict: VERIFIED`, exit 0, in 17 s.
+- *One input moved.* The same file with one action press (event 17, turn 552) moved 3 turns later: exit 6, `a checkpoint differs at turn 593` (the split's checkpoint, the first after the move; ticks 470 recorded, 439 replayed). The split also differs (0:22.417, 435 ticks).
+
+**The presentation check.** The recording above was replayed with each presentation setting changed in the file's settings, comparing every checkpoint's digest:
+
+| Changed | Guest digest |
+|---|---|
+| `hd_text = on` with `render_scale = 2` (at render scale 1 it does nothing) | the same |
+| `render_scale = 2` | the same |
+| `gapless_music = on` | the same |
+| `texture_pack`: a 2× pack of the game's GL textures only (`mtport.texpack build --no-ui`, 614 textures) | the same |
+| `texture_pack`: the same pack with its UIKit images (691 files) | **differs** at the first checkpoint, with the same tick and state line |
+| `widescreen = auto` | **differs** at the first checkpoint |
+
+`widescreen` writes the view's width into guest memory (the census's pure sites), so the game lays out a wider field. A pack's UIKit images are decoded into the guest's own image buffers, so their pixels are in the digest. Neither changed the run here (the same tick count and state line), but by this ADR's rule both are now **run variables**: `kRunVariables` is `fix_original_bugs`, `skip_intros`, `widescreen` and `texture_pack`. A pack is recorded as `off` or `on`, never by its folder, and a category's `allow texture_pack = off, on` takes those. The shipped categories name neither, so both must be off in them, like the original game. A run with a texture pack also verifies only where the verifier has the same pack in the same folder.
+
+**Consequences.**
+
+- A file verifies only on the build that recorded it, as before. A player's verifying build needs the same port version and their own copy of the game.
+- The guest's printing on stdout no longer reaches a verifier's report. A script reads the report from stdout and the log from stderr.
+- How we'd know this was wrong: a recording that does not verify on the build that made it (a clock read or input the tape misses), or a split time that differs between the live timer and the replay (a timer reading that does not go through the tape).
+
+## Addendum (#404): the input display
+
+Built in [`platform/src/input_display.h`](../../platform/src/input_display.h) with `input_display = off | on` (Video, outside the presets, applied at once, `--input-display`). The calls this child made (delegated by Joris, 2026-11-27):
+
+- **What it shows.** The four directions as a d-pad, jump, attack, quick slots 1 to 4, and the menu keys OK, back, the popup menu and the map, each lit while held. The port's own actions (fast-forward, auto-run, the save states' keys) never reach the game and have no cell. The cash shop and the revives are left out: under `hide_online_ui` they may send nothing (#400), and the panel stays small.
+- **Where a cell's state comes from.** The runtime's held actions (`mt_input_held`), which every device reaches through the action layer (ADR 0048): keys, pads, the Assists' latches and `skip_intros`' taps, after direction resolution (with `direction_priority = last` only the delivered direction lights). And the touch key pad's own key BOOLs (`TouchKeyPadView` `onLeftKey` … `onShort4Key`, ivars +104 to +113), which a finger sets without passing the action layer. The runtime reads them at each turn and after the turn's touches and gives them as `mt_input_pad_keys()`. It only reads; nothing is written, so the run census has no new site. The Map, Bag and Cash buttons on the touch screen are UIKit buttons that call the game directly, so a touch on them does not light a cell.
+- **Where it goes.** The bottom left of the border left of the picture when that bar has room for it at the window text's scale (or down to half of it), else of the border under the picture, else over the picture's left edge between the Map button (y < 52) and the d-pad (y ≥ 176), where the HUD has nothing. With widescreen the picture is the wide one. It is hidden while a port overlay (the settings menu, the remap screen, the controls card) is open, since those take the input.
+- **How it draws.** The port's Canvas (its 5x7 font and shapes, no game art) into a small texture, drawn after every read-back like the minimap and the EXP figure. It is never in a shot, a golden of the game, a `--capture` or the regression replay's digests, so it is not a run variable.
+
+**Evidence.** `tests/cpp/input_display_test.cpp` (CI): the action layer driven by keys and a pad lights exactly the delivered cells; the pad keys light theirs; the placement in a side bar, a bar below and over the picture; goldens `tests/golden/data/input_display_idle.png` and `input_display_held.png` of the panel alone on a synthetic frame. Locally with real assets, `scripts/regress --settings input_display=on` gives the same digests as with it off.
+
+## Addendum (#434): Any% splits on mob 68
+
+Accepted (delegated by Joris, 2026-11-27). The #406 addendum left mob 68 out of Any% because it "has no fight in version 1.5". The port's own chapter 2 run disproves that: mob 68 (32,000 HP) is main quest 8's boss on 9.5, the map's own spawn with no map script and no boss scene ([docs/re/boss-fights.md](../re/boss-fights.md)), and `play.chapter_2_f_synthetic` kills it with the run event `boss_killed 68` ([docs/testing/chapter-2-quests.md](../testing/chapter-2-quests.md), main 8). Main 8 leads to main 9 and the trip to chapter 3, so every run fights it.
+
+- **Any%'s splits** are now seven: the tutorial's end, mob 64, chapter 1's end, **mob 68 (`Chapter 2 boss`)**, chapter 2's end, mob 67 and mob 69. The new split sits between chapter 1's and chapter 2's ends, where the game fires it.
+- **Mob 66 stays out.** It is side quest 37's boss on 4.17, which a run can skip, so a split on it could leave a run waiting; the #406 reason holds for 66 only.
+- A personal best or a `.segments` file saved with the six-split Any% no longer lines up with the category; no release shipped one (#406 and #434 are in the same unreleased line).
+
+**Evidence.** `tests/cpp/run_timer_test.cpp`, `run categories: both shipped categories parse` (CI): Any%'s split list, in order, with 68 fourth. Locally with real assets, `play.chapter_2_f_synthetic` times Any%'s splits from `Chapter 2 boss` to `Chapter 2`: the 68 split fires on `run event mob 68 killed` and the run finishes at chapter 2's end. `play.speedrun_new_character` (#442, local, real assets) checks the second exit criterion of epic #402 from a fresh install: a new character starts the run, the overlay shows the real time and the next split before and after the Tutorial split, `turbo_attack` turned on and off mid-run leaves the run assisted, and the logs and Any%'s personal best land in the data folder's `runs/`.
+
+## Addendum (#424): a scene's map load is a map change
+
+The Context above says every warp goes through `CMapleWorld::changeMap` `0x81369`. Not every map change does: a scene ends with command 28 (a warp) or 52 (the next scene's map) by writing the target `CStateGame +0x98`/`+0x9C` and game mode 8 directly ([qol.md](../re/qol.md#the-commands)). The ending's 2.11 and 2.0 and the Magatia scenes' 8.6, 7.6 and 8.4 load that way, so `split map_change 2.11` never split. The call (delegated by Joris, 2026-11-27): **a scene's map load is a map change.**
+
+- **Where.** Every map load runs `CStateGame::LoadMap` `0x868D5` ([program-flow.md](../re/program-flow.md)), which is now observed too. Its two callers are told apart by the return address the `bl` leaves in `lr`: `LoadGame` `0x86C1D` (`0x87385`, entering the game: no change) and `CLoaderThread::Load` `0x6AEB5` mode 1 (`0x6AEEB`, a map change).
+- **No double event for a portal.** A portal's warp keeps its event at `changeMap`, with its portal and its timing. The runtime remembers the target `changeMap` reported last; the load of that target is that warp's and reports nothing. Any other load from the loader is a `MAP_CHANGE` with `value` `+0x98`, `more[0]` `+0x9C` and `more[1]` −1: a scene sets the hero's place itself, there is no portal.
+- **Alternatives.** Moving the whole event to `LoadMap` would drop the portal (a scene's `+0xA0` is the last warp's) and move every portal split by the fade-out's frames. Leaving scenes out would make `map_change` silently miss five maps.
+
+**Evidence.** `tests/cpp/rumble_test.cpp` "events: LoadMap's entry is a scene's map change, not a warp's or the game's (#424)" (CI). Locally with real assets, `play.chapter_3_e_synthetic` hears `MAP_CHANGE 2 11 -1` and `2 0 -1` for the ending's two scenes.

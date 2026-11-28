@@ -1,0 +1,35 @@
+// The Gradle project of MapleThiefTests.apk (#357): the runtime's seam tests on a device. Like
+// ../settings.gradle it never runs CMake: tests/CMakeLists.txt builds libMapleThiefTests.so and
+// libcrash_child.so, then runs this project with the -Pmaplethief.* properties of build.gradle.
+// The versions come from tools/containers/android/pins.env.
+
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+plugins {
+    // The pin is checked against pins.env in build.gradle; a plugins block can't read a variable.
+    id 'com.android.application' version '8.7.3' apply false
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+def pins = [:]
+file('../../../tools/containers/android/pins.env').eachLine { line ->
+    if (line && !line.startsWith('#') && line.contains('=')) {
+        def i = line.indexOf('=')
+        pins[line.substring(0, i)] = line.substring(i + 1)
+    }
+}
+gradle.ext.maplethiefPins = pins
+
+rootProject.name = 'MapleThiefTests'

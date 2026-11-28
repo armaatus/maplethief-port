@@ -5,6 +5,9 @@
 // log line) if it breaks one. The
 // manifest must be there and say format "1", a name and a language, or the pack is not opened.
 //
+// Several packs (#421, ADR 0149): up to MT_PACKS_MAX open in order, all of one language; the
+// first that has a key in a table (a string, or a table field by its row and column) wins it.
+//
 // What the pack changes while it is open (docs/re/text.md has the evidence):
 //   - the dialogue and quest text: the game's LocalizedCString 0x6DD1 asks NSBundle, which asks
 //     mt_textpack_lookup first;
@@ -33,7 +36,9 @@
 #include "maplethief/hle/abi.h"
 #include "maplethief/hooks.h"
 #include "maplethief/memory.h"
+#include "maplethief/packcheck.h"
 #include "maplethief/textpack.h"
+#include "textpack/packcheck_internal.h"
 #include "textpack/strings_file.h"
 #include "textpack/textpack_internal.h"
 
@@ -81,12 +86,11 @@ constexpr TextColumn k_columns[] = {
 };
 
 // The files a pack may have, by their name in lower case, and the table each serves.
+// pack.strings (ADR 0149) is the manifest when it is there; else textpack.strings (ADR 0108).
 constexpr const char *k_files[][2] = {
-    {"textpack.strings", "textpack"},
-    {"scripts.strings", "Scripts"},
-    {"scriptextra.strings", "ScriptExtra"},
-    {"tables.strings", "Tables"},
-    {"port.strings", "Port"},
+    {"pack.strings", "pack"},       {"textpack.strings", "textpack"},
+    {"scripts.strings", "Scripts"}, {"scriptextra.strings", "ScriptExtra"},
+    {"tables.strings", "Tables"},   {"port.strings", "Port"},
 };
 
 struct Field {
@@ -97,15 +101,25 @@ struct Field {
 };
 
 struct Pack {
-    bool open = false;
     std::string dir;
     std::map<std::string, std::map<std::string, std::string>> tables; // "Scripts" -> entries
     std::map<std::string, std::vector<Field>> fields;                 // "item_etc" -> fields
-    std::set<std::string> overflow_logged;
+    mt_pack_use use{};                                                // use.dir set when read
 };
 
-Pack g_pack;
+std::vector<Pack> g_packs; // in the list's order: the first that has a key wins it
+std::set<std::string> g_overflow_logged;
 mt_textpack_stats g_stats{};
+
+// Pack `winner` answered an entry: each later pack that has it too counts it as hidden.
+template <typename Has> void note_hidden(std::size_t winner, Has has) {
+    for (std::size_t j = winner + 1; j < g_packs.size(); ++j) {
+        if (has(g_packs[j])) {
+            ++g_packs[j].use.hidden;
+            ++g_packs[j].use.hidden_by[winner];
+        }
+    }
+}
 
 // Reads the file at `path` into `out` (at most MT_TEXTPACK_MAX_FILE bytes, checked first).
 bool read_file(const fs::path &path, std::vector<std::uint8_t> *out, std::string *why) {
@@ -263,7 +277,7 @@ std::string sub_chars(const std::string &s, std::int32_t from, std::int32_t to) 
 }
 
 std::uint32_t patch_table(const std::string &rel, std::vector<std::uint8_t> &bytes) {
-    if (!g_pack.open || g_pack.fields.empty()) {
+    if (g_packs.empty()) {
         return 0;
     }
     // <Language>/data/<table>.dat
@@ -277,11 +291,18 @@ std::uint32_t patch_table(const std::string &rel, std::vector<std::uint8_t> &byt
         return 0;
     }
     const std::string table = rel.substr(slash + 6, rel.size() - slash - 6 - 4);
-    const auto it = g_pack.fields.find(table);
-    if (it == g_pack.fields.end()) {
+    const TextColumn *any_column = nullptr;
+    for (const Pack &p : g_packs) {
+        const auto it = p.fields.find(table);
+        if (it != p.fields.end() && !it->second.empty()) {
+            any_column = it->second.front().column;
+            break;
+        }
+    }
+    if (any_column == nullptr) {
         return 0;
     }
-    const TextColumn &any = *it->second.front().column;
+    const TextColumn &any = *any_column;
     std::uint16_t header[3] = {0, 0, 0};
     if (bytes.size() >= 6) {
         std::memcpy(header, bytes.data(), 6);
@@ -296,27 +317,58 @@ std::uint32_t patch_table(const std::string &rel, std::vector<std::uint8_t> &byt
         return 0;
     }
     std::uint32_t written = 0;
-    for (const Field &f : it->second) {
-        if (f.row >= header[1]) {
-            if (g_pack.overflow_logged.insert("row:" + f.key).second) {
-                logf("textpack: Tables.strings: \"%s\": %s has %u rows: ignored", f.key.c_str(),
-                     table.c_str(), static_cast<unsigned>(header[1]));
-            }
+    // A field (its column and row) belongs to the first pack that has it; a later pack's value
+    // for it is hidden.
+    std::map<std::pair<const TextColumn *, u32>, std::size_t> winner;
+    for (std::size_t i = 0; i < g_packs.size(); ++i) {
+        Pack &pack = g_packs[i];
+        const auto it = pack.fields.find(table);
+        if (it == pack.fields.end()) {
             continue;
         }
-        const std::size_t room = f.column->width;
-        const std::string v = utf8_cut(f.value, room);
-        if (v.size() < f.value.size() && g_pack.overflow_logged.insert(f.key).second) {
-            g_stats.overflows++;
-            logf("textpack: overflow: Tables.strings \"%s\" is %zu bytes, its field holds %zu: "
-                 "cut to \"%s\"",
-                 f.key.c_str(), f.value.size(), room, v.c_str());
+        for (const Field &f : it->second) {
+            if (f.row >= header[1]) {
+                continue;
+            }
+            const auto [at, fresh] = winner.emplace(std::make_pair(f.column, f.row), i);
+            if (!fresh && at->second != i) {
+                ++pack.use.hidden;
+                ++pack.use.hidden_by[at->second];
+            }
         }
-        std::uint8_t *field = bytes.data() + 6u + f.row * f.column->stride + f.column->offset;
-        std::memset(field, 0, f.column->width);
-        // NOLINTNEXTLINE(bugprone-not-null-terminated-result): a zero-padded fixed-width field
-        std::memcpy(field, v.data(), v.size());
-        written++;
+    }
+    for (std::size_t i = 0; i < g_packs.size(); ++i) {
+        Pack &pack = g_packs[i];
+        const auto it = pack.fields.find(table);
+        if (it == pack.fields.end()) {
+            continue;
+        }
+        for (const Field &f : it->second) {
+            if (f.row >= header[1]) {
+                if (g_overflow_logged.insert("row:" + f.key).second) {
+                    logf("textpack: Tables.strings: \"%s\": %s has %u rows: ignored", f.key.c_str(),
+                         table.c_str(), static_cast<unsigned>(header[1]));
+                }
+                continue;
+            }
+            if (winner.at(std::make_pair(f.column, f.row)) != i) {
+                continue;
+            }
+            const std::size_t room = f.column->width;
+            const std::string v = utf8_cut(f.value, room);
+            if (v.size() < f.value.size() && g_overflow_logged.insert(f.key).second) {
+                g_stats.overflows++;
+                logf("textpack: overflow: Tables.strings \"%s\" is %zu bytes, its field holds %zu: "
+                     "cut to \"%s\"",
+                     f.key.c_str(), f.value.size(), room, v.c_str());
+            }
+            std::uint8_t *field = bytes.data() + 6u + f.row * f.column->stride + f.column->offset;
+            std::memset(field, 0, f.column->width);
+            // NOLINTNEXTLINE(bugprone-not-null-terminated-result): a zero-padded fixed-width field
+            std::memcpy(field, v.data(), v.size());
+            written++;
+            ++pack.use.replaced;
+        }
     }
     g_stats.fields += written;
     return written;
@@ -328,7 +380,7 @@ void *g_draw_user = nullptr;
 } // namespace
 
 void note_drawn(const std::string &utf8) {
-    if (g_pack.open && g_draw_fn != nullptr) {
+    if (!g_packs.empty() && g_draw_fn != nullptr) {
         g_draw_fn(utf8.c_str(), g_draw_user);
     }
 }
@@ -336,11 +388,10 @@ void note_drawn(const std::string &utf8) {
 void note_overflow(const std::string &utf8, float width, float limit) {
     // A text of several lines is measured as one (the width drawAtPoint returns): the game's own
     // speech boxes would read as overflows. Only a single line is judged.
-    if (!g_pack.open || width <= limit || utf8.find('\n') != std::string::npos) {
+    if (g_packs.empty() || width <= limit || utf8.find('\n') != std::string::npos) {
         return;
     }
-    if (g_pack.overflow_logged.size() < 4096 &&
-        g_pack.overflow_logged.insert("text:" + utf8).second) {
+    if (g_overflow_logged.size() < 4096 && g_overflow_logged.insert("text:" + utf8).second) {
         g_stats.overflows++;
         logf("textpack: overflow: \"%s\" is %.0f points wide, its texture %.0f: cut", utf8.c_str(),
              static_cast<double>(width), static_cast<double>(limit));
@@ -358,7 +409,16 @@ using namespace mt_textpack;
 
 extern "C" int mt_textpack_open(const char *dir) noexcept {
     mt_textpack_close();
+    return mt_textpack_add(dir);
+}
+
+extern "C" int mt_textpack_add(const char *dir) noexcept {
     if (dir == nullptr || dir[0] == 0) {
+        return -1;
+    }
+    if (g_packs.size() >= MT_PACKS_MAX) {
+        logf("textpack: %s is not opened: at most %u text packs at once", dir,
+             static_cast<unsigned>(MT_PACKS_MAX));
         return -1;
     }
     try {
@@ -415,8 +475,17 @@ extern "C" int mt_textpack_open(const char *dir) noexcept {
                      path.c_str(), file.duplicates);
             }
             const std::string table = f[1];
-            if (table == "textpack") {
+            if (table == "pack") {
                 manifest = std::move(file.entries);
+                continue;
+            }
+            if (table == "textpack") {
+                if (found.count("pack") != 0) {
+                    logf("textpack: %s: pack.strings is the manifest: textpack.strings ignored",
+                         dir);
+                } else {
+                    manifest = std::move(file.entries);
+                }
                 continue;
             }
             stats.entries += static_cast<u32>(file.entries.size());
@@ -437,24 +506,43 @@ extern "C" int mt_textpack_open(const char *dir) noexcept {
                 pack.tables[table] = std::move(file.entries);
             }
         }
-        if (found.count("textpack") == 0) {
-            logf("textpack: %s has no textpack.strings (the manifest): no text pack", dir);
+        const char *manifest_name = found.count("pack") != 0 ? "pack.strings" : "textpack.strings";
+        if (found.count("pack") == 0 && found.count("textpack") == 0) {
+            logf("textpack: %s has no pack.strings or textpack.strings (the manifest): no text "
+                 "pack",
+                 dir);
             return -1;
         }
         const std::string bad = manifest.empty() && stats.refused != 0
                                     ? std::string("the manifest was refused")
                                     : check_manifest(manifest);
         if (!bad.empty()) {
-            logf("textpack: %s/textpack.strings: %s: no text pack", dir, bad.c_str());
+            logf("textpack: %s/%s: %s: no text pack", dir, manifest_name, bad.c_str());
             return -1;
         }
+        if (!g_packs.empty()) {
+            const std::string &first = g_packs.front().tables["textpack"]["language"];
+            if (manifest["language"] != first) {
+                logf("textpack: %s: language %s differs from the first text pack's %s: no text "
+                     "pack",
+                     dir, manifest["language"].c_str(), first.c_str());
+                return -1;
+            }
+        }
         pack.tables["textpack"] = std::move(manifest);
-        pack.open = true;
-        g_pack = std::move(pack);
-        g_stats = stats;
-        mt_cf::set_korean_utf8(true);
-        install_hooks(true);
-        const auto &m = g_pack.tables["textpack"];
+        pack.use.rejected = stats.refused;
+        if (g_packs.empty()) {
+            g_stats = mt_textpack_stats{};
+            g_packs.reserve(MT_PACKS_MAX); // a pack's dir stays where mt_textpack_pack_use put it
+            mt_cf::set_korean_utf8(true);
+            install_hooks(true);
+        }
+        g_packs.push_back(std::move(pack));
+        g_stats.files += stats.files;
+        g_stats.refused += stats.refused;
+        g_stats.entries += stats.entries;
+        g_stats.unknown += stats.unknown;
+        const auto &m = g_packs.back().tables["textpack"];
         const auto get = [&m](const char *k) {
             const auto it = m.find(k);
             return it != m.end() ? it->second.c_str() : "";
@@ -462,51 +550,227 @@ extern "C" int mt_textpack_open(const char *dir) noexcept {
         logf("textpack: %s: \"%s\" (%s, version %s, for the game's %s): %u files, %u entries, "
              "%u refused",
              dir, get("name"), get("language"), get("version")[0] != 0 ? get("version") : "-",
-             get("game_version")[0] != 0 ? get("game_version") : "-", g_stats.files,
-             g_stats.entries, g_stats.refused);
-        return static_cast<int>(g_stats.entries);
+             get("game_version")[0] != 0 ? get("game_version") : "-", stats.files, stats.entries,
+             stats.refused);
+        return static_cast<int>(stats.entries);
     } catch (...) {
         logf("textpack: %s cannot be read: no text pack", dir);
-        mt_textpack_close();
         return -1;
     }
 }
 
 extern "C" void mt_textpack_close(void) noexcept {
-    if (g_pack.open) {
+    if (!g_packs.empty()) {
         install_hooks(false);
         mt_cf::set_korean_utf8(false);
     }
-    g_pack = Pack{};
+    g_packs.clear();
+    g_overflow_logged.clear();
     g_stats = mt_textpack_stats{};
 }
 
-extern "C" int mt_textpack_is_open(void) noexcept { return g_pack.open ? 1 : 0; }
+extern "C" int mt_textpack_is_open(void) noexcept { return g_packs.empty() ? 0 : 1; }
 
 extern "C" const char *mt_textpack_lookup(const char *table, const char *key) noexcept {
-    if (!g_pack.open || table == nullptr || key == nullptr) {
+    if (g_packs.empty() || table == nullptr || key == nullptr) {
         return nullptr;
     }
     g_stats.lookups++;
-    const auto t = g_pack.tables.find(table);
-    if (t == g_pack.tables.end() || std::strcmp(table, "textpack") == 0) {
+    if (std::strcmp(table, "textpack") == 0) {
         return nullptr;
     }
-    const auto it = t->second.find(key);
-    if (it == t->second.end()) {
-        return nullptr;
+    // The first pack with the key in the table answers.
+    const auto has = [table, key](const Pack &p, const std::string **value) {
+        const auto t = p.tables.find(table);
+        if (t == p.tables.end()) {
+            return false;
+        }
+        const auto it = t->second.find(key);
+        if (it == t->second.end()) {
+            return false;
+        }
+        *value = &it->second;
+        return true;
+    };
+    for (std::size_t i = 0; i < g_packs.size(); ++i) {
+        const std::string *value = nullptr;
+        if (has(g_packs[i], &value)) {
+            ++g_packs[i].use.replaced;
+            g_stats.replaced++;
+            note_hidden(i, [&has](const Pack &p) {
+                const std::string *v = nullptr;
+                return has(p, &v);
+            });
+            return value->c_str();
+        }
     }
-    g_stats.replaced++;
-    return it->second.c_str();
+    return nullptr;
 }
 
 extern "C" const char *mt_textpack_manifest(const char *key) noexcept {
-    if (!g_pack.open || key == nullptr) {
+    if (g_packs.empty() || key == nullptr) {
         return nullptr;
     }
-    const auto &m = g_pack.tables["textpack"];
+    const auto &m = g_packs.front().tables["textpack"];
     const auto it = m.find(key);
     return it != m.end() ? it->second.c_str() : nullptr;
 }
 
+extern "C" uint32_t mt_textpack_pack_count(void) noexcept {
+    return static_cast<u32>(g_packs.size());
+}
+
+extern "C" int mt_textpack_pack_use(uint32_t index, mt_pack_use *out) noexcept {
+    if (index >= g_packs.size() || out == nullptr) {
+        return -1;
+    }
+    *out = g_packs[index].use;
+    out->dir = g_packs[index].dir.c_str();
+    return 0;
+}
+
 extern "C" mt_textpack_stats mt_textpack_get_stats(void) noexcept { return g_stats; }
+
+namespace {
+
+mt_packcheck_english_fn g_port_fn = nullptr;
+void *g_port_user = nullptr;
+
+// The places "{N}" (one or two digits) of a text, as port_text.cpp fills them.
+std::set<int> places(const std::string &s) {
+    std::set<int> out;
+    for (std::size_t i = 0; i + 2 < s.size(); ++i) {
+        if (s[i] != '{' || s[i + 1] < '0' || s[i + 1] > '9') {
+            continue;
+        }
+        const bool two = s[i + 2] >= '0' && s[i + 2] <= '9';
+        const std::size_t close = i + (two ? 3 : 2);
+        if (close < s.size() && s[close] == '}') {
+            out.insert(two ? (s[i + 1] - '0') * 10 + (s[i + 2] - '0') : s[i + 1] - '0');
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+extern "C" void mt_packcheck_set_port_text(mt_packcheck_english_fn fn, void *user) noexcept {
+    g_port_fn = fn;
+    g_port_user = user;
+}
+
+extern "C" mt_packcheck_report mt_textpack_check(const char *dir, mt_packcheck_fn fn,
+                                                 void *user) noexcept {
+    mt_packcheck::Reporter r(fn, user, "text");
+    try {
+        const std::string d = dir != nullptr ? dir : "";
+        const fs::path root = host_path(d);
+        std::error_code ec;
+        if (d.empty() || !fs::is_directory(root, ec)) {
+            r.refused(d + ": is no folder");
+            return r.report;
+        }
+        // The files by role, as mt_textpack_open finds them.
+        std::map<std::string, fs::path> found;
+        for (fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+            const std::string shown = utf8_of(it->path().filename());
+            const std::string name = lower(shown);
+            const char *role = nullptr;
+            for (const auto &f : k_files) {
+                role = name == f[0] ? f[1] : role;
+            }
+            std::error_code fe;
+            const fs::file_status status = it->symlink_status(fe);
+            if (role == nullptr) {
+                if (name.size() > 8 && name.compare(name.size() - 8, 8, ".strings") == 0) {
+                    r.ignored(shown + ": not a text pack file (Scripts, ScriptExtra, Tables, "
+                                      "Port): ignored");
+                }
+            } else if (fs::is_symlink(status)) {
+                r.ignored(shown + ": a symbolic link, never followed: ignored");
+            } else if (!fe && fs::is_regular_file(status)) {
+                found[role] = it->path();
+            }
+        }
+        std::map<std::string, std::string> manifest;
+        const bool has_pack = found.count("pack") != 0;
+        if (has_pack) {
+            mt_packcheck::check_manifest(root, "text", r, &manifest);
+            if (found.count("textpack") != 0) {
+                r.ignored("textpack.strings: pack.strings is the manifest: ignored");
+            }
+        } else if (found.count("textpack") == 0) {
+            r.refused("no pack.strings or textpack.strings (the manifest): the pack is refused");
+        } else {
+            r.note("textpack.strings: the older manifest; pack.strings (ADR 0149) also gives an id "
+                   "and the content");
+        }
+        for (const auto &f : k_files) {
+            const auto it = found.find(f[1]);
+            const std::string table = f[1];
+            if (it == found.end() || table == "pack" || (has_pack && table == "textpack")) {
+                continue;
+            }
+            const std::string shown = utf8_of(it->second.filename());
+            std::vector<std::uint8_t> bytes;
+            std::string why;
+            StringsFile file;
+            if (!read_file(it->second, &bytes, &why) ||
+                !parse_strings(bytes.data(), bytes.size(), &file, &why)) {
+                if (table == "textpack") {
+                    r.refused(shown + ": " + why + ": the pack is refused");
+                } else {
+                    r.rejected(shown + ": " + why + ": refused, the game's text kept");
+                }
+                continue;
+            }
+            if (file.duplicates != 0) {
+                r.note(shown + ": " + std::to_string(file.duplicates) +
+                       " keys given more than once: the last value of each kept");
+            }
+            if (table == "textpack") {
+                const std::string bad = check_manifest(file.entries);
+                if (!bad.empty()) {
+                    r.refused(shown + ": " + bad + ": the pack is refused");
+                }
+                continue;
+            }
+            u32 good = static_cast<u32>(file.entries.size());
+            if (table == "Tables") {
+                for (const auto &[key, value] : file.entries) {
+                    const TextColumn *column = nullptr;
+                    u32 row = 0;
+                    std::string bad;
+                    if (!parse_field_key(key, &column, &row, &bad)) {
+                        --good;
+                        r.ignored(shown + " \"" + key + "\": " + bad + ": ignored");
+                    } else if (value.size() > column->width) {
+                        r.note(shown + " \"" + key + "\": " + std::to_string(value.size()) +
+                               " bytes, its field holds " + std::to_string(column->width) +
+                               ": cut to \"" + utf8_cut(value, column->width) + "\"");
+                    }
+                }
+            } else if (table == "Port" && g_port_fn != nullptr) {
+                for (const auto &[key, value] : file.entries) {
+                    const char *english = g_port_fn(g_port_user, key.c_str());
+                    if (english == nullptr) {
+                        --good;
+                        r.ignored(shown + " \"" + key + "\": the port has no such text: ignored");
+                    } else if (places(value) != places(english)) {
+                        --good;
+                        r.ignored(shown + " \"" + key +
+                                  "\": its places ({0}, {1}, ...) are not the English's: the "
+                                  "English kept");
+                    }
+                }
+            }
+            r.report.good += good;
+        }
+        if (r.report.opens != 0) {
+            r.note(std::to_string(r.report.good) + " entries usable");
+        }
+    } catch (const std::exception &) {
+        r.refused(std::string(dir != nullptr ? dir : "") + ": cannot be read");
+    }
+    return r.report;
+}

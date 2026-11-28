@@ -1,0 +1,10 @@
+{
+ "level": 99,
+ "equipped": [
+  {"id": 11, "slots_left": 5},
+  {"id": 35, "slots_left": 5},
+  {"id": 23, "slots_left": 5},
+  {"id": 71, "slots_left": 5},
+  {"id": 59, "slots_left": 5}
+ ]
+}

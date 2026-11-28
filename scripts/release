@@ -5,19 +5,27 @@
 # the player builds need work/gen, so they are built here and on the Windows PC
 # (scripts/release.ps1) with --players-only. Without it, every step runs here as before.
 #
-#   start TAG    checks: annotated tag vX.Y.Z[-rc.N], clean tree on main, tag on origin/main
+#   notes TAG    the notes pre-flight on its own (#313), before the release pull request is
+#                opened: asks GitHub for the notes it would generate for TAG (read only; the
+#                target is the local tag, else --target REF, else dev; the range starts at the
+#                latest release) and fails when a merged pull request since then lands in "Other changes" (no label of any
+#                category of .github/release.yml)
+#   start TAG    checks: docs/KNOWN_ISSUES.md cites no closed issue (also before publish),
+#                the notes pre-flight, annotated tag vX.Y.Z[-rc.N], clean tree on main, tag on origin/main
 #                and pushed, scripts/local-ci green on it; then creates the draft release
 #                with the committed header (.github/release-notes-header.md: what the downloads
 #                hold, bring your own IPA) above generated notes (.github/release.yml), a
 #                pre-release for -rc.N
-#   build TAG    the macOS universal and Linux x86_64 kits from a clean checkout of the tag
-#                (scripts/local-ci TAG --release, with MAPLETHIEF_VERSION from the tag), and the
+#   build TAG    the macOS universal, Linux x86_64 and Linux aarch64 kits from a clean
+#                checkout of the tag (scripts/local-ci TAG --release, and scripts/test-linux
+#                TAG --release --arch arm64, with MAPLETHIEF_VERSION from the tag), and the
 #                player builds (ADR 0125): the mac-player workflow on a clean clone of the tag
-#                with this checkout's work/gen linked in, the Linux tarball in the
-#                linux-game container (scripts/linux-game player TAG), and the Nintendo
+#                with this checkout's work/gen linked in, the Linux tarballs in the
+#                linux-game container, amd64 and arm64 (scripts/linux-game player TAG
+#                --arch ARCH, ADR 0194), and the Nintendo
 #                Switch's zip in the devkitA64 container (scripts/build-switch TAG --preset
 #                switch-player --gen work/gen, #243); checks each (lipo, codesign, `--version`
-#                reports the tag; Linux in the container; the Switch zip's layout and its NRO's
+#                reports the tag; Linux in the container of its CPU; the Switch zip's layout and its NRO's
 #                NACP version), runs the content guard (kit mode for kits, player mode for
 #                player builds), writes <file>.sha256, uploads them to the draft;
 #                --players-only: the player builds only (the kits come from release.yml)
@@ -25,15 +33,15 @@
 #                .sha256 is on the draft,
 #                downloads them, verifies them, merges SHA256SUMS (`shasum -a 256 -c` must
 #                pass), runs the guard again, uploads SHA256SUMS and publishes the release
-#   itch TAG     after publish (ADR 0146): downloads the published release's macOS, Linux and
-#                Nintendo Switch player builds, checks them against SHA256SUMS and the guard's player mode,
+#   itch TAG     after publish (ADR 0146): downloads the published release's macOS, Linux
+#                (x86_64 and aarch64) and Nintendo Switch player builds, checks them against SHA256SUMS and the guard's player mode,
 #                and pushes each to its itch.io channel with the pinned butler
 #                (python3 -m mtport.release itch; the key from BUTLER_API_KEY); Windows pushes
 #                its own with scripts\release.ps1 itch TAG
 #
-# Usage: scripts/release start|build|publish|itch TAG [--dry-run] [--replace] [--players-only]
+# Usage: scripts/release notes|start|build|publish|itch TAG [--dry-run] [--replace] [--players-only]
 #                                                     [--platforms LIST] [--build-arg NAME=VALUE]...
-#                                                     [--from DIR] [--out DIR]
+#                                                     [--from DIR] [--out DIR] [--target REF]
 # (the options are described in usage() below, printed by scripts/release --help)
 #
 # Everything lands in build/release/<TAG>/. --dry-run does every local step and prints the
@@ -46,17 +54,21 @@ cd "$REPO"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: scripts/release start|build|publish|itch TAG [--dry-run] [--replace] [--players-only]
+Usage: scripts/release notes|start|build|publish|itch TAG [--dry-run] [--replace] [--players-only]
                                                     [--platforms LIST] [--build-arg NAME=VALUE]...
-                                                    [--from DIR] [--out DIR]
+                                                    [--from DIR] [--out DIR] [--target REF]
 
-  start TAG        check the tag and the tree, run scripts/local-ci on the tag, create the
-                   draft release with the notes header and generated notes
+  notes TAG        the notes pre-flight: fail when a merged pull request since the last
+                   release would land in "Other changes" of the generated notes (run it
+                   before opening the release pull request; start runs it too)
+  start TAG        check that docs/KNOWN_ISSUES.md cites no closed issue, the notes, the tag
+                   and the tree, run scripts/local-ci on the tag, create the draft release with the
+                   notes header and generated notes
   build TAG        build, check, guard and checksum the kits and player builds of this Mac
-                   (macOS universal, Linux x86_64; the Nintendo Switch's player zip) and
-                   upload them to the draft
-  publish TAG      check every platform's kit and player build is on the draft, write
-                   SHA256SUMS, publish
+                   (macOS universal, Linux x86_64 and aarch64; the Nintendo Switch's player
+                   zip) and upload them to the draft
+  publish TAG      check KNOWN_ISSUES again, and that every platform's kit and player build
+                   is on the draft, write SHA256SUMS, publish
   itch TAG         push the published release's player builds (macOS, Linux, Switch) to itch.io
                    with butler, after checking them against SHA256SUMS and the guard; needs
                    BUTLER_API_KEY; pre-releases are not pushed (ADR 0146)
@@ -66,15 +78,18 @@ Usage: scripts/release start|build|publish|itch TAG [--dry-run] [--replace] [--p
                    publish uses the kits in build/release/TAG/ instead of downloading
   --replace        build/publish: replace assets already on the draft (gh --clobber)
   --players-only   build: the player builds only; release.yml built and uploaded the kits
-  --platforms LIST build: of mac,linux,switch (default all three; switch is a player build
-                   only); publish: the platforms that must be present, of
-                   mac,linux,windows,switch (default all four)
+  --platforms LIST build: of mac,linux,linux-arm64,switch (default all four; switch is a
+                   player build only); publish: the platforms that must be present, of
+                   mac,linux,linux-arm64,windows,windows-arm64,switch (default all six)
   --build-arg A=B  build: passed to scripts/local-ci / scripts/test-linux for the image
   --from DIR       itch: take the files and SHA256SUMS from DIR, not the published release
   --out DIR        itch: download directory (default build/release/TAG/itch)
+  --target REF     notes: the branch or commit the release is cut from (default: the local
+                   tag's commit, else dev)
 
   itch --dry-run checks the files and prints the butler commands (no butler or key needed);
-  itch --platforms is of mac,linux,windows,switch (default mac,linux,switch).
+  itch --platforms is of mac,linux,linux-arm64,windows,windows-arm64,switch (default
+  mac,linux,linux-arm64,switch).
 EOF
     exit "${1:-2}"
 }
@@ -84,7 +99,7 @@ step() { echo; echo "== $*"; }
 
 [ "$#" -ge 1 ] || usage
 case "$1" in
-    start | build | publish | itch) cmd="$1"; shift ;;
+    notes | start | build | publish | itch) cmd="$1"; shift ;;
     -h | --help) usage 0 ;;
     *) echo "scripts/release: unknown command: $1" >&2; usage ;;
 esac
@@ -95,6 +110,7 @@ players_only=0
 platforms=""
 build_args=()
 itch_args=()
+target=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --dry-run) dry_run=1; shift ;;
@@ -108,6 +124,11 @@ while [ "$#" -gt 0 ]; do
         --build-arg)
             [ "$#" -ge 2 ] || usage
             build_args+=(--build-arg "$2")
+            shift 2
+            ;;
+        --target)
+            [ "$#" -ge 2 ] || usage
+            target="$2"
             shift 2
             ;;
         --from | --out)
@@ -189,9 +210,60 @@ check_draft() {
     fi
 }
 
+# check_known_issues: docs/KNOWN_ISSUES.md at the tag (this checkout's when there is no local
+# tag yet) cites no closed issue (#309): an entry holds only while its issue is open. The
+# closed issues come from gh, read-only, also with --dry-run. MAPLETHIEF_KNOWN_ISSUES (a file)
+# and MAPLETHIEF_CLOSED_ISSUES (a JSON list of numbers) stand in for both in the tests.
+check_known_issues() {
+    step "Known issues"
+    local file="${MAPLETHIEF_KNOWN_ISSUES:-}" args=()
+    if [ -z "$file" ]; then
+        file="$out/KNOWN_ISSUES.md"
+        git show "$tag:docs/KNOWN_ISSUES.md" >"$file" 2>/dev/null || cp docs/KNOWN_ISSUES.md "$file"
+    fi
+    [ -n "${MAPLETHIEF_CLOSED_ISSUES:-}" ] && args+=(--closed "$MAPLETHIEF_CLOSED_ISSUES")
+    mtrelease known-issues "$file" ${args[@]+"${args[@]}"} ||
+        die "docs/KNOWN_ISSUES.md cites a closed issue: remove or re-source the entry first"
+}
+
+# check_notes REF [PREVIOUS]: the notes pre-flight (#313). GitHub generates the notes for the tag from REF
+# with .github/release.yml (read only, also with --dry-run); a merged pull request with no label
+# of any category lands in "Other changes", and that fails. MAPLETHIEF_RELEASE_NOTES (a file of
+# generated notes) stands in for GitHub in the tests.
+check_notes() {
+    step "Release notes"
+    local args=(notes-check "$tag")
+    if [ -n "${MAPLETHIEF_RELEASE_NOTES:-}" ]; then
+        args+=(--notes "$MAPLETHIEF_RELEASE_NOTES")
+    else
+        args+=(--target "$1")
+        [ -z "${2:-}" ] || args+=(--previous "$2")
+    fi
+    mtrelease "${args[@]}" ||
+        die "a merged pull request has no category label: label it (docs/release-checklist.md)"
+}
+
+cmd_notes() {
+    local ref="$target"
+    if [ -z "$ref" ]; then
+        ref=dev
+        git rev-parse -q --verify "refs/tags/$tag" >/dev/null && ref="$(git rev-parse "$tag^{commit}")"
+    fi
+    # Before the release pull request merges, the last release's tag is not in dev's history
+    # (it sits on main's merge commit), so GitHub would pick an older one: name it.
+    local previous=""
+    [ -n "${MAPLETHIEF_RELEASE_NOTES:-}" ] ||
+        previous="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
+    check_notes "$ref" "$previous"
+}
+
 cmd_start() {
+    check_known_issues
     step "Checks"
     check_tag
+    # The tag's commit; GitHub knows it once the tag (or main) is pushed.
+    check_notes "$commit"
+    step "Checks"
     [ -z "$(git status --porcelain --untracked-files=no)" ] || die "the working tree has changes"
     echo "   ok: clean working tree"
     [ "$dry_run" -eq 1 ] || git fetch --quiet origin main
@@ -241,11 +313,12 @@ check_mac_kit() {
     echo "   --version: $got"
 }
 
-# check_linux_kit KIT: unpack and run --version in the Linux CI container (x86_64).
+# check_linux_kit KIT ARCH: unpack and run --version in the Linux CI container of ARCH (amd64 or
+# arm64).
 check_linux_kit() {
-    local kit="$1" image got
-    image="$(scripts/test-linux --image-name ${build_args[@]+"${build_args[@]}"})"
-    got="$(docker run --rm --platform linux/amd64 -v "$(cd "$(dirname "$kit")" && pwd -P):/kits:ro" \
+    local kit="$1" arch="$2" image got
+    image="$(scripts/test-linux --image-name --arch "$arch" ${build_args[@]+"${build_args[@]}"})"
+    got="$(docker run --rm --platform "linux/$arch" -v "$(cd "$(dirname "$kit")" && pwd -P):/kits:ro" \
         "$image" bash -c 'set -eu; mkdir /tmp/kit; untar "/kits/$1" /tmp/kit
             file="$(ls /tmp/kit/*/bin/MapleThief)"
             echo "arch $(uname -m)" >&2
@@ -281,18 +354,33 @@ build_mac_player() {
     players+=("$out/$name")
 }
 
-# build_linux_player: the Linux player tarball in the linux-game container (glibc 2.39 floor,
-# ADR 0065) from a clean export of the tag; --version checked in the CI container.
+# build_linux_player ARCH: the Linux player tarball in the linux-game container of ARCH (amd64
+# or arm64; one glibc 2.35 floor, ADR 0065, ADR 0193, ADR 0194) from a clean export of the tag;
+# --version checked in the CI container of the same CPU, then the tarball started in Ubuntu 22.04
+# and Debian 12. For amd64 also the AppImage and Flatpak bundle, run under Xvfb to the import
+# screen (ADR 0193: x86_64 only).
 build_linux_player() {
-    local dir="$out/linux-player" name="MapleThief-$version-linux-x86_64.tar.gz"
+    local arch="$1" cpu=x86_64 pkg
+    [ "$arch" = amd64 ] || cpu=aarch64
+    local dir="$out/linux-player-$arch" name="MapleThief-$version-linux-$cpu.tar.gz"
     rm -rf "$dir"
-    MAPLETHIEF_VERSION="$version" scripts/linux-game player "$tag" --arch amd64 --out "$dir" ||
-        die "scripts/linux-game player failed on $tag"
+    MAPLETHIEF_VERSION="$version" scripts/linux-game player "$tag" --arch "$arch" --out "$dir" ||
+        die "scripts/linux-game player --arch $arch failed on $tag"
     [ -f "$dir/$name" ] || die "scripts/linux-game player wrote no $dir/$name"
     cp "$dir/$name" "$out/$name"
     echo "-- $out/$name ($(wc -c <"$out/$name" | tr -d ' ') bytes)"
-    check_linux_kit "$out/$name"
+    check_linux_kit "$out/$name" "$arch"
+    scripts/linux-game check-player "$out/$name" ||
+        die "$name does not start in Ubuntu 22.04 or Debian 12"
     players+=("$out/$name")
+    [ "$arch" = amd64 ] || return 0
+    for pkg in $(mtrelease linux-packages "$version"); do
+        [ -f "$dir/$pkg" ] || die "scripts/linux-game player wrote no $dir/$pkg"
+        cp "$dir/$pkg" "$out/$pkg"
+        echo "-- $out/$pkg ($(wc -c <"$out/$pkg" | tr -d ' ') bytes)"
+        players+=("$out/$pkg")
+    done
+    scripts/linux-game check-packages "$dir" || die "the AppImage or Flatpak bundle does not reach the import screen"
 }
 
 # build_switch_player: the Nintendo Switch's player zip (#243, ADR 0138) in the devkitA64
@@ -335,13 +423,14 @@ cmd_build() {
     [ "$(uname -s)" = Darwin ] || die "build runs on the Mac; on Windows use scripts\\release.ps1 build"
     [ -f work/gen/gen.cmake ] ||
         die "no work/gen/gen.cmake for the player builds: scripts/bootstrap, then python3 -m recomp all"
-    local want="${platforms:-mac,linux,switch}" jobs="lint,py-min" kits=() p
+    local want="${platforms:-mac,linux,linux-arm64,switch}" jobs="lint,py-min" kits=() p
     IFS=, read -r -a plist <<<"$want"
     for p in "${plist[@]}"; do
         case "$p" in
             mac | linux) jobs="$jobs,$p" ;;
-            switch) ;; # a player build only: the release has no Switch kit
-            *) die "--platforms: build makes the mac, linux and switch builds here, not '$p'" ;;
+            linux-arm64) ;; # its kit: scripts/test-linux --arch arm64, below
+            switch) ;;      # a player build only: the release has no Switch kit
+            *) die "--platforms: build makes the mac, linux, linux-arm64 and switch builds here, not '$p'" ;;
         esac
     done
 
@@ -362,22 +451,33 @@ cmd_build() {
         rm -f build/linux-release/MapleThief-kit-"$version"-*
         MAPLETHIEF_VERSION="$version" scripts/local-ci "$tag" --release --only "$jobs" \
             ${build_args[@]+"${build_args[@]}"} || die "scripts/local-ci --release failed on $tag"
+        case ",$want," in
+            *,linux-arm64,*)
+                # The aarch64 kit: the same Linux release workflow in the arm64 container.
+                step "scripts/test-linux $tag --release --arch arm64 (MAPLETHIEF_VERSION=$version)"
+                MAPLETHIEF_VERSION="$version" scripts/test-linux "$tag" --release --arch arm64 \
+                    ${build_args[@]+"${build_args[@]}"} ||
+                    die "scripts/test-linux --release --arch arm64 failed on $tag"
+                ;;
+        esac
         step "Kits"
     fi
     for p in "${plist[@]}"; do
         [ "$players_only" -eq 0 ] || break
-        local name
+        local name from="$ci_dir"
         case "$p" in
             mac) name="MapleThief-kit-$version-macos-universal.zip" ;;
             linux) name="MapleThief-kit-$version-linux-x86_64.tar.gz" ;;
+            linux-arm64) name="MapleThief-kit-$version-linux-aarch64.tar.gz" from=build/linux-release ;;
             switch) continue ;;
         esac
-        [ -f "$ci_dir/$name" ] || die "scripts/local-ci wrote no $ci_dir/$name"
-        cp "$ci_dir/$name" "$out/$name"
+        [ -f "$from/$name" ] || die "no $from/$name was built"
+        cp "$from/$name" "$out/$name"
         echo "-- $out/$name ($(wc -c <"$out/$name" | tr -d ' ') bytes)"
         case "$p" in
             mac) check_mac_kit "$out/$name" ;;
-            linux) check_linux_kit "$out/$name" ;;
+            linux) check_linux_kit "$out/$name" amd64 ;;
+            linux-arm64) check_linux_kit "$out/$name" arm64 ;;
         esac
         kits+=("$out/$name")
     done
@@ -387,7 +487,8 @@ cmd_build() {
     for p in "${plist[@]}"; do
         case "$p" in
             mac) build_mac_player ;;
-            linux) build_linux_player ;;
+            linux) build_linux_player amd64 ;;
+            linux-arm64) build_linux_player arm64 ;;
             switch) build_switch_player ;;
         esac
     done
@@ -413,21 +514,27 @@ cmd_build() {
 cmd_publish() {
     # Per platform its kit and its player build (ADR 0125); the Nintendo Switch has a player
     # build only (#243).
-    local want="${platforms:-mac,linux,windows,switch}" names=() kits=() players=() kit_all player_all p
+    local want="${platforms:-mac,linux,linux-arm64,windows,windows-arm64,switch}" names=() kits=() players=() kit_all player_all p
     local key name
+    check_known_issues
     kit_all="$(mtrelease kits "$version")"
     player_all="$(mtrelease players "$version")"
     IFS=, read -r -a plist <<<"$want"
     for p in "${plist[@]}"; do
         case "$p" in
             mac) key='-macos-' ;;
-            linux) key='-linux-' ;;
-            windows) key='-windows-' ;;
+            linux) key='-linux-x86_64\.' ;;
+            linux-arm64) key='-linux-aarch64\.' ;;
+            windows) key='-windows-x64\.' ;;
+            windows-arm64) key='-windows-arm64\.' ;;
             switch) key='-switch\.' ;;
-            *) die "--platforms: unknown platform '$p' (mac, linux, windows, switch)" ;;
+            *) die "--platforms: unknown platform '$p' (mac, linux, linux-arm64, windows, windows-arm64, switch)" ;;
         esac
         [ "$p" = switch ] || kits+=("$(grep -- "$key" <<<"$kit_all")")
         players+=("$(grep -- "$key" <<<"$player_all")")
+        if [ "$p" = linux ]; then
+            while IFS= read -r name; do players+=("$name"); done < <(mtrelease linux-packages "$version")
+        fi
     done
     names=("${kits[@]}" "${players[@]}")
 
@@ -493,7 +600,7 @@ cmd_publish() {
 # itch: the published release's player builds to itch.io (ADR 0146). mtport.itch downloads and
 # checks them and runs butler; BUTLER_API_KEY reaches butler through the environment only.
 cmd_itch() {
-    local args=(itch "$tag" --platforms "${platforms:-mac,linux,switch}")
+    local args=(itch "$tag" --platforms "${platforms:-mac,linux,linux-arm64,switch}")
     [ "$dry_run" -eq 1 ] && args+=(--dry-run)
     mtrelease "${args[@]}" ${itch_args[@]+"${itch_args[@]}"} || die "itch failed on $tag"
 }

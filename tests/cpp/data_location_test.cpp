@@ -256,6 +256,61 @@ TEST_CASE("data folder: macOS, the app alone in an Applications folder uses the 
     CHECK(loc.dir == str(fs::path("/Applications") / "data"));
 }
 
+TEST_CASE("data folder: an AppImage's <base> is the folder of the .AppImage file (ADR 0193)") {
+    const TempDir tmp("appimage");
+    const fs::path games = tmp.path / "Games";
+    // The runtime mounts the image read-only and runs AppRun's bin/MapleThief from there.
+    Fake f(fs::path("/tmp/.mount_MapleTabc123/bin"), tmp.path / "user", kLinux);
+    f.probe_says(true);
+    f.in.appimage = str(games / "MapleThief-1.0.0-linux-x86_64.AppImage");
+    fe::DataLocation loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kGame);
+    CHECK(loc.reason == Reason::kDefault);
+    CHECK(loc.base == str(games));
+    CHECK(loc.dir == str(games / "data"));
+    CHECK(loc.bundle_dir == str(games / "game"));
+    // user-data.txt next to the .AppImage file chooses the user folder, as next to any game.
+    write_text(games / fe::kUserDataMarkerName, "x");
+    loc = fe::resolve_data_location(f.in);
+    CHECK(loc.reason == Reason::kMarker);
+    CHECK(loc.base == str(games));
+    fs::remove(games / fe::kUserDataMarkerName);
+    // A relative APPIMAGE is not the runtime's: SDL's base path decides, as without one.
+    f.in.appimage = "MapleThief.AppImage";
+    loc = fe::resolve_data_location(f.in);
+    CHECK(loc.base == "/tmp/.mount_MapleTabc123/bin");
+    // Only on Linux.
+    f.in.appimage = str(games / "MapleThief.AppImage");
+    f.in.os = kWin;
+    f.in.probe = [](const std::string &, std::string *) { return true; };
+    loc = fe::resolve_data_location(f.in);
+    CHECK(loc.base == "/tmp/.mount_MapleTabc123/bin");
+}
+
+TEST_CASE("data folder: a Flatpak uses the sandbox's user folder (ADR 0193)") {
+    const TempDir tmp("flatpak");
+    write_text(tmp.path / "app" / "MapleThief.sh", "#!/bin/sh\n");
+    Fake f(tmp.path / "app" / "bin",
+           "/home/p/.var/app/io.github.armaatus.maplethief/data/MapleThief", kLinux);
+    f.probe_says(true);
+    f.in.flatpak = true;
+    fe::DataLocation loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kUser);
+    CHECK(loc.reason == Reason::kFlatpak);
+    CHECK(std::string(fe::data_reason_name(loc.reason)) == "flatpak");
+    CHECK(loc.dir == "/home/p/.var/app/io.github.armaatus.maplethief/data/MapleThief");
+    CHECK(loc.bundle_dir == str(fs::path(loc.dir) / "game"));
+    CHECK(loc.base == str(tmp.path / "app"));
+    CHECK_FALSE(loc.fallback()); // a normal state
+    CHECK(f.probe_calls == 0);
+    // --data-location game still tries the game folder (and its probe decides).
+    f.in.flag = Place::kGame;
+    f.probe_says(false, "Read-only file system");
+    loc = fe::resolve_data_location(f.in);
+    CHECK(loc.reason == Reason::kFallbackNotWritable);
+    CHECK(loc.why == "Read-only file system");
+}
+
 TEST_CASE("data folder: a game folder that can't be written falls back to the user folder") {
     const TempDir tmp("readonly");
     const fs::path kit = tmp.path / "kit", user = tmp.path / "user";
@@ -360,6 +415,52 @@ TEST_CASE("data folder: iOS keeps the app's folder and its own Documents (ADR 00
     loc = fe::resolve_data_location(f.in);
     CHECK(loc.place == Place::kEnv);
     CHECK(loc.saves == str(fs::path("/tmp/somewhere") / "saves"));
+}
+
+TEST_CASE("data folder: Android uses the app's external files folder, game/ inside it") {
+    // A file manager reaches /storage/emulated/0/Android/data/<package>/files, and the app needs
+    // no permission for it (ADR 0150, ADR 0251). No flag, marker or probe applies.
+    const std::string ext = "/storage/emulated/0/Android/data/io.github.armaatus.maplethief/files";
+    Fake f(fs::path(), "/data/user/0/io.github.armaatus.maplethief/files",
+           fe::DataInputs::Os::kAndroid);
+    f.probe_says(true);
+    f.in.flag = Place::kGame;
+    f.in.android_external = ext + "/";
+    fe::DataLocation loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kAndroid);
+    CHECK(loc.reason == Reason::kPlatform);
+    CHECK(std::string(fe::data_place_name(loc.place)) == "android");
+    CHECK(loc.dir == ext);
+    CHECK(loc.saves == str(fs::path(ext) / "saves"));
+    CHECK(loc.crashes == str(fs::path(ext) / "crashes"));
+    CHECK(loc.logs == str(fs::path(ext) / "logs"));
+    CHECK(loc.bundle_dir == str(fs::path(ext) / "game"));
+    CHECK(loc.base.empty());
+    CHECK(loc.placed_bundle.empty());
+    CHECK_FALSE(loc.fallback());
+    CHECK(f.probe_calls == 0);
+    CHECK(f.user_calls == 0);
+    // No external storage mounted writable: the internal files folder, as a fallback.
+    f.in.android_external.clear();
+    loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kAndroid);
+    CHECK(loc.reason == Reason::kFallbackNotWritable);
+    CHECK(loc.fallback());
+    CHECK(loc.dir == "/data/user/0/io.github.armaatus.maplethief/files");
+    CHECK(loc.why == "the external storage is not mounted writable");
+    CHECK(f.user_calls == 1);
+    // MAPLETHIEF_DATA_DIR still wins (the tests' data directory).
+    f.in.env = "/data/local/tmp/mt";
+    loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kEnv);
+}
+
+TEST_CASE("data folder: Android without any files folder is no data folder") {
+    Fake f(fs::path(), "", fe::DataInputs::Os::kAndroid);
+    const fe::DataLocation loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kNone);
+    CHECK(loc.dir.empty());
+    CHECK(loc.why == "Android gives no files folder");
 }
 
 TEST_CASE("data folder: the Nintendo Switch uses the SD card's folder, game/ beside data/") {

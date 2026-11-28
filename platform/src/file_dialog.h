@@ -2,10 +2,10 @@
 // over SDL 3's SDL_ShowOpenFileDialog / SDL_ShowSaveFileDialog and SDL_OpenURL that the settings
 // menu's Saves tab uses, and #182's IPA import can (the same open dialog with its own filter).
 //
-//   FileDialogs::show     asks for one file to open or a place to save. SDL may call back on
-//                         another thread, or before show() returns; the answer waits in a queue
-//                         and poll() hands it to its callback on the caller's (the frontend's)
-//                         thread. One dialog at a time: busy() while one is up.
+//   FileDialogs::show     asks for one file to open, a place to save or (#422) a folder. SDL
+//                         may call back on another thread, or before show() returns; the answer
+//                         waits in a queue and poll() hands it to its callback on the caller's
+//                         (the frontend's) thread. One dialog at a time: busy() while one is up.
 //   dialog_route          whether a dialog can show here, or the caller should use its folder
 //                         instead (iOS, a Steam Deck's Game Mode, a fullscreen Linux window).
 //   file_url, open_folder a folder as a file:// URL (percent-encoded, Windows drive paths too),
@@ -34,7 +34,7 @@ struct FileDialogFilter {
 };
 
 struct FileDialogRequest {
-    enum class Kind { kOpenFile, kSaveFile };
+    enum class Kind { kOpenFile, kSaveFile, kOpenFolder }; // a folder: `filters` unused
     Kind kind = Kind::kOpenFile;
     std::string title; // a log line's name for it ("export saves"); SDL 3.4 shows its own title
     // Where it starts: a folder, or (a save) a folder and the suggested name.
@@ -45,7 +45,7 @@ struct FileDialogRequest {
 struct FileDialogResult {
     enum class Outcome { kChosen, kCancelled, kFailed };
     Outcome outcome = Outcome::kCancelled;
-    std::string path; // kChosen: the file (UTF-8)
+    std::string path; // kChosen: the file or folder (UTF-8)
     std::string why;  // kFailed: SDL's error
 };
 

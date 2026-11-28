@@ -13,6 +13,9 @@ Names come from ``ScriptExtra.strings`` through tables transcribed from the code
 Command line::
 
     python3 -m mtport.compendium.world names [OUT]   # work/re/names/mapnames.json
+    python3 -m mtport.compendium.world map-name --app APP AREA MAP OUT
+        # the knowledge base's name of one map, "en\t<name>" and "ko\t<name>" lines (the
+        # minimap's name check, play_real_test minimap, #397); exit 77 without the bundle
 """
 
 from __future__ import annotations
@@ -317,6 +320,17 @@ def name_report(entities: dict[str, dict[str, Any]]) -> list[str]:
     return out
 
 
+def map_name(src: Sources, area: int, map_no: int) -> dict[str, str]:
+    """The name the knowledge base gives map ``area``.``map_no`` in each language (the game's:
+    the default slot's town past the end of the row); ``{}`` when its area has no name table."""
+    if area not in SPOT_TABLE or not 0 <= map_no < SPOT_TABLE_SHAPE[1]:
+        return {}
+    group, index, _ = spot(area, map_no)
+    key = SPOT_KEY.format(spot_key(group, index))
+    got = {lang: src.script_extra[lang].get(key) for lang in ("en", "ko")}
+    return {lang: name for lang, name in got.items() if name}
+
+
 def names_json() -> str:
     return gc.names_json("mapnames", NAMES)
 
@@ -328,7 +342,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     names = sub.add_parser("names", help=f"write the Ghidra names file (default {NAMES_OUT})")
     names.add_argument("out", nargs="?", default=NAMES_OUT)
+    one = sub.add_parser("map-name", help="write one map's name in each language")
+    one.add_argument("--app", type=Path, required=True, help="the MapleThief.app bundle")
+    one.add_argument("area", type=int)
+    one.add_argument("map", type=int)
+    one.add_argument("out", type=Path)
     args = parser.parse_args(argv)
+    if args.cmd == "map-name":
+        if not (args.app / "en.lproj" / "ScriptExtra.strings").is_file():
+            print(f"skip: no bundle at {args.app}", file=sys.stderr)
+            return 77
+        got = map_name(Sources(args.app), args.area, args.map)
+        if set(got) != {"en", "ko"}:
+            print(f"error: map {args.area}.{args.map} has no name", file=sys.stderr)
+            return 1
+        gc.write_text(args.out, "".join(f"{lang}\t{got[lang]}\n" for lang in ("en", "ko")))
+        print(f"wrote {args.out}")
+        return 0
     try:
         out = Path(args.out)
         gc.write_text(out, names_json())

@@ -69,20 +69,22 @@ Every key, by its SDL name (`SDL_GetKeyName`) and its actions by their names in 
 | `Tab` | fast_forward | fast_forward |
 | `F5` | quick_save | quick_save |
 | `F9` | quick_load | quick_load |
+| `F7` | practice_pick | practice_pick |
+| `F8` | practice_load | practice_load |
 <!-- END keyboard-defaults -->
 
 Keys are matched by **keycode** (`SDL_Keycode`): the key with that label in the player's layout. On AZERTY, Z is the key where QWERTY has W, and A is where QWERTY has Q. The letters are the ones this page names, and a bindings file (#70) can move them. Keys pressed while Cmd (macOS) or the Windows key is held are left to the system (Cmd+Q, Cmd+M, Cmd+H), so Cmd+M does not open the map.
 
 ### The port's own keys
 
-These are the port's, not the game's: they never reach the bindings and can't be bound. The port's fast-forward key (Tab), auto-run key (R), page keys (Shift, above) and save-state keys (F5, F9) are the exception: they are the bindable actions `fast_forward`, `auto_run`, `page`, `quick_save` and `quick_load`. The window's size keys are bindable too, in `bindings.ini`'s `[window]` section.
+These are the port's, not the game's: they never reach the bindings and can't be bound. The port's fast-forward key (Tab), auto-run key (R), page keys (Shift, above), save-state keys (F5, F9) and practice keys (F7, F8) are the exception: they are the bindable actions `fast_forward`, `auto_run`, `page`, `quick_save`, `quick_load`, `practice_pick` and `practice_load`. The window's size keys are bindable too, in `bindings.ini`'s `[window]` section.
 
 | Key | What it does |
 |---|---|
 | F1 | opens the settings menu ([ADR 0076](../adr/0076-settings-menu.md)); in a scripted run, the remap overlay ([remapping.md](remapping.md)) |
 | F3 | shows or hides the frame-time overlay ([ADR 0071](../adr/0071-frame-telemetry-and-frame-time-overlay.md)) |
 | F11, Alt+Enter, Cmd+Ctrl+F | fullscreen on or off; written to `settings.ini` as `fullscreen` ([ADR 0077](../adr/0077-desktop-conveniences.md)). On a Mac keyboard F11 is the system's Show Desktop unless Fn is held. On macOS with `fullscreen_mode = desktop`, Cmd+Ctrl+F is the Window menu's own Toggle Full Screen, which the setting follows ([ADR 0099](../adr/0099-fullscreen-modes-and-the-first-start-crash.md)) |
-| Ctrl+1 … Ctrl+5 (Cmd+1 … Cmd+5 on macOS) | the window at exactly 1 … 5 times the game's picture (480 × 320 points, 568 × 320 with widescreen), centred on its display; the largest size that fits it; out of fullscreen first ([ADR 0077's addendum](../adr/0077-desktop-conveniences.md#addendum-window-size-keys-and-the-fullscreen-display-196-2026-11-05)). Bindable in `bindings.ini`'s `[window]` ([remapping.md](remapping.md#the-windows-size-keys)). On Windows and Linux Ctrl is also the field's attack: in the field, the Ctrl press attacks once before the size key |
+| Ctrl+1 … Ctrl+5 (Cmd+1 … Cmd+5 on macOS) | the window at exactly 1 … 5 times the game's picture (480 × 320 points, 568 × 320 with widescreen), centred on its display; the largest size that fits it; out of fullscreen first ([ADR 0077's addendum](../adr/0077-desktop-conveniences.md#addendum-window-size-keys-and-the-fullscreen-display-196-2026-11-05)). Bindable in `bindings.ini`'s `[window]` ([remapping.md](remapping.md#the-windows-size-keys)). On Windows and Linux Ctrl is also the field's attack, so a Ctrl press waits for the chord ([#381](https://github.com/armaatus/maplethief-port/issues/381)): Ctrl+1 sizes the window without an attack; Ctrl tapped attacks when it is let go, Ctrl held attacks after 0.25 s, and another key pressed with it lets the attack out at once. Alt (jump) waits the same way for Alt+Enter. Z attacks without the wait |
 | F12 | a screenshot of the game's screen to `screenshots/` in the data directory (on a Mac keyboard, with Fn). A gamepad's Share / Capture button, or Back while the right stick is held in, does the same |
 
 The mouse cursor hides while the keyboard or a gamepad is used and comes back when the mouse moves. In menus the mouse wheel moves a row up or down, as the arrow keys do.
@@ -95,6 +97,7 @@ The mouse cursor hides while the keyboard or a gamepad is used and comes back wh
 - **It is not the game's save.** A state never writes the game's save files (`theif<N>`, `quest<N>`) and they never hold a state. The game still saves as it always did. After F9, the game's next save (yours, or the autosave) writes whatever is loaded, as if you had loaded an older save: what happened after the state is gone from that character.
 - **When.** Only in the field with nothing open: not in a menu, a shop, a chat or a popup, not during a scene, not while the screen moves. F5 also needs every other key let go (a walking hero is refused: "let go of the keys first"). Otherwise a short notice says why nothing happened ("Not saved: not in a menu"). F9 also refuses a state of another copy of the game, of another version of the port, or of another character, and a damaged file; nothing changes then.
 - The port's menus pause the game and take every key, so F5 and F9 do nothing while one is open.
+- With the speedrun timer on too, F7 and F8 pick and load a state kept after a split of your category ([speedrun.md](../play/speedrun.md#practice-from-a-split)).
 
 ### Why not W A S D
 

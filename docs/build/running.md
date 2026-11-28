@@ -102,6 +102,8 @@ These script a run, for tests and for reproducing a problem. Scripted and headle
 | `--no-audio`, `--audio-capture FILE`, `--audio-test-tone` | no sound; write the mix to a file; the placeholder plays a test tone and checks it |
 | `--perf-csv FILE` | a row per window frame ([frame telemetry](#frame-telemetry)) |
 | `--dump-textures DIR` | writes every texture the game uploads ([texture packs](#texture-packs)) |
+| `--force-crash host\|trap` | crashes on purpose 2 s after the first run-loop turn: a bad host write, or a guest trap, to see the crash report and dialog ([Debugging a trap](how-to/trap.md)) |
+| `--safe-start` | this run with the default settings (no packs, the software renderer), as the offer after a crash gives; `settings.ini` is not changed |
 
 ## Exit codes
 
@@ -136,11 +138,12 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `audio_mono` | off | - | Both channels the same mix, for one ear or one speaker: on, off |
 | `audio_device` | default | - | The sound's output device, by its name, or default (the system's; from the menu's list). Not in the Switch's menu |
 | `ios_audio` | original | - | iOS: the audio session: original (mixes with other apps' music, quiet with the Silent switch), own (plays with the switch on silent, other apps' music turned down) |
-| `audio_pack` | (empty) | - | A directory of your own music and sound files that replace the game's, by name (python3 -m mtport.audiopack init lists them); empty: none. Switch: the menu offers the folders in `sdmc:/switch/maplethief/audio-packs/` |
+| `audio_pack` | (empty) | - | A directory of your own music and sound files that replace the game's, by name (the game's `sound/` folder lists them; `--check-pack` checks a pack); several, in order, with `|` between them (the packs screen sets it, #370); empty: none. The packs screen lists the folders in `<data folder>/audio-packs/` |
 | `right_touch` | off | - | The right mouse button: a touch at screen point X,Y, or off. Not in the Switch's menu |
 | `hide_keypad` | auto | never / auto / auto | Hide the on-screen key pad: auto (while a gamepad or the keyboard is used), always, never |
-| `rumble` | on | on / on / on | The gamepad rumbles on a vibration, a hit and a level-up: on, off |
+| `rumble` | on | on / on / on | The gamepad rumbles on the game's vibration and, with `rumble_events = all`, a hit and a level-up: on, off |
 | `rumble_strength` | 100 | - | How strongly, 0 to 100 (percent) |
+| `rumble_events` | all | game / game / all | What rumbles: game (the game's own vibration only, as the phone), all (also every hit and a level-up) |
 | `keypad_haptics` | off (light on iOS) | - | IOS: a light tap of the phone at each press of a touch key pad key: off, light, medium |
 | `perf_overlay` | off | off / off / off | The frame-time overlay (F3 shows or hides it while the game runs): on, off |
 | `cash_shop` | off | off / off / off | Assist: the cash shop and the paid revives: off (as the original offline), meso (sold for the hero's meso, dearer with the level, the falls and the purchases) |
@@ -153,11 +156,13 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `vsync` | on | on / on / on | Wait for the display's refresh to present a frame (no tearing): on, off |
 | `pause_unfocused` | off | off / on / on | Pause the game while the window is not focused, as when it is minimised: on, off |
 | `language` | en | - | The game's language: en, ko (MAPLETHIEF_LANGUAGE overrides it; from the next start) |
-| `text_pack` | (empty) | - | A directory of translated text in UTF-8 (python3 -m mtport.textpack export makes one to edit); empty: none. Switch: the menu offers the folders in `sdmc:/switch/maplethief/text-packs/` |
+| `menu_language` | auto | - | The port's menus (not the game's text): auto (the system's preferred languages, the first the port ships, else English), en, ko (a draft), nl ([ADR 0222](../adr/0222-the-port-ships-its-menus-in-dutch-and-korean.md)); applies at once. The hint `SDL_PREFERRED_LOCALES` (also an environment variable, such as `nl_NL`) stands in for the system's languages |
+| `text_pack` | (empty) | - | A directory of translated text in UTF-8 (the menu's Other tab: Export text makes one to edit); several, in order, with `|` between them (the packs screen sets it, #370); empty: none. The packs screen lists the folders in `<data folder>/text-packs/` |
 | `fix_original_bugs` | off | off / off / on | Fixes the original game's crashes and dead ends ([original-bugs](../re/original-bugs.md)), never its balance: on, off |
-| `texture_pack` | (empty) | - | A directory of HD textures made from your own `--dump-textures` (python3 -m mtport.texpack); empty: none. Switch: the menu offers the folders in `sdmc:/switch/maplethief/texture-packs/` |
+| `restored_content` | off | off / off / off | Makes content the game ships but never reaches reachable ([original-bugs → Unreachable content](../re/original-bugs.md#unreachable-content)); never a bug fix, so no preset turns it on. Restored so far: shops 0, 1 and 16, offered beside their usual shop by three merchants ([#426](https://github.com/armaatus/maplethief-port/issues/426)); Monster Carnival, from a Spiegelman NPC in Kerning City, Orbis Village and Magatia Village, with its tickets sold by each town's etc merchant ([#427](https://github.com/armaatus/maplethief-port/issues/427)); the unreached maps 4.5 and 4.8, through a portal on 4.3 ([#428](https://github.com/armaatus/maplethief-port/issues/428)): on, off |
+| `texture_pack` | (empty) | - | A directory of HD textures made from your own texture dump (the menu's Other tab: Dump textures, Make texture pack); several, in order, with `|` between them (the packs screen sets it, #370); empty: none. The packs screen lists the folders in `<data folder>/texture-packs/` |
 | `texture_filter` | game | game / game / nearest | How textures are sampled at render scale 2 and up: game (smooth, the device's look), nearest (sharp) |
-| `hide_online_ui` | off | off / on / on | Hides the title menu's buttons whose web pages are gone (Game Center too while `local_game_center` is off): on, off |
+| `hide_online_ui` | off | off / on / on | Hides the title menu's buttons whose web pages are gone (Game Center too while `local_game_center` is off), and the field's Cash button and the death popup's two revive buttons while `cash_shop` is off: on, off |
 | `local_game_center` | off | off / off / on | Game Center on this computer: the leaderboard screen and local achievements: on, off |
 | `menu_repeat` | off | off / on / on | A held direction repeats in the popup menu, NPC chat, the shop (its amount too) and the map (after 0.4 s, then every 0.15 s): on, off |
 | `confirm_guard` | off | off / on / on | A popup that just opened ignores confirm and back for 0.3 s, and while a button pressed in the field is still held: on, off |
@@ -171,11 +176,16 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `game_speed` | game | game / game / game | Assist: the game's tick length: game (the game's own Speed option), 65, 50, 40, 33, 25 (ms; 33 and 25 are faster than any the game offers) |
 | `fast_forward` | off | off / off / off | Assist: holding the fast-forward key (Tab, the right stick's click) runs the game: off, x2, x3 (times as fast) |
 | `autosave` | off | off / off / on_quit | Save the game when it quits, goes to the background or exits to the main menu, where the game's own Save is allowed (not on boss maps, in a scene or with a popup open): off, on_quit |
-| `widescreen` | off | off / off / auto | The field up to 16:9 (568 x 320) on maps wide enough; menus and narrow maps stay 3:2: off, auto |
+| `crash_recovery` | off | off / off / on | Keep a recovery point of the game at map loads, saves and every five minutes, offered at the next start after a crash: on, off. Off on the Switch in every preset |
+| `widescreen` | off | off / off / auto | The field up to 16:9 (568 x 320) on maps wide enough, or (fill) as wide as the window up to 768 x 320; menus and narrow maps stay 3:2: off, auto, fill |
 | `widescreen_hud` | edges | edges / edges / edges | With widescreen, the touch key pad and its icons at the wide view's edges, or the HUD and the key pad kept at their 3:2 places in the middle: edges, narrow |
 | `colorblind_filter` | off | - | The picture's colours corrected for colour blindness: off, protanopia, deuteranopia, tritanopia |
 | `screen_shake` | 100 | - | How far the scenes shake the camera, 0 to 100 (percent of the game's) |
 | `flashes` | 100 | - | How strong the game's full-screen flashes are (a level-up's white and black frames, the scenes' white-outs), 0 to 100 (percent of the game's) |
+| `speech` | off | - | Read the game's text aloud with the system voice: off, on (not on the Switch; `MAPLETHIEF_SPEECH=log` logs each utterance instead) |
+| `speech_rate` | 100 | - | How fast the voice speaks, 50 to 200 (percent of its normal rate) |
+| `speech_volume` | 100 | - | How loud the voice speaks, 0 to 100 (percent) |
+| `speech_notices` | on | - | With `speech` on, also read the notify lines (pick-ups, meso, EXP, the map's name), queued behind dialogue and popups: on, off |
 | `brightness` | 100 | - | The picture's brightness, 50 to 150 (percent; 100: as the game drew it) |
 | `contrast` | 100 | - | The picture's contrast about mid-grey, 50 to 150 (percent; 100: the game's) |
 | `saturation` | 100 | - | How colourful the picture is, 50 to 150 (percent; 100: the game's colours) |
@@ -186,6 +196,8 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `auto_potion` | off | off / off / off | Assist: drink the HP potion of a quick slot under this share of max HP: off, 25, 50, 75 (percent) |
 | `skip_intros` | off | off / off / off | Scenes (the intro, chapter cards, boss entrances) run fast, each speech box tapped: on, off |
 | `minimap` | off | off / off / off | The port's minimap of the map in the field (platforms, ladders, the hero, portals and NPCs): off, border (beside the picture where there is room, else over it), overlay |
+| `minimap_mobs` | off | off / off / off | The minimap also shows the map's live mobs as dots (#397): on, off |
+| `minimap_name` | off | off / off / off | The minimap also shows the map's name, as the game names it in its language, on a strip along the box's top (#397): on, off |
 | `exp_percent` | off | off / off / on | The hero's EXP to the next level as a percentage beside the HUD's bar: on, off |
 | `auto_run` | off | off / off / off | Assist: the auto-run key (R, the left stick's click) keeps the hero walking: on, off |
 | `hold_toggle` | off | off / off / off | Assist: a press starts these held actions and the next one stops them: off, walk, fast_forward, all |
@@ -218,10 +230,12 @@ The picture is 480 × 320 points, scaled by `scale_mode` ([ADR 0043](../adr/0043
 Make HD textures from your own copy in three steps ([ADR 0081](../adr/0081-texture-packs-and-nearest-texture-filter.md)):
 
 1. `MapleThief --dump-textures DIR` writes every texture the game uploads while you play as `DIR/<hash>_<W>x<H>.png` (straight alpha) and the menus' images under `DIR/ui/`.
-2. `python3 -m mtport.texpack build DIR PACK --scale 2`, run from `tools/`, writes them upscaled (`--scaler scale` is Scale2x/Scale3x, `nearest` plain blocks; any factor 1 to 8). You can also edit a dumped PNG by hand and keep its name: a file must be the texture's size times a whole k from 1 to 8, or it's logged once and the game's texture is kept.
-3. `texture_pack = PACK` in `settings.ini` plays with them. The exit log counts what the pack replaced.
+2. `MapleThief --build-texture-pack DIR PACK --pack-scale 2` writes them upscaled (`--pack-scaler scale` is Scale2x/Scale3x, `nearest` plain blocks; any factor 1 to 8; `--pack-no-ui` leaves the menus out). `python3 -m mtport.texpack build DIR PACK --scale 2`, run from `tools/`, does the same. You can also edit a dumped PNG by hand and keep its name: a file must be the texture's size times a whole k from 1 to 8, or it's logged once and the game's texture is kept.
+3. `MapleThief --check-pack PACK` reports what the game will use, reject or ignore, with the game's own rules (exit status 3 when it rejects a file); `texture_pack = PACK` in `settings.ini` plays with the pack. The exit log counts what the pack replaced.
 
-`texture_filter = nearest` keeps sprites sharp at render scales above 1. Dumps and packs are made from the game's art: keep them to your own machines. Audio packs and text packs have their own sections in [Settings](../play/settings.md#audio-packs).
+The settings menu's Other tab has the same tools for a player: Dump textures (on and off while the game runs), Make texture pack, Export text and Check packs ([Making packs](../play/packs.md), [ADR 0205](../adr/0205-pack-tools-in-the-game.md)).
+
+`texture_filter = nearest` keeps sprites sharp at render scales above 1. Dumps and packs are made from the game's art: keep them to your own machines. Audio packs and text packs are in [Making packs](../play/packs.md).
 
 ### Sound
 
@@ -245,7 +259,7 @@ Minimising the window pauses the game as leaving it did on the iPhone: nothing i
 
 Offline, the cash shop and the paid revives sell nothing, as on a phone with purchases switched off. The Assist `cash_shop = meso` sells the items and revives for the hero's meso instead, at a price that follows the hero's level and rises with each fall and purchase until the next level-up ([ADR 0072](../adr/0072-offline-cash-shop-and-revives.md)).
 
-`hide_online_ui` hides the title menu's buttons whose web pages are gone. `local_game_center` turns Game Center's button into a leaderboard of your save slots on this computer and unlocks a few achievements of the port's own, kept in `gamecenter.json` in `saves/` ([ADR 0084](../adr/0084-offline-polish-hidden-online-ui-local-game-center.md)).
+`hide_online_ui` hides the title menu's buttons whose web pages are gone, and, while `cash_shop` is off, the field's Cash button and the death popup's two revive buttons, whose keys then do nothing either ([ADR 0084's addendum](../adr/0084-offline-polish-hidden-online-ui-local-game-center.md#addendum-the-dead-cash-buttons-2026-11-27)). `local_game_center` turns Game Center's button into a leaderboard of your save slots on this computer and unlocks a few achievements of the port's own, kept in `gamecenter.json` in `saves/` ([ADR 0084](../adr/0084-offline-polish-hidden-online-ui-local-game-center.md)).
 
 ### Frame telemetry
 
@@ -258,14 +272,21 @@ Every game run logs at exit its tick rate and tick intervals (p50, p99, max, the
 | `MAPLETHIEF_DATA_DIR` | the data folder, beating every other rule ([The data folder](#the-data-folder)) |
 | `MAPLETHIEF_BUNDLE_DIR` | the game's bundle ([Finding the game](#finding-the-game)) |
 | `MAPLETHIEF_SETTINGS` | settings applied after the file and `--preset` ([All settings](#all-settings)) |
+| `MAPLETHIEF_SPEECH=system\|log\|none` | the text-to-speech backend (default `system`; `log` writes each utterance to the log instead of speaking, for tests; ADR 0174) |
 | `MAPLETHIEF_LANGUAGE` | `en` or `ko`, overriding the setting |
 | `MAPLETHIEF_GPU_DRIVER` | the SDL3 GPU driver, for example `vulkan` |
-| `MAPLETHIEF_GFX_GPU_TIMING=1` | logs the GPU time per frame at exit |
+| `MAPLETHIEF_GFX_GPU_TIMING=1` | logs the GPU time per frame at exit, and times every GL frame (without it, `render_scale = auto` times one in four, [ADR 0203](../adr/0203-render-scale-auto-budgets-gpu-time.md)) |
 | `MAPLETHIEF_GPU_READBACK=1` | the read-back path of the GPU presentation |
 | `MAPLETHIEF_MAIN_THREAD_PRIORITY=normal` | keeps the main thread's default priority ([ADR 0120](../adr/0120-main-thread-priority-in-real-time-runs.md)) |
-| `MAPLETHIEF_TRACE=CHANNELS` | trace channels, comma-separated, e.g. `boot,objc` |
+| `MAPLETHIEF_GAMESCOPE_WINDOW=WxH` | the window size `MapleThief.sh` opens under gamescope, 1280x800 by default ([Linux and Steam Deck](../play/linux-and-steam-deck.md)) |
+| `MAPLETHIEF_TRACE=CHANNELS` | trace channels, comma-separated, e.g. `audio,uikit`, or `all` ([the channels](how-to/trap.md#4-trace-what-led-up-to-it)) |
 | `MAPLETHIEF_TRACE_HLE=FILTERS` | traces HLE calls by import name ([ADR 0030](../adr/0030-runtime-diagnostics.md)) |
 | `MAPLETHIEF_GL_TRACE_FILE=PATH` | writes the GL trace to a file |
-| `MAPLETHIEF_COVERAGE=PATH` | function-entry coverage (builds with `MT_TRACE_ENTRY`) |
+| `MAPLETHIEF_COVERAGE=PATH` | run coverage: function entries (builds with `MT_TRACE_ENTRY`, the `mac-coverage` preset) and the imports, selectors, scripts, natives and maps hit; `%p` is the process id ([ADR 0160](../adr/0160-run-coverage-entry-counters-and-hit-recorders.md)) |
+| `MAPLETHIEF_REPORT=PATH` | writes the unimplemented report (imports and selectors the game called that the runtime lacks) to PATH at exit, even when it is empty; `-` for stderr. Unset: stderr, only when not empty |
+| `MAPLETHIEF_SYMBOLS=PATH` | the guest symbol table, so traces and crash reports name functions; the build writes `build/<preset>/maplethief.sym` |
+| `MAPLETHIEF_UNIMPLEMENTED_IMPORT=POLICY` | what an unimplemented import or selector does: `stop` (the default: the guest traps), `continue` (logs the first call, returns 0) or `trace` (logs every call, returns 0) |
+| `MAPLETHIEF_HW_MACHINE=MODEL` | the device the game sees (`hw.machine`), `iPhone3,1` (an iPhone 4) by default |
+| `MAPLETHIEF_CRASH_DIALOG_LOG=FILE` | a test seam: a crash appends `dialog: <path>` to FILE instead of showing the crash dialog |
 
-The build's own variables (`MAPLETHIEF_VERSION`, `PYTHON`, and the rest) are on [Build from source](README.md).
+How to use the diagnostic ones is in [Debugging a trap](how-to/trap.md). `tests/test_env_vars_documented.py` fails when the program reads a `MAPLETHIEF_*` variable this table lacks. The build's own variables (`MAPLETHIEF_VERSION`, `PYTHON`, and the rest) are on [Build from source](README.md).

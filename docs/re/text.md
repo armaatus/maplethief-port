@@ -11,7 +11,7 @@ Research for text packs ([#189](https://github.com/armaatus/maplethief-port/issu
 | Names and descriptions of items, mobs, NPCs, skills | `<Language>/data/*.dat` (fixed records, [formats/data-tables.md](../formats/data-tables.md)) | the data manager's string accessor `0x37999` | the file's bytes as they are (English ASCII, Korean CP949) |
 | The quest log's requirements | the same tables, copied | `CChatBox::drawRequire` `0x3243D` | MacKorean (`kCFStringEncodingMacKorean`, `0x80000003`) |
 | Numbers, meso, counts | `sprintf` in the C++ code | (inline) | ASCII |
-| The port's own menus | `platform/src/port_text.def` | the frontend's overlays | ASCII (the port's 5x7 font, SDL's debug font) |
+| The port's own menus | `platform/src/port_text.def` | the frontend's overlays | UTF-8 (the port's 5x7 font for ASCII, the bundled fonts for the rest, ADR 0206; the price line's SDL debug font folds to ASCII) |
 
 ### LocalizedCString `0x6DD1`
 
@@ -48,6 +48,8 @@ Dialogue pages and speech boxes are cut into lines by `Text_Wrap` `0x22EC5` (nam
 - `Text_CharCount` `0x22989`: the length in characters, from `strlen`, counting **3 bytes for any byte ≥ 0x80** and 1 otherwise. That is UTF-8's length for Hangul (U+AC00–U+D7A3 are 3 bytes), so it is right for the Korean `.strings` text, which `LocalizedCString` hands over as UTF-8.
 - `Text_SubChars` `0x22A1D`: the characters [from, to) as a new string. It builds the piece in a static 255-byte buffer at a PC-relative global with the same 3-byte step, then copies it to a `new[]` (`0xF0E30`) buffer of `len + 1`; the caller frees it with `delete[]` (`0xF0E28`).
 
+Neither looks at the NUL: `Text_SubChars` skips `from` characters and copies `to - from` whatever the string's length, so its callers must keep it inside the string. `Text_Wrap` keeps the last space's character (`[r7-48]`, 0 at first) and, when the piece `[start, i)` is wider than the box, stores `[start, lastSpace + 1)` as a line and goes on from `lastSpace + 1`. A word wider than the box leaves no space to break at: the line is empty, `start` stays, and the loop stores empty lines until its 128-line array on the stack overwrites `lastSpace` with a pointer and `Text_SubChars` walks off memory ([original bug 15](original-bugs.md#15-a-dialogue-key-missing-in-korean), [#419](https://github.com/armaatus/maplethief-port/issues/419)). The port's wrap guard (`mt_hooks_install_text_wrap_guard`, every mode, ADR 0228) is a wrapper on `Text_SubChars` at that call (return `0x22FFB`): an empty line becomes the characters that fitted, and `lastSpace` its end − 1, so the word is cut at the box's width. An unbroken word's first line stays the original's, its first character.
+
 `0x22B6D` and the wrap's other callers use only these two. For "ö" (2 bytes) the 3-byte step swallows the next byte: a line can end inside a character, the next starts with a stray continuation byte, and both draw as garbage or fail to convert. With a pack open both functions are replaced by hooks (`MT_HOOK_FN_TEXT_CHAR_COUNT`, `MT_HOOK_FN_TEXT_SUB_CHARS`, `runtime/src/textpack/textpack.cpp`) that step by the UTF-8 lead byte's length (2, 3 or 4), which is the same step for every text the game ships. The hooked `Text_SubChars` allocates through the guest heap like the original. No other loop of the game's that steps through text by bytes was found; the drawing and measuring calls above take whole strings.
 
 ### The font
@@ -56,7 +58,9 @@ The port draws all game text with NanumGothic, which has a glyph for every code 
 
 ### The port's own text
 
-The port's overlays (settings menu, preset picker, controls card, remap screen, key pad editor, disconnect pause, price line, Saves tab, the EXP figure's label, the held button's glyph) draw with the port's 5x7 font and SDL's debug font, which have ASCII only, and their width and wrap code counts bytes. Their text moved into one table (`platform/src/port_text.def`, `tr()`), which a pack's `Port.strings` translates; the translation is folded to ASCII (`ascii_fold`: "ö" to "o", "ß" to "ss", typographic quotes and dashes to ASCII, anything else to "?"). Logs stay English.
+The port's overlays (settings menu, preset picker, controls card, remap screen, key pad editor, disconnect pause, price line, Saves tab, the EXP figure's label, the held button's glyph) draw with the port's 5x7 font and SDL's debug font, which have ASCII only, and their width and wrap code counts bytes. Their text moved into one table (`platform/src/port_text.def`, `tr()`), which a pack's `Port.strings` translates; the translation was folded to ASCII (`ascii_fold`: "ö" to "o", "ß" to "ss", typographic quotes and dashes to ASCII, anything else to "?"). Logs stay English.
+
+Since [#372](https://github.com/armaatus/maplethief-port/issues/372) ([ADR 0206](../adr/0206-the-port-menus-draw-accents-and-hangul.md)) the Canvas draws every character outside printable ASCII from the bundled fonts (NanumGothic, else Fira Sans) through stb_truetype, as the game's text is drawn, and the overlays' layout counts cells (two for a Hangul syllable) and cuts at whole characters. Only the price line, drawn with SDL's debug font, still folds.
 
 ## Evidence
 

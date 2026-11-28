@@ -12,6 +12,8 @@
 
 #if defined(__SWITCH__)
 #include "switch_test_host.h"
+#elif defined(__ANDROID__)
+#include "android_test_host.h"
 #endif
 
 namespace {
@@ -43,7 +45,12 @@ struct CaseCount : doctest::IReporter {
 
 DOCTEST_REGISTER_LISTENER("mt_case_count", 1, CaseCount);
 
+#if defined(__ANDROID__)
+// MapleThiefTests.apk's activity calls it through android_test_host.cpp (#357).
+int mt_android_doctest_main(int argc, char **argv) {
+#else
 int main(int argc, char **argv) {
+#endif
 #if defined(__SWITCH__)
     // A test NRO: output over nxlink or on the console, and to a results file (#236).
     std::ostream *out = mt_test_switch::begin(argc, argv);
@@ -68,3 +75,8 @@ int main(int argc, char **argv) {
     }
     return result;
 }
+
+#if defined(__ANDROID__)
+// The other doctest programs, never packaged but still linkable (and runnable with adb shell).
+int main(int argc, char **argv) { return mt_android_doctest_main(argc, argv); }
+#endif

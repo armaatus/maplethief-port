@@ -48,9 +48,32 @@ With the generated code, `platform.title_60s` runs `MapleThief --fixed-step 16.6
 
 `PYTHONPATH=tools python3 -m mtport.titlerun coverage` configures `build/title-coverage/` with `-DMAPLETHIEF_TRACE_ENTRY=ON`, runs the same minute with `MAPLETHIEF_COVERAGE`, and writes `build/title-coverage/report/title.coverage` and `title-coverage.md`: every guest function entered on the way to the title. The fixed-step run is deterministic, so the same code gives the same report. It is derived from the IPA and never committed.
 
+### Timing tests on a busy machine
+
+A few tests measure time: `gfx_gpu_test`'s GPU time checks (the busy frame, the present filters, the border's blur, the colour-blind filter, widescreen's wide picture) and the real-time runs such as `platform.game_speed`. Another process's load only adds time, and it comes and goes, so they measure in a way that a passing load does not fail (#344). The GPU checks share one helper, `gpu_time()`: several short windows, every presenter of a with/without pair in turn in each window, the median over the windows, and a reading over its limit measured again after a pause, up to 8 rounds, keeping the smallest. The `gfx_gpu.*` cases hold one CTest `RESOURCE_LOCK` (no other GPU case draws while one measures). `platform.game_speed` is `RUN_SERIAL` and runs a run whose tick rate is outside the tolerance again, up to 3 times, each attempt logged with the load average. A real regression fails every window, round and attempt.
+
+`scripts/timing-stress` checks this: a busy loop on every core and a second process drawing on the GPU, while the time checks (and with `--game-speed`, `platform.game_speed`) run 20 times in a row (`--passes N`). Each pass prints its load average; the readings go to `build/test-output/<preset>/timing_stress/`.
+
+### GPU tests
+
+`gfx_gpu_test` (CTest label `gpu`, cases `gfx_gpu.*`) checks the GPU backend against the software rasterizer ([ADR 0060](../adr/0060-gpu-rendering-backend.md)): the synthetic golden scenes within ADR 0060's tolerance, the sync points, batching, the present filters and the border, the colour-blind filter, the grade, widescreen and GPU presentation. It runs on whatever device SDL GPU opens: Metal on the Mac, Vulkan or D3D12 elsewhere. Without a device every case prints `gfx_gpu: skipped` and CTest reports it as skipped. `MAPLETHIEF_GPU_TESTS=1` makes a missing device a failure, `=0` skips; on GitHub Actions they skip unless the job sets `=1`. Without a display the test falls back to SDL's offscreen video driver; nothing opens a window.
+
+CI's Linux debug job and the Linux container run them on Mesa's **lavapipe**, a Vulkan driver on the CPU (`mesa-vulkan-drivers`, `VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json`; [ADR 0202](../adr/0202-gpu-tests-on-a-software-vulkan-device-in-ci.md)). On a software device (llvmpipe, SwiftShader or Direct3D's WARP, by SDL's device name; the log line `gfx_gpu: device name`):
+
+- the time-only cases skip (the present filters', the border blur's, the colour-blind filter's and the wide picture's GPU time), and the batching case prints its time without the 2 ms limit. The time limits are the Mac's and stay a local check;
+- every picture comparison runs. The lines scene alone may move a line's pixel by one, since Vulkan's lines are not GL ES's diamond-exit lines, with ADR 0060's 0.5% for anything else.
+
+The cases take about two minutes on lavapipe, one at a time (one `RESOURCE_LOCK`); the slowest take 35 to 46 s, under the 300 s timeout. A failure leaves its `.actual.png` and `.diff.png` in the job's uploaded `build/test-output/`.
+
+On Windows, the runner's only adapter is WARP. The Windows debug jobs (on the runs that build every OS) try the cases on it after `scripts/test.ps1`, in the step "Try - gpu tests on D3D12's WARP adapter", which never fails the job; the outcome is recorded on [#364](https://github.com/armaatus/maplethief-port/issues/364) and in ADR 0202.
+
+### Run coverage
+
+`python3 -m mtport.runcoverage run` builds the `mac-coverage` preset (the entry counters) and runs the baseline tests one at a time with `MAPLETHIEF_COVERAGE` set, then writes `work/coverage/run-coverage.md` and `.json`: the guest functions executed per function tag, the unexecuted ones, and the scripts, natives, maps, imports and selectors the runs used ([ADR 0160](../adr/0160-run-coverage-entry-counters-and-hit-recorders.md)). How, and the baseline's numbers: [testing/run-coverage.md](../testing/run-coverage.md).
+
 ### Playtests
 
-Step-by-step runs for checking the game by hand are in [docs/testing/](../testing/). The Nintendo Switch's hardware sign-off is [switch-checklist.md](../testing/switch-checklist.md).
+Step-by-step runs for checking the game by hand are in [docs/testing/](../testing/). The Nintendo Switch's hardware sign-off is [switch-checklist.md](../testing/switch-checklist.md). The playthrough checklist of #79 and #92 is generated from the knowledge base: [playthrough-checklist.md](../testing/playthrough-checklist.md).
 
 ## Sanitizers: ASan and UBSan
 
@@ -120,7 +143,7 @@ Linux runs in a container, x86_64 like `ubuntu-latest` (Rosetta under [OrbStack]
 scripts/test-linux               # Debug workflow + pytest on a clean export of HEAD
 scripts/test-linux --release     # linux-release workflow; the kit lands in build/linux-release/
 scripts/test-linux --worktree    # uncommitted changes to tracked files included
-scripts/test-linux --arch arm64  # native on Apple silicon: faster, but not what CI runs
+scripts/test-linux --arch arm64  # aarch64 (linux-arm64-* presets), native on Apple silicon: CI's ubuntu-24.04-arm
 scripts/test-linux --real-assets # mount work/ read-only, so the real_assets tests run too
 ```
 
@@ -130,15 +153,18 @@ Windows has no container: run `scripts\test.ps1` (Debug and pytest) and `scripts
 
 ## GitHub CI
 
-`dev` is the integration branch and the default. Every feature, fix or epic pull request targets it. `main` moves only through a release pull request from `dev` ([Releases](releases.md)). [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs on pull requests and manual runs, not on pushes, and the pull request's target decides what runs ([ADR 0126](../adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md)):
+`dev` is the integration branch and the default. Every feature, fix or epic pull request targets it. `main` moves only through a release pull request from `dev` ([Releases](releases.md)). [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs on pull requests, manual runs and once a week, not on pushes, and the pull request's target decides what runs ([ADR 0126](../adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md)):
 
 | Pull request into | Runs |
 |---|---|
-| `dev` | lint and Python 3.10 and latest (Linux), the Linux Debug build with the C/C++ tests, the same tests under ASan and UBSan with the fuzz smoke, and the Switch NRO |
-| `main` | lint and Python, Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux, and the ASan and UBSan tests |
+| `dev` | lint and Python 3.10 and latest (Linux), clang-tidy, the Linux Debug build with the C/C++ tests, the same tests under ASan and UBSan with the fuzz smoke, the Switch NRO and the Android APK |
+| `main` | lint and Python, clang-tidy, Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux, and on Windows and Linux ARM64, the ASan and UBSan tests, the iOS compile, the Switch NRO and the Android APK |
 | manual run | the full set, Release unless its `release` input is off |
+| weekly, on `dev` | the full set with Release, then the `weekly report` job ([below](#the-weekly-run)) |
 
-GitHub's hosted runners are free for this public repository, so use them. To run all three OSes on any branch:
+`scripts/ci-scope` skips the native jobs when a pull request touches only docs or compendium work, and the Switch or Android job when the native paths touch only another platform's own files.
+
+GitHub's hosted runners are free for this public repository, so use them. To run all three OSes, and Windows and Linux on ARM64 too, on any branch:
 
 ```sh
 gh workflow run ci.yml --ref <branch>
@@ -147,13 +173,34 @@ gh run watch
 
 A pull request is merged only when its checks are green (`gh pr checks --watch`).
 
-- **The `build` jobs** run the same `scripts/test` and `scripts/test.ps1` as above: the Debug build, CTest (including the headless `platform.smoke`) and pytest, with warnings as errors. The Release jobs run the release workflows and package the kits; the universal binary must contain both `arm64` and `x86_64`.
+- **The `build` jobs** run the same `scripts/test` and `scripts/test.ps1` as above: the Debug build, CTest (including the headless `platform.smoke`) and pytest, with warnings as errors. The Release jobs run the release workflows and package the kits; the universal binary must contain both `arm64` and `x86_64`. On the runs that build every OS, `windows-11-arm` and `ubuntu-24.04-arm` run the same jobs with the `win-arm64-*` and `linux-arm64-*` presets ([ADR 0194](../adr/0194-windows-arm64-and-linux-aarch64-builds.md)).
+- **The `guest image (macOS, clang + Apple ld)` job** (macOS, wherever the `build` jobs run) builds the guest program with `scripts/guest-image` and uploads `build/guest/` as the `guest-image` artifact; every `build` job waits for it and downloads it, so its CTest runs `platform.guest_program`: our own armv7 app through the recompiler, the runtime and the platform shell, checked against a golden frame, its log and its sound ([ADR 0213](../adr/0213-guest-program-end-to-end-in-ci.md)). Locally, `scripts/guest-image` on a Mac and a fresh configure do the same; elsewhere the test reports SKIPPED.
 - **The `asan` job** (Linux, on every pull request and manual run that builds) runs the `linux-asan` workflow: the C/C++ tests built with clang under ASan and UBSan, no recovery, the guest memory model checked ([Sanitizers](#sanitizers-asan-and-ubsan)). Then the fuzz smoke: the `linux-fuzz` workflow runs every target of `tests/fuzz/` for 30 s from its seeds ([Fuzzing](#fuzzing)); a finding fails the job, and its input is in the uploaded `build/test-output/linux-fuzz/fuzz/NAME/`.
 - **The `lint (clang-tidy)` job** (Linux, on every pull request and manual run that builds) runs `scripts/lint` in full, clang-tidy included, after installing the SDL3 build dependencies and clang for the compile database. It runs beside the build jobs and takes about 6 minutes, most of it clang-tidy.
 - **The `lint + Python min/latest` job** (Linux) runs `scripts/lint --no-tidy`, then `scripts/test --python-only` on Python 3.10 and the latest Python, and the guard that no compendium output is tracked ([ADR 0121](../adr/0121-public-compendium-site.md)).
 - **The `ios` job** (macOS, on the runs that build every OS: the release pull request and manual runs) runs the `ios-ci` workflow: our own code for iOS arm64, Debug and Release, no IPA and no signing. It links the frontend and runtime into the placeholder shell and checks the app is arm64 ([ADR 0136](../adr/0136-ios-app-through-xcode.md)). The game itself and a device are local.
 - **The `switch` job** (Linux, on every pull request and manual run) runs `scripts/build-switch HEAD --preset switch-release --arch amd64`: `MapleThief.nro` from our own code in the devkitA64 image pinned by digest, no IPA. Its CTest checks read the NRO's NACP and icon (`platform.switch_nro`) and run the release guard on it (`platform.switch_guard`). It also builds every test NRO, `MapleThiefTests.nro` among them. A console is never involved: hardware runs are local, with `scripts/switch-run` and `scripts/switch-test` ([ADR 0138](../adr/0138-nintendo-switch-homebrew-target.md)).
+- **The `android` job** builds `MapleThief.apk` and the runtime's test APK `MapleThiefTests.apk`; neither runs there. The test APK runs locally on the arm64 emulator or a device with `scripts/android-test --image 4k|16k` (or `--serial S`), which keeps `results.txt` and logcat in `build/test-output/android/` ([ADR 0251](../adr/0251-the-runtime-on-android-data-folder-and-test-apk.md)).
 - **Docs-only changes.** A pull request that touches only documentation or compendium work skips the build jobs, and one whose native changes only touch another platform's own files (`platform/macos/`, `scripts/*.ps1`, the Linux containers, …) skips the `switch` job. `scripts/ci-scope` decides, from an allow-list ([ADR 0006](../adr/0006-continuous-integration.md)'s addendum).
+- **`CI result`.** It waits for all the other jobs but the [weekly report](#the-weekly-run) and fails if any failed or was cancelled; a skipped job passes. It is what `dev`'s ruleset requires, since a skipped matrix job never reports under its expanded name. On a pull request into `main` nothing is skipped ([Branch rules](releases.md#branch-rules), [ADR 0173](../adr/0173-branch-rulesets-ci-result-gate-and-merge-commits-only.md)).
+
+### The weekly run
+
+Pull requests into `dev` build only on Linux, and the runner images are `*-latest`, so a toolchain update can break macOS, Windows or iOS without any change of ours. CI therefore also runs every Monday at 04:17 UTC on `dev` (GitHub runs a schedule on the default branch), with the manual run's full set and the Release jobs ([#339](https://github.com/armaatus/maplethief-port/issues/339)).
+
+Its last job, `weekly report`, runs after the others even when they fail. `tools/mtport/cireport.py` lists the run's jobs through GitHub's API and checks that every job of the full set ran and passed: a missing, skipped or cancelled job counts as a failure, since a run has ended as a failure with jobs missing and no log. Then:
+
+- **a failure** opens one issue titled *Weekly CI failed on dev*, labelled `ci-weekly`, with the failed jobs' links and the missing jobs' names, or comments on that issue if it is already open;
+- **a green run** comments on the open issue and closes it.
+
+The script's list of expected jobs (`EXPECTED`) has to follow `ci.yml`: `tests/test_ci_report.py` fails when a job is added to or removed from one but not the other, and when the report job doesn't `need` every job. If a run fails before any job starts (an invalid workflow, a startup failure), the report job can't run; GitHub then emails whoever last changed the schedule.
+
+To try the report on a branch, start a manual run with the `report` input; it files to the same issue:
+
+```sh
+gh workflow run ci.yml --ref <branch> -f report=true
+PYTHONPATH=tools python3 -m mtport.cireport --run-id <run id> --dry-run   # read only
+```
 
 CI never sees the IPA. A guard step in every job fails if a `*.ipa` ever shows up in the checkout, and `real_assets` tests show up as skipped. A job uploads an artifact only when it fails, and then only `build/test-output/` and CTest's logs.
 
@@ -166,5 +213,7 @@ A manual run with input `runners: self-hosted` sends the same jobs to self-hoste
 | macOS | `self-hosted`, `macOS`, `ARM64` | a Mac |
 | Windows | `self-hosted`, `Windows`, `X64` | a Windows PC with Visual Studio 2022+ and its C++ workload |
 | Linux, lint and Python | `self-hosted`, `Linux`, `X64` | a Linux x86_64 runner, for example the [actions/runner image](https://github.com/actions/runner/blob/main/images/Dockerfile) in OrbStack with `--platform linux/amd64` |
+| Windows ARM64 (`windows-11-arm`) | `self-hosted`, `Windows`, `ARM64` | an ARM64 Windows PC with Visual Studio 2022+, its C++ workload and the MSVC ARM64 build tools |
+| Linux aarch64 (`ubuntu-24.04-arm`) | `self-hosted`, `Linux`, `ARM64` | a Linux aarch64 runner, for example the actions/runner image in OrbStack with `--platform linux/arm64` |
 
 To set one up, Settings → Actions → Runners → New self-hosted runner gives the download and a registration token. Run `./config.sh --url https://github.com/armaatus/maplethief-port --token <token> --labels <labels>` and install it as a service (`./svc.sh install && ./svc.sh start` on macOS and Linux, `config.cmd --runasservice` on Windows). Keep the runner's directory away from your checkout, so its jobs never see `work/` or your IPA. Settings → Actions → General must keep "Run workflows from fork pull requests" off. The Linux runner needs `sudo` for the apt step.

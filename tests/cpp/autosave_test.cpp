@@ -372,3 +372,39 @@ TEST_CASE("autosave: the exit to the main menu (#179): Yes on popup 14 with OK; 
     CHECK_FALSE(off.exit_to_menu(nullptr, -5));
     CHECK(off.stats().saves + off.stats().skips == 0);
 }
+
+TEST_CASE("autosave: the death popup's exit to the main menu (#336): Yes on popup 0x6D in the "
+          "field; its popup passes and the dead hero refuses") {
+    constexpr u32 kWidget = 0x01004000;
+    FakeGuest g = field_game();
+    g.put32(fe::kAutosavePopup, fe::kAutosaveDeathExitPopup);
+    g.put32(fe::kAutosavePopupWidget, kWidget);
+    g.put32(kWidget + 0x14, 0); // Yes
+    // The confirm: OK (-5 or '5') with Yes picked on popup 0x6D, in game mode 0 only.
+    CHECK(fe::is_exit_to_menu_confirm(g.reader(), -5, fe::kAutosaveDeathExitPopup));
+    CHECK(fe::is_exit_to_menu_confirm(g.reader(), '5', fe::kAutosaveDeathExitPopup));
+    CHECK_FALSE(fe::is_exit_to_menu_confirm(g.reader(), -16, fe::kAutosaveDeathExitPopup));
+    CHECK_FALSE(fe::is_exit_to_menu_confirm(g.reader(), -5)); // not popup 14
+    g.put32(fe::kAutosaveGameMode, 1);
+    CHECK_FALSE(fe::is_exit_to_menu_confirm(g.reader(), -5, fe::kAutosaveDeathExitPopup));
+    g.put32(fe::kAutosaveGameMode, 0);
+    g.put32(kWidget + 0x14, 1); // No: back to the death popup
+    CHECK_FALSE(fe::is_exit_to_menu_confirm(g.reader(), -5, fe::kAutosaveDeathExitPopup));
+    g.put32(kWidget + 0x14, 0);
+    g.put32(fe::kAutosavePopup, 0x68); // the death popup itself
+    CHECK_FALSE(fe::is_exit_to_menu_confirm(g.reader(), -5, fe::kAutosaveDeathExitPopup));
+    // The guards: 0x6D passes only when the exit lets it through, and the dead hero refuses.
+    g.put32(fe::kAutosavePopup, fe::kAutosaveDeathExitPopup);
+    CHECK(fe::check_autosave(g.reader()).guard == AutosaveGuard::kPopup);
+    CHECK(fe::check_autosave(g.reader(), fe::kAutosaveDeathExitPopup).ok());
+    g.put32(kHero + 0x10, 1); // dead
+    const fe::AutosaveCheck c = fe::check_autosave(g.reader(), fe::kAutosaveDeathExitPopup);
+    CHECK(c.guard == AutosaveGuard::kDying);
+    CHECK(c.describe() == "the hero is dead (action 1)");
+    // The hook part: off does nothing.
+    fe::Autosaver off;
+    fe::Autosave mode = fe::Autosave::kOff;
+    off.install_exit_to_menu(&mode, [] { return 0.0; });
+    CHECK_FALSE(off.exit_to_menu(nullptr, -5, fe::kAutosaveDeathExitPopup));
+    CHECK(off.stats().saves + off.stats().skips == 0);
+}

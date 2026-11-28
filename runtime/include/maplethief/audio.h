@@ -45,6 +45,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "maplethief/pack_manifest.h"
 #include "maplethief/recomp/recomp.h"
 
 MT_EXTERN_C_BEGIN
@@ -65,6 +66,14 @@ typedef struct mt_audio_stats {
 
 /* This process's numbers (zeros before the first audio call). */
 mt_audio_stats mt_audio_get_stats(void) MT_NOEXCEPT;
+
+/* An audio-session interruption (#432): calls the listener the guest gave
+ * AudioSessionInitialize with `state` (1 kAudioSessionBeginInterruption, 0
+ * kAudioSessionEndInterruption) and a NULL user data (the game passes NULL: re/audio.md), on the
+ * guest thread between run-loop turns. Returns 1 if a listener was called, 0 if there is none.
+ * The platforms never call it (ADR 0045: a desktop has no phone call or alarm); the host-driven
+ * test does. */
+int mt_audio_session_interruption(mt_cpu *cpu, uint32_t state) MT_NOEXCEPT;
 
 /* --- the mixer's output (ADR 0045) ------------------------------------------------------- */
 
@@ -159,6 +168,11 @@ bool mt_audio_get_gapless_music(void) MT_NOEXCEPT;
  *             the limits is logged once ("audiopack: ...: rejected, the game's ... kept") and
  *             never read again, and the game's own file plays. A bad .loop is logged and
  *             ignored.
+ *   several   (#421, ADR 0149) mt_audio_pack_add appends a pack to an ordered list of at most
+ *             MT_PACKS_MAX. The first pack with a file for the sound id (`35` whatever its
+ *             extension) that passes the checks wins; a rejected file falls through to the next
+ *             pack, then the game's. A `.loop` applies to its own pack's sound only. Each pack's
+ *             counts: mt_audio_pack_use (maplethief/pack_manifest.h).
  *
  * Kept across processes (the frontend opens it before the boot). Single guest thread. */
 #define MT_AUDIO_PACK_MAX_FILE (128u << 20)   /* bytes */
@@ -168,22 +182,29 @@ bool mt_audio_get_gapless_music(void) MT_NOEXCEPT;
 #define MT_AUDIO_PACK_MAX_MUSIC_SECONDS 1800u /* a track's length (30 minutes) */
 #define MT_AUDIO_PACK_MAX_FILES 65536u        /* files indexed (#413); the rest skipped, logged */
 
-typedef struct mt_audio_pack_stats {
-    uint32_t files;            /* sound files indexed (.wav, .mp3 and .flac) */
-    uint32_t loops;            /* .loop files indexed */
-    uint32_t effects;          /* effects the pack was asked about */
-    uint32_t effects_replaced; /* of them, replaced by a pack file */
-    uint32_t music;            /* tracks the pack was asked about */
-    uint32_t music_replaced;   /* of them, replaced by a pack file */
-    uint32_t rejected;         /* asked about with a file that was rejected: the game's kept */
+typedef struct mt_audio_pack_stats { /* the packs, all together */
+    uint32_t files;                  /* sound files indexed (.wav, .mp3 and .flac) */
+    uint32_t loops;                  /* .loop files indexed */
+    uint32_t effects;                /* effects the packs were asked about */
+    uint32_t effects_replaced;       /* of them, replaced by a pack file */
+    uint32_t music;                  /* tracks the packs were asked about */
+    uint32_t music_replaced;         /* of them, replaced by a pack file */
+    uint32_t rejected; /* asked about with a file that was rejected: the game's kept */
 } mt_audio_pack_stats;
 
-/* Opens the pack in the directory `dir` (UTF-8): indexes its file names. Returns the sound
- * files indexed, or -1 (logged) if `dir` is no directory. A pack open before is closed first. */
+/* Adds the pack in the directory `dir` (UTF-8) after the packs open now: indexes its file names.
+ * Returns the sound files indexed, or -1 (logged) if `dir` is no directory or MT_PACKS_MAX packs
+ * are open. */
+int mt_audio_pack_add(const char *dir) MT_NOEXCEPT;
+/* Closes every pack, then adds `dir`: the pack alone. */
 int mt_audio_pack_open(const char *dir) MT_NOEXCEPT;
+/* Closes every pack. */
 void mt_audio_pack_close(void) MT_NOEXCEPT;
-/* The counters since the pack opened (zeros without one: closing it clears them). */
+/* The counters since the first pack opened (zeros without one: closing them clears them). */
 mt_audio_pack_stats mt_audio_pack_get_stats(void) MT_NOEXCEPT;
+/* The packs open now, and what pack `index` (0: the first) did: 0, or -1 if there is none. */
+uint32_t mt_audio_pack_count(void) MT_NOEXCEPT;
+int mt_audio_pack_use(uint32_t index, mt_pack_use *out) MT_NOEXCEPT;
 
 /* --- the vibrate hook (#64) ------------------------------------------------------------------ */
 

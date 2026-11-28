@@ -240,7 +240,7 @@ Example: `02 "Lucky Seven" … | 0300 | 00 01 03 0f 00 00 | 1e00 0b00 (30 % + 11
 
 ## `market.dat`
 
-Shop stock: one row per listing (`MarketItem`), read by the shop screen `0x4628D`. It scans all rows and keeps those whose `shop` equals the open shop. Rows 202–219 are all zero (unused). One listing in the middle of shop 8 (row 146) has `shop` 0, which looks like a data slip.
+Shop stock: one row per listing (`MarketItem`), read by the shop screen `0x4628D`. It scans all rows and keeps those whose `shop` equals the open shop. Rows 202–219 are all zero (unused); the shop screen still counts them as shop 0's (18 rows of equipment 0 at price 0), which no reachable shop shows ([original-bugs.md](../re/original-bugs.md#shops-0-1-and-16-restored-426)). No row lists the Monster Carnival tickets (`item_etc` 47–49); `restored_content` writes them on three of the unused rows in memory ([original-bugs.md](../re/original-bugs.md#monster-carnival-restored-427)). One listing in the middle of shop 8 (row 146) has `shop` 0, which looks like a data slip.
 
 | Offset | Type | Field | Meaning | Range | Evidence |
 |---|---|---|---|---|---|

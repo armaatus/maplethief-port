@@ -1,6 +1,7 @@
 """Packing and deploying the compendium (issues #226 and #248, ADR 0121), with ``gh`` stubbed:
 nothing here talks to GitHub. Also the deploy workflow's shape and its shell steps against a
-fake ``gh``, on both of its triggers (test_compendium_deploy_inputs.py has the inputs bundle)."""
+fake ``gh``, on both of its triggers (test_compendium_deploy_inputs.py has the inputs bundle),
+and its failure report (#319)."""
 
 from __future__ import annotations
 
@@ -261,8 +262,18 @@ def code_lines(text: str) -> str:
     return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
 
 
+def job(text: str, name: str) -> str:
+    """One job of the workflow, as its text (from its key to the next job)."""
+    body = text[text.index(f"\n  {name}:\n") + 1 :]
+    end = re.search(r"\n  [\w-]+:\n", body)
+    return body if end is None else body[: end.start() + 1]
+
+
 def steps(text: str) -> list[str]:
-    """The workflow's steps, each as its text (from ``- name:`` to the next step)."""
+    """The steps of the workflow's deploy job, each as its text (from ``- name:`` to the next
+    step); ``text`` may also be one job from :func:`job`."""
+    if "\njobs:\n" in text:
+        text = job(text, "deploy")
     body = text[text.index("    steps:\n") :]
     parts = re.split(r"\n(?=      - name: )", body)
     return [p for p in parts if p.lstrip().startswith("- name: ")]
@@ -291,8 +302,35 @@ def test_workflow_triggers_push_to_main_with_path_filters_and_dispatch():
     perms = text[text.index("\npermissions:") : text.index("\nconcurrency:")]
     for p in ("contents: write", "pages: write", "id-token: write"):
         assert p in perms
-    assert "if: github.ref == 'refs/heads/main'" in text
+    assert "if: github.ref == 'refs/heads/main' && !inputs.test_failure" in job(text, "deploy")
     assert "cancel-in-progress: false" in text
+    test_failure = on[on.index("      test_failure:") :]
+    assert "type: boolean" in test_failure and "default: false" in test_failure
+
+
+def test_the_pages_deployment_is_retried_once():
+    text = workflow()
+    first, retry = step(text, "Deploy to GitHub Pages"), step(text, "Retry the Pages deployment")
+    assert "continue-on-error: true" in first and "id: deployment\n" in first
+    assert "if: steps.deployment.outcome == 'failure'" in retry
+    assert "continue-on-error" not in retry  # the second failure fails the run
+    pages = re.compile(r"uses: (actions/deploy-pages@\S+)")
+    assert pages.search(first)[1] == pages.search(retry)[1]
+    deploy = job(text, "deploy")
+    assert "steps.deployment_retry.outputs.page_url || steps.deployment.outputs.page_url" in deploy
+    assert int(re.search(r"timeout-minutes: (\d+)", deploy)[1]) >= 25  # room for both tries
+
+
+def test_a_failed_run_reports_and_a_test_dispatch_can_force_one():
+    text = workflow()
+    forced = job(text, "test-failure")
+    assert "if: github.event_name == 'workflow_dispatch' && inputs.test_failure" in forced
+    assert "permissions: {}" in forced and "exit 1" in forced
+    report = job(text, "report")
+    assert "needs: [deploy, test-failure]" in report
+    assert "if: always() && (contains(needs.*.result, 'failure')" in report
+    assert re.search(r"permissions:\n      issues: write\n    steps:", report)
+    assert "${{" not in run_block(report)  # expressions only through env, never in the script
 
 
 def test_workflow_dispatch_path_checks_out_and_runs_nothing():
@@ -431,6 +469,11 @@ def run_steps(
         "GH_TOKEN": "x",
         "EVENT": event,
         "GITHUB_STEP_SUMMARY": str(summary),
+        "GITHUB_SHA": "c" * 40,
+        "GITHUB_EVENT_NAME": event,
+        "GITHUB_SERVER_URL": "https://github.com",
+        "GITHUB_REPOSITORY": "owner/repo",
+        "GITHUB_RUN_ID": "123",
     }
     outputs: dict[str, str] = {}
     ran = []
@@ -487,7 +530,12 @@ def test_workflow_dispatch_steps_with_a_fake_gh(tmp_path, case):
     if case == "ok":
         assert [(n.split()[0], rc) for n, rc, _ in ran] == [("Find", 0), ("Check", 0)], ran
         got = sorted(p.relative_to(site).as_posix() for p in site.rglob("*") if p.is_file())
-        assert got == sorted(names)
+        assert got == sorted([*names, "build.json"])
+        stamp = json.loads((site / "build.json").read_text(encoding="utf-8"))
+        assert stamp["commit"] == "c" * 40 and stamp["sha256"] == bundle.sha256(data)
+        assert stamp["run"] == "https://github.com/owner/repo/actions/runs/123"
+        assert stamp["event"] == "workflow_dispatch"
+        assert re.fullmatch(r"\d{4}-\d\d-\d\dT[\d:]{8}Z", stamp["deployed"])
         assert list(work.iterdir()) == []  # nothing written into the workspace
         return
     _, rc, log = ran[-1]
@@ -502,3 +550,68 @@ def test_workflow_dispatch_steps_with_a_fake_gh(tmp_path, case):
     }[case]
     assert expect in log, log
     assert not site.exists()
+
+
+def report_gh(tmp_path: Path, listing: list[dict]) -> tuple[Path, Path]:
+    """A ``gh`` for the report step: lists ``listing`` as the open issues and logs each call."""
+    calls = tmp_path / "calls.txt"
+    issues = tmp_path / "issues.json"
+    issues.write_text(json.dumps(listing), encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/usr/bin/env bash\n"
+        f'printf "%s\\n" "$*" >> "{calls}"\n'
+        'case "$1 $2" in\n'
+        f'  "issue list") jq -r "${{@: -1}}" "{issues}" ;;\n'
+        '  "issue comment"|"issue create") ;;\n'
+        '  *) echo "unexpected gh $*" >&2; exit 9 ;;\n'
+        "esac\n",
+        encoding="utf-8",
+    )
+    gh.chmod(0o755)
+    return bin_dir, calls
+
+
+@needs_tools
+@pytest.mark.parametrize("case", ["none-open", "one-open", "test-dispatch"])
+def test_the_report_opens_one_issue_or_comments_on_it(tmp_path, case):
+    """The report job's shell step with ``gh`` stubbed: one open issue gets a comment, none
+    open gets a new one, and a test dispatch says so."""
+    listing = [{"number": 5, "title": "Compendium deploy failed (other)"}]
+    if case == "one-open":
+        listing.append({"number": 9, "title": "Compendium deploy failed"})
+    bin_dir, calls = report_gh(tmp_path, listing)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "GH_TOKEN": "x",
+        "TEST_FAILURE": "true" if case == "test-dispatch" else "false",
+        "GITHUB_SERVER_URL": "https://github.com",
+        "GITHUB_REPOSITORY": "owner/repo",
+        "GITHUB_RUN_ID": "123",
+        "GITHUB_RUN_ATTEMPT": "2",
+        "GITHUB_SHA": "c" * 40,
+        "GITHUB_EVENT_NAME": "workflow_dispatch" if case == "test-dispatch" else "push",
+        "GITHUB_REF_NAME": "319-compendium-deploy" if case == "test-dispatch" else "main",
+    }
+    script = run_block(job(workflow(), "report"))
+    res = subprocess.run(
+        ["bash", "-e", "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    logged = calls.read_text(encoding="utf-8")
+    listed, acted = logged.split("\n", 1)
+    assert listed.startswith("issue list --repo owner/repo --state open --label area:compendium")
+    if case == "one-open":
+        assert acted.startswith("issue comment 9 --repo owner/repo --body ")
+        assert "commented on #9" in res.stdout
+    else:
+        assert acted.startswith("issue create --repo owner/repo --title Compendium deploy failed")
+        assert "--label area:compendium --label type:bug" in acted
+    assert "https://github.com/owner/repo/actions/runs/123 (attempt 2)" in acted
+    if case == "test-dispatch":
+        assert "failed on purpose" in acted and "319-compendium-deploy" in acted
+    else:
+        assert "gh run rerun 123 --failed" in acted and "c" * 40 in acted

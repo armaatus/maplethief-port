@@ -62,3 +62,7 @@ A pull request that only touches documentation or compendium work still skips th
 - The player builds could also move to CI later, on self-hosted runners that hold `work/gen` (Joris's Mac and PC, ADR 0006 addendum), triggered only by the merged release pull request, never by a pull request's code.
 - Hotfixes go through `dev` too: fix in `dev`, then a `Release vX.Y.Z+1` pull request.
 - The compendium site still deploys on a push to `main` (`compendium.yml`, ADR 0121), so it now follows the releases; a manual run of `compendium.yml` deploys it in between.
+
+## Addendum: the release PR carries `type:release` (#313, 2026-11-26)
+
+The `release title` check also fails unless the release PR carries the `type:release` label, which keeps it out of the generated notes (ADR 0024's addendum of the same date), and it reruns when labels change.

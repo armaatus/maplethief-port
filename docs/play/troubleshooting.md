@@ -16,13 +16,15 @@ An app you built yourself isn't affected.
 
 Windows SmartScreen warns about programs it hasn't seen often. Click **More info**, then **Run anyway**.
 
-### "MapleThief-1.5.ipa missing" or "SHA-256 mismatch"
+### The import screen says "THAT FILE CANNOT BE USED"
 
-The game can't find your copy of the game, or it's a different file. See [Your game file](your-ipa.md).
+The game checked the file you chose and refused it. The line below the title says why: "This file is not an IPA", "This is the IPA of another app", "This is MapleThief 1.x; the port needs version 1.5", "This IPA's game executable is encrypted", or "This is MapleThief 1.5, but not the known MapleThief-1.5.ipa", with the file's size and the start of its SHA-256. Nothing is kept from a refused file. Choose another file, or drop one on the window. [Your game file](your-ipa.md#if-it-doesnt-match) says what each case means.
+
+When you build it yourself, the build checks the file in `original/` instead, and says what is wrong in its own words ([Your game file](your-ipa.md)).
 
 ### Linux: "version `GLIBC_2.xx' not found"
 
-Your system is older than the build needs (glibc 2.39, e.g. Ubuntu 24.04). Update your distribution or SteamOS. More Linux tips: [Linux and Steam Deck](linux-and-steam-deck.md#if-it-doesnt-start).
+Your system is older than the build needs (glibc 2.35, e.g. Ubuntu 22.04). Update your distribution or SteamOS, or use the Flatpak bundle, which brings its own runtime. More Linux tips: [Linux and Steam Deck](linux-and-steam-deck.md#if-it-doesnt-start).
 
 ## The game keeps its data in the user folder
 
@@ -41,23 +43,59 @@ The game keeps your saves and settings in a `data` folder next to itself ([Saves
 
 **It runs slowly.** Lower the render scale or set it to `auto`, or try the GPU renderer (`gfx_backend = gpu`). F3 shows how long each frame takes.
 
+**Movement stutters a little on a 75, 144 or 165 Hz screen.** The game shows a new picture every 50 ms (20 a second). A 60, 100, 120 or 240 Hz screen fits a whole number of its refreshes into that, so every picture stays up just as long. A 144 Hz screen fits 7.2: four pictures in five stay up for 7 refreshes and one for 8 (75 Hz: 3 or 4; 165 Hz: 8 or 9). The game still runs at exactly the right speed, but the uneven steps can show as a faint stutter, and no clock can remove it. Two things do: set the screen to a rate it also offers that is a multiple of 20 Hz, usually 120 Hz on a 144 or 165 Hz screen and 60 Hz on a 75 Hz one (in your system's display settings; the log names the rates your screen offers that would, on a line starting `pacing:`), or turn on `frame_rate = smooth` with `gfx_backend = gpu`, which draws a picture for every refresh. The slower and faster game speeds (65 and 40 ms) have their own multiples (the log line says which).
+
 **No sound.** Check the volumes in the settings menu (Audio), and that `mute_unfocused` isn't muting it because the window lost focus. On Linux, try starting it with `SDL_AUDIO_DRIVER=pulseaudio`.
 
 **The controller does nothing.** Press a button on it once: the first controller you press is the one that plays. Steam can take over controllers; on the Deck use Steam's Gamepad layout.
 
 **The music pauses each time it loops.** The original did that too. Turn on gapless music (settings menu → Audio).
 
-**The menus have buttons that do nothing (More Games, the banner).** Those opened Nexon's web pages, which are gone. `hide_online_ui = on` hides them (part of the Original + controller and Enhanced presets).
+**The menus have buttons that do nothing (More Games, the banner).** Those opened Nexon's web pages, which are gone. `hide_online_ui = on` hides them (part of the Original + controller and Enhanced presets), and with the cash shop off it hides the Cash button and the death popup's two revive buttons too.
+
+## On the iPhone
+
+**The app stopped opening after a week.** With a free Apple account the app is signed for 7 days. Build and install it again ([Playing on your iPhone](iphone.md#3-install-it-with-xcode)); your saves stay as long as you don't delete the app.
+
+**"Untrusted Developer" when it starts.** On the iPhone open Settings > General > VPN & Device Management, tap your account under Developer App and choose **Trust**.
+
+**The build or Xcode's signing fails.** [Playing on your iPhone](iphone.md#when-something-goes-wrong) lists each message and its fix.
+
+**No sound.** The Ring/Silent switch silences the game, as it did the original. Turn the switch to ring, or set **Audio session** to `own` in the settings menu's Audio tab and start the game again ([Settings](settings.md#sound)).
+
+**The on-screen buttons disappeared.** They fade while a controller is used. Touch the screen and they come back. If they stay away, check Controls → **Hide the key pad** in the settings menu ([iPhone controls](iphone-controls.md#a-controller)).
+
+**The key pad is in an odd place.** Settings menu → Controls → **Edit the touch key pad**, then **Reset all** and **Save** ([iPhone controls](iphone-controls.md#moving-the-key-pad)).
+
+**The controller does nothing.** Pair it in the iPhone's Settings → Bluetooth first, then press a button on it while the game runs.
+
+**My saves are gone.** Deleting the app deletes its saves. Copy them out with the Files app before you delete it ([Uninstall and reset](uninstall-and-reset.md#iphone)).
+
+**Seeing the log.** Start the game from Xcode with your iPhone connected ([step 3](iphone.md#3-install-it-with-xcode)): the game's log shows in Xcode's debug area at the bottom. Copy it into your report.
+
+## On the Nintendo Switch
+
+**"Running short of memory", or it closes on a map.** You started the Homebrew Menu from the Album. Start it through a game instead: hold R while you start one ([Playing on the Nintendo Switch](switch.md#start)).
+
+**"No IPA found".** The file isn't in `sdmc:/switch/maplethief/`. Copy it there, next to `MapleThief.nro`, and press A to look again.
+
+**"That file cannot be used".** The line below says why: not an IPA, another version, an encrypted copy, or a damaged one. Check its SHA-256 on a computer ([Your game file](your-ipa.md)).
+
+**The import screen comes back on every start.** The import didn't finish, or `game/` was deleted. Let it run to the end with MapleThief open and the console awake.
+
+**The touch screen does nothing.** It works in handheld mode only; docked there is no touch screen.
+
+**The wrong button jumps.** Buttons go by their Nintendo labels: B jumps and A confirms. Settings menu (`+`) → Controls → **Bindings** → **Reset to defaults** brings back the defaults ([Nintendo Switch controls](../controls/switch.md)).
+
+**The settings menu is missing a row.** The console's menu leaves out what doesn't work there, such as fullscreen and the output device ([Settings](settings.md#on-the-nintendo-switch)).
+
+**Seeing the log.** Each run's log is in `sdmc:/switch/maplethief/data/logs/`, and a crash report in `sdmc:/switch/maplethief/crash.txt` and `data/crashes/`. Put the card in a computer to copy them. More in [Playing on the Nintendo Switch](switch.md#troubleshooting).
 
 ## Seeing what went wrong
 
-Start the game from a terminal to see its log:
+The game writes a log of each run to `logs/` in its data folder: settings menu → Saves → **Open logs folder**. Each file is named by the date and time the run started, so the newest is the latest run. You don't need a terminal for it.
 
-- Windows: open PowerShell in the game's folder and run `.\MapleThief.exe`
-- Mac: `MapleThief.app/Contents/MacOS/MapleThief`
-- Linux: `./MapleThief.sh`
-
-When you [report a problem](https://github.com/armaatus/maplethief-port/issues/new), include that log, your system, and what you did just before. [Known issues](../KNOWN_ISSUES.md) lists what we already know about.
+When you [report a problem](https://github.com/armaatus/maplethief-port/issues/new?template=bug.yml), attach that log, and say which system you play on and what you did just before. [Known issues](../KNOWN_ISSUES.md) lists what we already know about.
 
 ## Questions
 
@@ -73,6 +111,12 @@ When you [report a problem](https://github.com/armaatus/maplethief-port/issues/n
 
 **Can I help?** Yes. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
+**Can the menus be in my language?** The port's own menus are in English, Dutch and Korean (a draft): the Menu language row in the settings menu's Other tab, or `auto` to follow your system. To add your language, or fix a text: [Translating the port's menus](../build/how-to/translation.md). The game's own text stays in English or Korean (the `language` setting).
+
+**My question isn't here.** Ask in [Discussions](https://github.com/armaatus/maplethief-port/discussions/categories/q-a). Its [FAQ](https://github.com/armaatus/maplethief-port/discussions/418) sums up this page.
+
 ## A crash or a bug to report
 
-The game writes a log to `logs/` in the data folder (settings menu → Saves → **Open logs folder**) and, after a crash, a report in `crashes/`; a dialog names the file. Attach both to a [bug report](https://github.com/armaatus/maplethief-port/issues/new?template=bug.yml). After a crash the next start offers to use default settings for one run (no texture or audio packs, the software renderer); your settings file is not changed.
+The game writes a log to `logs/` in the data folder (settings menu → Saves → **Open logs folder**) and, after a crash, a report in `crashes/`; a dialog names the file. Attach both to a [bug report](https://github.com/armaatus/maplethief-port/issues/new?template=bug.yml). After a crash the next start offers to use default settings for one run (no texture or audio packs, the software renderer); your settings file is not changed. With **Crash recovery** on, it also offers to resume from a recovery point taken a few minutes before the crash ([Saves](saves.md#after-a-crash-recovery-points)).
+
+**The game freezes.** If the game stops drawing for 15 seconds on a desktop (not while it is minimised or in the background), it writes a hang report to `crashes/` and asks whether to **Keep waiting** or **Quit**. Keep waiting if it was loading something large; the question does not come back for the same freeze. Quit ends the game, and the next start offers default settings as after a crash. Attach the hang report and the newest log to a bug report as you would a crash report: it names where in the game it stopped.

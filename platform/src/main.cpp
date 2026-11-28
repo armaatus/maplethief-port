@@ -13,12 +13,13 @@
 //              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB] [--safe-area T,L,B,R]
 //              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N] [--seconds S]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
+//              [--pad T,BUTTON,down|up]... [--play-run FILE] [--verify-run FILE]
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
 //              [--effects-volume N] [--mute-unfocused on|off] [--gapless-music on|off]
 //              [--audio-mono on|off] [--audio-device default|NAME]
 //              [--right-touch X,Y|off] [--hide-keypad auto|always|never] [--shot-gl]
-//              [--rumble on|off] [--rumble-strength N]
+//              [--rumble on|off] [--rumble-strength N] [--rumble-events game|all]
 //              [--minimise T,S]... [--background T,S]... [--unfocus T,S]... [--quit T]
 //              [--save-settings]
 //              [--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]
@@ -27,16 +28,19 @@
 //              [--fix-original-bugs on|off] [--keypad-layout L] [--edit-keypad]
 //              [--preset original|original_controller|enhanced|custom]
 //              [--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off]
-//              [--language en|ko]
+//              [--language en|ko] [--menu-language auto|en|ko|nl]
 //              [--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR]
 //              [--border color|blur|image] [--border-image FILE]
 //              [--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3]
 //              [--hold-fast-forward T,S]... [--restore-backup T,N]...
 //              [--autosave off|on_quit] [--import-ipa FILE]
+//              [--check-pack DIR] [--build-texture-pack DUMP PACK] [--export-text DIR]
 //              [--print-data-dir] [--data-location game|user]
 //              [--switch-data-location game|user]
 //              [--migrate-from DIR [--force]]
 //              [--safe-start] [--force-crash host|trap] [--crash-dialog FILE]
+//              [--force-hang] [--hang-seconds S] [--hang-dialog FILE]
+//              [--native-script-vm on|off|shadow]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -80,6 +84,8 @@
 //   --rumble on|off        the active gamepad rumbles on the game's vibration, a hit and a
 //                          level-up (default on; rumble.h, #72)
 //   --rumble-strength N    how strongly, 0 to 100 percent (default 100)
+//   --rumble-events game|all  game: the game's vibration only; all: also a hit and a level-up
+//                          (default all; #399)
 //   --cash-shop off|meso   an Assist: the cash shop's items and the paid revives sold for the
 //                          hero's meso at rising prices (default off; maplethief/cashshop.h,
 //                          ADR 0072)
@@ -117,13 +123,13 @@
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
 // gapless_music, audio_mono, audio_device, audio_pack, ios_audio, text_pack, right_touch,
-// hide_keypad, rumble, rumble_strength, perf_overlay, pacing, fullscreen, vsync, pause_unfocused,
-// language, menu_repeat, confirm_guard, focus_highlight, button_prompts, button_labels,
-// pad_pointer, border, border_image, game_speed, fast_forward, autosave, ui_animations,
-// turbo_attack, auto_potion, skip_intros, minimap, exp_percent, auto_run, hold_toggle, auto_loot,
-// save_states, pause_on_disconnect); the command line overrides it. Every setting's flag is its
-// registry row's (settings.h), checked as its file line would be. The placeholder and the prototype
-// (tests) read no settings file.
+// hide_keypad, rumble, rumble_strength, rumble_events, perf_overlay, pacing, fullscreen, vsync,
+// pause_unfocused, language, menu_language, menu_repeat, confirm_guard, focus_highlight,
+// button_prompts, button_labels, pad_pointer, border, border_image, game_speed, fast_forward,
+// autosave, ui_animations, turbo_attack, auto_potion, skip_intros, minimap, minimap_mobs,
+// minimap_name, exp_percent, auto_run, hold_toggle, auto_loot, save_states, pause_on_disconnect);
+// the command line overrides it. Every setting's flag is its registry row's (settings.h), checked
+// as its file line would be. The placeholder and the prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
 //                     ADR 0070): applies the preset over the file before the other flags (which
 //                     then make it custom if they change a key it controls), and skips the
@@ -145,6 +151,8 @@
 //   --pause-unfocused on|off  the window losing focus pauses the game as a minimise does
 //                     (default off; lifecycle.h)
 //   --language en|ko  the game's language (default en; MAPLETHIEF_LANGUAGE overrides it)
+//   --menu-language auto|en|ko|nl  the port's menus (default auto: the system's language, else
+//                     English; the hint SDL_PREFERRED_LOCALES overrides the system's; #373)
 //   In an interactive run without --window, <data dir>/window.ini keeps the window's size and
 //   position from one run to the next. F12, a gamepad's Share button or R3 + Back write a
 //   screenshot to <data dir>/screenshots/; the cursor hides while the keyboard or a gamepad
@@ -193,6 +201,19 @@
 //                     turn: a left click at the window point that shows it, through the same
 //                     path as the mouse's (a test aid)
 //   --hold T,X,Y,S    the same touch held down for S seconds (a key pad button: walking, #87)
+//   --pad T,BUTTON,down|up  a virtual Xbox 360 pad's button (SDL's names: a, b, dpup, start,
+//                     ...) set T seconds after the first run-loop turn, through SDL's events as
+//                     a real pad's (a test aid, #405)
+//   --play-run FILE   play a run file (record_runs = on writes them in <data dir>/runs/, #405,
+//                     ADR 0156): its game files in a scratch data folder, its settings, its
+//                     tape as the clock and the only input, as fast as the host goes; checks a
+//                     checkpoint every 1,000 game ticks; exit status 6 if one differs or the
+//                     replay ends early. With SDL_VIDEO_DRIVER=dummy it runs headless
+//   --verify-run FILE verify a shared run file (#408, run_verify.h): --play-run with no window
+//                     and no audio device, refused for another binary or port version or a
+//                     missing checkpoint; prints a report on stdout (the splits' times
+//                     recomputed from the tape, clean or assisted from the recorded settings);
+//                     exit status 0 if it verifies, 6 if not
 //   --fixed-step MS   run on a virtual clock (ADR 0044): every run-loop turn advances it by MS
 //                     milliseconds (0.001 to 1000) and nothing waits, so a scripted run
 //                     reaches the same frames bit for bit every time
@@ -218,7 +239,8 @@
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
 //   --audio-pack DIR  the music and sound files in DIR replace the game's by file name
 //                     (audio_pack, maplethief/audio.h, ADR 0106); python3 -m mtport.audiopack
-//                     init DIR lists the names
+//                     init DIR lists the names; given more than once, the packs stack in order,
+//                     the first winning per sound (ADR 0149, as --texture-pack and --text-pack)
 //   --text-pack DIR   the text in DIR (UTF-8 .strings files) replaces the game's dialogue,
 //                     table names and descriptions and the port's own text by key (text_pack,
 //                     maplethief/textpack.h, ADR 0108); python3 -m mtport.textpack export DIR
@@ -255,6 +277,17 @@
 //                     passes, copy them into Documents/ after backing up what they replace
 //   --check-saves ZIP|DIR   each file's verdict ("theif0: ok", "config: bad_config: ...")
 //   --list-backups    every backup folder, newest first
+//   --check-ios-backup DIR   the game's files in an iPhone or iPod backup's folder (#374,
+//                     ios_backup.h), each with its verdict, and the names ignored
+//   --import-ios-backup DIR  the same files imported as --import-saves imports a folder (the
+//                     Saves tab's iPhone backup row)
+// The pack tools (#371, ADR 0205, pack_tools.h) run alone too, print the report and exit (status
+// 3 when the game would reject a file or refuse the pack, or the tool failed); --bundle names
+// the game's folder (else it is found as for the game):
+//   --check-pack DIR [--pack-kind texture|audio|text]  the pack as the game reads it
+//   --build-texture-pack DUMP PACK [--pack-scale K] [--pack-scaler scale|nearest] [--pack-no-ui]
+//                     a texture pack from a --dump-textures folder, K (default 2) times larger
+//   --export-text DIR [--language en|ko]  the game's and the port's text, to translate
 // The IPA import (#182, ADR 0100, ipa_import.h) runs alone too, without a window:
 //   --import-ipa FILE check FILE (your own MapleThief-1.5.ipa: its size and SHA-256) and
 //                     extract its Payload/MapleThief.app into the bundle folder (<game
@@ -293,6 +326,16 @@
 //                     guest trap (to see the dialog: a test aid)
 //   --crash-dialog FILE  shows the crash dialog for FILE and exits: what a crashed process
 //                     starts, since it cannot use SDL any more
+// The hang watchdog (hang_watchdog.h, #337): a run-loop turn that takes 15 s or more writes a
+// hang report to <data dir>/crashes/<time>.txt and asks Keep waiting or Quit.
+//   --hang-seconds S  the watchdog's limit (0: no watchdog; default 15, none with --fixed-step)
+//   --force-hang      the run-loop turn never ends 2 s after the first (a test aid)
+//   --native-script-vm on|off|shadow  the script VM's opcode loop as host code (#386, ADR 0226;
+//                     a developer switch, default on; off: the recompiled original); with
+//                     MAPLETHIEF_TRACE=scriptvm every opcode and native call is logged. shadow
+//                     (#430): each call runs both ways and is compared, the differences on stderr
+//   --hang-dialog FILE  shows the hang question for FILE and exits 3 for Quit, else 0: what the
+//                     watchdog starts, since the hung main thread cannot show it
 // Exit statuses: game.h (ExitStatus).
 
 #include <SDL3/SDL.h>
@@ -312,6 +355,12 @@
 #include <utility>
 #include <vector>
 
+#if defined(_WIN32)
+#include <io.h>
+#elif !defined(__SWITCH__)
+#include <unistd.h>
+#endif
+
 #include "audio_out.h"
 #include "bindings.h"
 #include "build_info.h"
@@ -320,21 +369,31 @@
 #include "data_location.h"
 #include "data_switch.h"
 #include "desktop.h"
+#include "file_dialog.h"
 #include "game.h"
 #include "gfx_backend.h"
 #include "gfx_prototype.h"
 #include "import_screen.h"
+#include "ios_backup.h"
 #include "ipa_import.h"
 #include "maplethief/audio.h"
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/runtime.h"
+#include "maplethief/texpack.h"
+#include "maplethief/widescreen.h"
+#include "pack_tools.h"
+#include "packs.h"
 #include "player_log.h"
+#include "port_text.h"
 #include "present.h"
 #include "preset_picker.h"
+#include "run_recorder.h"
+#include "run_verify.h"
 #include "save_tools.h"
 #include "scaling.h"
 #include "settings.h"
+#include "start_question.h"
 #include "thread_priority.h"
 
 #if defined(__SWITCH__)
@@ -398,21 +457,54 @@ struct Options {
     std::string bindings_file;  // --bindings (empty: <data dir>/bindings.ini)
     bool save_bindings = false; // --save-bindings
     // The save tools (#148, save_tools.h): one of them runs, prints to stdout and exits.
-    enum class SaveAction { kNone, kExport, kImport, kCheck, kListBackups };
+    enum class SaveAction { kNone, kExport, kImport, kCheck, kListBackups, kCheckIos, kImportIos };
     SaveAction save_action = SaveAction::kNone;
-    std::string save_action_path; // --export-saves, --import-saves, --check-saves
+    std::string save_action_path; // --export-saves, --import-saves, --check-saves, *-ios-backup
     std::string import_ipa;       // --import-ipa FILE (#182): import it and exit
-    bool print_data_dir = false;  // --print-data-dir (#261): print the data folder and exit
+    // The pack tools (#371, ADR 0205, pack_tools.h): one of them runs, prints and exits.
+    enum class PackTool { kNone, kCheck, kBuild, kExport };
+    PackTool pack_tool = PackTool::kNone;
+    std::string pack_path, pack_out; // --check-pack DIR, --build-texture-pack DUMP PACK, ...
+    std::string pack_kind;           // --pack-kind texture|audio|text ("": told from the folder)
+    unsigned pack_scale = 2;         // --pack-scale K
+    int pack_scaler = MT_TEXPACK_SCALER_SCALE; // --pack-scaler scale|nearest
+    bool pack_ui = true;                       // --pack-no-ui: false
+    bool print_data_dir = false; // --print-data-dir (#261): print the data folder and exit
     std::optional<DataPlace> data_location;        // --data-location game|user (ADR 0127)
     std::optional<DataPlace> switch_data_location; // --switch-data-location game|user (#263)
     std::string migrate_from;                      // --migrate-from DIR (#262): copy it in and exit
     bool force = false;                            // --force (with --migrate-from)
     bool safe_start = false;                       // --safe-start (#198)
     std::string crash_dialog;                      // --crash-dialog FILE: show it and exit
+    std::string play_run;                          // --play-run FILE (#405): replay a run file
+    std::string hang_dialog;                       // --hang-dialog FILE: ask, exit with it
     GameOptions game;
 };
 
 namespace proto = maplethief::gfx_prototype;
+
+// --verify-run's report stream (#408): stdout as it is now, while stdout itself goes to stderr
+// from here on, so that what the guest prints never mixes into the report. nullptr (the report
+// then goes to stdout) where that cannot be done.
+std::FILE *report_stream() {
+#if defined(_WIN32)
+    std::fflush(stdout);
+    const int out = _dup(_fileno(stdout));
+    if (out < 0 || _dup2(_fileno(stderr), _fileno(stdout)) != 0) {
+        return nullptr;
+    }
+    return _fdopen(out, "w");
+#elif defined(__SWITCH__)
+    return nullptr;
+#else
+    std::fflush(stdout);
+    const int out = dup(fileno(stdout));
+    if (out < 0 || dup2(fileno(stderr), fileno(stdout)) < 0) {
+        return nullptr;
+    }
+    return fdopen(out, "w");
+#endif
+}
 
 // The generated program, if this build links it (main.cpp is the only unit that sees
 // maplethief_gen and its MT_MEM_CHECKED).
@@ -567,13 +659,14 @@ void print_usage() {
             "[--safe-area T,L,B,R] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
             "[--capture-at N[,N...]] [--tap T,X,Y]... [--swipe T,X1,Y1,X2,Y2]... "
+            "[--pad T,BUTTON,down|up]... [--play-run FILE] [--verify-run FILE] "
             "[--fixed-step MS] [--shot T,NAME]... "
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
             "[--gapless-music on|off] [--audio-mono on|off] [--audio-device default|NAME] "
-            "[--audio-pack DIR] "
+            "[--audio-pack DIR]... "
             "[--right-touch X,Y|off] [--hide-keypad auto|always|never] "
-            "[--shot-gl] [--rumble on|off] [--rumble-strength N] "
+            "[--shot-gl] [--rumble on|off] [--rumble-strength N] [--rumble-events game|all] "
             "[--minimise T,S]... [--background T,S]... [--unfocus T,S]... [--quit T] "
             "[--save-settings] "
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
@@ -583,9 +676,11 @@ void print_usage() {
             "[--preset original|original_controller|enhanced|custom] [--pacing display|wall] "
             "[--save-dir DIR] [--save-backups N] [--export-saves ZIP|DIR] "
             "[--import-saves ZIP|DIR] [--check-saves ZIP|DIR] [--list-backups] "
+            "[--check-ios-backup DIR] [--import-ios-backup DIR] "
             "[--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off] "
             "[--language en|ko] "
-            "[--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR] "
+            "[--texture-pack DIR]... [--text-pack DIR]... [--texture-filter game|nearest] "
+            "[--dump-textures DIR] "
             "[--menu-repeat on|off] [--confirm-guard on|off] "
             "[--focus-highlight on|off] [--button-prompts on|off] "
             "[--keypad-layout original|GROUP=S,DX,DY,O;...] [--edit-keypad] "
@@ -593,8 +688,11 @@ void print_usage() {
             "[--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3] "
             "[--hold-fast-forward T,S]... [--restore-backup T,N]... "
             "[--autosave off|on_quit] [--import-ipa FILE] [--print-data-dir] "
+            "[--check-pack DIR [--pack-kind KIND]] [--build-texture-pack DUMP PACK "
+            "[--pack-scale K] [--pack-scaler scale|nearest] [--pack-no-ui]] [--export-text DIR] "
             "[--data-location game|user] [--switch-data-location game|user] "
-            "[--migrate-from DIR [--force]] [--safe-start] [--force-crash host|trap]");
+            "[--migrate-from DIR [--force]] [--safe-start] [--force-crash host|trap] "
+            "[--force-hang] [--hang-seconds S] [--native-script-vm on|off|shadow]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -663,7 +761,8 @@ bool parse_options(int argc, char **argv, Options &options) {
                 SDL_Log("%s: %s", std::string(arg).c_str(), why.c_str());
                 return false;
             }
-            options.setting_flags.emplace_back(info->key, argv[i]);
+            // A pack's flag given again adds to its list (#421).
+            add_setting_flag(options.setting_flags, info->key, argv[i]);
         } else if (arg == kPresetFlag && has_value) {
             Preset preset{};
             if (!parse_preset(argv[++i], &preset)) {
@@ -710,21 +809,64 @@ bool parse_options(int argc, char **argv, Options &options) {
         } else if (arg == "--save-bindings") {
             options.save_bindings = true;
             options.game_option = true;
-        } else if ((arg == "--export-saves" || arg == "--import-saves" || arg == "--check-saves") &&
+        } else if ((arg == "--export-saves" || arg == "--import-saves" || arg == "--check-saves" ||
+                    arg == "--check-ios-backup" || arg == "--import-ios-backup") &&
                    has_value) {
             if (options.save_action != Options::SaveAction::kNone) {
-                SDL_Log("only one of --export-saves, --import-saves, --check-saves and "
-                        "--list-backups");
+                SDL_Log("only one of --export-saves, --import-saves, --check-saves, "
+                        "--check-ios-backup, --import-ios-backup and --list-backups");
                 return false;
             }
-            options.save_action = arg == "--export-saves"   ? Options::SaveAction::kExport
-                                  : arg == "--import-saves" ? Options::SaveAction::kImport
-                                                            : Options::SaveAction::kCheck;
+            options.save_action = arg == "--export-saves"        ? Options::SaveAction::kExport
+                                  : arg == "--import-saves"      ? Options::SaveAction::kImport
+                                  : arg == "--check-ios-backup"  ? Options::SaveAction::kCheckIos
+                                  : arg == "--import-ios-backup" ? Options::SaveAction::kImportIos
+                                                                 : Options::SaveAction::kCheck;
             options.save_action_path = argv[++i];
             if (options.save_action_path.empty()) {
                 SDL_Log("%s needs a path", std::string(arg).c_str());
                 return false;
             }
+        } else if ((arg == "--check-pack" || arg == "--export-text") && has_value) {
+            if (options.pack_tool != Options::PackTool::kNone) {
+                SDL_Log("only one of --check-pack, --build-texture-pack and --export-text");
+                return false;
+            }
+            options.pack_tool =
+                arg == "--check-pack" ? Options::PackTool::kCheck : Options::PackTool::kExport;
+            options.pack_path = argv[++i];
+        } else if (arg == "--build-texture-pack" && i + 2 < argc) {
+            if (options.pack_tool != Options::PackTool::kNone) {
+                SDL_Log("only one of --check-pack, --build-texture-pack and --export-text");
+                return false;
+            }
+            options.pack_tool = Options::PackTool::kBuild;
+            options.pack_path = argv[++i];
+            options.pack_out = argv[++i];
+        } else if (arg == "--pack-kind" && has_value) {
+            options.pack_kind = argv[++i];
+            if (options.pack_kind != "texture" && options.pack_kind != "audio" &&
+                options.pack_kind != "text") {
+                SDL_Log("--pack-kind needs texture, audio or text");
+                return false;
+            }
+        } else if (arg == "--pack-scale" && has_value) {
+            const std::string v = argv[++i];
+            if (v.size() != 1 || v[0] < '1' || v[0] > '8') {
+                SDL_Log("--pack-scale needs 1 to 8");
+                return false;
+            }
+            options.pack_scale = static_cast<unsigned>(v[0] - '0');
+        } else if (arg == "--pack-scaler" && has_value) {
+            const std::string v = argv[++i];
+            if (v != "scale" && v != "nearest") {
+                SDL_Log("--pack-scaler needs scale or nearest");
+                return false;
+            }
+            options.pack_scaler =
+                v == "scale" ? MT_TEXPACK_SCALER_SCALE : MT_TEXPACK_SCALER_NEAREST;
+        } else if (arg == "--pack-no-ui") {
+            options.pack_ui = false;
         } else if (arg == "--import-ipa" && has_value) {
             options.import_ipa = argv[++i];
         } else if (arg == "--print-data-dir") {
@@ -742,6 +884,29 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.game_option = true;
         } else if (arg == "--crash-dialog" && has_value) {
             options.crash_dialog = argv[++i];
+        } else if (arg == "--hang-dialog" && has_value) {
+            options.hang_dialog = argv[++i];
+        } else if (arg == "--native-script-vm" && has_value) {
+            const std::string_view value = argv[++i];
+            if (value != "on" && value != "off" && value != "shadow") {
+                SDL_Log("--native-script-vm needs on, off or shadow, got '%s'", argv[i]);
+                return false;
+            }
+            options.game.native_script_vm = value == "on";
+            options.game.native_script_vm_shadow = value == "shadow";
+            options.game_option = true;
+        } else if (arg == "--force-hang") {
+            options.game.force_hang = true;
+            options.game_option = true;
+        } else if (arg == "--hang-seconds" && has_value) {
+            double seconds = 0;
+            if (!parse_double(argv[++i], &seconds) || !(seconds >= 0) || seconds > kMaxSeconds) {
+                SDL_Log("--hang-seconds needs seconds from 0 to %g, got '%s'", kMaxSeconds,
+                        argv[i]);
+                return false;
+            }
+            options.game.hang_seconds = seconds;
+            options.game_option = true;
         } else if (arg == "--force-crash" && has_value) {
             const std::string_view value = argv[++i];
             if (value != "host" && value != "trap") {
@@ -849,6 +1014,21 @@ bool parse_options(int argc, char **argv, Options &options) {
             tap.y2 = tap.y;
             options.game.taps.push_back(tap);
             options.game_option = true;
+        } else if (arg == "--pad" && has_value) {
+            const std::vector<std::string_view> parts = split(argv[++i]);
+            double t = 0;
+            const SDL_GamepadButton b =
+                parts.size() == 3 ? SDL_GetGamepadButtonFromString(std::string(parts[1]).c_str())
+                                  : SDL_GAMEPAD_BUTTON_INVALID;
+            if (parts.size() != 3 || !parse_double(parts[0], &t) || t < 0 ||
+                b == SDL_GAMEPAD_BUTTON_INVALID || (parts[2] != "down" && parts[2] != "up")) {
+                SDL_Log("--pad needs T,BUTTON,down|up (seconds, an SDL gamepad button name: a, "
+                        "b, dpup, start, ...), got '%s'",
+                        argv[i]);
+                return false;
+            }
+            options.game.pad_steps.push_back({t, static_cast<int>(b), parts[2] == "down"});
+            options.game_option = true;
         } else if (arg == "--hold" && has_value) {
             const std::vector<std::string_view> parts = split(argv[++i]);
             double v[4] = {};
@@ -927,6 +1107,14 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.game.quit_at = t;
+            options.game_option = true;
+        } else if (arg == "--play-run" && has_value) {
+            options.play_run = argv[++i];
+            options.game_option = true;
+        } else if (arg == "--verify-run" && has_value) {
+            options.play_run = argv[++i];
+            options.game.verify_run = true;
+            options.game.audio = false;
             options.game_option = true;
         } else if (arg == "--fixed-step" && has_value) {
             double ms = 0;
@@ -1150,6 +1338,52 @@ int run_save_action(const Options &options) {
         }
         break;
     }
+    case Options::SaveAction::kCheckIos:
+    case Options::SaveAction::kImportIos: {
+        IosBackupFiles backup;
+        if (!read_ios_backup(path, &backup, &why)) {
+            break;
+        }
+        std::printf("backup: %s (Manifest.%s)\n", ios_backup_label(backup.info).c_str(),
+                    backup.info.manifest.c_str());
+        for (const std::string &w : backup.warnings) {
+            std::printf("warning: %s\n", w.c_str());
+        }
+        const std::vector<SaveProblem> problems = check_save_set(backup.files);
+        for (const SaveFile &f : backup.files) {
+            const auto bad = std::find_if(problems.begin(), problems.end(),
+                                          [&](const SaveProblem &p) { return p.file == f.name; });
+            std::printf("%s\n",
+                        bad != problems.end() ? bad->line().c_str() : (f.name + ": ok").c_str());
+        }
+        for (const SaveProblem &p : problems) {
+            if (p.file == "set") {
+                std::printf("%s\n", p.line().c_str());
+            }
+        }
+        for (const std::string &name : backup.ignored) {
+            std::printf("ignored: %s\n", name.c_str());
+        }
+        if (options.save_action == Options::SaveAction::kCheckIos) {
+            ok = problems.empty();
+            break;
+        }
+        ImportResult result;
+        ok = import_save_set(loc, backup.files, path, backup_stamp_now(), &result, &why);
+        for (const std::string &name : result.imported) {
+            std::printf("imported: %s\n", name.c_str());
+        }
+        for (const std::string &name : result.removed) {
+            std::printf("removed: %s\n", name.c_str());
+        }
+        if (ok) {
+            std::printf("into %s\n", loc.documents_dir.c_str());
+            if (!result.backup.empty()) {
+                std::printf("the files it replaced are in %s\n", result.backup.c_str());
+            }
+        }
+        break;
+    }
     case Options::SaveAction::kListBackups:
         for (const BackupInfo &b : list_backups(loc)) {
             std::string files;
@@ -1285,6 +1519,72 @@ int run_import_ipa(const std::string &path) {
     return r.ok() ? kExitOk : kExitCheckMismatch;
 }
 
+// --check-pack, --build-texture-pack, --export-text (#371, ADR 0205, pack_tools.h): the pack
+// tools without a window; the report to stdout. Status 0, or 3 when the check found a file the
+// game rejects (or refuses the pack), the build skipped or failed a file, or the export failed.
+int run_pack_tool(const Options &options, const GameProgram &program) {
+    // The game's bundle for the sizes of its images, its sounds and its text: --bundle, else
+    // where the game would find it.
+    const std::string bundle =
+        find_bundle(bundle_search(options.game.bundle_dir, program.dev_bundle_dir)).dir;
+    Settings settings;
+    for (const auto &[key, value] : options.setting_flags) {
+        std::string why;
+        apply_setting(&settings, key, value, &why);
+    }
+    int status = kExitOk;
+    std::string text;
+    switch (options.pack_tool) {
+    case Options::PackTool::kCheck: {
+        const PackToolResult r = check_pack(options.pack_path, bundle, options.pack_kind.c_str());
+        text = pack_tool_text(options.pack_path, r);
+        if (bundle.empty()) {
+            text = "note: the game's folder not found: ui/ images and sounds not compared with "
+                   "the game's\n" +
+                   text;
+        }
+        status = r.report.opens != 0 && r.report.rejected == 0 ? kExitOk : kExitCheckMismatch;
+        break;
+    }
+    case Options::PackTool::kBuild: {
+        const PackToolResult r =
+            build_texture_pack(options.pack_path, options.pack_out, options.pack_scale,
+                               options.pack_scaler, options.pack_ui);
+        for (const PackToolLine &l : r.lines) {
+            text += std::string(l.level == MT_PACKCHECK_REJECTED  ? "error: "
+                                : l.level == MT_PACKCHECK_IGNORED ? "skipped: "
+                                                                  : "note: ") +
+                    l.text + "\n";
+        }
+        if (r.count >= 0) {
+            text += options.pack_out + ": " + std::to_string(r.count) + " pictures at " +
+                    std::to_string(options.pack_scale) +
+                    "x. Made from the game's art: keep this folder to yourself.\n";
+        }
+        status = r.count >= 0 && r.report.rejected == 0 ? kExitOk : kExitCheckMismatch;
+        break;
+    }
+    case Options::PackTool::kExport: {
+        const PackToolResult r = export_text(bundle, settings.language, options.pack_path);
+        for (const PackToolLine &l : r.lines) {
+            text += std::string(l.level == MT_PACKCHECK_REJECTED ? "error: " : "note: ") + l.text +
+                    "\n";
+        }
+        if (r.count >= 0) {
+            text += options.pack_path + ": " + std::to_string(r.count) +
+                    " entries to translate. Your own copy's text: keep this folder to yourself.\n";
+        }
+        status = r.count >= 0 ? kExitOk : kExitCheckMismatch;
+        break;
+    }
+    case Options::PackTool::kNone:
+        break;
+    }
+    std::fputs(text.c_str(), stdout);
+    std::fflush(stdout);
+    return status;
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -1307,6 +1607,9 @@ int main(int argc, char *argv[]) {
     if (!options.crash_dialog.empty()) {
         return run_crash_dialog_tool(options.crash_dialog); // a crashed process's helper
     }
+    if (!options.hang_dialog.empty()) {
+        return run_hang_dialog_tool(options.hang_dialog); // a hung process's helper
+    }
     if (options.version) {
         // stdout, not SDL_Log (stderr): scripts read it. A Windows GUI program prints only
         // when its output is redirected, e.g. `MapleThief.exe --version | Out-String`.
@@ -1316,6 +1619,40 @@ int main(int argc, char *argv[]) {
     // The data folder (data_location.h, ADR 0127): --data-location first, then resolved on the
     // first use. Without SDL's video: SDL_GetBasePath and SDL_GetPrefPath need none.
     set_data_location_flag(options.data_location);
+    // --play-run FILE (#405): the run file read, its game files in a scratch data folder of
+    // their own (the player's saves are never touched), before anything resolves the folder.
+    if (!options.play_run.empty()) {
+        std::string why;
+        auto run = std::make_shared<RunFile>();
+        const std::string dir = prepare_run_folder(options.play_run, run.get(), &why);
+        if (options.game.verify_run) {
+            // --verify-run (#408): no window, a missing checkpoint refused before it plays, and
+            // every refusal reported on stdout.
+            SDL_setenv_unsafe("SDL_VIDEO_DRIVER", "dummy", 1);
+            if (!dir.empty()) {
+                why = run_file_problem(*run);
+            }
+            if (!why.empty()) {
+                RunVerification v;
+                v.path = options.play_run;
+                v.refused = why;
+                std::fputs(run_verify_report(v).c_str(), stdout);
+                std::fflush(stdout);
+                return kExitRunDiffers;
+            }
+            options.game.run_path = options.play_run;
+            options.game.report = report_stream();
+        }
+        if (dir.empty()) {
+            SDL_Log("--play-run %s: %s", options.play_run.c_str(), why.c_str());
+            return kExitUsage;
+        }
+        set_data_location_dir(dir);
+        SDL_Log("--play-run %s: recorded by MapleThief %s, %llu turns; its %zu game files in %s",
+                options.play_run.c_str(), run->port_version.c_str(),
+                static_cast<unsigned long long>(run->turns), run->files.size(), dir.c_str());
+        options.game.run_file = std::move(run);
+    }
     if (options.print_data_dir) {
         std::fputs(describe_data_location(data_location()).c_str(), stdout);
         return std::fflush(stdout) == 0 ? kExitOk : kExitUsage;
@@ -1369,6 +1706,17 @@ int main(int argc, char *argv[]) {
         }
         prepare_data_folder();
         return run_import_ipa(options.import_ipa);
+    }
+    if (options.pack_tool != Options::PackTool::kNone) {
+        if (options.smoke_frames != 0 || options.gfx_prototype || options.audio_test_tone ||
+            options.save_action != Options::SaveAction::kNone || !options.import_ipa.empty()) {
+            SDL_Log("--check-pack, --build-texture-pack and --export-text run alone (with "
+                    "--bundle, --language or --pack-* options)");
+            print_usage();
+            return kExitUsage;
+        }
+        prepare_data_folder();
+        return run_pack_tool(options, generated_program());
     }
     const GameProgram program = generated_program();
     const bool game = options.smoke_frames == 0 && !options.gfx_prototype &&
@@ -1431,10 +1779,54 @@ int main(int argc, char *argv[]) {
     for (const auto &[key, value] : options.setting_flags) {
         apply_setting(&settings, key, value, nullptr); // checked by parse_options
     }
+    if (options.game.run_file != nullptr) {
+        // The recording's settings, whatever settings.ini and the command line say; only the
+        // window's own (fullscreen, vsync) from the command line.
+        Settings recorded;
+        for (const std::string &w : parse_settings(options.game.run_file->settings, &recorded)) {
+            SDL_Log("--play-run: the recording's settings: %s", w.c_str());
+        }
+        recorded.record_runs = false; // a replay is never recorded again
+        recorded.update_check = false;
+        recorded.crash_recovery = false;
+        for (const auto &[key, value] : options.setting_flags) {
+            if (key == "fullscreen" || key == "vsync") {
+                apply_setting(&recorded, key, value, nullptr);
+            }
+        }
+        settings = recorded;
+    }
+    // The port's menus in the player's language from the first screen on (#373, port_text.h):
+    // menu_language, whose default auto follows the system's, so the start question, the import
+    // screen and the preset picker of a first start (no settings.ini yet) are in it.
+    apply_menu_language(settings.menu_language);
 
     // The last run's crash (#198): offer a safe start, before anything uses the settings. The
     // marker is set now, so a crash during the start counts too.
     bool safe_start = false;
+    // The answer, from the box now or from the window's question once the window exists.
+    const auto apply_start = [&](const StartDecision &start, const RecoveryOffer &offer) {
+        safe_start = start.safe_start;
+        if (start.resume) {
+            options.game.recovery = offer;
+        } else if (offer.offered) {
+            SDL_Log("recovery: not offered (discarded at the start)");
+            delete_recovery_points(data_dir());
+        }
+        if (safe_start) {
+            settings = safe_start_settings(settings);
+            set_settings_write_blocked(true);
+            SDL_Log("safe start: default settings for this run (no texture or audio packs, the "
+                    "software renderer); settings.ini is not changed");
+        }
+    };
+    // Where no message box can be answered with every input method (the Switch, a Steam Deck's
+    // Game Mode; #416), the question waits for the window.
+    struct StartLater {
+        LastRun last;
+        RecoveryOffer offer;
+    };
+    std::optional<StartLater> start_later;
     if (game) {
         // What the settings name is the player's too: log lines quote these as they use them.
         // (Very short values would mangle unrelated text.)
@@ -1452,12 +1844,18 @@ int main(int argc, char *argv[]) {
         const LastRun last = crash_marker_begin(run_end.crashes_dir);
         const bool interactive = is_interactive_run(options.game, SDL_getenv("SDL_VIDEO_DRIVER"));
         set_crash_ui(interactive);
-        safe_start = decide_safe_start(options.safe_start, last, interactive);
-        if (safe_start) {
-            settings = safe_start_settings(settings);
-            set_settings_write_blocked(true);
-            SDL_Log("safe start: default settings for this run (no texture or audio packs, the "
-                    "software renderer); settings.ini is not changed");
+        // A recovery point (#335, ADR 0151): offered on #198's box; armed for the game, or
+        // deleted.
+        const DataLocation &loc = data_location();
+        const RecoveryOffer offer = find_recovery_point(
+            data_dir(), settings.save_dir.empty() ? loc.saves : settings.save_dir, last.crashed,
+            last.crash_file);
+        if (start_question_in_window(dialog_place(nullptr).gamescope) &&
+            start_asks(options.safe_start, last, interactive)) {
+            SDL_Log("safe start: the question is asked in the window");
+            start_later = StartLater{last, offer};
+        } else {
+            apply_start(decide_start(options.safe_start, last, interactive, offer), offer);
         }
         if (last.crashed) {
             SDL_Log("the last run did not end cleanly (report: %s)",
@@ -1540,6 +1938,12 @@ int main(int argc, char *argv[]) {
     // fullscreen_display (#196): a window that starts fullscreen opens on that display.
     const SDL_DisplayID start_display =
         game && !ios && settings.fullscreen ? find_display(settings.fullscreen_display) : 0;
+    // widescreen = fill (#425, ADR 0214): a first window (no --window, no window.ini) twice the
+    // picture the display's shape gives, so that it shows no bars.
+    if (game && !ios && !options.window_set && !window_state &&
+        settings.widescreen == Widescreen::kFill) {
+        options.window_w = 2 * display_fill_points(nullptr, static_cast<int>(MT_WIDESCREEN_FILL));
+    }
     SDL_Window *window = nullptr;
     if (window_state) {
         std::vector<SDL_Rect> displays;
@@ -1612,6 +2016,29 @@ int main(int argc, char *argv[]) {
     SDL_Renderer *renderer = window != nullptr ? gfx_backend.open(window, settings.gfx_backend,
                                                                   wants_gpu_renderer(settings))
                                                : nullptr;
+    // #198's question in the window (#416), then the safe start's settings; a safe start that
+    // changes what draws opens the renderer again (as after the preset picker). A window closed
+    // in the question quits and keeps the marker, so the next start asks again.
+    if (start_later && renderer != nullptr) {
+        bool quit = false;
+        const Settings before = settings;
+        const StartDecision start =
+            decide_start(false, start_later->last, true, start_later->offer,
+                         window_start_prompts(window, renderer, settings, &quit));
+        if (quit) {
+            run_end.crashes_dir.clear();
+            gfx_backend.close();
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return kExitOk;
+        }
+        apply_start(start, start_later->offer);
+        if (settings.gfx_backend != before.gfx_backend ||
+            wants_gpu_renderer(settings) != wants_gpu_renderer(before)) {
+            gfx_backend.close();
+            renderer = gfx_backend.open(window, settings.gfx_backend, wants_gpu_renderer(settings));
+        }
+    }
     // The bundle (#182, game.h's find_bundle): found, or imported now from the player's IPA by
     // the import screen in an interactive run; without one the game cannot start.
     if (game && renderer != nullptr) {

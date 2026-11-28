@@ -34,6 +34,7 @@
 #include <functional>
 #include <string>
 
+#include "recovery.h"
 #include "settings.h"
 
 struct SDL_Window;
@@ -71,6 +72,24 @@ void set_crash_dialog_for_test(CrashDialogFn fn); // null: the default
 // `MapleThief --crash-dialog FILE`: shows it and returns the process's exit status.
 int run_crash_dialog_tool(const std::string &path);
 
+// The hang report (#337, ADR 0195; hang_watchdog.h): crashes/<time>.txt as "MapleThief hang
+// report", the header, the hang's report and the log's tail. Not a crash: crash_reported() and
+// last_crash_file() stay as they were. Returns the path ("" if no file was written).
+std::string hang_report_write(const char *report, std::size_t len);
+// The question after a hang report, from the watchdog's thread (the main thread is the one that
+// hangs, so the box is the `--hang-dialog FILE` helper's, as the crash dialog's): Keep waiting
+// (the default) or Quit. The test seam first, then MAPLETHIEF_CRASH_DIALOG_LOG ("hang dialog:
+// <path>", keep waiting), then the helper in an interactive run (set_crash_ui), else keep waiting
+// (logged). No helper (iOS, Android, the Switch): keep waiting.
+enum class HangChoice { kKeepWaiting, kQuit };
+HangChoice ask_hang_choice(const std::string &path);
+using HangDialogFn = std::function<HangChoice(const std::string &path)>;
+void set_hang_dialog_for_test(HangDialogFn fn); // null: the default
+std::string hang_question_text(const std::string &path);
+// `MapleThief --hang-dialog FILE`: the box; exits with kHangHelperQuit for Quit, else 0.
+inline constexpr int kHangHelperQuit = 3;
+int run_hang_dialog_tool(const std::string &path);
+
 // The marker. `begin` returns whether the last run left it (and its report's path: the newest
 // .txt in `crashes_dir`, "" if none) and then sets it; `end` clears it. "" as the folder: a
 // no-op that reports no crash.
@@ -90,8 +109,43 @@ enum class SafeStartChoice { kDefaults, kNormal };
 using SafeStartPrompt = std::function<SafeStartChoice(const std::string &crash_file)>;
 void set_safe_start_prompt_for_test(SafeStartPrompt prompt); // null: the default
 // Whether this start is a safe one: `flag` (--safe-start), or the last run crashed, `interactive`
-// and the player chose it.
-bool decide_safe_start(bool flag, const LastRun &last, bool interactive);
+// and the player chose it. `ask` (null: the SDL box) asks; a test prompt comes first.
+bool decide_safe_start(bool flag, const LastRun &last, bool interactive,
+                       const SafeStartPrompt &ask = nullptr);
+
+// With a recovery point (#335, ADR 0151): the box gains a paragraph on the point and four
+// buttons. Resume (the default; the player's settings, the point armed), Resume with default
+// settings (the safe start, armed), Start with default settings (the safe start, the point
+// deleted), Start normally (Escape; the player's settings, deleted).
+enum class RecoveryChoice { kResume, kResumeDefaults, kStartDefaults, kStartNormal };
+using RecoveryPrompt =
+    std::function<RecoveryChoice(const std::string &crash_file, const RecoveryOffer &offer)>;
+void set_recovery_prompt_for_test(RecoveryPrompt prompt); // null: the default
+// The paragraph on the point: "A recovery point of character N, taken M minutes before the
+// crash, is kept."
+std::string recovery_offer_text(const RecoveryOffer &offer);
+struct StartDecision {
+    bool safe_start = false;
+    bool resume = false; // arm the offer's point (else the caller deletes it)
+};
+// Who asks the question: null ones are the SDL box; the window's question (start_question.h,
+// #416) where the box cannot be answered with every input method.
+struct StartPrompts {
+    SafeStartPrompt safe_start;
+    RecoveryPrompt recovery;
+};
+// decide_safe_start, and with `offer` offered the four-button question. `flag` (--safe-start):
+// a safe start, no resume. A run that is not interactive (and no test prompt): neither.
+StartDecision decide_start(bool flag, const LastRun &last, bool interactive,
+                           const RecoveryOffer &offer, const StartPrompts &ask = {});
+// Whether decide_start would ask anything (the window's question waits for the window).
+bool start_asks(bool flag, const LastRun &last, bool interactive);
+// The question's words and buttons, the box's and the window's alike: the two-button question
+// (no recovery point) and ADR 0151's four-button one.
+std::string safe_start_question_text(const std::string &crash_file);
+std::string recovery_question_text(const std::string &crash_file, const RecoveryOffer &offer);
+const char *start_choice_label(SafeStartChoice choice);
+const char *start_choice_label(RecoveryChoice choice);
 
 } // namespace maplethief::frontend
 

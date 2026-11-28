@@ -1,0 +1,14 @@
+# MapleThief run category (docs/formats/run-category.md): Any%, a new character to the last
+# boss's death (mob 69, whose closing scene is the first ending scene). Splits on every chapter
+# end and on the bosses the main quests ask for: 64, 68 (main 8's, on 9.5), 67 and 69. Mob 66 is
+# side quest 37's boss (on 4.17), which a run can leave, so it is not a split.
+title = Any%
+allow fix_original_bugs = off
+allow skip_intros = off
+split chapter_end 0 = Tutorial
+split boss_killed 64 = Chapter 1 boss
+split chapter_end 1 = Chapter 1
+split boss_killed 68 = Chapter 2 boss
+split chapter_end 2 = Chapter 2
+split boss_killed 67 = Chapter 3 boss
+split boss_killed 69 = Last boss

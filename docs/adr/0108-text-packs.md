@@ -85,3 +85,11 @@
 ## Addendum (#413)
 
 A symbolic link among a pack's five files is skipped and never followed, in one log line (`textpack: DIR: symbolic links not followed: ...`); a manifest that is a link leaves the pack unopened. Tests: `textpack: a symbolic link in a pack is not followed, logged once (#413)`; the limits that had none: `textpack: a file over 4 MiB is refused before it is read (#413)`, `textpack: the manifest's language is 1 to 35 characters (#413)`, `textpack: a Tables key's row is at most 5 digits (#413)`.
+
+## Addendum (#372)
+
+The port's menus draw a pack's `Port.strings` as it is: printable ASCII in the 5x7 font, any other character from the bundled fonts (NanumGothic, else Fira Sans), laid out in cells and cut at whole characters ([ADR 0206](0206-the-port-menus-draw-accents-and-hangul.md)). "The port's menus show translations without accents" above no longer holds; only the cash shop's price line (SDL's debug font) folds to ASCII. Covered and tested: Latin with accents and Hangul; Greek and Cyrillic draw from Fira Sans. **Not covered** (drawn as "?"): right-to-left scripts (Arabic, Hebrew), scripts that need shaping (Devanagari and the other Indic scripts, Thai, Khmer), combining marks (translations must be NFC), CJK ideographs and kana neither font has, and emoji. Test: `menu glyphs: a pseudo-translation draws every overlay without '?' or clipping`.
+
+## Addendum (#373)
+
+The port ships translations of its own menus, Dutch and Korean (a draft), as text packs of our own text in `platform/lang/<tag>/`, embedded in the frontend ([ADR 0222](0222-the-port-ships-its-menus-in-dutch-and-korean.md)). They sit under a pack: a text is an open pack's `Port.strings` value, else the menu language's (`menu_language = auto | en | ko | nl`, auto following the system's preferred languages), else the English. "The first start's preset picker runs before it and stays English" above no longer holds: the start question, the import screen and the preset picker are in the menu language. `mt_textpack_parse` parses `.strings` bytes by a pack's rules without opening a pack. `mtport.textpack`'s list of the port's keys now has the `help_pad` fields and the actions' default button, as the frontend's export does.

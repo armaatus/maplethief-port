@@ -626,7 +626,10 @@ bool load_audio(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *app
         return false;
     }
     auto voices = std::make_shared<mix::Voices>();
-    if (!r.u32(&n) || !r.count_fits(n, 30)) {
+    // An effect voice is at least 26 bytes (key, buffer, inline flag, pos, step, playing), a music
+    // voice 39 (no samples): a larger minimum refuses a state with a few voices and little after
+    // them (#409: two music voices with empty buffers).
+    if (!r.u32(&n) || !r.count_fits(n, 26)) {
         return false;
     }
     for (u32 i = 0; i < n; i++) {
@@ -647,7 +650,7 @@ bool load_audio(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *app
         }
         voices->effects.push_back(std::move(e));
     }
-    if (!r.u32(&n) || !r.count_fits(n, 43)) {
+    if (!r.u32(&n) || !r.count_fits(n, 39)) {
         return false;
     }
     for (u32 i = 0; i < n; i++) {
@@ -1241,6 +1244,18 @@ mt_audio_stats mt_audio_get_stats(void) noexcept {
     }
     st.sources = static_cast<u32>(s.sources.size());
     return st;
+}
+
+int mt_audio_session_interruption(mt_cpu *cpu, std::uint32_t interruption) noexcept {
+    const u32 listener = state().session_listener;
+    if (listener == 0) {
+        return 0;
+    }
+    mt_tracef("audio", "interruption %s: the session listener 0x%08X",
+              interruption != 0 ? "begins" : "ends", static_cast<unsigned>(listener));
+    const u32 args[2] = {0u, interruption};
+    mt_call_guest(cpu, listener, args, 2, listener);
+    return 1;
 }
 
 } // extern "C"

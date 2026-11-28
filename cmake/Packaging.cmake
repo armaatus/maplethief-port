@@ -7,15 +7,15 @@
 # assets-out/. Layout below the kit's top-level directory MapleThief-kit-<version>-<os>-<arch>/:
 #
 #   MapleThief.app (macOS) | bin/MapleThief[.exe]   the platform shell (no game code yet)
-#   | MapleThief.nro (Nintendo Switch)
+#   | MapleThief.nro (Nintendo Switch) | MapleThief.apk (Android, debug-key signed, ADR 0150)
 #   lib/                    runtime + static SDL3 libraries
 #   include/                runtime headers (maplethief/) + SDL3 headers (SDL3/)
 #   recomp/ tools/ scripts/ the recompiler, the Python tools and the user-facing scripts, in
 #   pyproject.toml uv.lock  the repository's layout, so the scripts run unchanged
 #   README.md THIRD_PARTY.md docs/ licenses/
 #
-# Generators: ZIP on Windows and the Nintendo Switch (MapleThief-kit-<version>-switch.zip, ADR
-# 0138), TGZ on Linux, and on macOS an External script that zips with
+# Generators: ZIP on Windows, the Nintendo Switch (MapleThief-kit-<version>-switch.zip, ADR
+# 0138) and Android (MapleThief-kit-<version>-android-arm64.zip, ADR 0150), TGZ on Linux, and on macOS an External script that zips with
 # `ditto -c -k --norsrc --keepParent`, which keeps the bundle's symlinks and signature. The
 # package lands in the build directory (build/<preset>/). Use the package presets:
 # `cmake --workflow --preset <os>-release` configures, builds, tests and packages.
@@ -45,10 +45,15 @@ function(_maplethief_kit_platform out_var)
         set(${out_var} "macos-${arch}" PARENT_SCOPE)
     elseif(NINTENDO_SWITCH)
         set(${out_var} "switch" PARENT_SCOPE)
+    elseif(ANDROID)
+        set(${out_var} "android-arm64" PARENT_SCOPE)
     elseif(WIN32)
-        string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" arch)
-        if(arch STREQUAL "amd64")
+        # MAPLETHIEF_ARCH (CMakeLists.txt) is MSVC's target, which a cross build to ARM64 on an
+        # x64 PC gets right and CMAKE_SYSTEM_PROCESSOR (the host's) does not (#362).
+        if(MAPLETHIEF_ARCH STREQUAL "x86_64")
             set(arch x64)
+        else()
+            set(arch "${MAPLETHIEF_ARCH}")
         endif()
         set(${out_var} "windows-${arch}" PARENT_SCOPE)
     else()
@@ -80,10 +85,16 @@ endfunction()
 #                           the import, docs/play/switch.md
 #   LICENSE THIRD_PARTY.md licenses/  with the notices of what the NRO links (ADR 0138:
 #                           maplethief_use_switch_licenses() in cmake/Dependencies.cmake)
+#
+# The Linux player's licenses/ adds the notices of the AppImage's type-2 runtime and what it
+# links (ADR 0193, #439: maplethief_use_appimage_licenses()): mtport.linux_package packs the
+# player's files behind that runtime, so the AppImage carries them.
 
 FetchContent_GetProperties(SDL3 SOURCE_DIR sdl3_source_dir)
 if(NINTENDO_SWITCH)
     maplethief_use_switch_licenses()
+elseif(MAPLETHIEF_PLAYER_BUILD AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    maplethief_use_appimage_licenses()
 endif()
 # install(FILES) of the Switch's licence texts into licenses/, for COMPONENT <component>.
 function(_maplethief_install_switch_licenses component)
@@ -138,6 +149,16 @@ if(MAPLETHIEF_PLAYER_BUILD)
             COMPONENT player)
         _maplethief_install_switch_licenses(player)
     else()
+        foreach(item IN LISTS MAPLETHIEF_APPIMAGE_LICENSES)
+            string(REPLACE "|" ";" parts "${item}")
+            list(GET parts 0 path)
+            list(GET parts 1 name)
+            install(
+                FILES "${path}"
+                DESTINATION licenses/AppImage-runtime
+                RENAME "${name}"
+                COMPONENT player)
+        endforeach()
         install(
             FILES platform/player/README.md
             DESTINATION .
@@ -173,6 +194,9 @@ else()
 if(NINTENDO_SWITCH)
     # The homebrew itself, not its ELF (platform/switch/switch.cmake).
     install(FILES "${MAPLETHIEF_SWITCH_NRO}" DESTINATION . COMPONENT platform)
+elseif(ANDROID)
+    # The APK, not libmain.so (platform/android/android.cmake).
+    install(FILES "${MAPLETHIEF_ANDROID_APK}" DESTINATION . COMPONENT platform)
 else()
     install(
         TARGETS MapleThief
@@ -276,7 +300,7 @@ if(APPLE)
     set(CPACK_GENERATOR External)
     set(CPACK_EXTERNAL_ENABLE_STAGING ON)
     set(CPACK_EXTERNAL_PACKAGE_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/DittoZip.cmake")
-elseif(WIN32 OR NINTENDO_SWITCH)
+elseif(WIN32 OR NINTENDO_SWITCH OR ANDROID)
     set(CPACK_GENERATOR ZIP)
 else()
     set(CPACK_GENERATOR TGZ)

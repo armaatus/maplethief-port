@@ -370,6 +370,47 @@ TEST_CASE("controls card: the touch card follows the key pad's layout") {
     CHECK(titled("Map")->rect.x == 0); // Map, Bag and Cash stay
 }
 
+TEST_CASE("controls card: the pointer tap names a touchpad only on a pad that may have one") {
+    // #381: a Nintendo or Xbox pad has no touchpad, so its card shows R3 held alone; a PS4/PS5
+    // pad, and the types SDL names no further (a Steam Deck), keep the touchpad's click first.
+    const std::vector<fe::Binding> table = fe::default_bindings();
+    const Control touchpad = button(SDL_GAMEPAD_BUTTON_TOUCHPAD);
+    const Control hold_rs{ControlKind::kGamepadHold, SDL_GAMEPAD_BUTTON_RIGHT_STICK};
+    struct Case {
+        SDL_GamepadType type;
+        bool has_touchpad;
+        const char *label; // the line's first glyph
+    };
+    const Case cases[] = {
+        {SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO, false, "Hold RS"},
+        {SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR, false, "Hold RS"},
+        {SDL_GAMEPAD_TYPE_GAMECUBE, false, "Hold RS"},
+        {SDL_GAMEPAD_TYPE_XBOXONE, false, "Hold RS"},
+        {SDL_GAMEPAD_TYPE_XBOX360, false, "Hold RS"},
+        {SDL_GAMEPAD_TYPE_PS3, false, "Hold R3"},
+        {SDL_GAMEPAD_TYPE_PS4, true, "Touchpad"},
+        {SDL_GAMEPAD_TYPE_PS5, true, "Touchpad"},
+        {SDL_GAMEPAD_TYPE_STANDARD, true, "Touchpad"},
+    };
+    for (const Case &k : cases) {
+        CAPTURE(static_cast<int>(k.type));
+        CHECK(fe::pad_type_has_touchpad(k.type) == k.has_touchpad);
+        const std::vector<fe::CardLine> lines =
+            fe::controls_card_lines(table, PromptDevice::kGamepad, k.type);
+        for (const Context ctx : {Context::kField, Context::kMenu}) {
+            const fe::CardLine *tap = find_line(lines, ctx, MT_ACTION_POINTER_TAP);
+            REQUIRE(tap != nullptr);
+            REQUIRE(!tap->controls.empty());
+            CHECK((std::find(tap->controls.begin(), tap->controls.end(), touchpad) !=
+                   tap->controls.end()) == k.has_touchpad);
+            CHECK(std::find(tap->controls.begin(), tap->controls.end(), hold_rs) !=
+                  tap->controls.end());
+            CHECK(fe::pad_glyph_label(tap->controls.front(), k.type, fe::FaceButtons::kPosition) ==
+                  k.label);
+        }
+    }
+}
+
 TEST_CASE("controls card: drawn per device, against synthetic goldens") {
     // The card is the port's own drawing: Canvas shapes and the port's font, integer arithmetic
     // only, over a plain synthetic backdrop. No game art.

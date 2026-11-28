@@ -7,16 +7,16 @@ MapleThief is MapleStory Thief Edition, the 2010 iPhone game, running natively o
 ## What you need
 
 1. **Your own copy of the game**: the file `MapleThief-1.5.ipa`. We can't give it to you. [Your game file](your-ipa.md) explains which file it has to be and how to check it.
-2. **A computer** with one of these:
+2. **A computer, phone or console** with one of these:
 
    | System | Minimum |
    |---|---|
-   | Windows | Windows 10 or 11, 64-bit |
+   | Windows | Windows 10 or 11, 64-bit (x64, or ARM64 such as Snapdragon laptops) |
    | Mac | macOS 13 Ventura or later (Apple silicon or Intel) |
-   | Linux | x86_64 with glibc 2.39 or later (Ubuntu 24.04, Fedora 40, current SteamOS) |
+   | Linux | x86_64 or aarch64 (ARM64) with glibc 2.35 or later (Ubuntu 22.04, Debian 12, current SteamOS): a tarball; on x86_64 also an AppImage or a Flatpak bundle |
    | Steam Deck | Yes, as a non-Steam game ([Linux and Steam Deck](linux-and-steam-deck.md)) |
-| iPhone | iOS 16 or later, built yourself on a Mac with Xcode ([Playing on your iPhone](iphone.md)), not checked on a device yet |
-| Nintendo Switch | One that runs homebrew from the Homebrew Menu ([Playing on the Nintendo Switch](switch.md)), not checked on a console yet |
+   | iPhone | iOS 16 or later, built yourself on a Mac with Xcode ([Playing on your iPhone](iphone.md)); checked on an iPhone 12 so far |
+   | Nintendo Switch | One that runs homebrew from the Homebrew Menu ([Playing on the Nintendo Switch](switch.md)), not checked on a console yet |
 
 ## Download and play
 
@@ -29,9 +29,9 @@ MapleThief is MapleStory Thief Edition, the 2010 iPhone game, running natively o
 
    | System | File |
    |---|---|
-   | Windows | `MapleThief-<version>-windows-x64.zip` |
+   | Windows | `MapleThief-<version>-windows-x64.zip`; on an ARM64 PC `MapleThief-<version>-windows-arm64.zip` |
    | Mac | `MapleThief-<version>-macos-universal.zip` |
-   | Linux, Steam Deck | `MapleThief-<version>-linux-x86_64.tar.gz` |
+   | Linux, Steam Deck | `MapleThief-<version>-linux-x86_64.tar.gz` (or `.AppImage`, `.flatpak`); on ARM64 (aarch64) `MapleThief-<version>-linux-aarch64.tar.gz` |
    | Nintendo Switch | `MapleThief-<version>-switch.zip`: copy and start it as [Playing on the Nintendo Switch](switch.md) says |
 
    The `MapleThief-kit-…` files are for developers; you don't need them.
@@ -68,7 +68,7 @@ The app runs natively on Apple silicon and on Intel Macs.
 2. Run `./MapleThief.sh` in the unpacked folder.
 3. To add it to your application menu, and through that to Steam's "Add a Non-Steam Game" list, run `./MapleThief.sh --install-desktop` once.
 
-It needs glibc 2.39 or later (Ubuntu 24.04, Fedora 40, current SteamOS). The Steam Deck steps and controller layout are in [Linux and Steam Deck](linux-and-steam-deck.md).
+It needs glibc 2.35 or later (Ubuntu 22.04, Debian 12, current SteamOS). The same game also comes as an `.AppImage` and a `.flatpak`; which to pick, and where each keeps your data, is in [Linux and Steam Deck](linux-and-steam-deck.md#play-it-on-linux). The Steam Deck steps and controller layout are in [Linux and Steam Deck](linux-and-steam-deck.md).
 
 ## Build it yourself
 
@@ -90,10 +90,26 @@ Before the game starts, the port asks how you want to play:
 
 Choose with the arrow keys and Enter, a gamepad, or the mouse. You can change it later in the settings menu (**F1**).
 
+## Your system, page by page
+
+Where to find each step for your system: installing, the controls, fixing a problem, resetting or removing the game, and moving your saves.
+
+| Platform | Install | Controls | Troubleshooting | Reset and uninstall | Save transfer |
+|---|---|---|---|---|---|
+| Windows | [Windows](#windows) | [Controls](controls.md) | [Troubleshooting](troubleshooting.md#windows-windows-protected-your-pc) | [Windows](uninstall-and-reset.md#windows) | [Saves](saves.md#moving-saves-to-another-computer) |
+| Mac | [Mac](#mac) | [Controls](controls.md) | [Troubleshooting](troubleshooting.md#mac-apple-could-not-verify-maplethief-is-free-of-malware) | [Mac](uninstall-and-reset.md#mac) | [Saves](saves.md#moving-saves-to-another-computer) |
+| Linux | [Linux](#linux-and-steam-deck) | [Controls](controls.md) | [Linux](linux-and-steam-deck.md#if-it-doesnt-start) | [Linux](uninstall-and-reset.md#linux-and-steam-deck) | [Saves](saves.md#moving-saves-to-another-computer) |
+| Steam Deck | [Steam Deck](linux-and-steam-deck.md#steam-deck) | [Steam Deck controls](linux-and-steam-deck.md#controls) | [Linux and Steam Deck](linux-and-steam-deck.md#if-it-doesnt-start) | [Steam Deck](uninstall-and-reset.md#linux-and-steam-deck) | [Saves](saves.md#moving-saves-to-another-computer) |
+| iPhone | [Playing on your iPhone](iphone.md) | [iPhone controls](iphone-controls.md) | [On the iPhone](troubleshooting.md#on-the-iphone) | [iPhone](uninstall-and-reset.md#iphone) | [The Files app](iphone.md#saves), [from the original game](iphone-saves.md) |
+| Nintendo Switch | [Playing on the Nintendo Switch](switch.md) | [Switch controls](../controls/switch.md) | [On the Nintendo Switch](troubleshooting.md#on-the-nintendo-switch) | [Nintendo Switch](uninstall-and-reset.md#nintendo-switch) | [Saves](saves.md#on-the-nintendo-switch) |
+
 ## Next
 
-- [Controls](controls.md): keyboard, mouse, gamepad, Steam Deck
+- [Controls](controls.md): keyboard, mouse, gamepad, Steam Deck; [iPhone controls](iphone-controls.md) for the phone
 - [Playing on the Nintendo Switch](switch.md): copying it to the SD card, the import on the console, saves
-- [Settings](settings.md): the settings menu, display, sound, graphics and gameplay options
+- [Settings](settings.md): the settings menu, display, sound, graphics, gameplay options, the language and packs
+- [Making packs](packs.md): texture, audio and text packs, made and checked with the game
+- [Speedrun timer](speedrun.md): the run timer, its categories, splits and personal bests, and what a clean run is
 - [Saves](saves.md): where they are, backups, moving them between computers, bringing your iPhone save over
+- [Uninstall and reset](uninstall-and-reset.md): putting the settings back, starting over, removing the game
 - [Troubleshooting](troubleshooting.md): when something doesn't work, and common questions

@@ -14,6 +14,8 @@
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
+#include "maplethief/offline.h"
+#include "maplethief/runtape.h"
 #include "snapshot/snapshot_internal.h"
 #include "uikit/uikit_internal.h"
 
@@ -53,13 +55,22 @@ const mt_input_action_info k_actions[MT_ACTION_COUNT] = {
     {"pointer_tap", "Pointer tap", nullptr, 0},
     {"quick_save", "Quick-save", nullptr, 0},
     {"quick_load", "Quick-load", nullptr, 0},
+    {"practice_pick", "Practice pick", nullptr, 0},
+    {"practice_load", "Practice load", nullptr, 0},
 };
 
 // EAGLView's ivars (objc.json): touchKeyPadView, statusOfTouchKeyPad.
 constexpr u32 k_eagl_touch_keypad = 84;
 constexpr u32 k_eagl_status = 92;
-// TouchKeyPadView's touchKeyPadEnable.
+// TouchKeyPadView's touchKeyPadEnable and isJoyPad.
 constexpr u32 k_pad_enable = 228;
+constexpr u32 k_pad_joypad = 96;
+// TouchKeyPadView's ten key BOOLs (objc.json), one byte each from onLeftKey: left, right, up,
+// down, jump, attack, short 1 to 4.
+constexpr u32 k_pad_keys = 104;
+constexpr u32 k_pad_key_actions[10] = {
+    MT_ACTION_LEFT,   MT_ACTION_RIGHT, MT_ACTION_UP,    MT_ACTION_DOWN,  MT_ACTION_JUMP,
+    MT_ACTION_ATTACK, MT_ACTION_SLOT1, MT_ACTION_SLOT2, MT_ACTION_SLOT3, MT_ACTION_SLOT4};
 // SkyCanvas's pending press and release; -1000 = none (program-flow.md, SkyCanvas::Tick).
 constexpr u32 k_canvas_press = 0xD8;
 constexpr u32 k_canvas_release = 0xE8;
@@ -93,6 +104,7 @@ struct State {
     i32 panel = -1;
     u32 pad = 0;
     bool live = false;
+    u32 pad_keys = 0; // the pad's key BOOLs as action bits (mt_input_pad_keys)
 
     u32 held[MT_ACTION_COUNT] = {};
     std::deque<Event> queue;
@@ -119,6 +131,15 @@ State g;
 bool valid_action(u32 a) { return a > MT_ACTION_NONE && a < MT_ACTION_COUNT; }
 // An action the guest gets (not one of the port's own, which the frontend handles).
 bool guest_action(u32 a) { return a > MT_ACTION_NONE && a < MT_ACTION_FIRST_PORT; }
+
+// The run tape's check of a call from the host (maplethief/runtape.h): recorded, or dropped while
+// a tape plays.
+bool admit(u32 kind, u32 action) {
+    mt_runtape_event e{};
+    e.kind = kind;
+    e.a = action;
+    return mt_runtape_admit(&e) != 0;
+}
 
 // Whether [addr, addr + size) is guest memory that is there: an image segment or the committed
 // heap. The game's globals are in its image; a synthetic guest (a test) may have no image, and
@@ -163,6 +184,17 @@ std::uint8_t rd8(const mt_cpu *cpu, u32 addr) {
 }
 
 const char *name_of(u32 a) { return valid_action(a) ? k_actions[a].name : "?"; }
+
+// The live pad's key BOOLs as bits 1 << action (read only; 0 while the pad is off).
+u32 read_pad_keys(const mt_cpu *cpu) {
+    u32 bits = 0;
+    for (u32 i = 0; g.live && g.pad != 0 && i < 10; i++) {
+        if (rd8(cpu, g.pad + k_pad_keys + i) != 0) {
+            bits |= 1u << k_pad_key_actions[i];
+        }
+    }
+    return bits;
+}
 
 // The EAGLView in the windows (depth first), or 0. The game has exactly one.
 u32 find_eagl(mt_cpu *cpu) {
@@ -217,6 +249,7 @@ void refresh(mt_cpu *cpu) {
         g.panel = -1;
         g.pad = 0;
         g.live = false;
+        g.pad_keys = 0;
         return;
     }
     g.panel = static_cast<i32>(rd32(cpu, g.eagl + k_eagl_status));
@@ -225,6 +258,16 @@ void refresh(mt_cpu *cpu) {
     if (g.panel == -1 && g.pad != 0 && mt_objc_current() == g.rt) {
         g.panel = shown_panel(g.pad);
     }
+    // A script's alert from the NPC chat (invenFullNotify's popup 8: the bag is full) is closed
+    // by disableAlertKey: status -1, panel 7 hidden, and nothing enables a panel again. The game
+    // pad stays live (enableAlertKey leaves touchKeyPadEnable and isJoyPad set), so on the device
+    // the hidden pad still walks the hero, and the screen is the field (#299).
+    const mt_ui::View *pad = g.panel == -1 && g.live ? mt_ui::view_of(nullptr, g.pad) : nullptr;
+    if (pad != nullptr && !pad->hidden && pad->model.alpha >= 0.01 &&
+        rd8(cpu, g.pad + k_pad_joypad) != 0) {
+        g.panel = 0;
+    }
+    g.pad_keys = read_pad_keys(cpu);
 }
 
 void enqueue(u32 action, bool down) {
@@ -530,7 +573,9 @@ extern "C" uint32_t mt_input_action_named(const char *name) noexcept {
 }
 
 extern "C" void mt_input_press(uint32_t action) noexcept {
-    if (!guest_action(action)) {
+    // The cash shop off with hide_online_ui (#400): its hidden buttons' keys send nothing.
+    if (!guest_action(action) || mt_offline_ui_drops_action(action) != 0 ||
+        !admit(MT_RUNTAPE_PRESS, action)) {
         return;
     }
     if (g.held[action]++ == 0) {
@@ -539,7 +584,7 @@ extern "C" void mt_input_press(uint32_t action) noexcept {
 }
 
 extern "C" void mt_input_release(uint32_t action) noexcept {
-    if (!guest_action(action) || g.held[action] == 0) {
+    if (!guest_action(action) || g.held[action] == 0 || !admit(MT_RUNTAPE_RELEASE, action)) {
         return;
     }
     if (--g.held[action] == 0) {
@@ -552,6 +597,9 @@ extern "C" uint32_t mt_input_held(uint32_t action) noexcept {
 }
 
 extern "C" void mt_input_release_all(void) noexcept {
+    if (!admit(MT_RUNTAPE_RELEASE_ALL, 0)) {
+        return;
+    }
     for (u32 a = 1; a < MT_ACTION_COUNT; a++) {
         if (g.held[a] != 0) {
             g.held[a] = 0;
@@ -563,6 +611,8 @@ extern "C" void mt_input_release_all(void) noexcept {
 extern "C" int32_t mt_input_panel(void) noexcept { return g.panel; }
 
 extern "C" int mt_input_pad_live(void) noexcept { return g.live ? 1 : 0; }
+
+extern "C" uint32_t mt_input_pad_keys(void) noexcept { return g.pad_keys; }
 
 extern "C" std::uint32_t mt_input_pad_panel_view(std::int32_t index) noexcept {
     if (g.pad == 0 || index < 0 || mt_objc_current() == nullptr || mt_objc_current() != g.rt) {
@@ -700,6 +750,7 @@ extern "C" void mt_input_after_touches(mt_cpu *cpu) noexcept {
     if (!g.live || g.pad == 0) {
         return;
     }
+    g.pad_keys = read_pad_keys(cpu); // the fingers' keys before the re-assert below
     for (u32 a = 1; a < MT_ACTION_FIRST_PORT; a++) {
         const char *key = k_actions[a].pad_key;
         if (g.held[a] == 0 || g.route[a] != Route::pad || key == nullptr ||

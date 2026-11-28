@@ -211,9 +211,9 @@ struct Rig {
             },
             this);
         focus.set_menu_source(
-            [](void *user, mt_cpu *, std::int32_t *tab, std::int32_t *open) {
-                *tab = static_cast<Rig *>(user)->tab;
-                *open = static_cast<Rig *>(user)->open;
+            [](void *user, mt_cpu *, std::int32_t *tab_out, std::int32_t *open_out) {
+                *tab_out = static_cast<Rig *>(user)->tab;
+                *open_out = static_cast<Rig *>(user)->open;
                 return true;
             },
             this);
@@ -1130,6 +1130,26 @@ struct Guest {
         c.resize(n);
         return c;
     }
+    // What the walk in focus.cpp sees of `obj`, for a failure's message: its state, its corners
+    // on the landscape screen and what the hit test finds at its centre.
+    std::string describe(u32 obj) {
+        const mt_ui::View *v = mt_ui::view_of(&cpu, obj);
+        if (v == nullptr) {
+            return "no view";
+        }
+        const mt_cg::Affine m = mt_ui::local_to_screen(&cpu, *v).then(mt_ui::screen_from_window());
+        const mt_cg::Rect &b = v->model.bounds;
+        const mt_cg::Point p0 = m.apply({b.x, b.y}), p1 = m.apply({b.x + b.w, b.y + b.h});
+        const mt_cg::Point mid = m.apply({b.x + b.w / 2, b.y + b.h / 2});
+        char line[400];
+        std::snprintf(line, sizeof line,
+                      "view 0x%X: kind %d hidden %d interaction %d alpha %g actions %zu subviews "
+                      "%zu, screen (%g, %g)-(%g, %g), hit at the centre 0x%X",
+                      obj, static_cast<int>(v->kind), v->hidden, v->interaction, v->model.alpha,
+                      v->actions.size(), v->subviews.size(), p0.x, p0.y, p1.x, p1.y,
+                      mt_ui::hit_test_screen(&cpu, mt_cg::Point{mid.y, 480.0 - mid.x}));
+        return line;
+    }
     void turn(double dt = 1.0 / 60) {
         g_now += dt;
         mt_uikit_turn(&cpu, g_now);
@@ -1147,6 +1167,48 @@ const mt_uikit_control *find(const std::vector<mt_uikit_control> &c, u32 object)
 
 } // namespace
 
+TEST_CASE("focus: the walk's steps: screen boxes, their clipping, a button's action") {
+    Guest g;
+    const u32 menu = g.add(g.root, "MainMenuView", 0, 0, 480, 320);
+    const u32 play = g.button(menu, 46, 148, 120, 48, menu, "clickPlay:");
+    const auto box_of = [&](u32 obj) {
+        const mt_ui::View *v = mt_ui::view_of(&g.cpu, obj);
+        REQUIRE(v != nullptr);
+        return mt_ui::screen_box(&g.cpu, *v);
+    };
+    const auto same = [](const mt_ui::ScreenBox &b, double x0, double y0, double x1, double y1) {
+        INFO(b.x0, " ", b.y0, " ", b.x1, " ", b.y1);
+        CHECK(b.x0 == x0);
+        CHECK(b.y0 == y0);
+        CHECK(b.x1 == x1);
+        CHECK(b.y1 == y1);
+    };
+    // The portrait window turned to the landscape screen, the root turned back inside it.
+    const mt_ui::ScreenBox window = box_of(mt_ui::state(&g.cpu).windows.at(0));
+    same(window, 0, 0, 480, 320);
+    same(box_of(g.root), 0, 0, 480, 320);
+    const mt_ui::ScreenBox button = box_of(play);
+    same(button, 46, 148, 166, 196);
+
+    const mt_ui::ScreenBox screen{0, 0, 480, 320};
+    same(mt_ui::intersect(screen, window), 0, 0, 480, 320);
+    same(mt_ui::intersect(window, button), 46, 148, 166, 196);
+    same(mt_ui::intersect(button, mt_ui::ScreenBox{100, 0, 480, 160}), 100, 148, 166, 160);
+    CHECK_FALSE(screen.empty());
+    CHECK_FALSE(button.empty());
+    CHECK(mt_ui::ScreenBox{10, 10, 10.4, 50}.empty());
+    CHECK(mt_ui::ScreenBox{10, 10, 50, 10.4}.empty());
+    CHECK(mt_ui::intersect(button, mt_ui::ScreenBox{200, 0, 480, 320}).empty());
+
+    const mt_ui::View *v = mt_ui::view_of(&g.cpu, play);
+    REQUIRE(v != nullptr);
+    const mt_ui::TargetAction *action = mt_ui::tap_action(*v);
+    REQUIRE(action != nullptr);
+    CHECK(action->target == menu);
+    CHECK(action->action == mt_objc_sel(g.rt, "clickPlay:"));
+    CHECK(mt_ui::tap_action(*mt_ui::view_of(&g.cpu, menu)) == nullptr);
+}
+
 TEST_CASE("focus: mt_uikit_controls lists what a tap reaches, as the hit test does") {
     Guest g;
     const u32 menu = g.add(g.root, "MainMenuView", 0, 0, 480, 320);
@@ -1156,6 +1218,14 @@ TEST_CASE("focus: mt_uikit_controls lists what a tap reaches, as the hit test do
     const u32 edge = g.button(menu, 440, 10, 80, 40, menu, "closeHelp:");
 
     std::vector<mt_uikit_control> c = g.controls();
+    const mt_ui::ControlsWalkTrace t = mt_ui::last_controls_walk();
+    INFO("walk: windows ", t.windows, " views ", t.views, " visible ", t.visible, " controls ",
+         t.controls, " with an action ", t.with_action, " reached ", t.reached, " listed ",
+         t.listed);
+    INFO(g.describe(mt_ui::state(&g.cpu).windows.at(0)));
+    INFO(g.describe(g.root));
+    INFO(g.describe(menu));
+    INFO(g.describe(play));
     REQUIRE(c.size() == 3);
     const mt_uikit_control *p = find(c, play);
     REQUIRE(p != nullptr);

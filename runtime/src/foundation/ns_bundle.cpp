@@ -168,6 +168,47 @@ void bundle_info_object(mt_cpu *cpu) {
     cpu->r[0] = v != nullptr ? autoreleased(cpu, to_object(cpu, *v)) : 0u;
 }
 
+// mt_cf_set_missing_key_fallback (original bug 15).
+bool g_missing_key_fallback = false;
+
+// mt_cf_set_literal_key_prefixes (#427): the prefixes, in order of preference.
+std::vector<std::u16string> g_literal_prefixes;
+
+// The key of ko.lproj/<table>.strings whose value is `text`, under the first prefix that has
+// one; nullptr if none does or no prefixes are set.
+const std::u16string *literal_key(mt_cpu *cpu, const std::string &table,
+                                  const std::u16string &text) {
+    if (g_literal_prefixes.empty()) {
+        return nullptr;
+    }
+    const std::string ko = mt_cf::bundle_find(cpu, table, "strings", "", "ko");
+    if (ko.empty()) {
+        return nullptr;
+    }
+    const PlistValue &strings = plist(cpu, ko);
+    for (const std::u16string &prefix : g_literal_prefixes) {
+        for (const auto &[key, value] : strings.entries) {
+            if (value.kind == PlistValue::string && value.s == text &&
+                key.compare(0, prefix.size(), prefix) == 0) {
+                return &key;
+            }
+        }
+    }
+    return nullptr;
+}
+
+// A text pack's string of `key` in <table>.strings (#189, ADR 0108) as a new NSString, or 0.
+u32 packed_string(mt_cpu *cpu, const std::string &table, const std::u16string &key) {
+    if (const char *packed = mt_textpack_lookup(table.c_str(), mt_cf::to_utf8(key).c_str())) {
+        std::u16string text;
+        if (mt_cf::decode(reinterpret_cast<const std::uint8_t *>(packed), std::strlen(packed),
+                          mt_cf::k_enc_utf8, text)) {
+            return autoreleased(cpu, mt_cf::string_create(cpu, std::move(text), false));
+        }
+    }
+    return 0u;
+}
+
 // -localizedStringForKey:value:table: the string of `key` in <language>.lproj/<table>.strings
 // (table nil or empty: Localizable); else `value` if it is not empty, else `key`.
 void bundle_localized_string(mt_cpu *cpu) {
@@ -184,22 +225,57 @@ void bundle_localized_string(mt_cpu *cpu) {
         t = "Localizable";
     }
     // A text pack's string first (#189, ADR 0108), UTF-8 from its <table>.strings.
-    if (const char *packed = mt_textpack_lookup(t.c_str(), mt_cf::to_utf8(*k).c_str())) {
-        std::u16string text;
-        if (mt_cf::decode(reinterpret_cast<const std::uint8_t *>(packed), std::strlen(packed),
-                          mt_cf::k_enc_utf8, text)) {
-            cpu->r[0] = autoreleased(cpu, mt_cf::string_create(cpu, std::move(text), false));
-            return;
-        }
+    if (const u32 packed = packed_string(cpu, t, *k)) {
+        cpu->r[0] = packed;
+        return;
     }
     const std::string rel = mt_cf::bundle_find(cpu, t, "strings", "", "");
     const PlistValue *found = rel.empty() ? nullptr : plist(cpu, rel).find(*k);
+    // A key the language's table lacks, from the English table (original bug 15).
+    if (found == nullptr && g_missing_key_fallback && mt_cf::config().language != "en") {
+        const std::string en = mt_cf::bundle_find(cpu, t, "strings", "", "en");
+        found = en.empty() ? nullptr : plist(cpu, en).find(*k);
+    }
+    // A script's literal text as the key it is the Korean value of (#427).
+    if (found == nullptr) {
+        if (const std::u16string *alias = literal_key(cpu, t, *k)) {
+            if (const u32 packed = packed_string(cpu, t, *alias)) {
+                cpu->r[0] = packed;
+                return;
+            }
+            found = rel.empty() ? nullptr : plist(cpu, rel).find(*alias);
+        }
+    }
     if (found != nullptr && found->kind == PlistValue::string) {
         cpu->r[0] = autoreleased(cpu, mt_cf::string_create(cpu, found->s, false));
         return;
     }
     cpu->r[0] = val != nullptr && !val->empty() ? value : key;
 }
+
+} // namespace
+
+bool localized_utf8(mt_cpu *cpu, const std::string &table, const std::string &key,
+                    std::string *out) {
+    if (const char *packed = mt_textpack_lookup(table.c_str(), key.c_str())) {
+        *out = packed;
+        return true;
+    }
+    std::u16string k;
+    if (key.empty() || !mt_cf::decode(reinterpret_cast<const std::uint8_t *>(key.data()),
+                                      key.size(), mt_cf::k_enc_utf8, k)) {
+        return false;
+    }
+    const std::string rel = mt_cf::bundle_find(cpu, table, "strings", "", "");
+    const PlistValue *found = rel.empty() ? nullptr : plist(cpu, rel).find(k);
+    if (found == nullptr || found->kind != PlistValue::string) {
+        return false;
+    }
+    *out = mt_cf::to_utf8(found->s);
+    return true;
+}
+
+namespace {
 
 const mt_objc_host_method k_bundle_instance[] = {
     {"retain", singleton_retain},
@@ -288,3 +364,19 @@ std::string home_guest_path() {
 }
 
 } // namespace mt_ns
+
+extern "C" void mt_cf_set_missing_key_fallback(int on) noexcept {
+    mt_ns::g_missing_key_fallback = on != 0;
+}
+
+extern "C" void mt_cf_set_literal_key_prefixes(const char *const *prefixes) noexcept {
+    mt_ns::g_literal_prefixes.clear();
+    for (; prefixes != nullptr && *prefixes != nullptr; prefixes++) {
+        std::u16string prefix;
+        const std::size_t n = std::strlen(*prefixes);
+        if (mt_cf::decode(reinterpret_cast<const std::uint8_t *>(*prefixes), n, mt_cf::k_enc_utf8,
+                          prefix)) {
+            mt_ns::g_literal_prefixes.push_back(std::move(prefix));
+        }
+    }
+}

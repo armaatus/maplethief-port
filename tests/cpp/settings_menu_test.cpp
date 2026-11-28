@@ -18,6 +18,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <set>
 #include <span>
 #include <string>
@@ -47,6 +48,7 @@
 #include "rumble.h"
 #include "settings.h"
 #include "settings_menu.h"
+#include "speech.h"
 #include "virtual_pad.h"
 
 namespace {
@@ -556,8 +558,9 @@ TEST_CASE("settings menu: the preset line; a change makes it custom; what waits 
     drv.key(SDLK_RIGHT);
     CHECK(live.preset == fe::Preset::kOriginal);
     CHECK(live.hide_keypad == fe::KeypadMode::kNever);
-    CHECK(applied == std::vector<std::string>{"hide_keypad"}); // the one row Original changes
-    CHECK(menu.status() == "Original: 1 setting changed");
+    // The rows Original changes from the defaults (rumble_events since #399).
+    CHECK(applied == std::vector<std::string>{"hide_keypad", "rumble_events"});
+    CHECK(menu.status() == "Original: 2 settings changed");
     drv.key(SDLK_RIGHT);
     CHECK(live.preset == fe::Preset::kOriginalController);
     drv.key(SDLK_D);
@@ -1285,6 +1288,9 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
         layouts.push_back(fe::keypad_layout_text(l));
     };
     t.turn_reads_settings = true;
+    // #390's speech rows: a Speech on the log backend.
+    fe::Speech speech(std::make_unique<fe::LogSpeechBackend>([](const std::string &) {}));
+    t.speech = &speech;
     // #195's output device: a stream on SDL's dummy driver, which audio_device reopens.
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
     fe::AudioDevice audio;
@@ -1306,6 +1312,7 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
     s.hide_keypad = fe::KeypadMode::kNever;
     s.rumble = false;
     s.rumble_strength = 30;
+    s.rumble_events = fe::RumbleEvents::kGame;
     s.perf_overlay = true;
     s.filter = fe::ShaderFilter::kCrt;
     s.border = fe::BorderMode::kImage;
@@ -1339,6 +1346,7 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
     CHECK(keypad.mode() == fe::KeypadMode::kNever);
     CHECK_FALSE(rumble.on());
     CHECK(rumble.strength() == 30);
+    CHECK(rumble.events() == fe::RumbleEvents::kGame);
     CHECK(perf.on());
     // vsync off reached the window and, through follow_vsync, Game::vsync and the telemetry
     // (the paced clock's plan reads them); fullscreen's case applies the same Desktop::apply.
@@ -1509,7 +1517,7 @@ TEST_CASE("settings menu: the drawing, by hash; every label and help fits") {
     // #179: Video has fullscreen_mode; every tab ends with Quit.
     const Case cases[] = {
         {"video", false, 0, 2, 0x376f9f95dc01ab3dull},
-        {"controls", false, 2, 4, 0x57b84f95d110e575ull},
+        {"controls", false, 2, 4, 0x165f11713efdfebbull}, // #399: rumble_events
         {"assists", true, 4, 0, 0x13f1e0d844400b8aull},
     };
     fe::RecentStats recent;
@@ -1721,6 +1729,7 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"hide_keypad", true, "the handheld's touch screen"},
     {"rumble", true, ""},
     {"rumble_strength", true, ""},
+    {"rumble_events", true, ""},
     {"keypad_haptics", false, "iOS only"},
     {"perf_overlay", true, ""},
     {"cash_shop", true, ""},
@@ -1733,8 +1742,10 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"vsync", true, ""},
     {"pause_unfocused", true, "the applet's focus (#240)"},
     {"language", true, ""},
+    {"menu_language", true, ""},
     {"text_pack", true, "offers <base>/text-packs/"},
     {"fix_original_bugs", true, ""},
+    {"restored_content", true, ""},
     {"texture_pack", true, "offers <base>/texture-packs/"},
     {"texture_filter", true, ""},
     {"hide_online_ui", true, ""},
@@ -1751,11 +1762,16 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"game_speed", true, ""},
     {"fast_forward", true, ""},
     {"autosave", true, ""},
+    {"crash_recovery", true, "off by default (kPlatformDefaults); the applet keeps a heap margin"},
     {"widescreen", true, ""},
     {"widescreen_hud", true, ""},
     {"colorblind_filter", true, ""},
     {"screen_shake", true, ""},
     {"flashes", true, ""},
+    {"speech", false, "no system voice open to homebrew (kCapSpeech, ADR 0174)"},
+    {"speech_rate", false, "kCapSpeech"},
+    {"speech_volume", false, "kCapSpeech"},
+    {"speech_notices", false, "kCapSpeech"},
     {"brightness", true, ""},
     {"contrast", true, ""},
     {"saturation", true, ""},
@@ -1766,7 +1782,10 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"auto_potion", true, ""},
     {"skip_intros", true, ""},
     {"minimap", true, ""},
+    {"minimap_mobs", true, ""},
+    {"minimap_name", true, ""},
     {"exp_percent", true, ""},
+    {"input_display", true, ""},
     {"auto_run", true, ""},
     {"hold_toggle", true, ""},
     {"auto_loot", true, ""},
@@ -1775,6 +1794,11 @@ constexpr SwitchDecision kSwitchRows[] = {
     {"stick_mode", true, ""},
     {"direction_priority", true, ""},
     {"update_check", false, "no HTTP fetcher on the console (update_fetch.cpp)"},
+    {"run_timer", true, ""},
+    {"run_category", true, ""},
+    {"record_runs", true, "run files go in the data folder (#405)"},
+    {"livesplit", false, "LiveSplit runs on a desktop (kCapLiveSplit)"},
+    {"livesplit_game_time", false, "LiveSplit runs on a desktop (kCapLiveSplit)"},
 };
 constexpr SwitchDecision kSwitchActions[] = {
     {"bindings", true, "the remap screen takes the pad"},
@@ -1782,6 +1806,9 @@ constexpr SwitchDecision kSwitchActions[] = {
     {"game_options", true, ""},
     {"export_saves", true, "a zip in data/exports/, no dialog"},
     {"import_saves", true, "a list of import/ and exports/ (save_menu.h's import_list)"},
+    {"ios_backup", true, "a list of import/'s backup folders (#374)"},
+    {"check_saves", true, "as on the desktop"},
+    {"other_saves", true, "a list of import/'s folders (#374)"},
     {"backups", true, "as on the desktop"},
     {"data_location", false, "one place: sdmc:/switch/maplethief/data (ADR 0127's addendum)"},
     {"open_data_folder", false, "no file manager"},
@@ -1789,6 +1816,10 @@ constexpr SwitchDecision kSwitchActions[] = {
     {"achievements", true, ""},
     {"keypad_layout_edit", true, "the editor takes the pad"},
     {"update_notice", false, "no update check"},
+    {"dump_textures", true, "into sdmc:/switch/maplethief/texture-dumps (#371)"},
+    {"build_texture_pack", true, "into texture-packs/, which the pack rows list"},
+    {"export_text", true, "into text-packs/, to translate on a computer"},
+    {"check_packs", true, "the verdicts in a list, the reports in the log"},
     {"quit", true, "back to the Homebrew Menu"},
 };
 
@@ -1990,9 +2021,11 @@ TEST_CASE("platform caps: the desktop shows every row as before; iOS and the Swi
             ios_hidden.emplace_back(row.key);
         }
     }
-    // iOS: the window is always the whole screen (ADR 0055), so its rows are gone; nothing else.
-    CHECK(ios_hidden ==
-          std::vector<std::string>{"fullscreen", "fullscreen_mode", "fullscreen_display"});
+    // iOS: the window is always the whole screen (ADR 0055), so its rows are gone; and LiveSplit
+    // runs on a desktop (#407). Nothing else.
+    CHECK(ios_hidden == std::vector<std::string>{"fullscreen", "fullscreen_mode",
+                                                 "fullscreen_display", "livesplit",
+                                                 "livesplit_game_time"});
     std::vector<std::string> ios_actions_hidden;
     for (const MenuActionInfo &a : fe::menu_actions()) {
         CHECK(fe::action_shown(a, SettingsPlatform::kDesktop));
@@ -2006,6 +2039,52 @@ TEST_CASE("platform caps: the desktop shows every row as before; iOS and the Swi
     // The build's own platform is the menu's default.
     const SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
     CHECK(menu.platform() == fe::kSettingsPlatform);
+}
+
+TEST_CASE("settings menu: a row the platform cannot serve now says so (#390: no system voice)") {
+    using fe::SettingsPlatform;
+    Settings live;
+    SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    menu.set_platform(SettingsPlatform::kDesktop);
+    menu.attach(&live);
+    bool voice = false;
+    const std::string why = "No system voice: install speech-dispatcher";
+    for (const char *key : {"speech", "speech_rate", "speech_volume"}) {
+        menu.set_setting_unavailable(key, [&voice, why] { return voice ? std::string() : why; });
+    }
+    Driver drv{menu, nullptr};
+    drv.button(SDL_GAMEPAD_BUTTON_GUIDE);
+    REQUIRE(menu.is_open());
+    for (std::size_t t = 0;
+         t < menu.tabs().size() && menu.tabs()[menu.tab()] != SettingGroup::kAccessibility; t++) {
+        drv.button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+    }
+    REQUIRE(menu.tabs()[menu.tab()] == SettingGroup::kAccessibility);
+    std::size_t row = 0;
+    for (std::size_t i = 1; i < menu.items().size(); i++) {
+        const SettingsMenu::Item &it = menu.items()[i];
+        if (it.kind == Kind::kSetting && std::string(it.setting->key) == "speech") {
+            row = i;
+        }
+    }
+    REQUIRE(row != 0);
+    while (menu.selected() < row) {
+        drv.button(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+    }
+    // Without a voice: "not available", the help says why, and Right changes nothing.
+    CHECK(menu.row_value(row) == "not available");
+    CHECK(menu.row_value(row + 1) == "not available"); // speech_rate
+    CHECK(menu.help() == why);
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    CHECK_FALSE(live.speech);
+    CHECK(menu.status() == why);
+    CHECK_FALSE(menu.changed());
+    // With one, the row is an ordinary on / off.
+    voice = true;
+    CHECK(menu.row_value(row) == "off");
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    CHECK(live.speech);
+    CHECK(menu.row_value(row) == "on");
 }
 
 TEST_CASE("settings menu: the pack rows offer their folders and show a pack by its name on the "
@@ -2049,7 +2128,7 @@ TEST_CASE("settings menu: the pack rows offer their folders and show a pack by i
     CHECK(changes[0].first == "texture_pack");
     CHECK(changes[0].second == "sdmc:/switch/maplethief/texture-packs/HD");
     fe::set_pack_choices("texture_pack", {});
-    // On the desktop the row offers nothing and shows the path as it is, as before.
+    // On the desktop the row offers nothing; since #370 it shows the pack by its name too.
     const SettingInfo *row = fe::find_setting("texture_pack");
     REQUIRE(row != nullptr);
     CHECK(fe::setting_choices(*row).empty());
@@ -2062,7 +2141,7 @@ TEST_CASE("settings menu: the pack rows offer their folders and show a pack by i
     for (std::size_t k = 1; k < desk.items().size(); k++) {
         const SettingsMenu::Item &it = desk.items()[k];
         if (it.kind == Kind::kSetting && std::strcmp(it.setting->key, "texture_pack") == 0) {
-            CHECK(desk.row_value(k) == "/packs/HD");
+            CHECK(desk.row_value(k) == "HD");
         }
     }
     for (const char *key : {"texture_pack", "audio_pack", "text_pack", "border_image"}) {

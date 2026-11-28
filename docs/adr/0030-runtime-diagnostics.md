@@ -42,7 +42,7 @@ Options 3, (c) and (b). Interface: `runtime/include/maplethief/diag.h`. Implemen
 | `MAPLETHIEF_TRACE_HLE=FILTERS` | trace every HLE call whose import name matches: comma-separated globs (`*`, `?`), `!glob` excludes, the last match wins; `memcpy` also matches `_memcpy` |
 | `MAPLETHIEF_TRACE=CHANNELS` | enable `mt_tracef(channel, …)` channels (`boot,objc`; `all`). `entry` logs each guest function's first entry |
 | `MAPLETHIEF_REPORT=PATH` | write the unimplemented report to PATH at exit, even when empty (`-` = stderr). Unset: stderr, only if not empty |
-| `MAPLETHIEF_COVERAGE=PATH` | write the function-entry coverage at exit |
+| `MAPLETHIEF_COVERAGE=PATH` | write the function-entry coverage at exit (with the run coverage's hits, `%p` = the process id: [ADR 0160](0160-run-coverage-entry-counters-and-hit-recorders.md)) |
 | `MAPLETHIEF_SYMBOLS=PATH` | load the guest symbol table |
 
 Addendum (#56, [ADR 0040](0040-gles-fixed-function-pipeline.md)): `MAPLETHIEF_GL_TRACE_FILE=PATH` writes every OpenGL ES call (decoded arguments, each draw's outcome, presents) to PATH. It is read by the GL layer (`maplethief/gles.h`), not by `mt_diag_configure`; the `gl` channel of `MAPLETHIEF_TRACE` logs the same lines to the log sink.
@@ -80,7 +80,7 @@ selector -[UIView setFoo:]: 2 messages, first from 0x00002003 CGame::Update+0x2
 
 Names come from the names contract, or `f_XXXXXXXX` where there is none, plus every `__symbolstub1` stub. For the real binary that is 2,872 symbols (2,655 functions, 1,676 of them named, plus 217 stubs), 124 KB. When the recompiler's outputs exist next to `MAPLETHIEF_GEN_DIR`, the build writes `<build dir>/maplethief.sym` (target `maplethief_symbols`, `cmake/GeneratedCode.cmake`). It is never installed or packaged. The runtime parses it defensively: skipped lines are counted, there are no overflowing ranges, and it is read-only once loaded, so the crash handler may look names up. `mt_symbolize` gives `Name+0xOFF`. Without a table, addresses stay raw, and the crash report still names regions through `mt_mem_describe`.
 
-**Function-entry coverage.** With `MT_TRACE_ENTRY 1` (CMake option `MAPLETHIEF_TRACE_ENTRY` on `maplethief_gen`), `MT_FN_ENTER` keeps a function-local `static uint64_t` entry counter. On the first entry it calls `mt_trace_fn_first(cpu, __func__, &counter)`. When on, a call costs one increment and one predictable branch; when off, nothing is emitted. `mt_coverage_format` lists `0xPTR entries name` by address.
+**Function-entry coverage.** With `MT_TRACE_ENTRY 1` (CMake option `MAPLETHIEF_TRACE_ENTRY` on `maplethief_gen`), `MT_FN_ENTER` keeps a function-local `static uint64_t` entry counter. On the first entry it calls `mt_trace_fn_first(cpu, __func__, &counter)`. When on, a call costs one increment and one predictable branch; when off, nothing is emitted. `mt_coverage_format` lists `0xPTR entries name` by address. Addendum (#295, [ADR 0160](0160-run-coverage-entry-counters-and-hit-recorders.md)): `mt_trace_fn_first` answers a function's pointer when the run coverage watches it, and the macro then calls `mt_trace_fn_watched` on every entry; the coverage file gets `hit <kind> <count> <key>` lines after the functions.
 
 **Crash reporter.** `mt_crash_format` writes one report for a trap or a hardware fault:
 

@@ -4,12 +4,16 @@ A text pack is a folder (``text_pack = DIR`` in settings.ini, or ``--text-pack D
 ``maplethief/textpack.h``, ``docs/formats/text-pack.md``) of ``.strings`` files in Apple's
 text syntax, strict UTF-8:
 
-- ``textpack.strings``: the manifest (``format`` "1", ``name``, ``language``; ``version``,
-  ``game_version`` and ``author`` optional). Required.
+- ``pack.strings``: the manifest (ADR 0149: ``format`` "1", ``kind`` "text", ``id``, ``name``,
+  ``language``; ``version``, ``author``, ``game_version``, ``content`` optional), or, in a pack
+  made before it, ``textpack.strings`` (``format``, ``name``, ``language``). Required.
 - ``Scripts.strings``, ``ScriptExtra.strings``: the dialogue, by the game's own keys.
 - ``Tables.strings``: names and descriptions of the data tables, ``<table>.<row>.<column>``.
 - ``Port.strings``: the port's menus, by ``platform/src/port_text.def``'s ids and the derived
   keys ``setting.<key>.label|help`` and ``action.<key>.label|help|button|confirm``.
+
+The game does both without the repository (#371, ADR 0205): ``MapleThief --export-text DIR``
+and ``MapleThief --check-pack DIR``, or the settings menu's Export text and Check packs.
 
 ``python3 -m mtport.textpack export DIR [--bundle APP] [--language en|ko]`` writes every text
 of the game's language (from your own copy, ``work/ipa/Payload/MapleThief.app`` by default)
@@ -42,8 +46,10 @@ MAX_KEY = 256
 MAX_VALUE = 4096
 MAX_ENTRIES = 65536
 
-MANIFEST = "textpack.strings"
+MANIFEST = "pack.strings"
+OLD_MANIFEST = "textpack.strings"
 FILES = {
+    "pack.strings": "pack",
     "textpack.strings": "textpack",
     "scripts.strings": "Scripts",
     "scriptextra.strings": "ScriptExtra",
@@ -65,6 +71,7 @@ TEXT_COLUMNS: dict[tuple[str, str], tuple[int, int]] = {
 
 LANGUAGES = {"en": ("en.lproj", "English"), "ko": ("ko.lproj", "Korean")}
 _LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$")
+_PACK_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _PLACE = re.compile(r"\{(\d{1,2})\}")
 
 
@@ -256,7 +263,9 @@ def places(s: str) -> set[int]:
 
 _C_STRING = r'"(?:[^"\\]|\\.)*"'
 _DEF = re.compile(r"MT_TEXT\(\s*(\w+)\s*,\s*((?:" + _C_STRING + r"\s*)+)\)")
-_FIELD = re.compile(r"\.(key|label|help|button|confirm)\s*=\s*((?:" + _C_STRING + r"\s*)+)")
+_FIELD = re.compile(
+    r"\.(key|label|help_pad|help|button|confirm)\s*=\s*((?:" + _C_STRING + r"\s*)+)"
+)
 
 
 def _c_literal(chunk: str) -> str:
@@ -289,12 +298,19 @@ def port_english(repo: Path = REPO) -> dict[str, str]:
     """Every key of Port.strings with its English: the table, the registry, the menu actions."""
     out: dict[str, str] = {}
     src = repo / "platform" / "src"
-    for m in _DEF.finditer((src / "port_text.def").read_text(encoding="utf-8")):
+    table = (src / "port_text.def").read_text(encoding="utf-8")
+    for m in _DEF.finditer(re.sub(r"^\s*//.*$", "", table, flags=re.M)):  # not the comments
         out[m[1]] = _c_literal(m[2])
     settings = (src / "settings.cpp").read_text(encoding="utf-8")
-    out.update(_rows(settings, "kRegistry[] = {", ("label", "help"), "setting"))
+    out.update(_rows(settings, "kRegistry[] = {", ("label", "help", "help_pad"), "setting"))
     menu = (src / "settings_menu.cpp").read_text(encoding="utf-8")
-    out.update(_rows(menu, "kActions[] = {", ("label", "help", "button", "confirm"), "action"))
+    actions = _rows(
+        menu, "kActions[] = {", ("label", "help", "help_pad", "button", "confirm"), "action"
+    )
+    for k in list(actions):
+        if k.endswith(".label"):  # MenuActionInfo's default button
+            actions.setdefault(k[: -len("label")] + "button", "Open...")
+    out.update(actions)
     return out
 
 
@@ -331,11 +347,13 @@ def check(pack: Path, port: dict[str, str] | None = None) -> Report:
     for name, p in sorted(found.items()):
         if name.endswith(".strings") and name not in FILES:
             report.notes.append(f"{p.name}: not a text pack file: ignored")
-    if MANIFEST not in found:
-        report.refused.append(f"{pack}: has no {MANIFEST} (the manifest)")
+    if MANIFEST not in found and OLD_MANIFEST not in found:
+        report.refused.append(f"{pack}: has no {MANIFEST} or {OLD_MANIFEST} (the manifest)")
         return report
+    if MANIFEST in found and OLD_MANIFEST in found:
+        report.notes.append(f"{OLD_MANIFEST}: {MANIFEST} is the manifest: ignored")
     for name, table in FILES.items():
-        if name not in found:
+        if name not in found or (table == "textpack" and MANIFEST in found):
             continue
         p = found[name]
         try:
@@ -345,8 +363,8 @@ def check(pack: Path, port: dict[str, str] | None = None) -> Report:
             continue
         if parsed.duplicates:
             report.notes.append(f"{p.name}: {parsed.duplicates} keys twice: the last one kept")
-        if table == "textpack":
-            _check_manifest(parsed.entries, report)
+        if table in ("pack", "textpack"):
+            _check_manifest(parsed.entries, report, p.name, table == "pack")
             continue
         report.entries += len(parsed.entries)
         if table == "Tables":
@@ -374,13 +392,21 @@ def check(pack: Path, port: dict[str, str] | None = None) -> Report:
     return report
 
 
-def _check_manifest(m: dict[str, str], report: Report) -> None:
+def _check_manifest(m: dict[str, str], report: Report, name: str, pack: bool) -> None:
+    """The manifest's rules: ADR 0149's for pack.strings (the runtime's pack_manifest.cpp, which
+    also checks the lengths and port_min), ADR 0108's for textpack.strings."""
     if m.get("format") != "1":
-        report.refused.append(f'{MANIFEST}: its "format" is not "1"')
+        report.refused.append(f'{name}: its "format" is not "1"')
+    if pack and m.get("kind") != "text":
+        report.refused.append(f'{name}: its "kind" is not "text"')
+    if pack and not _PACK_ID.match(m.get("id", "")):
+        report.refused.append(f'{name}: its "id" is not 1 to 64 of a-z, 0-9, ".", "_" and "-"')
     if not m.get("name"):
-        report.refused.append(f'{MANIFEST}: it has no "name"')
+        report.refused.append(f'{name}: it has no "name"')
     if not _LANGUAGE_TAG.match(m.get("language", "")):
-        report.refused.append(f'{MANIFEST}: its "language" is not a language tag (en, pt-BR)')
+        report.refused.append(f'{name}: its "language" is not a language tag (en, pt-BR)')
+    if pack and m.get("game_version", "1.5") != "1.5":
+        report.refused.append(f"{name}: made for the game's version {m['game_version']}")
 
 
 # -- export ----------------------------------------------------------------------------------------
@@ -402,14 +428,18 @@ def export(pack: Path, bundle: Path, language: str = "en") -> dict[str, int]:
     counts: dict[str, int] = {}
     _write(
         pack / MANIFEST,
-        "The pack: rename it, set its language (en, de, pt-BR, ...) and your name.",
+        "The pack: give it your own id and name, set its language (en, de, pt-BR, ...) and "
+        "your name. Made from the game's text: keep it to yourself (docs/play/packs.md).",
         [
             ("format", "1", ""),
+            ("kind", "text", ""),
+            ("id", f"maplethief-text-{language}", ""),
             ("name", f"MapleThief text ({language})", ""),
             ("language", language, ""),
             ("version", "1", ""),
             ("game_version", "1.5", ""),
             ("author", "", ""),
+            ("content", "derived", ""),
         ],
     )
     for table in ("Scripts", "ScriptExtra"):
@@ -434,8 +464,8 @@ def export(pack: Path, bundle: Path, language: str = "en") -> dict[str, int]:
     port = port_english()
     _write(
         pack / "Port.strings",
-        "Port: the port's menus. Keep each {0}, {1}, ... (the menus show plain letters only: "
-        "accents are dropped).",
+        "Port: the port's menus. Keep each {0}, {1}, ... The menus show Latin with accents "
+        "and Hangul; a text longer than its room is cut with '...' (ADR 0206).",
         [(k, v, "") for k, v in port.items()],
     )
     counts["Port"] = len(port)

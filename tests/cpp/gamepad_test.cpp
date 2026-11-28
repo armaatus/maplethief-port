@@ -33,6 +33,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
+#include "maplethief/offline.h"
 #include "maplethief/uikit.h"
 #include "uikit/uikit_internal.h"
 
@@ -928,6 +929,34 @@ TEST_CASE("input runtime: key events through Clet_HandleEvent wait for SkyCanvas
     const mt_input_stats s = mt_input_get_stats();
     CHECK(s.key_events == 7);
     CHECK(s.pad_edges == 0);
+}
+
+TEST_CASE("input runtime: the hidden cash buttons' keys send nothing (#400)") {
+    Guest g;
+    g.set_live(false);
+    g.set_panel(7); // the death popup
+    g.turn();
+    mt_offline_ui_configure(MT_OFFLINE_HIDE_LINKS | MT_OFFLINE_HIDE_CASH);
+    for (const u32 a : {MT_ACTION_REVIVE, MT_ACTION_GRADE_REVIVE, MT_ACTION_CASH_SHOP}) {
+        CAPTURE(a);
+        mt_input_press(a);
+        CHECK(mt_input_held(a) == 0u);
+        CHECK(g.tick().empty());
+        mt_input_release(a); // not held: ignored
+        CHECK(g.tick().empty());
+    }
+    // OK and back (Return to town, Go to main menu) still go.
+    mt_input_press(MT_ACTION_OK);
+    CHECK(g.tick() == Lines{"event 2 -5 0"});
+    mt_input_release(MT_ACTION_OK);
+    CHECK(g.tick() == Lines{"event 3 -5 0"});
+    // The cash shop sells (or hide_online_ui is off): the revive goes, as the original.
+    mt_offline_ui_configure(MT_OFFLINE_HIDE_LINKS);
+    mt_input_press(MT_ACTION_REVIVE);
+    CHECK(g.tick() == Lines{"event 2 -25 0"});
+    mt_input_release(MT_ACTION_REVIVE);
+    CHECK(g.tick() == Lines{"event 3 -25 0"});
+    mt_offline_ui_configure(0);
 }
 
 TEST_CASE("input runtime: a release goes the way its press went") {

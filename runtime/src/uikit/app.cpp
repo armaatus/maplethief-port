@@ -26,6 +26,7 @@
 #include "maplethief/diag.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/input.h"
+#include "maplethief/runtape.h"
 #include "objc/objc_internal.h"
 #include "snapshot/snapshot_internal.h"
 #include "uikit/nib.h"
@@ -637,19 +638,26 @@ const char *launch(mt_cpu *cpu, const mt_app_main_args *args) {
     }
     NibResult nib;
     std::string error;
-    if (!load_nib(cpu, nib_name, app, &nib, &error)) {
+    char detail[160] = {};
+    const bool delegate_named = args != nullptr && args->delegate_class_name != 0;
+    if (value == 0 && delegate_named && mt_cf::bundle_find(cpu, nib_name, "nib", "", "").empty()) {
+        // No NSMainNibFile and no MainWindow.nib, and UIApplicationMain names the delegate's
+        // class: UIKit loads no nib, and that delegate makes its window in code. The guest
+        // program does that (#385, ADR 0213); the game names its nib and passes nil.
+        mt_process_milestone("nib", 0, "no main nib (Info.plist names none)");
+    } else if (!load_nib(cpu, nib_name, app, &nib, &error)) {
         log(cpu, "UIApplicationMain: %s", error.c_str());
         mt_objc_pool_pop(rt, pool);
         return "UIApplicationMain: the main nib could not be loaded";
+    } else {
+        std::snprintf(detail, sizeof detail,
+                      "%s.nib: %u archive objects -> %u guest objects, window 0x%08X, delegate "
+                      "0x%08X",
+                      nib_name.c_str(), static_cast<unsigned>(nib.archive_objects),
+                      static_cast<unsigned>(nib.objects), static_cast<unsigned>(nib.window),
+                      static_cast<unsigned>(st.delegate));
+        mt_process_milestone("nib", nib.archive_objects, detail);
     }
-    char detail[160] = {};
-    std::snprintf(detail, sizeof detail,
-                  "%s.nib: %u archive objects -> %u guest objects, window 0x%08X, delegate "
-                  "0x%08X",
-                  nib_name.c_str(), static_cast<unsigned>(nib.archive_objects),
-                  static_cast<unsigned>(nib.objects), static_cast<unsigned>(nib.window),
-                  static_cast<unsigned>(st.delegate));
-    mt_process_milestone("nib", nib.archive_objects, detail);
     if (args != nullptr && args->delegate_class_name != 0) {
         const std::string name = mt_ns::string_utf8(cpu, args->delegate_class_name);
         const u32 dcls = mt_objc_class_named(rt, name.c_str());
@@ -947,6 +955,12 @@ extern "C" int mt_uikit_lifecycle_event(mt_cpu *cpu, std::uint32_t event) noexce
     if (event >= sizeof k_selectors / sizeof k_selectors[0]) {
         return 0;
     }
+    mt_runtape_event e{};
+    e.kind = MT_RUNTAPE_LIFECYCLE;
+    e.a = event;
+    if (mt_runtape_admit(&e) == 0) {
+        return 0; // a tape plays: only its messages reach the guest
+    }
     const State &st = state(cpu);
     if (st.delegate == 0 || !responds(cpu, st.delegate, k_selectors[event])) {
         return 0;
@@ -1004,9 +1018,11 @@ extern "C" std::int32_t mt_uikit_app_main(mt_process *, mt_cpu *cpu, const mt_ap
         mt_process_stop(cpu, "UIApplicationMain: launched; no turn hook installed");
     }
     for (;;) {
+        mt_runtape_turn();
         const double t = now(cpu);
         mt_uikit_turn(cpu, t);
         const double next = mt_runloop_run_once(cpu, t);
+        mt_runtape_deliver(cpu); // a tape that plays: this turn's input, as the hook gave it
         const mt_uikit_config &c = state(cpu).config;
         if (c.turn(c.user, cpu, t, next) != 0) {
             mt_process_stop(cpu, "UIApplicationMain: the host ended the run loop");

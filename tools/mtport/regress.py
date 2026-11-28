@@ -16,6 +16,12 @@ another build's: ``--save-baseline FILE`` writes the first run's checkpoints, ``
 compares with them and names the first checkpoint that differs. Baselines hold hashes of our
 renders and stay local (``work/regress/``, never committed).
 
+``--native-script-vm on|off|shadow`` sets ``MAPLETHIEF_NATIVE_SCRIPT_VM`` for the runs, the
+driver's ``--native-script-vm`` (#386, #430): the script VM's loop on the host (the default),
+the recompiled original, or both at every call, compared (a run with a difference fails; its
+``scriptvm shadow:`` line is repeated here). ``on`` and ``off`` must give the same digest
+(ADR 0226).
+
 The last line is ``regress: digest <16 hex>``: the run in one word, for two builds to compare.
 Exit status: 0 passed, 1 failed, 77 skipped (no generated code, no game files), 2 bad usage.
 """
@@ -38,6 +44,9 @@ FNV_START = 0xCBF29CE484222325
 FNV_PRIME = 0x100000001B3
 DIGEST_LINE = re.compile(r"^regress: .*digest ([0-9a-f]{16})$", re.MULTILINE)
 SETTINGS_ENV = "MAPLETHIEF_SETTINGS"
+SCRIPT_VM_ENV = "MAPLETHIEF_NATIVE_SCRIPT_VM"
+SCRIPT_VM_MODES = ("on", "off", "shadow")
+SHADOW_LINE = re.compile(r"^(?:\w+:\s+)?(scriptvm shadow: .*)$", re.MULTILINE)
 PRESETS = ("original", "original_controller", "enhanced", "custom")
 
 
@@ -112,8 +121,10 @@ def run_once(
     settings: str,
     timeout: float,
     environ: dict[str, str] | None = None,
+    script_vm: str = "",
 ) -> RunResult:
-    """One play of the replay in `out` (made afresh)."""
+    """One play of the replay in `out` (made afresh). `script_vm`: MAPLETHIEF_NATIVE_SCRIPT_VM
+    for it ("": as the environment has it)."""
     shutil.rmtree(out, ignore_errors=True)
     out.parent.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ if environ is None else environ)
@@ -129,6 +140,8 @@ def run_once(
         env[SETTINGS_ENV] = settings
     else:
         env.pop(SETTINGS_ENV, None)
+    if script_vm:
+        env[SCRIPT_VM_ENV] = script_vm
     start = time.monotonic()
     try:
         proc = subprocess.run(
@@ -147,6 +160,8 @@ def run_once(
     out.mkdir(parents=True, exist_ok=True)
     (out / "stdout.txt").write_text(proc.stdout, encoding="utf-8")
     (out / "stderr.txt").write_text(proc.stderr, encoding="utf-8")
+    for line in SHADOW_LINE.findall(proc.stdout)[-1:]:
+        print(f"       {line}")
     if proc.returncode == SKIP:
         last = proc.stdout.strip().splitlines()[-1:] or ["skipped"]
         return RunResult("SKIP", last[0], seconds=seconds)
@@ -181,14 +196,18 @@ def regress(
     baseline: Path | None = None,
     save_baseline: Path | None = None,
     environ: dict[str, str] | None = None,
+    script_vm: str = "",
 ) -> int:
+    vm = f", {SCRIPT_VM_ENV}={script_vm}" if script_vm else ""
     print(
-        f"regress: {replay} x{repeat}, {SETTINGS_ENV}={settings or '(none: the defaults)'}, "
+        f"regress: {replay} x{repeat}, {SETTINGS_ENV}={settings or '(none: the defaults)'}{vm}, "
         f"output in {out}"
     )
     results: list[RunResult] = []
     for i in range(repeat):
-        r = run_once(binary, replay, out / f"run_{i + 1:02d}", settings, timeout, environ)
+        r = run_once(
+            binary, replay, out / f"run_{i + 1:02d}", settings, timeout, environ, script_vm
+        )
         results.append(r)
         print(
             f"run {i + 1}/{repeat}: {r.status} {r.digest or '-' * 16} ({r.why}; {r.seconds:.1f} s)",
@@ -247,6 +266,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--baseline", type=Path, help="compare the first run's checkpoints")
     parser.add_argument("--save-baseline", type=Path, help="write the first run's checkpoints")
     parser.add_argument("--timeout", type=float, default=1800.0, help="seconds per run")
+    parser.add_argument(
+        "--native-script-vm",
+        default="",
+        choices=("",) + SCRIPT_VM_MODES,
+        help=f"{SCRIPT_VM_ENV}: the script VM on the host, the original, or both compared",
+    )
     args = parser.parse_args(argv)
     if args.repeat < 1:
         print("regress: --repeat needs 1 or more", file=sys.stderr)
@@ -266,6 +291,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.timeout,
         args.baseline,
         args.save_baseline,
+        script_vm=args.native_script_vm,
     )
 
 

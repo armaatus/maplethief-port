@@ -8,6 +8,7 @@
 //   2. --data-location game|user (this run)             location game|user, reason flag
 //   3. <base>/user-data.txt                              location user, reason marker
 //   4. macOS: <base> is /Applications or ~/Applications  location user, reason applications-folder
+//      Linux in a Flatpak sandbox (FLATPAK_ID set)       location user, reason flatpak
 //   5. <base>/data, if the probe can create and remove a file in it
 //                                                        location game, reason default
 //   6. otherwise the per-user folder (SDL_GetPrefPath("", "MapleThief")), with the reason
@@ -20,10 +21,18 @@
 // its data/ and the bundle folder its game/: location switch, reason platform. Neither
 // SDL_GetBasePath (romfs:/ there) nor SDL_GetPrefPath (the working directory) is asked, and no
 // flag, marker or probe applies. MAPLETHIEF_DATA_DIR still wins.
+// Android (ADR 0150, ADR 0251, #357): the app's external files folder
+// (SDL_GetAndroidExternalStoragePath, /storage/emulated/0/Android/data/<package>/files), which a
+// file manager reaches and which needs no permission: location android, reason platform, game/
+// inside it. When the external storage is not mounted writable, the app's internal files folder
+// (SDL_GetAndroidInternalStoragePath), reason fallback-not-writable. No flag, marker or probe
+// applies. MAPLETHIEF_DATA_DIR still wins.
 //
 // <base> is SDL_GetBasePath()'s folder: the folder of MapleThief.exe; the folder around
 // MapleThief.app (never inside it); on Linux the game folder, the parent of bin/ when it holds
-// MapleThief.sh. portable.txt there is accepted and does nothing (logged once).
+// MapleThief.sh; in an AppImage (APPIMAGE set by its runtime to the image's absolute path) the
+// folder that holds the .AppImage file, not the read-only mount it runs from (ADR 0193).
+// portable.txt there is accepted and does nothing (logged once).
 //
 // The layout under the data folder (ADR 0127's *Layout*):
 //
@@ -62,13 +71,14 @@ inline constexpr const char *kPrefPathApp = "MapleThief";        // the per-user
 inline constexpr const char *kSwitchBaseDir = "sdmc:/switch/maplethief";
 
 // Where the data folder is (ADR 0127's table).
-enum class DataPlace { kGame, kUser, kEnv, kIos, kSwitch, kNone };
+enum class DataPlace { kGame, kUser, kEnv, kIos, kSwitch, kAndroid, kNone };
 // Why it is there.
 enum class DataReason {
     kDefault,
     kFlag,
     kMarker,
     kApplicationsFolder,
+    kFlatpak, // the Flatpak bundle's /app is read-only: the sandbox's per-user folder (ADR 0193)
     kFallbackTranslocated,
     kFallbackNotWritable,
     kFallbackNoBase,
@@ -76,9 +86,9 @@ enum class DataReason {
     kPlatform,
     kNone,
 };
-// "game", "user", "env", "ios", "switch", "none".
+// "game", "user", "env", "ios", "switch", "android", "none".
 const char *data_place_name(DataPlace place);
-// "default", "flag", "marker", "applications-folder", "fallback-translocated",
+// "default", "flag", "marker", "applications-folder", "flatpak", "fallback-translocated",
 // "fallback-not-writable", "fallback-no-base", "env", "platform", "none".
 const char *data_reason_name(DataReason reason);
 // --data-location's values: "game" or "user"; nullopt otherwise.
@@ -127,14 +137,20 @@ bool probe_data_dir(const std::string &data_dir, std::string *why);
 
 // What the resolver reads. current_data_inputs() fills it from the process; tests build one.
 struct DataInputs {
-    enum class Os { kMacos, kWindows, kLinux, kIos, kSwitch, kOther };
+    enum class Os { kMacos, kWindows, kLinux, kIos, kSwitch, kAndroid, kOther };
     std::string env;               // MAPLETHIEF_DATA_DIR ("": not set or empty)
     std::optional<DataPlace> flag; // --data-location (kGame or kUser)
     std::string base_path;         // SDL_GetBasePath()'s answer ("": none)
     std::string home;              // the user's home folder (macOS ~/Applications)
+    std::string appimage;          // Linux: APPIMAGE, the running AppImage's path ("": none)
+    bool flatpak = false;          // Linux: in a Flatpak sandbox (FLATPAK_ID set)
     Os os = Os::kOther;
     std::string ios_documents; // iOS: the app's Documents/ (SDL_FOLDER_DOCUMENTS)
-    // The per-user folder (SDL_GetPrefPath, which creates it); called only when it is used.
+    // Android: the app's external files folder, "" when the storage is not mounted writable
+    // (SDL_GetAndroidExternalStoragePath and SDL_GetAndroidExternalStorageState).
+    std::string android_external;
+    // The per-user folder (SDL_GetPrefPath, which creates it; on Android the app's internal files
+    // folder); called only when it is used.
     std::function<std::string()> user_dir;
     // The probe; probe_data_dir when empty.
     std::function<bool(const std::string &data_dir, std::string *why)> probe;
@@ -147,6 +163,9 @@ DataLocation resolve_data_location(const DataInputs &in);
 
 // --data-location for this run (main.cpp sets it before the first data_location()).
 void set_data_location_flag(std::optional<DataPlace> flag);
+// A data folder for this run that wins over everything, as MAPLETHIEF_DATA_DIR does ("": none);
+// --play-run's scratch folder (#405).
+void set_data_location_dir(const std::string &dir);
 // This process's data folder: resolved once (current_data_inputs()), then the same answer.
 // The first call logs "data: <dir> (<reason>)", a fallback's line and portable.txt's line.
 const DataLocation &data_location();

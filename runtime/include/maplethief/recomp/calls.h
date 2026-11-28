@@ -77,18 +77,26 @@ MT_NORETURN void mt_trap(mt_cpu *cpu, uint32_t kind, uint32_t pc, uint32_t detai
  * MT_TRACE_ENTRY 1 (CMake: MAPLETHIEF_TRACE_ENTRY on maplethief_gen) every generated function
  * counts its entries in a static counter and registers itself with the runtime on the first
  * one (mt_trace_fn_first, maplethief/diag.h): one increment and one predictable branch per
- * call. No change to the recompiler's output: the name comes from __func__. */
+ * call. No change to the recompiler's output: the name comes from __func__. The run coverage
+ * (#295, ADR 0160) watches a few functions on every entry: mt_trace_fn_first answers the
+ * pointer of such a function (0 for every other one), and each entry of a watched function
+ * then calls mt_trace_fn_watched, after a second predictable branch. */
 #ifndef MT_TRACE_ENTRY
 #define MT_TRACE_ENTRY 0
 #endif
 
 #if MT_TRACE_ENTRY
-void mt_trace_fn_first(mt_cpu *cpu, const char *fn_name, const uint64_t *calls) MT_NOEXCEPT;
+uint32_t mt_trace_fn_first(mt_cpu *cpu, const char *fn_name, const uint64_t *calls) MT_NOEXCEPT;
+void mt_trace_fn_watched(mt_cpu *cpu, uint32_t fn) MT_NOEXCEPT;
 #define MT_FN_TRACE_ENTRY()                                                                        \
     do {                                                                                           \
         static uint64_t mt_fn_calls_;                                                              \
+        static uint32_t mt_fn_watched_;                                                            \
         if (MT_UNLIKELY(mt_fn_calls_++ == 0u)) {                                                   \
-            mt_trace_fn_first(cpu, __func__, &mt_fn_calls_);                                       \
+            mt_fn_watched_ = mt_trace_fn_first(cpu, __func__, &mt_fn_calls_);                      \
+        }                                                                                          \
+        if (MT_UNLIKELY(mt_fn_watched_ != 0u)) {                                                   \
+            mt_trace_fn_watched(cpu, mt_fn_watched_);                                              \
         }                                                                                          \
     } while (0)
 #else

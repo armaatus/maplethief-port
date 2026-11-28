@@ -2,10 +2,10 @@
 //
 //   the matrix   window sizes from 480 x 320 to 3840 x 2160 points in 3:2, 4:3, 16:10, 16:9 and
 //                21:9 (and an odd size), at densities 1, 1.5, 2 and 3, in every scale mode,
-//                widescreen off and on, render scale 1 to 3, with and without a phone's safe
-//                area: the picture's rectangles in whole pixels, centred, inside the safe area,
-//                the wings flush with the screen image (no seam), and the mouse mapping: every
-//                edge pixel of the image hits a screen point inside it, the pixel beyond it
+//                widescreen off, auto (568) and fill (768), render scale 1 to 3, with and without a
+//                phone's safe area: the picture's rectangles in whole pixels, centred, inside the
+//                safe area, the wings flush with the screen image (no seam), and the mouse mapping:
+//                every edge pixel of the image hits a screen point inside it, the pixel beyond it
 //                none, screen -> window -> screen round trips, the wings' edges map to the wide
 //                picture's edge points, and the gear stays inside the drawable and the safe area.
 //   text         the port's window-only text (scaling.h's text_frame, place_text_box): its scale
@@ -193,7 +193,9 @@ bool overlaps(const fe::Rect &a, const fe::Rect &b) {
 
 // The EXP figure's box (#191, ADR 0109): whole pixels inside the image, above the HUD's plate
 // between its left end and the level badge, clear of the minimap and the pad's keys and labels.
-void check_exp_percent(const fe::Placement &p, const fe::Rect &wide, bool widescreen) {
+void check_exp_percent(const fe::Placement &p, const fe::Rect &wide, int points) {
+    const bool widescreen = points > 480;
+    const float off = static_cast<float>(points - 480) / 2;
     const std::string t = "EXP 99.99%"; // the widest figure
     const fe::Rect r = fe::exp_percent_rect(p.rect, t);
     INFO("exp box (" << text(r) << ")");
@@ -208,18 +210,22 @@ void check_exp_percent(const fe::Placement &p, const fe::Rect &wide, bool widesc
     // The minimap, as overlay at the compass and in the corner (a 400 x 300 map).
     for (const fe::MinimapAnchor anchor :
          {fe::MinimapAnchor::kCompass, fe::MinimapAnchor::kCorner}) {
-        const fe::MinimapLayout m = fe::minimap_layout(
-            fe::Minimap::kOverlay, anchor, p, wide,
-            fe::minimap_visible(p, wide, widescreen ? 568 : 480, 568), 400 * 8, 300 * 8);
+        const fe::MinimapLayout m =
+            fe::minimap_layout(fe::Minimap::kOverlay, anchor, p, wide,
+                               fe::minimap_visible(p, wide, static_cast<std::uint32_t>(points),
+                                                   static_cast<std::uint32_t>(points)),
+                               400 * 8, 300 * 8);
         CHECK_FALSE(overlaps(m.box, r));
     }
     // The pad's keys and their labels (a glyph of 12 x 12 points beside each).
     for (const bool anchored : {true, false}) {
         const fe::KeypadWide kw =
-            widescreen ? fe::keypad_wide(568, 568, anchored) : fe::KeypadWide{};
+            widescreen ? fe::keypad_wide(static_cast<std::uint32_t>(points),
+                                         static_cast<std::uint32_t>(points), anchored)
+                       : fe::KeypadWide{};
         for (const fe::HudLabel &l : fe::hud_labels(fe::KeypadLayout{}, kw, 1)) {
             const fe::Rect key{l.key.x, l.key.y, l.key.w, l.key.h};
-            const fe::KeypadRect b = fe::hud_label_box(l, 12, 12, -44, 524);
+            const fe::KeypadRect b = fe::hud_label_box(l, 12, 12, -off, 480 + off);
             CHECK_FALSE(overlaps(key, pt));
             CHECK_FALSE(overlaps(fe::Rect{b.x, b.y, b.w, b.h}, pt));
         }
@@ -227,20 +233,26 @@ void check_exp_percent(const fe::Placement &p, const fe::Rect &wide, bool widesc
 }
 
 // The checks of one configuration of the matrix.
-void check_config(ScaleMode mode, Size window, float density, bool wide, int render_scale,
+// `setting`: the picture's width, 480 (widescreen off) or 568 (auto); 0 is fill (#425), as wide
+// as the safe area at 320 points high, up to 768 (Presenter::draw).
+void check_config(ScaleMode mode, Size window, float density, int setting, int render_scale,
                   const fe::Insets &insets) {
     const int ow = static_cast<int>(std::lround(static_cast<float>(window.w) * density));
     const int oh = static_cast<int>(std::lround(static_cast<float>(window.h) * density));
     const float dx = static_cast<float>(ow) / static_cast<float>(window.w);
     const float dy = static_cast<float>(oh) / static_cast<float>(window.h);
-    const int points = wide ? 568 : 480;
+    const fe::Rect safe = fe::safe_rect(ow, oh, insets, dx, dy);
+    const int points = setting != 0 ? setting : std::max(fe::fill_points(safe.w, safe.h, 768), 480);
+    CAPTURE(points);
+    const bool wide = points > 480;
+    const float off = static_cast<float>(points - 480) / 2;
     const fe::Placement wp =
         fe::place(mode, ow, oh, points * render_scale, 320 * render_scale, insets, dx, dy, points);
     REQUIRE(wp.rect.w > 0);
     // As Presenter::draw: the screen image is the wide picture's middle 480 points.
     fe::Placement p = wp;
     if (wide) {
-        p.rect = fe::wide_part(wp.rect, 568, 480);
+        p.rect = fe::wide_part(wp.rect, static_cast<std::uint32_t>(points), 480);
     }
     INFO("picture (" << text(wp.rect) << "), image (" << text(p.rect) << "), safe (" << text(p.safe)
                      << ")");
@@ -272,15 +284,15 @@ void check_config(ScaleMode mode, Size window, float density, bool wide, int ren
         CHECK(wings.left.x + wings.left.w == p.rect.x);
         CHECK(wings.right.x == p.rect.x + p.rect.w);
         CHECK(wings.right.x + wings.right.w == wp.rect.x + wp.rect.w);
-        // The wings' outer pixels map to the wide picture's edge points (44 points beyond the
+        // The wings' outer pixels map to the wide picture's edge points (off points beyond the
         // screen), within a point.
         // (A pixel's worth of points, plus the edges' rounding to whole pixels.)
         const float pixel = 480.0f / p.rect.w;
         const fe::ScreenPoint l = fe::drawable_to_screen(p, wp.rect.x + 0.5f, p.rect.y + 1);
         const fe::ScreenPoint r =
             fe::drawable_to_screen(p, wp.rect.x + wp.rect.w - 0.5f, p.rect.y + 1);
-        CHECK(std::fabs(l.x - (-44.0f)) < 1.0f + pixel);
-        CHECK(std::fabs(r.x - (480.0f + 44.0f)) < 1.0f + pixel);
+        CHECK(std::fabs(l.x - (-off)) < 1.0f + pixel);
+        CHECK(std::fabs(r.x - (480.0f + off)) < 1.0f + pixel);
         CHECK_FALSE(l.inside);
     } else {
         CHECK(wings.left.w == 0);
@@ -330,7 +342,7 @@ void check_config(ScaleMode mode, Size window, float density, bool wide, int ren
     CHECK(inside(fe::Rect{box.box.x * k, box.box.y * k, box.box.w * k, box.box.h * k}, p.safe));
     check_prompts(p);
     check_price_line(tf, wp.rect);
-    check_exp_percent(p, wp.rect, wide);
+    check_exp_percent(p, wp.rect, points);
 }
 
 } // namespace
@@ -342,7 +354,7 @@ TEST_CASE("ui scaling: the picture, the mapping, the gear and the text across th
     for (const Size window : kWindows) {
         for (const float density : kDensities) {
             for (const ScaleMode mode : kModes) {
-                for (const bool wide : {false, true}) {
+                for (const int wide : {480, 568, 0}) {
                     for (const int n : {1, 2, 3}) {
                         for (const bool notch : {false, true}) {
                             CAPTURE(window.w);
@@ -362,13 +374,13 @@ TEST_CASE("ui scaling: the picture, the mapping, the gear and the text across th
         }
     }
     MESSAGE(configs << " configurations");
-    CHECK(configs == 12 * 4 * 4 * 2 * 3 * 2);
+    CHECK(configs == 12 * 4 * 4 * 3 * 3 * 2);
     // The price line had room in the picture everywhere but in the 480 x 320 window at density
     // 1 with a phone's insets (a safe area 362 pixels wide).
     MESSAGE(g_price_skipped << " price-line boxes without room at scale 1");
-    // (that one window and density: 4 modes x widescreen off and on x 3 render scales x 3 boxes x
-    // 8 text scales).
-    CHECK(g_price_skipped == 4 * 2 * 3 * 3 * 8);
+    // (that one window and density: 4 modes x widescreen off, auto and fill x 3 render scales x 3
+    // boxes x 8 text scales).
+    CHECK(g_price_skipped == 4 * 3 * 3 * 3 * 8);
 }
 
 TEST_CASE("ui scaling: the window text's scale follows the density and the picture") {
@@ -450,6 +462,34 @@ TEST_CASE("ui scaling: a text box shrinks until it fits, inside the safe area's 
         CHECK(whole(t.box.x));
         CHECK(whole(t.box.y));
     }
+}
+
+TEST_CASE("ui scaling: the speedrun timer's box at the top right (#406)") {
+    Window w(1920, 1080);
+    const auto dark = [](const std::uint8_t *p) { return p[0] < 128 && p[1] < 128; };
+    const auto white = [](const std::uint8_t *p) {
+        return p[0] == 255 && p[1] == 255 && p[2] == 255;
+    };
+    const fe::Placement p =
+        fe::place(ScaleMode::kInteger, 1920, 1080, 480, 320, fe::Insets{}, 1.0f, 1.0f);
+    const fe::TextFrame f = fe::text_frame(p, 1.0f, 1920, 1080);
+    REQUIRE(f.scale == 2);
+    SDL_SetRenderDrawColor(w.renderer, 255, 255, 255, 255);
+    SDL_RenderClear(w.renderer);
+    // "ABC": (3 x 8 + 2 x 4) x (8 + 2 x 4) font pixels, 2 in from the top right corner.
+    fe::PerfOverlay::draw_lines(w.renderer, {"ABC"}, f, fe::TextCorner::kTopRight);
+    const Readback rb(w.renderer);
+    const int x1 = 1920 - 4; // one past the box's last column
+    const int y0 = 4;
+    CHECK(dark(rb.at(x1 - 1, y0)));
+    CHECK(dark(rb.at(x1 - 64, y0 + 31)));
+    CHECK(white(rb.at(x1, y0)));
+    CHECK(white(rb.at(x1 - 65, y0)));
+    CHECK(white(rb.at(x1 - 1, y0 - 1)));
+    CHECK(white(rb.at(x1 - 1, y0 + 32)));
+    float sx = 0, sy = 0;
+    SDL_GetRenderScale(w.renderer, &sx, &sy);
+    CHECK(sx == 1);
 }
 
 TEST_CASE("ui scaling: the notice and the price line drawn at 1080p and inside a safe area") {

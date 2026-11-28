@@ -123,7 +123,7 @@ TEST_CASE("keyboard: the default rows are docs/controls/keyboard.md's table") {
                        action_name(b.field) + "|" + action_name(b.menu));
     }
     const std::vector<std::string> doc = doc_rows();
-    CHECK(doc.size() == 36); // #204: F5 quick_save, F9 quick_load
+    CHECK(doc.size() == 38); // #204: F5 quick_save, F9 quick_load; #409: F7, F8
     CHECK(code == doc);
     // Each key once; the frontend's table holds the gamepad's rows and then these.
     std::set<int> keys;
@@ -154,6 +154,11 @@ TEST_CASE("keyboard: every default key presses and releases its action, in the f
             if (action == MT_ACTION_NONE || fe::port_action(action)) {
                 CHECK(k.down(code).empty());
                 CHECK(k.up(code).empty());
+            } else if (code == SDLK_LCTRL || code == SDLK_RCTRL || code == SDLK_LALT ||
+                       code == SDLK_RALT) {
+                // A modifier waits for a desktop chord (#381): a tap goes out at its release.
+                CHECK(k.down(code).empty());
+                CHECK(k.up(code) == Lines{"+" + action_name(action), "-" + action_name(action)});
             } else {
                 CHECK(k.down(code) == Lines{"+" + action_name(action)});
                 CHECK(k.up(code) == Lines{"-" + action_name(action)});
@@ -263,12 +268,59 @@ TEST_CASE("keyboard: repeats are one press, system shortcuts are not pressed") {
         CHECK(k.sent(key_event(SDLK_M, true, false, mod)).empty());
         CHECK(k.sent(key_event(SDLK_M, false, false, mod)).empty());
     }
-    // Shift, Ctrl and Alt do not stop a key (Ctrl is attack: Ctrl held, X still jumps).
-    CHECK(k.down(SDLK_LCTRL) == Lines{"+attack"});
-    CHECK(k.sent(key_event(SDLK_X, true, false, SDL_KMOD_LCTRL)) == Lines{"+jump"});
+    // Shift, Ctrl and Alt do not stop a key (Ctrl is attack: Ctrl held, X still jumps; Ctrl's
+    // press, held back for a chord (#381), goes out first).
+    CHECK(k.down(SDLK_LCTRL).empty());
+    CHECK(k.sent(key_event(SDLK_X, true, false, SDL_KMOD_LCTRL)) == Lines{"+attack", "+jump"});
     CHECK(k.up(SDLK_X) == Lines{"-jump"});
     CHECK(k.up(SDLK_LCTRL) == Lines{"-attack"});
     CHECK(k.actions.held() == 0);
+}
+
+TEST_CASE("keyboard: a modifier waits for a desktop chord (#381)") {
+    Keys k;
+    // Tapped: pressed and released at once, at its release.
+    CHECK(k.down(SDLK_LCTRL).empty());
+    CHECK(k.keyboard.held_back() == 1);
+    CHECK(k.up(SDLK_LCTRL) == Lines{"+attack", "-attack"});
+    // Held: pressed at the first turn kChordSeconds after the turn it went down in.
+    k.keyboard.turn(10.0);
+    CHECK(k.down(SDLK_RCTRL).empty());
+    g_sent.clear();
+    k.keyboard.turn(10.0 + fe::Keyboard::kChordSeconds / 2);
+    CHECK(g_sent.empty());
+    k.keyboard.turn(10.0 + fe::Keyboard::kChordSeconds);
+    CHECK(g_sent == Lines{"+attack"});
+    CHECK(k.up(SDLK_RCTRL) == Lines{"-attack"});
+    // Ctrl+1 taken by the desktop (game.cpp: Desktop::handle consumed the key down): Ctrl
+    // never attacks, and its release releases nothing; the 1 never reaches the keyboard.
+    CHECK(k.down(SDLK_LCTRL).empty());
+    k.keyboard.chord_taken(SDL_KMOD_LCTRL);
+    CHECK(k.keyboard.held_back() == 0);
+    k.keyboard.turn(20.0);
+    CHECK(k.up(SDLK_LCTRL).empty());
+    CHECK(k.actions.presses(MT_ACTION_ATTACK, fe::Context::kField) == 2);
+    // Alt+Enter (fullscreen) swallows Alt's jump the same way; a chord of another modifier
+    // leaves it.
+    CHECK(k.down(SDLK_LALT).empty());
+    k.keyboard.chord_taken(SDL_KMOD_LCTRL);
+    CHECK(k.keyboard.held_back() == 1);
+    k.keyboard.chord_taken(SDL_KMOD_RALT);
+    CHECK(k.up(SDLK_LALT).empty());
+    // Lifted while held back (an overlay opening, Actions::release_source): never pressed.
+    CHECK(k.down(SDLK_LCTRL).empty());
+    k.actions.release_source(fe::InputSource::kKeyboard);
+    g_sent.clear();
+    k.keyboard.turn(30.0);
+    CHECK(g_sent.empty());
+    CHECK(k.up(SDLK_LCTRL).empty());
+    CHECK(k.actions.held() == 0);
+    // Focus lost drops a held-back modifier too.
+    CHECK(k.down(SDLK_LCTRL).empty());
+    SDL_Event lost{};
+    lost.type = SDL_EVENT_WINDOW_FOCUS_LOST;
+    k.handle(lost);
+    CHECK(k.keyboard.held_back() == 0);
 }
 
 TEST_CASE("keyboard: focus lost, hidden or minimised releases every held key") {

@@ -4,7 +4,7 @@ You only need this page to change the port, or to play on a system without a dow
 
 The repository holds only our own work. **You bring your own copy of the game**, `MapleThief-1.5.ipa`, and everything else is made from it locally by scripts: extracted files, converted assets, recompiled code and binaries. All of it lands in the git-ignored `work/`, `assets-out/`, `build/` and `dist/`, and none of it is ever committed ([ADR 0100](../adr/0100-public-repository-and-player-releases.md)). What you build holds the game: keep it to your own machines.
 
-Below: the tools for each system, then the [one-command build](#one-command-build-just-build), then every step by hand. The other pages are [Running and options](running.md), [Testing and CI](testing.md) and [Releases](releases.md). `just doctor` checks what you have and says the fix for what's missing.
+Below: the tools for each system, then the [one-command build](#one-command-build-just-build), then every step by hand. The other pages are [Running and options](running.md), [Testing and CI](testing.md), [Releases](releases.md) and the [how-tos](how-to/README.md) for the most common changes. `just doctor` checks what you have and says the fix for what's missing.
 
 ## Tools
 
@@ -49,14 +49,15 @@ just build mac       # macOS: dist/mac/MapleThief.app
 just build win       # Windows: dist\win\MapleThief-game-…-windows-x64\ and its .zip
 just build linux     # Linux / Steam Deck, in Docker, from any OS: dist/linux/…
 just build switch    # Nintendo Switch homebrew, in Docker, from macOS or Linux: dist/switch/MapleThief.nro
+just build android   # Android APK (the placeholder shell for now), from macOS or Linux: dist/android/MapleThief.apk
 just run             # start this OS's build
 ```
 
-Without `just`, the same words work on `scripts/build` (macOS, Linux) and `scripts\build.ps1` (Windows): `scripts/build mac`. `just build` alone builds for this OS. `macos`, `windows` and a leading dash (`-linux`) also work. Windows sets up the Visual Studio x64 environment itself, from any terminal. The Windows exe and the macOS app only build on their own OS; `linux` builds from any OS with Docker, on Windows through Git for Windows' bash. `just build ios` needs a Mac with Xcode: it builds `dist/ios/MapleThief.app` ([ADR 0136](../adr/0136-ios-app-through-xcode.md)) and stops with what is missing without it. [Playing on your iPhone](../play/iphone.md) has the steps to sign and install it. `just build switch` builds `MapleThief.nro` in Docker from macOS or Linux: with your IPA in `original/` (or `--ipa`) the recompiled game, without it the version screen ([Nintendo Switch](#nintendo-switch)).
+Without `just`, the same words work on `scripts/build` (macOS, Linux) and `scripts\build.ps1` (Windows): `scripts/build mac`. `just build` alone builds for this OS. `macos`, `windows` and a leading dash (`-linux`) also work. Windows sets up the Visual Studio x64 environment itself, from any terminal. The Windows exe and the macOS app only build on their own OS; `linux` builds from any OS with Docker, on Windows through Git for Windows' bash. `just build ios` needs a Mac with Xcode: it builds `dist/ios/MapleThief.app` ([ADR 0136](../adr/0136-ios-app-through-xcode.md)) and stops with what is missing without it. [Playing on your iPhone](../play/iphone.md) has the steps to sign and install it. `just build switch` builds `MapleThief.nro` in Docker from macOS or Linux: with your IPA in `original/` (or `--ipa`) the recompiled game, without it the version screen ([Nintendo Switch](#nintendo-switch)). `just build android` builds `MapleThief.apk` from macOS (natively once `scripts/android-sdk install` has run, else in Docker) or Linux (in Docker): for now the placeholder shell, our own code only ([Android](#android)).
 
 | Recipe | What it does |
 |---|---|
-| `just build [mac\|win\|linux\|ios\|switch] [debug\|release] [--ipa PATH]` | runs every step below, leaves the game in `dist/`. Default: this OS, Release. `--ipa` takes [your copy from anywhere](#build-from-your-own-copy-wherever-it-is) |
+| `just build [mac\|win\|linux\|ios\|switch\|android] [debug\|release] [--ipa PATH]` | runs every step below, leaves the game in `dist/`. Default: this OS, Release. `--ipa` takes [your copy from anywhere](#build-from-your-own-copy-wherever-it-is) |
 | `just run [debug] [-- ARGS]` | starts the `dist/` build for this OS, and says what to run if there is none |
 | `just bootstrap` | checks the IPA, extracts it into `work/` |
 | `just assets` | converts the assets (`scripts/pipeline`; the game doesn't need this step) |
@@ -77,6 +78,7 @@ Each step is skipped when its stamp is up to date ([ADR 0133](../adr/0133-one-co
 | `linux` | `dist/linux/MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` | built in Docker ([Linux and Steam Deck](#linux-and-steam-deck)) |
 | `ios` | `dist/ios/MapleThief.app` | Mac with Xcode; signed with `MAPLETHIEF_IOS_TEAM`, else unsigned ([Playing on your iPhone](../play/iphone.md)) |
 | `switch` | `dist/switch/MapleThief.nro` | built in Docker from macOS or Linux; the game with your IPA, which reads the bundle you copy to the SD card; without it our own code only, which shows its version ([Nintendo Switch](#nintendo-switch)) |
+| `android` | `dist/android/MapleThief.apk` | arm64, signed with the build's debug key; the placeholder shell until the game runs on Android ([Android](#android)) |
 | `… debug` | the same below `dist/<platform>/debug/` | **for debugging only**, see below |
 
 Then start it from that path: `just run`, `open dist/mac/MapleThief.app`, the exe in the Windows folder, or `./MapleThief.sh` in the Linux folder. There's no import screen: your build already has the game, unlike the [player downloads](releases.md#what-a-release-holds), which import it on first launch ([ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md)).
@@ -135,7 +137,7 @@ It is safe to re-run and writes byte-identical outputs every time. The scripts o
 
 1. checks the IPA against `original/SHA256SUMS` (the exact file, or a [repacked copy](#build-from-your-own-copy-wherever-it-is) with the right main binary), then extracts it to `work/ipa/`. The IPA is treated as untrusted data: every entry name is checked before anything is written (no absolute paths, `..` or symbolic links), and nothing extracted is executed. `scripts/verify-original.sh` runs just this step (`--no-extract`: only the checks);
 2. splits the fat main binary into `work/slices/MapleThief.armv6` and `work/slices/MapleThief.armv7` with a portable splitter ([`tools/mtport/fat.py`](../../tools/mtport/fat.py), no `lipo` needed) and checks both slices. On macOS it also cross-checks them against `lipo -thin`;
-3. writes `work/slices/SHA256SUMS` and `work/bootstrap.json` (paths, sizes, hashes, fat offsets and the tool version). Other tools read `work/bootstrap.json` instead of hard-coding paths.
+3. writes `work/slices/SHA256SUMS` and `work/bootstrap.json` (paths, sizes, hashes, fat offsets and the tool version). Other tools read `work/bootstrap.json` instead of hard-coding paths. It also writes `work/gen/ipa_files.inc`, the SHA-256 of each bundle file the game reads ([`tools/mtport/ipa_files.py`](../../tools/mtport/ipa_files.py)), which a build compiles into the IPA import so that it accepts a repacked copy ([ADR 0135](../adr/0135-accept-an-ipa-by-its-main-binary.md)'s addendum); the player build needs it.
 
 Any failure (missing file, the wrong game or version, an encrypted copy, a tool that's too old) stops with an `error:` line and a non-zero exit.
 
@@ -158,7 +160,7 @@ python3 -m recomp all       # Windows: py -m recomp all
 
 This loads, discovers and lifts the armv7 slice in a few seconds. It writes the generated C into the ignored `work/gen/` (`mt_gen.h`, the translation units `fn_NNN.c`, `imports.c`, `dispatch.c` and `gen.cmake`) and its reports into `work/recomp/`. A file is rewritten only when its content changes, so the next build recompiles only what changed. `python3 -m recomp lift --units N` picks another number of translation units.
 
-When `work/gen/gen.cmake` exists, the build compiles it as the static library `maplethief_gen`, and the program runs the game. Without it, the build skips that target and the program shows a placeholder. `-DMAPLETHIEF_GEN_DIR=<dir>` builds another output directory, and `-DMAPLETHIEF_GEN_DIR=` leaves the generated code out ([ADR 0014](../adr/0014-recompiler-design.md), [ADR 0021](../adr/0021-generated-code-partition-and-build.md)).
+When `work/gen/gen.cmake` exists, the build compiles it as the static library `maplethief_gen`, and the program runs the game. Without it, the build skips that target and the program shows a placeholder. `-DMAPLETHIEF_GEN_DIR=<dir>` builds another output directory, and `-DMAPLETHIEF_GEN_DIR=` leaves the generated code out ([ADR 0014](../adr/0014-recompiler-design.md), [ADR 0021](../adr/0021-generated-code-partition-and-build.md)). The IPA import's per-file hash list is read from `<gen dir>/ipa_files.inc` the same way; `-DMAPLETHIEF_IPA_FILES=<file>` names another one ([ADR 0135](../adr/0135-accept-an-ipa-by-its-main-binary.md)'s addendum).
 
 ### 4. Configure, build and test
 
@@ -187,7 +189,10 @@ cmake --build --preset mac-debug --target smoke   # its headless smoke test, out
 | `mac-app` | macOS | Release, arm64 + x86_64, macOS 13+, the game app from your IPA ([below](#the-macos-app)) | `build/mac-app/platform/MapleThief.app` |
 | `win-debug` / `win-release` | Windows | Debug / Release, x64, MSVC | `build/win-*/platform/MapleThief.exe` |
 | `linux-debug` / `linux-release` | Linux | Debug / Release | `build/linux-*/platform/MapleThief` |
-| `mac-player` / `win-player` / `linux-player` | each OS | Release, the release's player build | see [Releases](releases.md) |
+| `win-arm64-debug` / `win-arm64-release` | Windows, from an [ARM64 developer environment](#windows-arm64) | Debug / Release, ARM64, MSVC | `build/win-arm64-*/platform/MapleThief.exe` |
+| `linux-arm64-debug` / `linux-arm64-release` | Linux on aarch64 (the default there; also the arm64 container) | Debug / Release; configure fails for another CPU | `build/linux-arm64-*/platform/MapleThief` |
+| `mac-player` / `win-player` / `linux-player`, `win-arm64-player` / `linux-arm64-player` | each OS | Release, the release's player build | see [Releases](releases.md) |
+| `android-debug` / `android-release` | the Mac with `scripts/android-sdk install`, or the Android container | Debug / Release, `arm64-v8a`, API 26+, `MAPLETHIEF_MEM_MODEL=checked` | `build/android-*/MapleThief.apk` ([Android](#android)) |
 | `switch-debug` / `switch-release` | the devkitA64 container (`DEVKITPRO` set) | Debug / Release, AArch64 `-mcpu=cortex-a57+crypto`, `MAPLETHIEF_MEM_MODEL=checked` | `build/switch-*/MapleThief.nro`; the tests as `build/switch-*/tests/<program>.nro` ([Nintendo Switch](#nintendo-switch)) |
 
 Run the program from the output path. With the generated code it runs the game from the extracted bundle in `work/ipa/` (`--bundle` or `MAPLETHIEF_BUNDLE_DIR` name another), and it needs that `work/` to stay where it is. Without the generated code (CI, a clean clone, the kits) it shows a solid placeholder colour.
@@ -198,14 +203,17 @@ Warnings in our own code are errors when `CI` is set in the environment, or with
 
 ### 5. Package a kit (optional)
 
-The three release workflows also **package** a kit with CPack ([ADR 0023](../adr/0023-local-ci-and-packaging.md)): `cmake --workflow --preset <preset>` configures, builds, runs CTest and writes the package into `build/<preset>/`. `cpack --preset <preset>` repackages an existing build.
+These workflow presets also **package** a kit with CPack ([ADR 0023](../adr/0023-local-ci-and-packaging.md)): `cmake --workflow --preset <preset>` configures, builds, runs CTest and writes the package into `build/<preset>/`. `cpack --preset <preset>` repackages an existing build. A release carries the macOS, Windows and Linux ones (Windows and Linux on x64 and ARM64), which `release.yml` builds ([Releases](releases.md)); the Switch and Android kits are built and tested in CI but never uploaded, and the Switch ships as a player zip instead.
 
 | Workflow preset | Package |
 |---|---|
 | `mac-release-universal` | `MapleThief-kit-<version>-macos-universal.zip` (the `.app` is ad-hoc signed) |
 | `win-release` | `MapleThief-kit-<version>-windows-x64.zip` |
 | `linux-release` | `MapleThief-kit-<version>-linux-x86_64.tar.gz` (built in the Linux container, [Testing and CI](testing.md#the-linux-container)) |
+| `win-arm64-release` | `MapleThief-kit-<version>-windows-arm64.zip` (on an ARM64 PC; CI's `windows-11-arm` runner) |
+| `linux-arm64-release` | `MapleThief-kit-<version>-linux-aarch64.tar.gz` (in the arm64 container: `scripts/test-linux --release --arch arm64`) |
 | `switch-release` | `MapleThief-kit-<version>-switch.zip` (`MapleThief.nro` and the docs; built in the Switch container) |
+| `android-release` | `MapleThief-kit-<version>-android-arm64.zip` (`MapleThief.apk`, debug-key signed, and the docs) |
 
 A kit holds only our own work and the libraries it links: the platform shell, `lib/` (the runtime and static SDL3), `include/`, the recompiler, the Python tools and the user scripts, the docs (Markdown), `THIRD_PARTY.md` and the licence texts. Nothing generated from the IPA: `maplethief_gen` and `work/` are never installed ([Releases](releases.md), [ADR 0024](../adr/0024-release-contents-and-flow.md)).
 
@@ -214,6 +222,10 @@ The version is `MAPLETHIEF_VERSION` (`X.Y.Z` or `X.Y.Z-rc.N`, default `0.0.1`), 
 ## Windows: the x64 developer environment
 
 `just build` sets this up by itself. For anything else that compiles (the `win-*` presets, `scripts\test.ps1`) the presets use Ninja with MSVC, so they need the Visual Studio **x64** developer environment. Start "x64 Native Tools Command Prompt for VS 2022", or run `Enter-VsDevShell -Arch amd64` in PowerShell (the plain "Developer PowerShell" shortcut targets x86, which configure rejects), or open the folder in Visual Studio or VS Code, whose CMake integration sets it up from the presets. That environment also puts the CMake and Ninja that ship with Visual Studio on `PATH`.
+
+### Windows ARM64
+
+The `win-arm64-*` presets ([ADR 0194](../adr/0194-windows-arm64-and-linux-aarch64-builds.md)) need an **ARM64** developer environment, with the "MSVC ARM64 build tools" component of Visual Studio installed. On an ARM64 PC that is `vcvarsall.bat arm64` (or `Enter-VsDevShell -Arch arm64 -HostArch arm64`); there `scripts\test.ps1` picks the `win-arm64-*` presets by itself. On an x64 PC, `vcvarsall.bat x64_arm64` (the "ARM64 Cross Tools" prompt) cross-compiles: the build works, but the x64 PC can't run what it builds, so only the `win-arm64-player` workflow is useful there (its CTest preset runs only the check that reads the executable; [Releases](releases.md)). Configuring an ARM64 preset from the x64 environment fails with "This preset builds for arm64, but the compiler targets x86_64".
 
 ## The macOS app
 
@@ -234,7 +246,7 @@ An app you built yourself has no quarantine attribute, so it opens without askin
 
 ## Linux and Steam Deck
 
-`just build linux` (into `dist/linux/`), or `scripts/linux-game build` by hand (into `build/linux-game/`), builds the game in a pinned Ubuntu 24.04 container, on a Mac too, as `MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` ([ADR 0065](../adr/0065-linux-and-steam-deck-build.md)). It holds the launcher `MapleThief.sh`, the executable (static libstdc++, needs only glibc 2.39+) and a copy of your bundle. `scripts/linux-game check` runs it in a stock Ubuntu 24.04 image, and `--native` builds on your own Linux machine with your compiler. [Linux and Steam Deck](../play/linux-and-steam-deck.md) has the Steam Deck steps.
+`just build linux` (into `dist/linux/`), or `scripts/linux-game build` by hand (into `build/linux-game/`), builds the game in a pinned Ubuntu 22.04 container, on a Mac too, as `MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` ([ADR 0065](../adr/0065-linux-and-steam-deck-build.md)). It holds the launcher `MapleThief.sh`, the executable (static libstdc++, needs only glibc 2.35+) and a copy of your bundle. `scripts/linux-game check` runs it in a stock Ubuntu 22.04 image, and `--native` builds on your own Linux machine with your compiler. [Linux and Steam Deck](../play/linux-and-steam-deck.md) has the Steam Deck steps.
 
 ## Nintendo Switch
 
@@ -276,6 +288,35 @@ The runtime's tests on the console are `MapleThiefTests.nro` (#236): guest memor
 scripts/switch-test --ip 192.168.1.23 --build
 scripts/switch-test --ip 192.168.1.23 --crash-test
 ```
+
+The runtime's tests on Android are `MapleThiefTests.apk` (#357, [ADR 0251](../adr/0251-the-runtime-on-android-data-folder-and-test-apk.md)): the same suite as `MapleThiefTests.nro` plus the crash child, built by the `android-*` presets. `scripts/android-test` boots the emulator image (or uses `--serial` for a phone with USB debugging), installs and starts the APK, and passes when `results.txt`'s last line is `android: all tests passed (exit status 0)`. The API 35 images want about 7.4 GB free on the disk to boot.
+
+```sh
+scripts/android-sdk install --image 4k
+scripts/android-test --image 4k --build
+scripts/android-sdk remove-image 4k && scripts/android-sdk install --image 16k
+scripts/android-test --image 16k
+```
+
+## Android
+
+`MapleThief.apk` is one `arm64-v8a` APK for Android 8.0 and later ([ADR 0150](../adr/0150-android-target.md), [ADR 0163](../adr/0163-android-toolchain-pins-gradle-step-and-emulator-runs.md), epic [#292](https://github.com/armaatus/maplethief-port/issues/292)). Our CMake builds `libmain.so` with the NDK and SDL3 linked in, and a step of the same build packages it with Gradle (`platform/android/`). Every version, the NDK r28c, API 35, the build tools, Temurin 17, Gradle 8.12, the emulator and its two images, is pinned with its SHA-256 in one file, [`tools/containers/android/pins.env`](../../tools/containers/android/pins.env), which the Mac and the container install from with the same script.
+
+```sh
+scripts/android-sdk install                   # the Mac: the pins into build/_android-sdk/ (about 3.6 GB)
+cmake --workflow --preset android-release     # build/android-release/MapleThief.apk, its check and the kit
+scripts/build-android                         # the same in the pinned linux/amd64 container (CI's way), from HEAD
+scripts/build-android --worktree              # your uncommitted tree instead of a commit
+scripts/android-sdk install --image 4k        # the emulator and the 4 KiB page image (about 5 GB more)
+scripts/android-run --image 4k                # install, start, wait for the log line, screenshot
+scripts/android-sdk remove-image 4k           # make room, then the same with --image 16k
+```
+
+What the build checks (CTest `platform.android_apk`, `python3 -m mtport.apk check`): `libmain.so` alone, for `arm64-v8a`, stored uncompressed at a 16 KiB boundary with 16 KiB-aligned segments (16 KiB page devices need it); the APK signed; no file of an IPA; and through the pinned `aapt2` the package `io.github.armaatus.maplethief`, the label, the version, API 26 and 35, and the launcher icon at each density, which must be the port's own drawing pixel for pixel. CI's `android` job runs `scripts/build-android` on every pull request whose changes reach the Android build; it never starts an emulator.
+
+`scripts/android-run` boots the arm64 emulator without a window (an AVD it writes into `build/_android-sdk/avd/`), checks the page size, installs the APK with `adb`, starts it and waits for MapleThief's start-up line in logcat (`MapleThief <version>, SDL 3.4.18, video driver android, renderer opengles2, … the placeholder`). The log and a screenshot go to `build/android-run/<image>/`: screenshots of your own runs, never committed. Without the generated code the APK is the placeholder shell; the game on Android is [#358](https://github.com/armaatus/maplethief-port/issues/358).
+
+The APK is signed with a debug key generated in the build tree. A release APK is signed by `scripts/release` with Joris's key ([#361](https://github.com/armaatus/maplethief-port/issues/361)); an APK signed with another key can't update it.
 
 ## Shaders
 

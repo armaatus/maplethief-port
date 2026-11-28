@@ -14,6 +14,10 @@
 // before the process dies of the fault. A fault outside the guest is reported the same way
 // (MT_CRASH_HOST) only when a sink wants it (mt_crash_set_sink); the sink itself keeps to
 // async-signal-safe calls (platform/src/crash_report.cpp).
+//
+// The hang sampler (#337, ADR 0195) gives the same report for a thread that is alive but stuck:
+// the frontend's watchdog thread stops the guest's thread for a moment, takes its host PC and a
+// copy of its mt_cpu, and formats that as MT_CRASH_HANG.
 #include <atomic>
 #include <cstdarg>
 #include <cstdint>
@@ -45,8 +49,10 @@
 #else
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #if defined(__linux__)
 #include <ucontext.h>
@@ -501,6 +507,8 @@ extern "C" const char *mt_trap_kind_name(std::uint32_t kind) noexcept {
         return "hardware fault";
     case MT_CRASH_HOST:
         return "host crash (outside the guest)";
+    case MT_CRASH_HANG:
+        return "hang (the run loop stopped turning)";
     default:
         return "unknown trap";
     }
@@ -573,16 +581,19 @@ extern "C" std::size_t mt_crash_format(const mt_cpu *cpu, const mt_crash_info *i
         buf[0] = '\0';
     }
     mt_mem *mem = mem_of(cpu);
-    const bool hardware = info->kind == MT_CRASH_HARDWARE || info->kind == MT_CRASH_HOST;
+    const bool hardware = info->kind == MT_CRASH_HARDWARE || info->kind == MT_CRASH_HOST ||
+                          info->kind == MT_CRASH_HANG;
     put(t, "=== guest crash: %s ===\n", mt_trap_kind_name(info->kind));
     if (hardware) {
         char sym[192];
         u32 fn = 0;
         host_symbol(info->host_pc, sym, sizeof sym, &fn);
-        put(t, "%s at host pc 0x%llx%s%s, host address 0x%llx\n",
-            info->what != nullptr ? info->what : "fault",
-            static_cast<unsigned long long>(info->host_pc), sym[0] != '\0' ? " " : "", sym,
-            static_cast<unsigned long long>(info->host_addr));
+        put(t, "%s at host pc 0x%llx%s%s", info->what != nullptr ? info->what : "fault",
+            static_cast<unsigned long long>(info->host_pc), sym[0] != '\0' ? " " : "", sym);
+        if (info->kind != MT_CRASH_HANG) {
+            put(t, ", host address 0x%llx", static_cast<unsigned long long>(info->host_addr));
+        }
+        put(t, "\n");
         if (fn != 0u) {
             put(t, "in guest function 0x%08X", fn);
             annotate(t, mem, fn, true);
@@ -771,4 +782,140 @@ extern "C" void mt_crash_set_host_functions(const mt_fn_entry *table,
 extern "C" void mt_crash_set_sink(mt_crash_sink_fn sink, void *user) noexcept {
     g_sink = sink;
     g_sink_user = user;
+}
+
+// --- the hang sampler (#337, ADR 0195)
+// ------------------------------------------------------------
+
+namespace {
+
+std::atomic<mt_cpu *> g_hang_cpu{nullptr}; // mt_hang_watch_thread
+mt_cpu g_hang_copy;                        // the watched cpu as the last sample found it
+std::uint64_t g_hang_pc = 0;               // and its thread's host pc
+
+#if defined(_WIN32)
+
+HANDLE g_hang_thread = nullptr;
+
+bool sample_thread(const mt_cpu *cpu) {
+    if (g_hang_thread == nullptr || SuspendThread(g_hang_thread) == static_cast<DWORD>(-1)) {
+        return false;
+    }
+    CONTEXT ctx{};
+    ctx.ContextFlags = CONTEXT_CONTROL;
+    if (GetThreadContext(g_hang_thread, &ctx)) {
+#if defined(_M_ARM64)
+        g_hang_pc = ctx.Pc;
+#else
+        g_hang_pc = ctx.Rip;
+#endif
+    }
+    std::memcpy(&g_hang_copy, cpu, sizeof g_hang_copy);
+    ResumeThread(g_hang_thread);
+    return true;
+}
+
+#elif defined(__SWITCH__)
+
+bool sample_thread(const mt_cpu *) { return false; } // no signal to another thread on Horizon
+
+#else
+
+pthread_t g_hang_thread;
+// 0: no sample asked; 1: the signal is on its way; 2: the handler took the sample.
+std::atomic<int> g_hang_state{0};
+std::atomic<int> g_hang_handler{0};
+
+void on_hang_sample(int, siginfo_t *, void *uctx) {
+    const mt_cpu *cpu = g_hang_cpu.load();
+    if (cpu == nullptr || g_hang_state.load() != 1 ||
+        !pthread_equal(pthread_self(), g_hang_thread)) {
+        return;
+    }
+    int access = MT_ACCESS_UNKNOWN;
+    context_of(uctx, &g_hang_pc, &access);
+    std::memcpy(&g_hang_copy, cpu, sizeof g_hang_copy);
+    g_hang_state.store(2);
+}
+
+bool sample_thread(const mt_cpu *) {
+    g_hang_state.store(1);
+    if (pthread_kill(g_hang_thread, SIGURG) != 0) {
+        g_hang_state.store(0);
+        return false;
+    }
+    for (int i = 0; i < 50; i++) { // half a second
+        if (g_hang_state.load() == 2) {
+            g_hang_state.store(0);
+            return true;
+        }
+        const timespec ten_ms{0, 10 * 1000 * 1000};
+        nanosleep(&ten_ms, nullptr);
+    }
+    int asked = 1;
+    if (g_hang_state.compare_exchange_strong(asked, 0)) {
+        return false; // no answer: the thread has the signal blocked
+    }
+    g_hang_state.store(0); // it answered just now
+    return true;
+}
+
+#endif
+
+} // namespace
+
+extern "C" int mt_hang_watch_thread(mt_cpu *cpu) noexcept {
+    g_hang_cpu.store(nullptr);
+    if (cpu == nullptr) {
+        return 0;
+    }
+#if defined(_WIN32)
+    if (g_hang_thread != nullptr) {
+        CloseHandle(g_hang_thread);
+        g_hang_thread = nullptr;
+    }
+    HANDLE self = nullptr;
+    if (!DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &self,
+                         THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, 0)) {
+        g_hang_cpu.store(cpu);
+        return -1;
+    }
+    g_hang_thread = self;
+    g_hang_cpu.store(cpu);
+    return 0;
+#elif defined(__SWITCH__)
+    g_hang_cpu.store(cpu);
+    return -1;
+#else
+    g_hang_thread = pthread_self();
+    if (g_hang_handler.exchange(1) == 0) {
+        struct sigaction sa{};
+        sa.sa_sigaction = on_hang_sample;
+        sa.sa_flags = SA_SIGINFO | SA_RESTART;
+        sigemptyset(&sa.sa_mask);
+        if (sigaction(SIGURG, &sa, nullptr) != 0) {
+            g_hang_handler.store(0);
+            g_hang_cpu.store(cpu);
+            return -1;
+        }
+    }
+    g_hang_cpu.store(cpu);
+    return 0;
+#endif
+}
+
+extern "C" std::size_t mt_hang_report(const char *what, char *buf, std::size_t size) noexcept {
+    const mt_cpu *cpu = g_hang_cpu.load();
+    if (cpu == nullptr) {
+        return 0;
+    }
+    g_hang_pc = 0;
+    if (!sample_thread(cpu)) {
+        std::memcpy(&g_hang_copy, cpu, sizeof g_hang_copy); // the registers as last stored
+    }
+    mt_crash_info info{};
+    info.kind = MT_CRASH_HANG;
+    info.what = what;
+    info.host_pc = g_hang_pc;
+    return mt_crash_format(&g_hang_copy, &info, buf, size);
 }

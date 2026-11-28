@@ -1,5 +1,6 @@
 # SDL3 frontend (ARCHITECTURE.md section 3). Shared C++ lives in src/; per-OS files go in
-# macos/, windows/, ios/, linux/ and switch/ (Objective-C++ only under macos/ and ios/, ADR 0002).
+# macos/, windows/, ios/, linux/, switch/ and android/ (Objective-C++ only under macos/ and ios/,
+# ADR 0002).
 
 set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
 if(APPLE)
@@ -57,10 +58,13 @@ add_library(
     src/gamepad.cpp
     src/gfx_backend.cpp
     src/gpu_screen.cpp
+    src/ios_backup.cpp
+    src/hang_watchdog.cpp
     src/glyphs.cpp
     src/hud_labels.cpp
     src/import_screen.cpp
     src/input.cpp
+    src/input_display.cpp
     src/ipa_import.cpp
     src/keyboard.cpp
     src/keypad_haptics.cpp
@@ -85,11 +89,20 @@ add_library(
     src/remap.cpp
     src/render_scale.cpp
     src/replay.cpp
+    src/restored_content.cpp
     src/rumble.cpp
+    src/run_census.cpp
+    src/run_file.cpp
+    src/run_recorder.cpp
+    src/run_timer.cpp
+    src/run_verify.cpp
+    src/livesplit.cpp
     src/file_dialog.cpp
     src/save_menu.cpp
     src/save_state_input.cpp
+    src/practice_state.cpp
     src/quick_state.cpp
+    src/recovery.cpp
     src/save_tools.cpp
     src/save_zip.cpp
     src/scaling.cpp
@@ -97,13 +110,85 @@ add_library(
     src/switch_applet.cpp
     src/settings.cpp
     src/settings_menu.cpp
+    src/speech.cpp
+    src/speech_menus.cpp
+    src/sqlite_read.cpp
+    src/speech_text.cpp
+    src/start_question.cpp
     src/switch_pads.cpp
     src/pack_folders.cpp
+    src/pack_add.cpp
+    src/pack_tools.cpp
+    src/packs.cpp
     src/list_keys.cpp
     src/thread_priority.cpp
     src/update_check.cpp
     src/update_fetch.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+# The shipped speedrun categories (#406, run_timer.h, docs/formats/run-category.md): each
+# categories/*.mtcat embedded as a raw string in a generated source, re-generated when a file
+# changes (the files are our own data, never game files).
+file(GLOB _maplethief_categories CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/categories/*.mtcat")
+list(SORT _maplethief_categories)
+set(_maplethief_category_entries "")
+foreach(_file IN LISTS _maplethief_categories)
+    get_filename_component(_name "${_file}" NAME_WE)
+    file(READ "${_file}" _text)
+    string(FIND "${_text}" ")mtcat\"" _bad)
+    if(NOT _bad EQUAL -1)
+        message(FATAL_ERROR "${_file}: holds the raw string's end )mtcat\"")
+    endif()
+    string(APPEND _maplethief_category_entries "        {\"${_name}\", R\"mtcat(${_text})mtcat\"},\n")
+endforeach()
+set(_maplethief_categories_cpp "${CMAKE_CURRENT_BINARY_DIR}/run_categories.cpp")
+file(
+    CONFIGURE
+    OUTPUT "${_maplethief_categories_cpp}"
+    CONTENT
+        "// Generated from platform/categories/*.mtcat by platform/CMakeLists.txt (#406).\n#include \"run_timer.h\"\n\nnamespace maplethief::frontend {\n\nstd::vector<std::pair<std::string, std::string>> shipped_run_category_files() {\n    return {\n${_maplethief_category_entries}    };\n}\n\n} // namespace maplethief::frontend\n"
+    @ONLY)
+target_sources(maplethief_frontend PRIVATE "${_maplethief_categories_cpp}")
+# The port's own translations (#373, ADR 0222, port_text.h): each lang/<tag>/ is a text pack of
+# our own text only (textpack.strings and Port.strings), embedded as bytes in a generated source
+# (no string literal: MSVC caps those at 64 KiB), re-generated when a file changes.
+file(GLOB _maplethief_langs CONFIGURE_DEPENDS LIST_DIRECTORIES true "${CMAKE_CURRENT_SOURCE_DIR}/lang/*")
+list(SORT _maplethief_langs)
+set(_maplethief_lang_arrays "")
+set(_maplethief_lang_entries "")
+foreach(_dir IN LISTS _maplethief_langs)
+    if(NOT IS_DIRECTORY "${_dir}")
+        continue()
+    endif()
+    get_filename_component(_tag "${_dir}" NAME)
+    string(MAKE_C_IDENTIFIER "${_tag}" _id)
+    foreach(_part manifest port)
+        if(_part STREQUAL "manifest")
+            set(_file "${_dir}/textpack.strings")
+        else()
+            set(_file "${_dir}/Port.strings")
+        endif()
+        if(NOT EXISTS "${_file}")
+            message(FATAL_ERROR "${_dir}: has no ${_file}")
+        endif()
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_file}")
+        file(READ "${_file}" _hex HEX)
+        string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _hex "${_hex}")
+        # Sixteen bytes per line.
+        string(REPEAT "0x[0-9a-f][0-9a-f]," 16 _line)
+        string(REGEX REPLACE "(${_line})" "\\1\n" _hex "${_hex}")
+        string(APPEND _maplethief_lang_arrays "const unsigned char k_${_id}_${_part}[] = {\n${_hex}0};\n")
+    endforeach()
+    string(APPEND _maplethief_lang_entries
+           "        {\"${_tag}\", {reinterpret_cast<const char *>(k_${_id}_manifest), sizeof k_${_id}_manifest - 1}, {reinterpret_cast<const char *>(k_${_id}_port), sizeof k_${_id}_port - 1}},\n")
+endforeach()
+set(_maplethief_langs_cpp "${CMAKE_CURRENT_BINARY_DIR}/port_languages.cpp")
+file(
+    CONFIGURE
+    OUTPUT "${_maplethief_langs_cpp}"
+    CONTENT
+        "// Generated from platform/lang/*/ by platform/CMakeLists.txt (#373).\n#include \"port_text.h\"\n\nnamespace maplethief::frontend {\n\nnamespace {\n\n${_maplethief_lang_arrays}\n} // namespace\n\nstd::vector<ShippedLanguageFiles> shipped_port_language_files() {\n    return {\n${_maplethief_lang_entries}    };\n}\n\n} // namespace maplethief::frontend\n"
+    @ONLY)
+target_sources(maplethief_frontend PRIVATE "${_maplethief_langs_cpp}")
 target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
 # The build type and optimisation level of the start-up log (#136, ADR 0134, build_info.h).
 if(MSVC)
@@ -159,6 +244,21 @@ if(APPLE)
 elseif(WIN32)
     target_link_libraries(maplethief_frontend PRIVATE winhttp)
 endif()
+# The LiveSplit link's TCP socket (#407, livesplit.h): Winsock on Windows.
+if(WIN32)
+    target_link_libraries(maplethief_frontend PRIVATE ws2_32)
+endif()
+# Text-to-speech's system voice (#390, ADR 0174, speech.h): AVSpeechSynthesizer on macOS and iOS
+# (Objective-C++ with ARC), SAPI 5 on Windows; Linux loads libspeechd at run time
+# (speech.cpp), so it is no build dependency.
+if(APPLE)
+    target_sources(maplethief_frontend PRIVATE src/speech_apple.mm)
+    set_source_files_properties(src/speech_apple.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_link_libraries(maplethief_frontend PRIVATE "-framework AVFoundation")
+elseif(WIN32)
+    target_sources(maplethief_frontend PRIVATE src/speech_sapi.cpp)
+    target_link_libraries(maplethief_frontend PRIVATE sapi ole32)
+endif()
 # iOS (#83, ADR 0136): the frontend's Objective-C++ sources, with ARC, and the frameworks they
 # and SDL's backends need (#73's audit). A new iOS source goes in this list.
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -184,10 +284,43 @@ if(NOT _maplethief_commit)
 endif()
 set_source_files_properties(src/player_log.cpp PROPERTIES COMPILE_DEFINITIONS
                                                           MT_COMMIT="${_maplethief_commit}")
+# The per-file hash list that lets the import take a repacked IPA (#350, ADR 0135's addendum):
+# <gen>/ipa_files.inc, which scripts/bootstrap writes from your own copy (mtport.ipa_files),
+# compiled into ipa_import.cpp when it is there. Hashes only. The player build needs it.
+set(MAPLETHIEF_IPA_FILES
+    ""
+    CACHE FILEPATH
+          "Per-file hash list for the import of a repacked IPA (mtport.ipa_files); empty: <gen>/ipa_files.inc")
+set(_maplethief_ipa_files "${MAPLETHIEF_IPA_FILES}")
+if(NOT _maplethief_ipa_files AND MAPLETHIEF_GEN_DIR)
+    set(_maplethief_ipa_files "${MAPLETHIEF_GEN_DIR}/ipa_files.inc")
+endif()
+if(_maplethief_ipa_files)
+    cmake_path(ABSOLUTE_PATH _maplethief_ipa_files BASE_DIRECTORY "${PROJECT_SOURCE_DIR}" NORMALIZE)
+endif()
+if(_maplethief_ipa_files AND EXISTS "${_maplethief_ipa_files}")
+    set_property(SOURCE src/ipa_import.cpp APPEND
+                 PROPERTY COMPILE_DEFINITIONS MT_IPA_FILES_INC="${_maplethief_ipa_files}")
+    set_property(SOURCE src/ipa_import.cpp APPEND PROPERTY OBJECT_DEPENDS "${_maplethief_ipa_files}")
+    message(STATUS "IPA import: accepts a repack (${_maplethief_ipa_files})")
+elseif(MAPLETHIEF_PLAYER_BUILD)
+    message(
+        FATAL_ERROR
+            "MAPLETHIEF_PLAYER_BUILD: the player build needs the per-file hash list "
+            "'${_maplethief_ipa_files}' (#350). From the repository: scripts/bootstrap writes it "
+            "into work/gen/, then configure again (docs/release-checklist.md).")
+else()
+    message(STATUS "IPA import: the exact IPA only (no ipa_files.inc)")
+endif()
 # The capture converts the mix to 16-bit the same way on every CPU (ADR 0045).
 maplethief_strict_fp(src/audio_out.cpp)
 
-add_executable(MapleThief src/main.cpp src/gfx_prototype.cpp)
+if(ANDROID)
+    # libmain.so, whose SDL_main SDL's Java activity calls (android/android.cmake, ADR 0150).
+    add_library(MapleThief SHARED src/main.cpp src/gfx_prototype.cpp)
+else()
+    add_executable(MapleThief src/main.cpp src/gfx_prototype.cpp)
+endif()
 # The prototype scene of --gfx-prototype (#55, ADR 0039) computes its vertices in floats, which
 # must round as in its golden image (tests/cpp/gfx_test.cpp).
 maplethief_strict_fp(src/gfx_prototype.cpp)
@@ -374,4 +507,9 @@ endif()
 # checks (#235, ADR 0138).
 if(NINTENDO_SWITCH)
     include("${CMAKE_CURRENT_SOURCE_DIR}/switch/switch.cmake")
+endif()
+# Android: libmain.so packaged into MapleThief.apk with Gradle, with its icon and its host-side
+# check (#356, ADR 0150).
+if(ANDROID)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/android/android.cmake")
 endif()

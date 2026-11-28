@@ -7,8 +7,10 @@
 #include <cstdio>
 #include <iterator>
 
+#include "livesplit.h"
 #include "maplethief/gfx.h"
 #include "port_text.h"
+#include "run_timer.h"
 
 namespace maplethief::frontend {
 
@@ -323,6 +325,71 @@ constexpr SettingValue fullscreen_display_value() {
     return v;
 }
 
+// run_category (#406): a category's name, 1 to 32 of a-z, 0-9 and '_' (any case read, written
+// in lower case).
+bool parse_run_category(const SettingValue &, std::string_view text, Settings *s) {
+    if (text.empty() || text.size() > kMaxRunCategoryBytes) {
+        return false;
+    }
+    std::string name;
+    for (const char c : text) {
+        const char l = (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+        if (!((l >= 'a' && l <= 'z') || (l >= '0' && l <= '9') || l == '_')) {
+            return false;
+        }
+        name += l;
+    }
+    s->run_category = name;
+    return true;
+}
+
+std::string print_run_category(const SettingValue &, const Settings &s) { return s.run_category; }
+
+std::vector<std::string> &run_category_names() {
+    static std::vector<std::string> names;
+    return names;
+}
+
+// The names game.cpp set; until then the shipped categories' (run_timer.h).
+std::vector<std::string> offer_run_categories() {
+    if (!run_category_names().empty()) {
+        return run_category_names();
+    }
+    std::vector<std::string> out;
+    for (const auto &file : shipped_run_category_files()) {
+        out.push_back(file.first);
+    }
+    return out;
+}
+
+constexpr SettingValue run_category_value() {
+    SettingValue v = custom_value(&parse_run_category, &print_run_category,
+                                  "a category's name (a-z, 0-9 and _, at most 32)");
+    v.offer = &offer_run_categories;
+    return v;
+}
+
+// livesplit (#407): off, or an address parse_livesplit_address reads (written as it prints it).
+bool parse_livesplit(const SettingValue &, std::string_view text, Settings *s) {
+    std::string lower(text);
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (lower == "off") {
+        s->livesplit.clear();
+        return true;
+    }
+    const std::optional<LiveSplitAddress> a = parse_livesplit_address(text);
+    if (!a) {
+        return false;
+    }
+    s->livesplit = livesplit_address_text(*a);
+    return true;
+}
+
+std::string print_livesplit(const SettingValue &, const Settings &s) {
+    return s.livesplit.empty() ? "off" : s.livesplit;
+}
+
 constexpr SettingValue audio_device_value() {
     SettingValue v = custom_value(&parse_audio_device, &print_audio_device,
                                   "default or an output device's name");
@@ -504,14 +571,15 @@ constexpr SettingInfo kRegistry[] = {
      .applies = Applies::kAtOnce},
     {.key = "rumble",
      .group = SettingGroup::kControls,
-     .comment = "# the gamepad rumbles on a vibration, a hit and a level-up: on | off",
+     .comment = "# the gamepad rumbles on the game's vibration and, with rumble_events = all, "
+                "a hit and a\n# level-up: on | off",
      .value = on_off<&Settings::rumble>(),
-     // Original and Original + controller: the game's vibration only, once #72's follow-up
-     // splits it from the hit and the level-up.
+     // On in every preset; Original and Original + controller narrow it to the game's
+     // vibration with rumble_events (#399).
      .presets = {"on", "on", "on"},
      .flag = "--rumble",
      .label = "Rumble",
-     .help = "The gamepad rumbles on the game's vibration, a hit and a level-up",
+     .help = "The gamepad rumbles: on the game's vibration, or also a hit and a level-up",
      .applies = Applies::kAtOnce},
     {.key = "rumble_strength",
      .group = SettingGroup::kControls,
@@ -520,6 +588,18 @@ constexpr SettingInfo kRegistry[] = {
      .flag = "--rumble-strength",
      .label = "Rumble strength",
      .help = "How strongly the gamepad rumbles, in percent",
+     .applies = Applies::kAtOnce},
+    // #399 (rumble.h): Original rumbles where the phone vibrated, nowhere else.
+    {.key = "rumble_events",
+     .group = SettingGroup::kControls,
+     .comment = "# what rumbles: game (the game's own vibration only, as the phone) | all (also "
+                "every hit\n# and a level-up)",
+     .value = choice<&Settings::rumble_events>(kRumbleEventsNames),
+     .presets = {"game", "game", "all"},
+     .flag = "--rumble-events",
+     .label = "What rumbles",
+     .help = "game: only where the phone vibrated (the game's vibration option). all: also every "
+             "hit and a level-up",
      .applies = Applies::kAtOnce},
     // #194 (keypad_haptics.h): read live by game.cpp; iOS only, outside the presets.
     {.key = "keypad_haptics",
@@ -650,9 +730,17 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Language",
      .help = "English or Korean (the Korean build's screens and help), from the next start"},
+    {.key = "menu_language",
+     .group = SettingGroup::kOther,
+     .comment = "# the port's menus: auto (the system's language) | en | ko | nl",
+     .value = choice<&Settings::menu_language>(kMenuLanguageNames),
+     .flag = "--menu-language",
+     .label = "Menu language",
+     .help = "The language of these menus: auto follows the system's",
+     .applies = Applies::kAtOnce},
     {.key = "text_pack",
      .group = SettingGroup::kOther,
-     .comment = "# a directory of translated text in UTF-8 (python3 -m mtport.textpack export "
+     .comment = "# a directory of translated text in UTF-8 (the menu's Other tab: Export text "
                 "makes one to edit); empty: none",
      .value = pack_value<2>(&parse_text_pack, &print_text_pack,
                             "a directory (empty: none), without control characters"),
@@ -672,11 +760,24 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Fix original bugs",
      .help = "Fixes the original game's crashes and dead ends; never changes its balance"},
+    // Gameplay (#389, ADR 0069's #379 addendum): content the game ships but never reaches,
+    // made reachable. Not a fix, so off in every preset, Enhanced included.
+    {.key = "restored_content",
+     .group = SettingGroup::kGameplay,
+     .comment = "# make content the game ships but never reaches reachable "
+                "(docs/re/original-bugs.md,\n# Unreachable content): on | off",
+     .value = on_off<&Settings::restored_content>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--restored-content",
+     .game_only = true,
+     .label = "Restored content",
+     .help = "Opens content the game ships but never reaches, as each restore lands; off is the "
+             "original"},
     // Video: texture packs (#153, ADR 0081).
     {.key = "texture_pack",
      .group = SettingGroup::kVideo,
-     .comment = "# a directory of HD textures made from your own --dump-textures (python3 -m "
-                "mtport.texpack); empty: none",
+     .comment = "# a directory of HD textures made from your own texture dump (the menu's Other "
+                "tab: Dump textures, Make texture pack); empty: none",
      .value = pack_value<0>(&parse_texture_pack, &print_texture_pack,
                             "a directory (empty: none), without control characters"),
      .flag = "--texture-pack",
@@ -697,14 +798,16 @@ constexpr SettingInfo kRegistry[] = {
     // Offline polish (#154, ADR 0084).
     {.key = "hide_online_ui",
      .group = SettingGroup::kGameplay,
-     .comment = "# hide the title menu's dead online buttons (the banner, More Games, About's "
-                "links;\n# Game Center too while local_game_center is off): on | off",
+     .comment = "# hide the dead online buttons (the banner, More Games, About's links; Game "
+                "Center\n# too while local_game_center is off; Cash and the two revives too "
+                "while cash_shop is off): on | off",
      .value = on_off<&Settings::hide_online_ui>(),
      .presets = {"off", "on", "on"},
      .flag = "--hide-online-ui",
      .game_only = true,
      .label = "Hide dead online buttons",
-     .help = "Hides the banner, More Games and the About links, whose pages are gone"},
+     .help = "Hides the banner, More Games and the About links, whose pages are gone, and "
+             "Cash and the revives while the cash shop is off"},
     {.key = "local_game_center",
      .group = SettingGroup::kGameplay,
      .comment = "# Game Center on this computer: the leaderboard screen and local achievements: "
@@ -861,17 +964,32 @@ constexpr SettingInfo kRegistry[] = {
      .help = "Saves when you quit, leave or exit to the main menu, wherever the game's own Save "
              "would",
      .applies = Applies::kAtOnce},
+    // Gameplay: crash recovery points (#335, ADR 0151, recovery.h). Read live by the turn hook;
+    // a point stalls play for one to three ticks, so the Original columns keep the game's pace.
+    {.key = "crash_recovery",
+     .group = SettingGroup::kGameplay,
+     .comment = "# keep a recovery point of the game at map loads, saves and every five minutes, "
+                "offered\n# at the next start after a crash: on | off",
+     .value = on_off<&Settings::crash_recovery>(),
+     .presets = {"off", "off", "on"},
+     .flag = "--crash-recovery",
+     .game_only = true,
+     .label = "Crash recovery",
+     .help = "After a crash, the next start offers to resume from a few minutes before it. "
+             "Play pauses briefly at map loads, saves and every five minutes",
+     .applies = Applies::kAtOnce},
     // Video: the wider field (#86, ADR 0090). The GL layer's size is set at the start.
     {.key = "widescreen",
      .group = SettingGroup::kVideo,
-     .comment = "# the field up to 16:9 (568 x 320) on maps wide enough;\n# menus and narrow "
-                "maps stay 3:2: off | auto",
+     .comment = "# the field up to 16:9 (568 x 320) on maps wide enough, or (fill) as wide as "
+                "the\n# window up to 768 x 320; menus and narrow maps stay 3:2: off | auto | fill",
      .value = choice<&Settings::widescreen>(kWidescreenNames),
      .presets = {"off", "off", "auto"},
      .flag = "--widescreen",
      .game_only = true,
      .label = "Widescreen",
-     .help = "Shows more of the map beside the 3:2 picture where the map is wide enough"},
+     .help = "Shows more of the map beside the 3:2 picture where the map is wide enough. "
+             "Fill: as wide as the window allows"},
     // Video: where the HUD and the touch key pad go in the wide view (#168). Read every turn.
     {.key = "widescreen_hud",
      .group = SettingGroup::kVideo,
@@ -914,6 +1032,49 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Flashes",
      .help = "How strong the full-screen white and black flashes are, in percent (0: none)",
      .applies = Applies::kAtOnce},
+    // Accessibility: text-to-speech (#390, ADR 0174, speech.h), where the platform has a
+    // system voice (kCapSpeech; not the Switch). Live: Speech::set_enabled and set_voice.
+    {.key = "speech",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# read the game's text aloud with the system voice: off | on",
+     .value = on_off<&Settings::speech>(),
+     .flag = "--speech",
+     .game_only = true,
+     .label = "Speech",
+     .help = "Reads the game's text aloud with the system's voice",
+     .applies = Applies::kAtOnce,
+     .needs = kCapSpeech},
+    {.key = "speech_rate",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# how fast the voice speaks, 50 to 200 (percent of its normal rate)",
+     .value = uint_range<&Settings::speech_rate>(kSpeechRateMin, kSpeechRateMax, kSpeechRateStep),
+     .flag = "--speech-rate",
+     .game_only = true,
+     .label = "Speech rate",
+     .help = "How fast the voice speaks, in percent of its normal rate",
+     .applies = Applies::kAtOnce,
+     .needs = kCapSpeech},
+    {.key = "speech_volume",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# how loud the voice speaks, 0 to 100 (percent)",
+     .value = uint_range<&Settings::speech_volume>(0, kSpeechVolumeMax, kSpeechVolumeStep),
+     .flag = "--speech-volume",
+     .game_only = true,
+     .label = "Speech volume",
+     .help = "How loud the voice speaks, in percent",
+     .applies = Applies::kAtOnce,
+     .needs = kCapSpeech},
+    // #392 (ADR 0191, speech_text.h): the notify lines too, queued behind dialogue and popups.
+    {.key = "speech_notices",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# with speech on, also read the notify lines (pick-ups, meso, EXP): on | off",
+     .value = on_off<&Settings::speech_notices>(),
+     .flag = "--speech-notices",
+     .game_only = true,
+     .label = "Speak notices",
+     .help = "With speech on, also reads the pick-up, meso and EXP lines and the map's name",
+     .applies = Applies::kAtOnce,
+     .needs = kCapSpeech},
     // Video: the picture adjustments (#187, ADR 0093's addendum, color_filter.h), the colour
     // step with the colour-blind filter. The player's screen: no preset changes them.
     {.key = "brightness",
@@ -1027,6 +1188,27 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Minimap",
      .help = "The map's platforms and where you are: beside the picture, or over its top",
      .applies = Applies::kAtOnce},
+    // Video: the minimap's extras (#397, ADR 0098's second addendum, minimap.h).
+    {.key = "minimap_mobs",
+     .group = SettingGroup::kVideo,
+     .comment = "# the minimap's extras (#397): the map's live mobs as dots: on | off",
+     .value = on_off<&Settings::minimap_mobs>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--minimap-mobs",
+     .game_only = true,
+     .label = "Minimap mobs",
+     .help = "The minimap also shows the map's live mobs, as pink dots",
+     .applies = Applies::kAtOnce},
+    {.key = "minimap_name",
+     .group = SettingGroup::kVideo,
+     .comment = "# the minimap's extras (#397): the map's name along the box's top: on | off",
+     .value = on_off<&Settings::minimap_name>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--minimap-name",
+     .game_only = true,
+     .label = "Minimap name",
+     .help = "The minimap also shows the map's name, in the game's language, along its top",
+     .applies = Applies::kAtOnce},
     // Video: the EXP percentage beside the HUD's bar (#191, ADR 0109, exp_percent.h).
     {.key = "exp_percent",
      .group = SettingGroup::kVideo,
@@ -1037,6 +1219,19 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "EXP percentage",
      .help = "Your EXP to the next level, as \"EXP 42.17%\" beside the HUD's bar",
+     .applies = Applies::kAtOnce},
+    // Video: the input display (#404, ADR 0156, input_display.h), read live by game.cpp; in no
+    // preset.
+    {.key = "input_display",
+     .group = SettingGroup::kVideo,
+     .comment = "# the keys the game is being given, lit while held, in a corner (for videos and\n"
+                "# practice): on | off",
+     .value = on_off<&Settings::input_display>(),
+     .flag = "--input-display",
+     .game_only = true,
+     .label = "Input display",
+     .help = "Shows the directions, jump, attack, the quick slots and the menu keys, lit while "
+             "held",
      .applies = Applies::kAtOnce},
     // Controller extras (#172, ADR 0094, assists.h).
     {.key = "auto_run",
@@ -1124,7 +1319,7 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Direction priority",
      .help = "Two directions held: the game's own order, or the newest one wins (rolling keys)",
      .applies = Applies::kAtOnce},
-    // The opt-in update notice (#199, ADR 0137, update_check.h): the port's only network use.
+    // The opt-in update notice (#199, ADR 0137, update_check.h): network use, with livesplit.
     {.key = "update_check",
      .group = SettingGroup::kOther,
      .comment = "# once a day, ask github.com whether a newer version of the port is out (never "
@@ -1136,6 +1331,64 @@ constexpr SettingInfo kRegistry[] = {
      .help = "Asks github.com once a day whether a newer version of the port is out; downloads "
              "nothing. Never in the Original preset",
      .needs = kCapUpdateFetch},
+    // The speedrun timer (#406, ADR 0156, run_timer.h): read live by game.cpp's turn.
+    {.key = "run_timer",
+     .group = SettingGroup::kOther,
+     .comment = "# the speedrun timer over the picture (run_timer.h): on | off",
+     .value = on_off<&Settings::run_timer>(),
+     .flag = "--run-timer",
+     .game_only = true,
+     .label = "Speedrun timer",
+     .help = "Times a run from a new character, with splits and a personal best; says whether "
+             "an Assist was on",
+     .applies = Applies::kAtOnce},
+    {.key = "run_category",
+     .group = SettingGroup::kOther,
+     .comment = "# the timer's category: any | chapter_1, or a file of your own in <data "
+                "dir>/categories",
+     .value = run_category_value(),
+     .flag = "--run-category",
+     .game_only = true,
+     .label = "Speedrun category",
+     .help = "What the timer times: Any% (to the last boss) or Chapter 1 (to the trip to Orbis)",
+     .applies = Applies::kAtOnce},
+    // Run recording (#405, ADR 0156, run_recorder.h): a replay of every session.
+    {.key = "record_runs",
+     .group = SettingGroup::kOther,
+     .comment = "# record every session, from the start to quit, as a run file in runs/ that "
+                "plays back\n# exactly (MapleThief --play-run FILE): on | off",
+     .value = on_off<&Settings::record_runs>(),
+     .flag = "--record-runs",
+     .game_only = true,
+     .label = "Record runs",
+     .help = "Keeps a replay of every session in runs/, from the start to quit; it plays back "
+             "exactly with --play-run"},
+    // The LiveSplit link (#407, ADR 0156, livesplit.h): read live by game.cpp's turn.
+    {.key = "livesplit",
+     .group = SettingGroup::kOther,
+     .comment = "# send the run timer's start, splits and resets to LiveSplit's TCP server\n"
+                "# (livesplit.h): off | HOST:PORT (localhost:16834)",
+     .value = custom_value(&parse_livesplit, &print_livesplit,
+                           "off, or localhost, an IPv4 address or [an IPv6 one], with :PORT"),
+     .flag = "--livesplit",
+     .game_only = true,
+     .label = "LiveSplit server",
+     .help = "Sends the timer's start, splits and resets to LiveSplit's TCP server on this "
+             "computer (localhost:16834); needs the speedrun timer on",
+     .applies = Applies::kAtOnce,
+     .needs = kCapLiveSplit | kCapTypedValues},
+    {.key = "livesplit_game_time",
+     .group = SettingGroup::kOther,
+     .comment =
+         "# with livesplit, LiveSplit's game time is the game's ticks (50 ms each): on | off",
+     .value = on_off<&Settings::livesplit_game_time>(),
+     .flag = "--livesplit-game-time",
+     .game_only = true,
+     .label = "LiveSplit game time",
+     .help = "LiveSplit's game time counts the game's own ticks (50 ms each), whatever the "
+             "computer's speed",
+     .applies = Applies::kAtOnce,
+     .needs = kCapLiveSplit},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -1444,6 +1697,10 @@ void set_audio_device_choices(std::vector<std::string> names) {
 }
 
 void set_display_choices(std::vector<std::string> names) { display_names() = std::move(names); }
+
+void set_run_category_choices(std::vector<std::string> names) {
+    run_category_names() = std::move(names);
+}
 
 void set_pack_choices(std::string_view key, std::vector<std::string> values) {
     for (std::size_t i = 0; i < std::size(kPackRowKeys); i++) {

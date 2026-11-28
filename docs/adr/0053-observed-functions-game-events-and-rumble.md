@@ -63,3 +63,26 @@ For the platform side:
 ## Addendum (#156, ADR 0072): more observed functions, listeners
 
 The offline cash shop's counters ([ADR 0072](0072-offline-cash-shop-and-revives.md)) take three more observed entries and four event kinds: `Popup_Open` `0x3EAA1` with id `0x68` is `MT_GAME_EVENT_DEATH_POPUP`, the revive `0x6140D` is `MT_GAME_EVENT_REVIVED`, and `CDataMgr::LoadSaveData` `0x39989` is `MT_GAME_EVENT_LOAD_CHARACTER` or, when the slot has no cached `theif<slot>` buffer (`CDataMgr+0x4DC[slot]` is 0), `MT_GAME_EVENT_NEW_CHARACTER` (`value` the slot). Other ids, slots past 2 and an unreadable `CDataMgr` are ignored. Besides the one host hook, up to `MT_GAME_EVENTS_MAX_LISTENERS` (4) listeners (`mt_game_events_add_listener`) hear every event after it, so Rumble and the cash shop share the events. `rumble_test.cpp` covers the new kinds and the listeners.
+
+## Addendum (#403, ADR 0156): run events
+
+The speedrun kit's splits ([ADR 0156](0156-speedrun-kit-splits-clean-runs-and-verifiable-replays.md)) take four more observed entries and four event kinds. Each reads only; the guest runs as before.
+
+| Entry | Event | Value | Guard |
+| --- | --- | --- | --- |
+| `ScriptNative_clearAll` `0x996ED` (vm) | `MT_GAME_EVENT_CHAPTER_END` | the chapter that ends: the quest manager's `+0x04`, reached as vm `+0x04` (the `CStateGame`) → `+0x58` | the chain of pointers reads |
+| `CHero::SetClassUp` `0x655AD` (hero, branch, tier) | `MT_GAME_EVENT_JOB_ADVANCE` | the branch; `more[0]` the tier | the hero reads |
+| `CMob::Die` `0x73349` (mob, hero) | `MT_GAME_EVENT_BOSS_KILLED` | the mob id (`+0xA0`) | bosses only: 64 and 66 to 69 |
+| `CMapleWorld::changeMap` `0x81369` (world, area, map, portal) | `MT_GAME_EVENT_MAP_CHANGE` | the area; `more[0]` the map, `more[1]` the portal | not while a warp is pending (the byte `world+0xB4`), where the function does nothing |
+
+- **Job advancement.** The observer sits on `CHero::SetClassUp` rather than on the native `setClassUp` `0x997E1`: the native is its only caller (one `bl`, at `0x99852`), no pointer to it is stored in the image, and its registers are the values the native popped off the script stack.
+- **The event** gains `more[2]` for a run event's second and third values (0 for the other kinds); run events carry no HP. `mt_game_events_stats` counts `chapter_ends`, `job_advances`, `boss_kills` and `map_changes`, and the exit log prints them.
+- **Tests.** `rumble_test.cpp` covers each kind on synthetic guest memory (its guard, bad pointers, no write to the guest, the value). On real assets chapter 1's parts G, K and L (`play.chapter_1_g`, `_k`, `_l`) check that the 2nd job, portal371 to 3.8, Malady's death and the trip to Orbis are each heard.
+
+## Addendum (#399): which sources rumble, `rumble_events`
+
+The three sources stay separate calls into `Rumble`, so a filter there splits them: `rumble_events = game | all` (`settings.h`'s `RumbleEvents`; [ADR 0070](0070-settings-registry-and-presets.md)'s #399 addendum). With `game` only the vibrate hook requests a rumble, as the phone vibrated: `CMSoundPlayer::Vibrate`, gated by the game's own vibration option (every hit, a mob's critical, the options preview, the scene steps). `on_event` drops `HERO_DAMAGE` and `LEVEL_UP` and counts them in `RumbleStats::filtered`; a hit with the game's option off is therefore no rumble, and a level-up never is. With `all` (the default without a settings file, and Enhanced) nothing changes from the above. Original and Original + controller are `game`. `Rumble::configure(on, strength, events)` takes it live from the settings menu; `rumble` off and strength 0 still silence every source.
+
+The Switch's rumble ([#239](https://github.com/armaatus/maplethief-port/issues/239), [ADR 0140](0140-switch-input-nintendo-layout-and-touch.md)) goes through this same `Rumble` and `SDL_RumbleGamepad` on the active pad, so it follows `rumble_events` with no Switch code.
+
+**Tests.** `rumble_test.cpp`'s `rumble: rumble_events game passes the game's vibration only; all, every source (#399)`: with `game` a hit (the game's vibration off) and a level-up never reach the motors, directly or through the installed observer, and the vibrate hook does (one call with the vibration's effect, also when a hit and a level-up arrive in the same turn); with `all` each rumbles as before; off and strength 0 never rumble under either. The settings test reads, rejects and writes the key. On real assets `input.rumble` gains a third pass with `rumble_events = game`: the hit through `CHero::TakeDamage` rumbles once with the vibration's effect alone (the game's own vibration, its option on), and the level-up through `CHero::setExp` sends no motor call.

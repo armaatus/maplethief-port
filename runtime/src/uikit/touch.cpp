@@ -35,6 +35,7 @@
 #include "maplethief/diag.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/input.h"
+#include "maplethief/runtape.h"
 #include "uikit/uikit_internal.h"
 
 namespace mt_ui {
@@ -1020,6 +1021,15 @@ extern "C" int mt_uikit_touch(std::uint32_t finger, std::uint32_t phase, float x
                               float y) noexcept {
     if (phase > MT_UIKIT_TOUCH_CANCELLED || !std::isfinite(x) || !std::isfinite(y)) {
         return -1;
+    }
+    mt_runtape_event e{};
+    e.kind = MT_RUNTAPE_TOUCH;
+    e.a = finger;
+    e.b = phase;
+    e.x = x;
+    e.y = y;
+    if (mt_runtape_admit(&e) == 0) {
+        return 0; // a tape plays: only its touches reach the guest
     }
     try {
         std::lock_guard<std::mutex> lock(mt_ui::g_queue_mutex);

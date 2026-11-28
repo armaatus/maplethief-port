@@ -8,17 +8,21 @@
  * screen is wider. No update function reads the width or the camera (docs/re/widescreen.md).
  *
  * The port therefore:
- *   - gives the GL renderbuffer a wider storage (`width`, 568: the iPhone 5's 568 x 320 points)
- *     when -[EAGLContext renderbufferStorage:fromDrawable:] sees the 480-point layer, so that
- *     -[EAGLView setupView] sets glViewport and glOrthox to 568 x 320;
+ *   - gives the GL renderbuffer a wider storage (`width`: 568, the iPhone 5's 568 x 320 points,
+ *     for widescreen = auto; 768 for fill, #425) when -[EAGLContext
+ *     renderbufferStorage:fromDrawable:] sees the 480-point layer, so that -[EAGLView setupView]
+ *     sets glViewport and glOrthox to `width` x 320;
  *   - sets the engine's view width E each turn and in the camera hooks: in the field (the current
  *     state a CStateGame, game mode 0x11AA00 0 or 4, a map loaded) while the host allows it, E is
- *     the map's width clamped to 480 ... `width`; also behind the popup menu, the shop, the map
- *     screen and the cash shop (modes 1, 2, 3, 0xB: see the menus below, #169); everywhere else
- *     480. The original clamp then keeps the camera inside the map, and the culling widens
- *     with E;
- *   - stretches the field's backdrop (CStateGame +0x454, a fixed 480 x 320 image drawn at (0, 0)
- *     through 0x24DC9) to E columns with mt_gles_set_host_x_transform;
+ *     the map's width clamped to 480 ... `width` (and the host's limit, the window's width at
+ *     320 high: mt_widescreen_set_limit); also behind the popup menu, the shop, the map
+ *     screen and the cash shop (modes 1, 2, 3, 0xB: see the menus below, #169); in the scenes
+ *     on mt_widescreen_scene_wide's list (modes 9 and 10, #396); everywhere else 480. The
+ *     original clamp then keeps the camera inside the map, and the culling widens with E;
+ *   - widens the field's backdrop (CStateGame +0x454, a fixed 480 x 320 image drawn at (0, 0)
+ *     through 0x24DC9) to E columns: a backdrop whose columns x and x + 160 are equal is tiled
+ *     (drawn again at x = 480, #425, ADR 0214), any other stretched with
+ *     mt_gles_set_host_x_transform;
  *   - moves the field HUD (HUD_Paint 0x5A465: the bar, the quick slots and the attack key's
  *     icon, drawn at fixed 480-point places) right by (E - 480) / 2 points, into the 3:2
  *     picture's place in the middle of the view, over the key pad's keys (#168).
@@ -36,19 +40,39 @@ MT_EXTERN_C_BEGIN
 
 #define MT_WIDESCREEN_NARROW 480u /* the original width, points */
 #define MT_WIDESCREEN_WIDE 568u   /* the wide renderbuffer's width (16:9 at 320 high, iPhone 5) */
+#define MT_WIDESCREEN_FILL 768u   /* widescreen = fill's renderbuffer (48 tiles; 21:9 is 747) */
 #define MT_WIDESCREEN_HEIGHT 320u /* the height, points: never changes */
 
-/* Before the boot: the renderbuffer's width (MT_WIDESCREEN_WIDE), or 0 / 480 for the original.
+/* Before the boot: the renderbuffer's width (MT_WIDESCREEN_WIDE or MT_WIDESCREEN_FILL), or 0 / 480
+ * for the original. The limit goes back to none.
  * Registers the four hooks (camera clamp, follow, the backdrop's draw, the HUD), on when wide. */
 void mt_widescreen_configure(uint32_t width) MT_NOEXCEPT;
 /* The configured width: 480 when off. */
 uint32_t mt_widescreen_width(void) MT_NOEXCEPT;
+
+/* The host's cap on the view width (widescreen = fill, #425): the window's (or the safe area's)
+ * width at 320 points high, in points. E never exceeds it (nor 480 below it); 0 means none, the
+ * configured width alone caps E. Read at the next decision. */
+void mt_widescreen_set_limit(uint32_t points) MT_NOEXCEPT;
+/* The view width E may reach now: the configured width, capped by the limit (480 when off). */
+uint32_t mt_widescreen_reach(void) MT_NOEXCEPT;
+
+/* Whether a backdrop repeats every 160 points (#425, ADR 0214): `rgba` holds `width` x `height`
+ * RGBA8 texels, `scale` texels a point (a pack's replacement is k times the 480 x 320 image),
+ * the image in its top-left 480 x 320 points. 1 when every column x of the image equals column
+ * x + 160 over its 320 rows (so a copy drawn at x = 480 continues it with no seam), else 0 (and
+ * for an image smaller than 320 points wide or a NULL one). */
+int mt_widescreen_backdrop_repeats(const uint8_t *rgba, uint32_t width, uint32_t height,
+                                   uint32_t scale) MT_NOEXCEPT;
 
 /* The view width the engine should draw at now: 480, or in the field (see above) with `allow`
  * the map's width clamped to 480 ... `width`. Reads guest memory only; 480 without the game's
  * globals. */
 uint32_t mt_widescreen_decide(const mt_cpu *cpu, uint32_t width, int allow) MT_NOEXCEPT;
 
+/* Whether scripted scene `scene` (CStateGame +0x1E4, CStateGame::StartScene 0x853E5's number) keeps
+ * the field's E in game modes 9 and 10 (#396): 1 for the scenes on the allowlist, else 0. */
+int mt_widescreen_scene_wide(uint32_t scene) MT_NOEXCEPT;
 /* Once a run-loop turn, before the guest's frame: whether the host allows the wide view now
  * (the setting), then decides and applies E (as the camera hooks do too).
  * Returns E. With widescreen off it does nothing and returns 480. */
@@ -67,12 +91,13 @@ typedef struct mt_widescreen_stats {
     uint64_t wide_turns;   /* of them with E > 480 */
     uint64_t changes;      /* times E changed */
     uint64_t camera_calls; /* camera hook calls (clamp, follow) */
-    uint64_t backdrops;    /* backdrops stretched */
+    uint64_t backdrops;    /* backdrops stretched (they don't repeat every 160 points) */
+    uint64_t tiles;        /* backdrops tiled: drawn again at x = 480 (#425) */
     uint64_t huds;         /* field HUDs moved to the middle of a wide view (#168) */
 } mt_widescreen_stats;
 
 mt_widescreen_stats mt_widescreen_get_stats(void) MT_NOEXCEPT;
-/* Back to off, E = 480, the numbers zeroed, the hooks unregistered
+/* Back to off, E = 480, no limit, the numbers zeroed, the hooks unregistered
  * (tests). */
 void mt_widescreen_reset(void) MT_NOEXCEPT;
 
@@ -83,10 +108,14 @@ void mt_widescreen_reset(void) MT_NOEXCEPT;
  * clip-space x offset of (E - 480) / 2 points moves what they draw into the GL frame's centre
  * 480 points, the screen image the host shows (and takes touches on). The popup menu's dim, its
  * fill of (0, 0, 480, 320) (0x8079), is stretched over the whole view. The cash shop is UIKit:
- * nothing to wrap. Registered by mt_widescreen_configure. */
+ * nothing to wrap. A wide scene's speech box (#396: CChatBox::drawChatBox 0x35189, from Paint in
+ * game mode 9) is drawn the same way, its lines wrapped at the 3:2 width (Text_Wrap 0x22EC5 from
+ * the scene runner's command 50). Registered by mt_widescreen_configure. */
 typedef struct mt_widescreen_menu_stats {
-    uint64_t screens; /* screen paints drawn in the centre of a wide view */
-    uint64_t dims;    /* popup menu dims stretched over the wide view */
+    uint64_t screens;   /* screen paints (and scene speech boxes) drawn in the centre of a wide
+                           view */
+    uint64_t dims;      /* popup menu dims stretched over the wide view */
+    uint64_t box_wraps; /* scene speech boxes wrapped at the 3:2 width (#396) */
 } mt_widescreen_menu_stats;
 
 mt_widescreen_menu_stats mt_widescreen_get_menu_stats(void) MT_NOEXCEPT;

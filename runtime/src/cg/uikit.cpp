@@ -751,6 +751,19 @@ u32 uiimage_display_cgimage(mt_cpu *cpu, u32 uiimage) {
     return s == nullptr ? 0u : s->display != 0 ? s->display : s->cgimage;
 }
 
+std::string uiimage_name(mt_cpu *cpu, u32 uiimage) {
+    runtime(cpu);
+    if (uiimage == 0) {
+        return {};
+    }
+    for (const auto &[name, image] : g_uikit.named) {
+        if (image == uiimage) {
+            return name;
+        }
+    }
+    return {};
+}
+
 u32 uiimage_create(mt_cpu *cpu, u32 cgimage) {
     return image_new(cpu, mt_objc_class_named(runtime(cpu), "UIImage"), cgimage, 1);
 }
