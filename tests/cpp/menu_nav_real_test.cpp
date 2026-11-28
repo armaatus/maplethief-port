@@ -30,6 +30,7 @@
 #if defined(MT_HAVE_GENERATED_CODE)
 
 #include "game_driver.h"
+#include "maplethief/events.h"
 
 namespace {
 
@@ -1550,25 +1551,16 @@ float rdf(mt_cpu *cpu, u32 addr) {
     return f;
 }
 bool rd_bool(mt_cpu *cpu, u32 addr) { return (rd(cpu, addr) & 0xFF) != 0; }
+// A guest word written.
+void wr(mt_cpu *cpu, u32 addr, u32 v) {
+    if (addr != 0 && addr + 4ull <= cpu->mem_size) {
+        std::memcpy(cpu->mem + addr, &v, 4);
+    }
+}
 
-// On a copy of the post-tutorial save (Henesys): Mr. Wang talked to by a touch on him, his
-// shop's tabs, list, Buy and Sell with their popups' buttons, his close; Humanoid's offer
-// refused and accepted; the map touched, its buttons.
-void touches(Run &r) {
-    attach_pad(r);
-    auto from = std::make_shared<std::size_t>(0);
-    const auto mark = [&r, from](const std::string &what) {
-        then_do(r, "mark: " + what, [&r, from](mt_cpu *) { *from = r.log.size(); });
-    };
-    const auto ran = [&r, from](std::vector<std::string> want, const std::string &what) {
-        then_do(r, "check: " + what,
-                [&r, from, want, what](mt_cpu *) { check_actions(r, *from, want, what); });
-    };
-    then_load_slot0(r);
-    then_check(r, "the save loads in Henesys", [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
-
-    // Mr. Wang (x 440): a touch on him talks (TouchKeyPadView's touchesBegan: sends
-    // clickUpButton: while isNearNPC, +0xE6, around npcPosition, +0x94).
+// Mr. Wang (x 440 in Henesys): a touch on him talks (TouchKeyPadView's touchesBegan: sends
+// clickUpButton: while isNearNPC, +0xE6, around npcPosition, +0x94), until his shop opens.
+void then_touch_shop(Run &r) {
     then_walk_to(r, 440);
     then_wait_field(r);
     auto next = std::make_shared<double>(0);
@@ -1587,6 +1579,24 @@ void touches(Run &r) {
         hold(r, A, !field(cpu) && std::fmod(el, 0.8) < 0.1); // through the greeting
         return false;
     });
+}
+
+// On a copy of the post-tutorial save (Henesys): Mr. Wang talked to by a touch on him, his
+// shop's tabs, list, Buy and Sell with their popups' buttons, his close; Humanoid's offer
+// refused and accepted; the map touched, its buttons.
+void touches(Run &r) {
+    attach_pad(r);
+    auto from = std::make_shared<std::size_t>(0);
+    const auto mark = [&r, from](const std::string &what) {
+        then_do(r, "mark: " + what, [&r, from](mt_cpu *) { *from = r.log.size(); });
+    };
+    const auto ran = [&r, from](std::vector<std::string> want, const std::string &what) {
+        then_do(r, "check: " + what,
+                [&r, from, want, what](mt_cpu *) { check_actions(r, *from, want, what); });
+    };
+    then_load_slot0(r);
+    then_check(r, "the save loads in Henesys", [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    then_touch_shop(r);
 
     // The tabs, the list's drag (MarketKeyPadView's touches), a row's tap.
     mark("the shop's tabs");
@@ -1704,6 +1714,394 @@ void touches(Run &r) {
          "-[TouchKeyPadView releaseClearButton:]"},
         "the map's World, a town, World, Mini and close by touch");
     then_finish(r);
+}
+
+// --- what touches_game and the character slots add (#435) -------------------------------------
+//
+// The paths #433's flow left (re/coverage-gaps.md): the popup menu's GL touch widgets on the
+// option and equipment tabs (keypad.md, "GL touch widgets"), the in-game help's paging scroll
+// view (two pages in Korean, so the flow runs in Korean), Charge, the death popup's buttons, and
+// the main menu's About build label and the empty slots' New.
+
+constexpr u32 kOptionButtons = 0xF14A4; // the option tab's 4 buttons, then the config page's 5
+constexpr u32 kEquipList = 0xF14C0;     // the equipment tab's list
+constexpr u32 kEquipWorn = 0xF14BC;     // the equipment tab's worn slots
+constexpr u32 kConfig = 0x11A98C;       // g_pConfig: the options file's 6 bytes (formats/save.md)
+constexpr u32 kOptionPage = 0xAC;       // CDataMgr: the option tab's page (1 config, 2 help)
+
+// The centre of cell `i` of the GL touch widget at `global` (a pointer to the widget's pointer,
+// as grid() reads them), if it has the cell:
+// the cell's rect (+0x20), the list's offset (the cell's +0x08 / +0x0C) unless it is placed
+// alone (+0x5C), and the widget's drag (+0x6C).
+bool cell_point(mt_cpu *cpu, u32 global, i32 i, float *x, float *y) {
+    const u32 w = rd(cpu, rd(cpu, global));
+    if (w == 0 || i < 0 || i >= rdi(cpu, w + 8)) {
+        return false;
+    }
+    const u32 c = rd(cpu, rd(cpu, w) + 4 * static_cast<u32>(i));
+    const bool alone = cpu->mem[c + 0x5C] != 0;
+    *x = static_cast<float>(rdi(cpu, c + 0x20) + (alone ? 0 : rdi(cpu, c + 0x08)) +
+                            rdi(cpu, c + 0x28) / 2);
+    *y = static_cast<float>(rdi(cpu, c + 0x24) + (alone ? 0 : rdi(cpu, c + 0x0C)) +
+                            rdi(cpu, w + 0x6C) + rdi(cpu, c + 0x2C) / 2);
+    return true;
+}
+
+// `taps` taps of a finger on cell `i` of the widget at `global` (once it has the cell: at most
+// 5 s), each touch event 0.12 s after the last so the widgets see each one on its own frame.
+void then_tap_cell(Run &r, const std::string &what, u32 global, i32 i, int taps = 1,
+                   double after = 0.5) {
+    auto p = std::make_shared<std::array<float, 2>>();
+    then_wait_for(r, what + " shows", 5, [global, i, p](mt_cpu *cpu) {
+        return cell_point(cpu, global, i, &(*p)[0], &(*p)[1]);
+    });
+    auto sent = std::make_shared<int>(0);
+    then(r, "tap " + what, taps * 0.3 + after + 1, [&r, p, taps, after, sent](mt_cpu *, double el) {
+        const int due = std::min(2 * taps, static_cast<int>(el / 0.12) + 1);
+        for (; *sent < due; ++*sent) {
+            r.input.touch(fe::InputSource::kScripted, 0,
+                          *sent % 2 == 0 ? MT_UIKIT_TOUCH_BEGAN : MT_UIKIT_TOUCH_ENDED, (*p)[0],
+                          (*p)[1]);
+        }
+        return *sent == 2 * taps && el >= 2 * taps * 0.12 + after;
+    });
+}
+
+// A tap on tab `i` of the popup menu's tab bar (status, item, equipment, skill, quest, option:
+// 54 points wide from x 75 in (70, 260, 335, 35); its cells have no rects of their own).
+void then_tap_tab(Run &r, const std::string &what, int i) {
+    then_touch_at(r, what, 75.0f + 54.0f * static_cast<float>(i) + 27.0f, 277.0f);
+}
+
+// The Korean main menu's terms (agreed by a touch) and promo banner (closed by a touch), if they
+// show, until Play does alone.
+void then_main_menu(Run &r) {
+    then(r, "the main menu, its terms and banner touched away", 30, [&r](mt_cpu *, double) {
+        float x = 0, y = 0;
+        for (const char *a : {"releaseAgreementButton:", "clickADClose:"}) {
+            if (control_point(r, a, &x, &y)) {
+                r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, x, y);
+                r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, x, y);
+                return false;
+            }
+        }
+        return has_control(r, "clickPlay:");
+    });
+    then_wait(r, 1.0);
+}
+
+// Touches the first of `buttons` a popup shows (once a second) until `done` holds: at most 30 s.
+void then_answer(Run &r, const std::string &what, std::vector<std::string> buttons, Pred done) {
+    then(r, what + " answered by touch", 30, [&r, buttons, done](mt_cpu *cpu, double el) {
+        if (done(cpu)) {
+            return true;
+        }
+        float x = 0, y = 0;
+        for (const std::string &a : buttons) {
+            if (std::fmod(el, 1.0) < 0.05 && control_point(r, a, &x, &y)) {
+                std::printf("popup %d: %s\n", popup_id(cpu), a.c_str());
+                r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, x, y);
+                r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, x, y);
+                break;
+            }
+        }
+        return false;
+    });
+}
+
+// CHero::TakeDamage(hero, damage, from_left) 0x65B55, the game's own hit, enough to fall (as
+// play_real_test's cash shop runs).
+void fall(mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    u32 saved[16];
+    std::memcpy(saved, cpu->r, sizeof saved);
+    const u32 args[3] = {h.addr, static_cast<u32>(h.max_hp * 2 + 1000), 0u};
+    mt_call_guest(cpu, MT_EVENTS_FN_TAKE_DAMAGE, args, 3, MT_EVENTS_FN_TAKE_DAMAGE);
+    std::memcpy(cpu->r, saved, sizeof saved);
+}
+
+// CQuestList::ClearAll(quests) 0x7C61D, the clearAll native's work (chapter 1's end).
+constexpr u32 kClearAll = 0x7C61Du;
+
+// On a copy of the post-tutorial save with equip_save's 30 items: the first item in the bag made
+// a quest item (type +0x8C = 6), then CQuestList::ClearAll, as chapter 1's clearAll calls it.
+// ClearAll drops the hero's quest items (0x5F5A9); no run reaches the trip to Orbis holding one.
+void quest_clear(Run &r) {
+    auto slot = std::make_shared<i32>(-1);
+    auto item = std::make_shared<u32>(0);
+    attach_pad(r);
+    then_main_menu(r);
+    then_load_slot0(r);
+    then_check(r, "the save loads in Henesys", [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    then_do(r, "a quest item in the bag, then clearAll", [slot, item](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const u32 items = rd(cpu, h.addr + 0xD8);
+        for (u32 i = 0; i < 48 && items != 0 && *slot < 0; i++) {
+            const u32 it = rd(cpu, items + 4 * i);
+            if (it != 0) {
+                wr(cpu, it + 0x8C, 6);
+                *slot = static_cast<i32>(i);
+                *item = it;
+            }
+        }
+        check(*slot >= 0, "an item in the bag");
+        u32 saved[16];
+        std::memcpy(saved, cpu->r, sizeof saved);
+        const u32 args[1] = {h.quests};
+        mt_call_guest(cpu, kClearAll, args, 1, kClearAll);
+        std::memcpy(cpu->r, saved, sizeof saved);
+    });
+    then_wait(r, 0.5);
+    then_do(r, "check: clearAll", [slot, item](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const u32 items = rd(cpu, h.addr + 0xD8);
+        bool kept = false;
+        for (u32 i = 0; i < 48 && items != 0; i++) {
+            kept = kept || rd(cpu, items + 4 * i) == *item;
+        }
+        check(!kept, "clearAll drops the quest item (slot " + std::to_string(*slot) + ")");
+        check(h.chapter == 2, "clearAll starts chapter 2 (" + std::to_string(h.chapter) + ")");
+    });
+    then_finish(r);
+}
+
+// On a copy of the post-tutorial save with equip_save's 30 items, in Korean: the popup menu's
+// option tab by touch (the config page's four rows, each round to its value again, and back;
+// the help pages, swiped and closed; save, Yes and the saved popup's text box; the other
+// question and its No); the
+// equipment tab (a double tap on a list cell equips it, on a worn slot takes it off); Charge on
+// a short stack of stars in Mr. Wang's Sell list; a fall: Revival, Return to town; a fall: Go to
+// the main menu and Yes.
+void touches_game(Run &r) {
+    attach_pad(r);
+    auto from = std::make_shared<std::size_t>(0);
+    const auto mark = [&r, from](const std::string &what) {
+        then_do(r, "mark: " + what, [&r, from](mt_cpu *) { *from = r.log.size(); });
+    };
+    const auto ran = [&r, from](std::vector<std::string> want, const std::string &what) {
+        then_do(r, "check: " + what,
+                [&r, from, want, what](mt_cpu *) { check_actions(r, *from, want, what); });
+    };
+    const auto page = [](mt_cpu *cpu) { return rdi(cpu, data_mgr(cpu) + kOptionPage); };
+    then_main_menu(r);
+    then_load_slot0(r);
+    then_check(r, "the save loads in Henesys", [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+
+    // The option tab, touched on the tab bar; its config button (PopupMenu_OptionTabOnKey).
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5, [](mt_cpu *cpu) { return game_mode(cpu) == 1; }, 0.3);
+    then_tap_tab(r, "the option tab", 5);
+    then_check(r, "the option tab by touch", [](mt_cpu *cpu) { return menu_tab(cpu) == 5; });
+    auto config = std::make_shared<std::array<std::uint8_t, 4>>();
+    then_do(r, "the options before",
+            [config](mt_cpu *cpu) { std::memcpy(config->data(), cpu->mem + rd(cpu, kConfig), 4); });
+    then_tap_cell(r, "Config", kOptionButtons, 1);
+    then_check(r, "the config page (CDataMgr +0xAC = 1)",
+               [page](mt_cpu *cpu) { return page(cpu) == 1; });
+    // The page's rows are the widget's cells 4-8. Sound has 4 values, speed 3, walking 2,
+    // vibration 2 (its preview vibrates): each row touched that often comes back to its value.
+    // Then the fifth, back.
+    const int values[4] = {4, 3, 2, 2};
+    for (i32 row = 0; row < 4; row++) {
+        for (int k = 0; k < values[row]; k++) {
+            then_tap_cell(r, "config row " + std::to_string(row), kOptionButtons, 4 + row, 1, 0.3);
+        }
+    }
+    then_check(r, "each row round to its value", [config](mt_cpu *cpu) {
+        return std::memcmp(config->data(), cpu->mem + rd(cpu, kConfig), 4) == 0;
+    });
+    then_tap_cell(r, "the config page's back", kOptionButtons, 8);
+    then_check(r, "back on the option tab", [page](mt_cpu *cpu) { return page(cpu) == 0; });
+    // Help (Shell_EnalbeHelpScrollKey): the help pages, panel 10; a swipe pages them (two in
+    // Korean: scrollViewDidScroll:); its close (TouchKeyPadView's).
+    then_tap_cell(r, "Help", kOptionButtons, 2);
+    then_wait_for(
+        r, "the help pages (panel 10)", 5, [](mt_cpu *) { return mt_input_panel() == 10; }, 0.3);
+    then_drag(r, "the help's first page left", 400, 160, 80, 160, 8);
+    then_wait(r, 1.0);
+    then_drag(r, "the help's second page right", 80, 160, 400, 160, 8);
+    then_wait(r, 1.0);
+    mark("help's close");
+    then_touch_at(r, "the help's close", 462, 21);
+    then_wait_field(r);
+    ran({"-[TouchKeyPadView releaseClearButton:]"}, "the help's close by touch: the field");
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5, [](mt_cpu *cpu) { return game_mode(cpu) == 1; }, 0.3);
+    then_tap_tab(r, "the option tab", 5);
+    // Save: "save?" (popup 13), Yes; "saved" (popup 2, kind 0: its Empty button covers the
+    // text box, a tap anywhere on it is OK); the fourth button's question (popup 14), No.
+    then_tap_cell(r, "Save", kOptionButtons, 0);
+    then_wait_for(r, "save? (popup 13)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 13; });
+    then_touch(r, "releaseYesButton:");
+    then_wait_for(r, "saved (popup 2)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 2; });
+    mark("saved's text box");
+    then_touch(r, "releaseEmptyButton:");
+    then_wait_for(r, "no popup", 5, [](mt_cpu *cpu) { return popup_id(cpu) == -1; }, 0.3);
+    ran({"-[PopupKeyPadView releaseEmptyButton:]"}, "saved's text box by touch");
+    then_tap_cell(r, "the fourth button", kOptionButtons, 3);
+    then_wait_for(r, "popup 14", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 14; });
+    then_touch(r, "releaseNoButton:");
+    then_wait_for(r, "no popup", 5, [](mt_cpu *cpu) { return popup_id(cpu) == -1; }, 0.3);
+
+    // The equipment tab by touch: a double tap on the list's first cell equips it, one on each
+    // worn slot takes it off again.
+    then_tap_tab(r, "the equipment tab", 2);
+    then_check(r, "the equipment tab by touch", [](mt_cpu *cpu) { return menu_tab(cpu) == 2; });
+    then_tap_cell(r, "the list's first cell, twice", kEquipList, 0, 2);
+    for (i32 slot = 0; slot < 5; slot++) {
+        then_tap_cell(r, "worn slot " + std::to_string(slot) + ", twice", kEquipWorn, slot, 2, 0.3);
+    }
+    then_press_until(r, "the field", B, field, 4);
+
+    // Charge (MarketKeyPadView): shown on the Sell tab for a short stack of stars (Shop_Paint:
+    // an item of kind 2 whose count, +0x100, is below its stack's, +0xFC). The Subi
+    // Throwing-Stars bought whole (Buy row 2, popup 3), then one star fewer, as one throw leaves
+    // them (a level-8 beginner throws none).
+    then_touch_shop(r);
+    then_touch_at(r, "the Buy tab's third row", 248, 157);
+    then_touch(r, "releaseBuyButton:");
+    then_wait_for(r, "buy? (popup 3)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 3; });
+    then_touch(r, "releaseYesButton:");
+    then_wait_for(r, "bought (popup 111)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 111; });
+    then_touch(r, "releaseOkButton:");
+    then_wait_for(r, "the shop's list again", 5, in_shop, 0.3);
+    then_do(r, "one star thrown", [](mt_cpu *cpu) {
+        const u32 items = rd(cpu, hero(cpu).addr + 0xD8);
+        int stacks = 0;
+        for (u32 i = 0; i < 48 && items != 0; i++) {
+            const u32 it = rd(cpu, items + 4 * i);
+            if (it != 0 && rdi(cpu, it + 0x8C) == 2 &&
+                rdi(cpu, it + 0x100) == rdi(cpu, it + 0xFC)) {
+                wr(cpu, it + 0x100, rd(cpu, it + 0xFC) - 1);
+                stacks++;
+            }
+        }
+        check(stacks > 0, "a full stack of stars to take one from");
+    });
+    then_touch(r, "releaseSellTabButton:");
+    auto row = std::make_shared<int>(-1);
+    then(r, "a Sell row with Charge", 12, [&r, row](mt_cpu *, double el) {
+        const int i = static_cast<int>(el / 1.0);
+        if (has_control(r, "releaseChargeButton:") && std::fmod(el, 1.0) > 0.5) {
+            return true;
+        }
+        if (i > 5) {
+            return true;
+        }
+        if (*row != i) {
+            *row = i;
+            const float y = 80.0f + 38.5f * static_cast<float>(i);
+            r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, 248, y);
+            r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, 248, y);
+        }
+        return false;
+    });
+    mark("Charge");
+    then_touch(r, "releaseChargeButton:");
+    then_wait(r, 1.0);
+    then_do(r, "after Charge", [](mt_cpu *cpu) {
+        std::printf("after Charge: popup %d, mode %d, panel %d\n", popup_id(cpu), game_mode(cpu),
+                    static_cast<int>(mt_input_panel()));
+    });
+    ran({"-[MarketKeyPadView releaseChargeButton:]"}, "Charge by touch");
+    then_press_until(r, "the field", B, field, 6);
+
+    // A fall: Revival (its payment refused by the offline store), then Return to town.
+    then_do(r, "the hero falls", fall);
+    then_wait_for(
+        r, "the death popup (0x68)", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+    mark("Revival");
+    then_touch(r, "releaseRevivalButton:");
+    then_wait(r, 2.0);
+    ran({"-[PopupKeyPadView releaseRevivalButton:]"}, "Revival by touch");
+    then_touch(r, "releaseReturnTownButton:");
+    then_answer(r, "Return to town's question", {"releaseYesButton:", "releaseOkButton:"}, field);
+    // A fall: Go to the main menu, Yes.
+    then(r, "the hero falls again (hit each 2 s: the town's arrival shields him)", 30,
+         [](mt_cpu *cpu, double el) {
+             if (popup_id(cpu) == 0x68) {
+                 return el > 1.0;
+             }
+             if (std::fmod(el, 2.0) < 0.05 && field(cpu)) {
+                 fall(cpu);
+             }
+             return false;
+         });
+    then_touch(r, "releaseGoMainMenuButton:");
+    then_wait(r, 1.0);
+    then_do(r, "after Go to the main menu", [](mt_cpu *cpu) {
+        std::printf("after Go to the main menu: popup %d, mode %d\n", popup_id(cpu),
+                    game_mode(cpu));
+    });
+    then_answer(r, "Go to the main menu's question", {"releaseYesButton:", "releaseOkButton:"},
+                [&r](mt_cpu *) { return has_control(r, "clickPlay:"); });
+    then_finish(r);
+}
+
+// The main menu by touch: About and its build label, closed; Play; the New of each empty slot
+// (newCharacterOne: ... Three:, from ChooseCharacterView's drawRect:), its alert's No.
+void touches_slots(Run &r) {
+    attach_pad(r);
+    auto from = std::make_shared<std::size_t>(0);
+    then_main_menu(r);
+    then_do(r, "mark", [&r, from](mt_cpu *) { *from = r.log.size(); });
+    then_touch(r, "clickAbout:");
+    then_touch(r, "clickAboutBuild:");
+    then_touch(r, "closeAbout:");
+    then_do(r, "check: About's build label", [&r, from](mt_cpu *) {
+        check_actions(r, *from,
+                      {"-[MainMenuView clickAbout:]", "-[MainMenuView clickAboutBuild:]",
+                       "-[MainMenuView closeAbout:]"},
+                      "About, its build label and its close by touch");
+    });
+    then_touch(r, "clickPlay:");
+    then_do(r, "mark", [&r, from](mt_cpu *) { *from = r.log.size(); });
+    auto touched = std::make_shared<std::vector<std::string>>();
+    for (const char *slot : {"newCharacterOne:", "newCharacterTwo:", "newCharacterThree:"}) {
+        then(r, std::string("the character select: ") + slot + " if its slot is empty", 10,
+             [&r, slot](mt_cpu *, double el) {
+                 return el > 1.0 && (has_control(r, slot) || has_control(r, "clickStart:"));
+             });
+        auto sent = std::make_shared<bool>(false);
+        then(r, std::string("touch ") + slot, 8, [&r, slot, touched, sent](mt_cpu *, double el) {
+            float x = 0, y = 0;
+            if (!*sent && control_point(r, slot, &x, &y)) {
+                *sent = true;
+                r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, x, y);
+                r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, x, y);
+                touched->push_back(std::string("-[ChooseCharacterView ") + slot + "]");
+                touched->push_back("-[ChooseCharacterView cancelNewAlert:]");
+            }
+            if (*sent && el > 0.8 && control_point(r, "cancelNewAlert:", &x, &y)) {
+                r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, x, y);
+                r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, x, y);
+                return true;
+            }
+            return !*sent || el > 2.0;
+        });
+    }
+    then_wait(r, 1.0);
+    then_do(r, "check: the empty slots' New", [&r, from, touched](mt_cpu *) {
+        check(touched->size() == 4,
+              "two empty slots (" + std::to_string(touched->size() / 2) + ")");
+        check_actions(r, *from, *touched, "each empty slot's New and its alert's No by touch");
+    });
+    then_finish(r);
+}
+
+// Slot 0's save moved to slot 1 (before a launch), so the first slot is empty.
+int move_slot(const fs::path &data) {
+    std::error_code ec;
+    for (const char *name : {"theif", "quest"}) {
+        fs::rename(data / "saves" / (std::string(name) + "0"),
+                   data / "saves" / (std::string(name) + "1"), ec);
+        if (ec) {
+            std::printf("FAIL: cannot move %s0: %s\n", name, ec.message().c_str());
+            return 1;
+        }
+    }
+    std::printf("move_slot: slot 0 moved to slot 1\nall ok\n");
+    return 0;
 }
 
 // --- direction resolution at a rope (#138, ADR 0128) -------------------------------------------
@@ -2452,6 +2850,12 @@ bool run_mode(Run &r, int argc, char **argv) {
         pointer(r);
     } else if (r.mode == "touches") {
         touches(r);
+    } else if (r.mode == "touches_game") {
+        touches_game(r);
+    } else if (r.mode == "touches_slots") {
+        touches_slots(r);
+    } else if (r.mode == "quest_clear") {
+        quest_clear(r);
     } else if (r.mode == "climb_stick") {
         climb_stick(r);
     } else if (r.mode == "climb_last") {
@@ -2520,7 +2924,7 @@ int equip_save(const fs::path &data) {
 int usage() {
     std::printf("usage: menu_nav_real_test main_menu|terms|early|seed|create|select|delete|"
                 "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|pointer|touches|"
-                "chords_touch|"
+                "touches_game|touches_slots|quest_clear|move_slot|chords_touch|"
                 "chords_pad|chords_keys|chords_keys_last|chord_mash|chord_mixed|carry_pad|carry_"
                 "keys|explore DATA_DIR "
                 "OUT_DIR "
@@ -2547,6 +2951,9 @@ int main(int argc, char **argv) {
     fs::create_directories(r.out);
     if (r.mode == "equip_save") {
         return equip_save(r.data);
+    }
+    if (r.mode == "move_slot") {
+        return move_slot(r.data);
     }
     // The pads' events reach the test without a focused window.
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");

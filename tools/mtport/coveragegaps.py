@@ -31,9 +31,11 @@ that no run entered and gives it one class:
   live function ``dead`` when the port or the shipped data never takes its path (crt1's
   ``start``, the Monster Carnival that only unused scripts start), with the evidence.
 - ``missed``: live, reachable by play, and no run has entered it yet (a run step is missing).
+  None is left: #433 and #435 added the run steps (``input.menu_touches``,
+  ``input.menu_touches_more``, ``runtime.scriptvm_corpus``) or a rule; a new one fails
+  ``tests/test_coveragegaps_real.py``.
 
-Every ``unreachable`` and ``missed`` row names the follow-up issue that adds its test or run
-step (:data:`HOST_TESTS`, :data:`RUN_STEPS`).
+Every ``unreachable`` row names the follow-up issue that adds its test (:data:`HOST_TESTS`).
 
 ``generate`` writes the doc from a coverage file (``mtport.runcoverage`` format, or a
 directory of them); ``update`` adds what a new run entered (a host-driven test, #432) to the
@@ -102,8 +104,8 @@ ROW = re.compile(r"^\| `0x([0-9A-F]+)` \|")
 class Rule:
     """Live functions whose name matches ``pattern`` (a regex, the whole name): ``dead`` (the
     port or the shipped data never takes the path: the reason says why), ``unreachable`` (a
-    state no run produces: the reason says which) or ``missed`` (no reason; a run step is
-    missing). ``issue`` is the follow-up that adds the test or the run step."""
+    state no run produces: the reason says which). ``issue`` is the follow-up that adds the
+    test."""
 
     pattern: str
     cls: str
@@ -112,7 +114,6 @@ class Rule:
 
 
 HOST_TESTS = 432  # host-driven tests for the unreachable functions
-RUN_STEPS = 435  # run steps for the missed functions (#433, then #435)
 
 # Checked in order; the first match wins.
 RULES: tuple[Rule, ...] = (
@@ -143,7 +144,70 @@ RULES: tuple[Rule, ...] = (
          "presents Game Center, which the port draws itself (re/program-flow.md, ADR 0084)"),
     Rule(r"-\[TouchKeyPadView (release[4568]|click[58])Button:\]", "dead", "sent only by "
          "`setKeySequence:`'s 9-key chord mode, which only ever gets −1 (controls/keypad.md)"),
-    Rule(r".*", "missed", "", RUN_STEPS),
+    # #435: what play cannot reach, each with its reason.
+    Rule(r"ScriptNative_(removeItem|checkItemCount)|FUN_00075960|FUN_00075a74", "dead",
+         "Monster Carnival: the natives are called only by `Spiegelman1`–`3`, scripts no map "
+         "names, and the mobs' branch runs only with the carnival's flag `CStateGame +0x404` "
+         "set, which only `initMonCa` sets (ANALYSIS.md, unused scripts; #427 restores them)"),
+    Rule(r"ScriptNative_getQuestTitle", "dead", "its one call is in `chapter2/Alchester`'s "
+         "`reward`, a script function nothing calls: every other script that calls a `reward` "
+         "defines its own, and the engine calls script functions only through `regCallBack`"),
+    Rule(r"Lua::(numberToString|toStringCheck|stringToNumber|pushStringOrNil|setLine)", "dead",
+         "the shipped scripts never take the path: they have no SETLINE (no line numbers) and "
+         "no CONCOP, and every comparison and arithmetic has a number literal on the right and "
+         "on the left a call of a native that returns a number (`getQuestState`, `getLevel`, "
+         "`checkItemCount`, `checkRequire`) or a global stored only from those or from numbers; "
+         "`runtime.scriptvm_corpus` runs every function of the 307 under 16 answer sets and "
+         "enters none of them (re/script-vm.md, ADR 0226)"),
+    Rule(r"FUN_0000b1c0|FUN_0005d818", "dead", "reached only from a constructor's SjLj landing "
+         "pad, which runs when a member's construction throws: the game imports no "
+         "`__cxa_throw`, and the port's `operator new` stops the guest instead of throwing "
+         "`std::bad_alloc` (ANALYSIS.md, SjLj; runtime/src/hle/cxxabi.cpp)"),
+    Rule(r"FUN_00012590|FUN_0001267c|FUN_00098004", "dead", "the title's logo steps 0–2: "
+         "`CStateTitle::Enter` starts it at step 3 with `LoadSettings(3)`, step 3 hands over "
+         "to the main menu, and no caller passes 0, 1 or 2 (ANALYSIS.md, program flow)"),
+    Rule(r"SkyCanvas::RepaintRect", "dead", "`SkyCanvas::Tick` repaints a rectangle only "
+         "when `+0xB5` is 0, which never happens: it repaints the whole surface "
+         "(re/program-flow.md)"),
+    Rule(r"CNotifyTextList::SetMaxLines", "dead", "`CDataMgr::ApplyInfoLines` sets it only "
+         "for a game: `LoadConfig` passes none, and the options page passes one only for "
+         "row 5 (information lines), which neither its keys (rows 0–3) nor its touches "
+         "(rows 0–3) select (formats/save.md)"),
+    Rule(r"FUN_000468f0", "dead", "the option page's mode `CDataMgr +0xAC` = 3: its key and "
+         "touch handlers set only 0, 1 (options) and 2 (help pages)"),
+    Rule(r"FUN_00025770|FUN_00039f28|SaveFile_ThiefSlotExists|CDataMgr::SaveCupon", "dead",
+         "the GL main menu's items other than Play (quit, help pages, options, coupons): its "
+         "cursor `CStateMainMenu +0x20` moves only on `'2'`, `'8'`, −1 and −2, which no "
+         "main-menu button sends (controls/keypad.md); the cupon's other writer is the "
+         "Monster Carnival"),
+    Rule(r"CDataMgr::CountCoupons|FUN_0000f34c", "dead", "the Pigmy dialogue (`CStateGame::"
+         "SetPigmeState`), which no map places (formats/obj.md), and the GL main menu's coupon "
+         "screen, whose cursor no main-menu button moves (controls/keypad.md)"),
+    Rule(r"-\[MapKeyPadView addButtonWithImageName:.*\]", "dead", "the 15 sends of the "
+         "selector are each class's to itself, in the 8 other classes that define it; "
+         "`MapKeyPadView`'s `initWithFrame:` only calls `super`, and its buttons are made by "
+         "`-[TouchKeyPadView initWithFrame:]` (re/objc-shell.md)"),
+    Rule(r"FUN_00024108|FUN_00024150", "dead", "the box painter `FUN_0003a898` draws its "
+         "stripes only for box style 4 (its second argument) with fill 2 or 4: its 35 calls "
+         "pass constant styles (0, 3, 6, 8, 9, 10, 13–16, 18, 24, 25, 27, 34, 41–44), none 4"),
+    Rule(r"FUN_00024170", "dead", "`DrawImageAnchored` calls it only while `CDataMgr +0x510` "
+         "is 1, and the one store to that byte is `CDataMgr::CDataMgr`'s 0"),
+    Rule(r"FUN_000c0d84", "dead", "the pointer array grows only when full: `CMSocket`'s send "
+         "queue (capacity 30, re/network.md) holds a packet only until `Send`'s own "
+         "`FlushSendQueue` call, and 3 failed sends disconnect, which frees it"),
+    Rule(r"FUN_00078a64", "dead", "`Popup_Paint` draws the popup's buttons in GL only while "
+         "`-[TouchKeyPadView onInGamePopup]` is 0: `Popup_Open`, the only way a popup opens, "
+         "sets it through `enableAlertKey`, and `Popup_Close` clears it with "
+         "`disableAlertKey` as it closes the popup (controls/keypad.md)"),
+    Rule(r"FUN_000a0d40", "dead", "`TouchWidget_PaintCells` outlines the cells only while the "
+         "widget's byte `+0xB8` is set, and its one store (`FUN_000a0b74`) writes 0: a "
+         "debugging overlay"),
+    Rule(r"-\[TouchKeyPadView releaseRevivalButton:\]", "dead", "the selector's one load "
+         "is `-[PopupKeyPadView initWithFrame:]`'s Revival button, whose target is the popup "
+         "pad; `TouchKeyPadView` makes no Revival button, and the popup pad forwards to it "
+         "only `clickRevivalButton:` (re/objc-shell.md)"),
+    Rule(r"CAniManager::makeAniYetiIn", "dead", "scene 7, which only `YetiMap.out` starts, a "
+         "script no map object names (re/boss-fights.md, 9.5 has no map script)"),
 )  # fmt: skip
 
 
@@ -452,9 +516,8 @@ def render(gaps: Sequence[Gap], p: Program, executed: int) -> str:
         "produce; the evidence says which. The host-driven test `play.host_events` enters "
         f"such functions ([#{HOST_TESTS}](https://github.com/armaatus/maplethief-port/issues/"
         f"{HOST_TESTS}), ADR 0242).",
-        f"- `missed`: {counts['missed']:,}. Live and reachable by play; no run enters them yet. "
-        f"Run steps for them: [#{RUN_STEPS}](https://github.com/armaatus/maplethief-port/issues/"
-        f"{RUN_STEPS}).",
+        f"- `missed`: {counts['missed']:,}. Live and reachable by play; no run enters them yet "
+        "(a run step is missing). None is left: the run steps of #433 and #435 enter the rest.",
         "- A `dead` row with a reason in words comes from a rule: the port or the shipped data "
         "never takes the path.",
         "",

@@ -20,6 +20,11 @@
 #                                                pages, #185, ADR 0107)
 #   touches     touches                         (on a copy of SEED: the key pads' UIKit buttons
 #                                                by scripted touches, #433)
+#   touches_more equip_save touches_game         (on a copy of SEED, in Korean: the option and
+#               quest_clear touches_slots        equipment tabs' touch widgets, the help pages,
+#               move_slot touches_slots          Charge, the death popup's buttons; clearAll
+#                                                with a quest item; About's build label, the
+#                                                empty slots' New, #435)
 #   carry_pad   carry_pad                       (on a copy of SEED: pick up and drop by the pad,
 #                                                #140, ADR 0129)
 #   carry_keys  carry_keys                      (the same by the keys, and the trash)
@@ -76,6 +81,9 @@ elseif(FLOW STREQUAL "pointer")
     set(language ko)
 elseif(FLOW STREQUAL "touches")
     set(modes touches)
+elseif(FLOW STREQUAL "touches_more")
+    set(modes equip_save touches_game quest_clear touches_slots move_slot touches_slots)
+    set(language ko)
 elseif(FLOW STREQUAL "carry_pad")
     set(modes carry_pad)
 elseif(FLOW STREQUAL "carry_keys")

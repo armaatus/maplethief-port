@@ -1028,6 +1028,22 @@ add_test(
 set_tests_properties(
     input.menu_touches PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
                                   TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
+# input.menu_touches_more (#435): what input.menu_touches leaves, by touch, in Korean (two help
+# pages): the popup menu's option tab (the config rows, the help pages swiped, save's No) and
+# equipment tab (equip, take off) through their GL touch widgets, Charge on a short stack of
+# stars, the death popup's Revival, Return to town, text box and Go to the main menu; then the
+# main menu's About build label and each empty slot's New and its No (slot 0 moved to 1 for the
+# first). On a copy of the same save.
+add_test(
+    NAME input.menu_touches_more
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=touches_more"
+            "-DSEED=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops_save/data"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_touches_more" -P
+            "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+set_tests_properties(
+    input.menu_touches_more
+    PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:" TIMEOUT 900 RUN_SERIAL
+               TRUE FIXTURES_REQUIRED menu_shops_save)
 # input.menu_shop_scroll (ADR 0102): Mr. Wang's Buy and Sell lists by the d-pad, item by item,
 # the drawn list scrolled so the cursor's row stays in view; the amount set by the d-pad (and
 # held with menu_repeat, ADR 0114) and two bought; the Sell list paged with LT (ADR 0114); the

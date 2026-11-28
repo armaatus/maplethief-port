@@ -42,6 +42,19 @@ PYTHONPATH=tools python3 -m mtport.coveragegaps update --coverage <dir>
 
 On 2026-11-27 it entered 113 of the 124 `unreachable` functions; the other 11 have no sender and are `dead` rules. The teardown ran 86 destructors: 46 on live objects, 1 on an object made by its constructor (`CAniManager`) and 39 on zeroed objects with the class's vtables. It also ran 14 `dealloc`s, one on a new object (`TermsView`).
 
+### Run steps
+
+Every function play can reach is entered by a run (#433, #435): `input.menu_touches` and `input.menu_touches_more` touch the key pads' buttons and the GL touch widgets that the other flows drive by keys, and `runtime.scriptvm_corpus` runs every script function. To add them:
+
+```sh
+cmake --build --preset mac-coverage --target menu_nav_real_test scriptvm_real_test
+cd build/mac-coverage && MAPLETHIEF_COVERAGE=<dir>/coverage-%p.txt \
+  ctest -R 'input\.menu_touches|runtime\.scriptvm_corpus' --output-on-failure
+PYTHONPATH=tools python3 -m mtport.coveragegaps update --coverage <dir>
+```
+
+A function no run enters is a `dead` rule with its evidence (`RULES` in `tools/mtport/coveragegaps.py`) or a new run step: `tests/test_coveragegaps_real.py` fails on a `missed` row.
+
 ## The baseline
 
 2026-11-26, branch `armaatus/295-run-coverage` at `3c6e8ad3` (on `dev` after #415), Apple M4, macOS 26.6.2, `mac-coverage` build, `python3 -m mtport.runcoverage run` with its default tests: `play.chapter_1_a` to `play.chapter_1_m`, `play.regress`, every `menus.*` and every `input.*` (53 tests, all real-asset, 0 failed). `play.regress` gave its usual digest `8a2f05733c8d4603` with the recorders on.
