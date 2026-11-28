@@ -1291,6 +1291,17 @@ set_tests_properties(
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 set_tests_properties(play.save_quit PROPERTIES FIXTURES_SETUP play_save)
+# A timed run from a new character (#442, epic #402): the speedrun timer as game.cpp runs it,
+# started by the new character's event, the shipped chapter_1 and Any% (cut to its first split)
+# through the tutorial's split; the overlay's lines, an Assist turned on mid-run (assisted for
+# good), the run logs and Any%'s personal best in the data folder's runs/.
+add_test(NAME play.speedrun_new_character
+         COMMAND play_real_test speedrun_new_character
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_speedrun_new_character" 1)
+set_tests_properties(
+    play.speedrun_new_character
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 set_tests_properties(play.save_relaunch PROPERTIES FIXTURES_REQUIRED play_save)
 # The first-start copy (#262, ADR 0127): play.save_quit's save as an old per-user folder (the
 # layout before ADR 0127), copied into a kit's empty data/ as the first start does, then loaded:

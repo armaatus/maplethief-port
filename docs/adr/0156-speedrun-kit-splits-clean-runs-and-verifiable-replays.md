@@ -194,7 +194,7 @@ Accepted (delegated by Joris, 2026-11-27). The #406 addendum left mob 68 out of 
 - **Mob 66 stays out.** It is side quest 37's boss on 4.17, which a run can skip, so a split on it could leave a run waiting; the #406 reason holds for 66 only.
 - A personal best or a `.segments` file saved with the six-split Any% no longer lines up with the category; no release shipped one (#406 and #434 are in the same unreleased line).
 
-**Evidence.** `tests/cpp/run_timer_test.cpp`, `run categories: both shipped categories parse` (CI): Any%'s split list, in order, with 68 fourth. Locally with real assets, `play.chapter_2_f_synthetic` times Any%'s splits from `Chapter 2 boss` to `Chapter 2`: the 68 split fires on `run event mob 68 killed` and the run finishes at chapter 2's end.
+**Evidence.** `tests/cpp/run_timer_test.cpp`, `run categories: both shipped categories parse` (CI): Any%'s split list, in order, with 68 fourth. Locally with real assets, `play.chapter_2_f_synthetic` times Any%'s splits from `Chapter 2 boss` to `Chapter 2`: the 68 split fires on `run event mob 68 killed` and the run finishes at chapter 2's end. `play.speedrun_new_character` (#442, local, real assets) checks the second exit criterion of epic #402 from a fresh install: a new character starts the run, the overlay shows the real time and the next split before and after the Tutorial split, `turbo_attack` turned on and off mid-run leaves the run assisted, and the logs and Any%'s personal best land in the data folder's `runs/`.
 
 ## Addendum (#424): a scene's map load is a map change
 
