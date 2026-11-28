@@ -116,6 +116,19 @@ def test_every_dockerfile_arg_is_a_pin_or_derived_from_one():
     assert {p.pinned for p in images} == {d[:19] for d in digests}
 
 
+def test_every_appimage_licence_pin_is_listed():
+    text = (REPO / deps.DEPENDENCIES_CMAKE).read_text(encoding="utf-8")
+    files = [n for n, _ in deps.licence_pins(text, "MAPLETHIEF_APPIMAGE_LICENSE_PINS", "x")]
+    assert len(files) == 7
+    names = by_name(deps.pins())
+    assert names["AppImage licence musl.txt"].pinned == "v1.2.5"  # cgit's h=
+    assert names["AppImage licence libfuse-LGPL-2.1.txt"].pinned == "fuse-3.15.0"
+    for f in files:
+        assert f"AppImage licence {f}" in names
+    # Neither list takes the other's items.
+    assert not any(n.startswith("Switch licence AppImage") for n in names)
+
+
 def test_an_unknown_dockerfile_arg_fails():
     with pytest.raises(ValueError, match="FOO_VERSION"):
         deps.dockerfile_pins({"x/Dockerfile": "ARG FOO_VERSION=1.0\n"})
@@ -274,6 +287,56 @@ def test_every_image_digest_is_in_third_party_md():
     for path in (REPO / deps.CONTAINERS).glob("*/Dockerfile"):
         for digest in re.findall(r"@(sha256:[0-9a-f]{64})", path.read_text(encoding="utf-8")):
             assert digest in third_party, f"{path.parent.name}: {digest}"
+
+
+def dockerfiles() -> dict[str, str]:
+    return {
+        p.relative_to(REPO).as_posix(): p.read_text(encoding="utf-8")
+        for p in (REPO / deps.CONTAINERS).glob("*/Dockerfile")
+    }
+
+
+def test_every_packaged_download_pin_is_in_third_party_md():
+    # A download that ships in a player download (the AppImage's runtime, #439) needs its row
+    # and licence in THIRD_PARTY.md, with the release and every SHA-256 the build checks.
+    third_party = (REPO / "THIRD_PARTY.md").read_text(encoding="utf-8")
+    files = dockerfiles()
+    packaged = [
+        name
+        for text in files.values()
+        for name in re.findall(r"^ARG (\w+)=", text, re.MULTILINE)
+        if deps.DOCKER_ARG_PACKAGED.search(name)
+    ]
+    assert sorted(packaged) == [
+        "APPIMAGE_RUNTIME_RELEASE",
+        "APPIMAGE_RUNTIME_SHA256_AMD64",
+        "APPIMAGE_RUNTIME_SHA256_ARM64",
+    ]
+    assert deps.packaged_missing_from(third_party, files) == []
+
+
+def test_a_packaged_download_missing_from_third_party_md_fails():
+    files = {
+        "x/Dockerfile": "ARG APPIMAGE_RUNTIME_RELEASE=20990101\n"
+        "ARG APPIMAGE_RUNTIME_SHA256_AMD64=" + "c" * 64 + "\n"
+        "ARG CMAKE_VERSION=9.9.9\n"
+    }
+    third_party = "| AppImage runtime | 20990101 | ... |\n"
+    assert deps.packaged_missing_from(third_party, files) == [
+        "x/Dockerfile: APPIMAGE_RUNTIME_SHA256_AMD64=" + "c" * 64
+    ]
+    assert deps.packaged_missing_from(third_party + "c" * 64, files) == []
+
+
+def test_the_guard_accepts_exactly_the_pinned_appimage_runtimes():
+    from mtport import release
+
+    text = dockerfiles()["tools/containers/linux-game/Dockerfile"]
+    pinned = set(
+        re.findall(r"^ARG APPIMAGE_RUNTIME_SHA256_\w+=([0-9a-f]{64})$", text, re.MULTILINE)
+    )
+    assert len(pinned) == 2
+    assert set(release.APPIMAGE_RUNTIMES) == pinned
 
 
 def test_dependabot_leaves_capstones_major_versions_alone():

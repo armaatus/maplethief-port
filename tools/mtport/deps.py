@@ -3,7 +3,8 @@
 Dependabot (``.github/dependabot.yml``) bumps the actions and the Python packages. Everything
 else is pinned where it can't follow: the C and C++ dependencies by SHA-256 in
 ``cmake/Dependencies.cmake``, the container images by digest and their tools by version in the
-``ARG`` lines of ``tools/containers/*/Dockerfile``, uv in CI, the linters in ``scripts/lint``,
+``ARG`` lines of ``tools/containers/*/Dockerfile`` (among them the AppImage's runtime, which
+ships in the Linux player's AppImage), uv in CI, the linters in ``scripts/lint``,
 Ghidra and its JDK in ``tools/mtport/ghidra_setup.py``. This module reads each pin from its file
 (:func:`pins`, so a new pin needs no second list), asks upstream for the latest, and prints one
 row per pin. The Python packages are listed too, for the whole picture.
@@ -65,6 +66,10 @@ DOCKER_ARG_TAGS: dict[str, tuple[str, str]] = {
 # later date is newer), and what is derived from another pin (a file's hash, an archive name).
 DOCKER_ARG_FIXED = ("UBUNTU_SNAPSHOT",)
 DOCKER_ARG_DERIVED = re.compile(r"_SHA256(_\w+)?$|^DXC_ARCHIVE$|^TARGETARCH$")
+# Dockerfile ARGs whose download ships inside a player download, not only in a build image:
+# the AppImage's type-2 runtime (ADR 0193). Each value is in THIRD_PARTY.md
+# (:func:`packaged_missing_from`, tests/test_deps.py).
+DOCKER_ARG_PACKAGED = re.compile(r"^APPIMAGE_RUNTIME_")
 
 # scripts/lint's <NAME>_VERSION lines and their PyPI packages.
 LINT_PACKAGES = {
@@ -339,7 +344,7 @@ def cmake_pins(text: str, where: str = DEPENDENCIES_CMAKE) -> list[Pin]:
         Pin("NanumGothic", fonts[:12], w, path_check("google/fonts", fonts, "ofl/nanumgothic")),
         Pin("Fira Sans", fonts[:12], w, path_check("google/fonts", fonts, "ofl/firasans")),
     ]
-    for name, url in re.findall(r'"([\w.-]+)\|(https://[^|]+)\|[0-9a-f]{64}"', text):
+    for name, url in licence_pins(text, "MAPLETHIEF_SWITCH_LICENSE_PINS", where):
         m = re.match(r"https://raw\.githubusercontent\.com/([^/]+/[^/]+)/(v[\d.]+)/", url)
         parts = url.split("/")
         ref = "/".join(parts[5:7]) if parts[5] == "releases" else parts[5]  # gcc's tags
@@ -354,7 +359,28 @@ def cmake_pins(text: str, where: str = DEPENDENCIES_CMAKE) -> list[Pin]:
             out.append(Pin(f"Switch licence {name}", tag, w, check))
         else:
             out.append(Pin(f"Switch licence {name}", ref[:19], w, follows("devkitA64 image")))
+    for name, url in licence_pins(text, "MAPLETHIEF_APPIMAGE_LICENSE_PINS", where):
+        out.append(
+            Pin(f"AppImage licence {name}", url_ref(url), w, follows("the AppImage runtime"))
+        )
     return out
+
+
+def licence_pins(text: str, variable: str, where: str) -> list[tuple[str, str]]:
+    """The ``<name>|<url>|<sha256>`` items of ``set(<variable> ...)``: (name, url) pairs."""
+    block = _one(rf"^set\({variable}\n((?:.*\n)*?.*\))$", text, where)
+    return re.findall(r'"([\w.-]+)\|(https://[^|]+)\|[0-9a-f]{64}"', block)
+
+
+def url_ref(url: str) -> str:
+    """The tag or commit a raw file URL names: GitHub's path part, cgit's ``h=``."""
+    m = re.search(r"[?&]h=([^&]+)$", url)
+    if m:
+        return m.group(1)
+    m = re.match(r"https://raw\.githubusercontent\.com/[^/]+/[^/]+/([^/]+)/", url)
+    if not m:
+        raise ValueError(f"{url}: no tag or commit in the URL")
+    return m.group(1)[:19]
 
 
 def dockerfile_pins(files: dict[str, str]) -> list[Pin]:
@@ -391,6 +417,17 @@ def dockerfile_pins(files: dict[str, str]) -> list[Pin]:
         else:
             raise ValueError(f"{where[0]}: ARG {name} is a pin deps.py doesn't know")
     return out
+
+
+def packaged_missing_from(third_party: str, files: dict[str, str]) -> list[str]:
+    """The packaged downloads' ARG pins (:data:`DOCKER_ARG_PACKAGED`) of the Dockerfiles
+    ({repo-relative path: text}) whose value THIRD_PARTY.md's text lacks, as ``path: ARG=value``."""
+    return [
+        f"{where}: {name}={value}"
+        for where, text in sorted(files.items())
+        for name, value in re.findall(r"^ARG (\w+)=(\S+)$", text, re.MULTILINE)
+        if DOCKER_ARG_PACKAGED.search(name) and value not in third_party
+    ]
 
 
 def lint_pins(text: str, where: str = LINT) -> list[Pin]:
