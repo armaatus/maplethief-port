@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Every version pin against upstream (#340): the C and C++ dependencies of
+# cmake/Dependencies.cmake, the container images' digests and tools, uv, Ghidra, the linters and
+# the Python packages, one row each (tools/mtport/deps.py). Run by hand; never on a pull request.
+# Dependabot bumps the actions and the Python packages (.github/dependabot.yml); the rest is
+# docs/build/how-to/bump-a-dependency.md.
+#
+#   scripts/deps check [--only SUBSTRING] [--offline]
+#
+# Uses GH_TOKEN, GITHUB_TOKEN or `gh auth token` for GitHub's API when there is one.
+# Exit status: 0 nothing newer, 1 something is newer, 2 a lookup failed.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="${PYTHON:-python3}"
+PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -B -m mtport.deps "$@"
