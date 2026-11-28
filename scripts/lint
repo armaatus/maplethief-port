@@ -193,6 +193,12 @@ if [ -f .github/ISSUE_TEMPLATE/config.yml ]; then
     run "${check_jsonschema[@]}" --schemafile "$SCHEMASTORE/github-issue-config.json" \
         .github/ISSUE_TEMPLATE/config.yml
 fi
+# Dependabot's config (#340), against the same SchemaStore commit: Dependabot only reads it from
+# the default branch, so a broken file would first show as a missing weekly pull request.
+if [ -f .github/dependabot.yml ]; then
+    run "${check_jsonschema[@]}" --schemafile "$SCHEMASTORE/dependabot-2.0.json" \
+        .github/dependabot.yml
+fi
 
 # Compendium prose (#212, docs/compendium/style.md): standard library only, no uvx needed.
 run env PYTHONPATH=tools "$python" -m mtport.prose_lint

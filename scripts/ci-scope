@@ -55,6 +55,10 @@ while IFS= read -r path || [ -n "$path" ]; do
         .github/rulesets/*) continue ;;
         scripts/local-ci) continue ;;   # never runs in CI
         .github/workflows/compendium.yml) continue ;;
+        .github/dependabot.yml) continue ;;
+        scripts/deps) continue ;;      # run by hand (#340)
+        tools/mtport/deps.py) continue ;;
+        tests/test_deps.py) continue ;;
         *) native=true ;;
     esac
     # A native change; does the Switch build see it?

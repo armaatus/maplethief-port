@@ -4,6 +4,8 @@ Everything this project uses but didn't write. The decision and the rules live i
 
 No third-party source is committed to this repository. The build downloads the files listed here into `build/_downloads/` and checks each one against its SHA-256.
 
+Dependabot bumps the GitHub Actions and the Python packages; `scripts/deps check` lists every other pin against upstream. A bump follows [Bumping a dependency](docs/build/how-to/bump-a-dependency.md).
+
 ## Libraries
 
 | Dependency | Version | Upstream tag → commit (date) | License | Mechanism | Used for |
@@ -51,6 +53,7 @@ Download URLs:
 | Temurin JDK | 25.0.4.1+1 | GPL-2.0 WITH Classpath-exception-2.0 | `tools/mtport/ghidra_setup.py` (ADR 0007): one archive per host (macOS arm64/x64, Linux x64/arm64, Windows x64), each with its SHA-256 |
 | Gradle | 9.8.0 | Apache-2.0 | `tools/mtport/ghidra_setup.py` (ADR 0007): `gradle-9.8.0-bin.zip`, SHA-256 `bafd5ce9cfaea0fbccfdc8439a1ac42fbd4cd9c89dc9a988228d8a2639a58e6c`; only builds Ghidra's native tools on hosts the release zip has none for (macOS, Linux arm64) |
 | Ubuntu base image | 26.04, index digest `sha256:19fcd1bf268f02b60aca3bd30bd8a6d9a11759a430e32921833e65f16d87348a`; apt packages from snapshot `20261024T000000Z` | various (Ubuntu archive) | `tools/containers/linux/Dockerfile` ([ADR 0023](docs/adr/0023-local-ci-and-packaging.md)): the Linux CI container of `scripts/test-linux` |
+| Ubuntu base image (portable Linux build) | 22.04, index digest `sha256:b000e69a50ff940390233025e7a337fb8469b509e2334fa4d018ac30f3e18cdb`; apt packages and the Toolchain PPA's GCC 14 from snapshot `20261125T000000Z` | various (Ubuntu archive) | `tools/containers/linux-game/Dockerfile` ([ADR 0193](docs/adr/0193-linux-glibc-2-35-appimage-and-flatpak-bundle.md)): the glibc 2.35 image of `scripts/linux-game` |
 | CMake (Kitware release archive) | 4.4.4 | BSD-3-Clause | `tools/containers/linux/Dockerfile` (ADR 0023): `cmake-4.4.4-linux-{x86_64,aarch64}.tar.gz`, each with its SHA-256 |
 | PowerShell | 7.6.7 | MIT | `tools/containers/linux/Dockerfile` (ADR 0023): `powershell-7.6.7-linux-{x64,arm64}.tar.gz`, each with its SHA-256; runs the `.ps1` scripts in the tests, as on `ubuntu-latest` |
 | uv (container image) | 0.11.7 | MIT OR Apache-2.0 | `tools/containers/linux/Dockerfile` (ADR 0023): `ghcr.io/astral-sh/uv:0.11.7`, index digest `sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a` |

@@ -64,6 +64,10 @@ def test_compendium_and_docs_only_skip_the_build():
             "scripts/rulesets",
             "tests/test_rulesets.py",
             ".github/rulesets/dev.json",
+            ".github/dependabot.yml",
+            "scripts/deps",
+            "tools/mtport/deps.py",
+            "tests/test_deps.py",
         )
         == NONE
     )
