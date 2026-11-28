@@ -1,8 +1,9 @@
 // The runtime's OS layer as the Nintendo Switch needs it (#236): guest memory committed on
 // demand and given back, an interrupted save recovered at the next start, the file system calls
 // of files.cpp and bundle.cpp, and a thread made the way GCD makes its workers. Part of
-// runtime_test on every desktop, and of MapleThiefTests.nro, where the same cases run on Horizon
-// in applet mode and in title takeover (scripts/switch-test).
+// runtime_test on every desktop, of MapleThiefTests.nro, where the same cases run on Horizon
+// in applet mode and in title takeover (scripts/switch-test), and of MapleThiefTests.apk on
+// Android (scripts/android-test, #357).
 #include <doctest/doctest.h>
 
 #include <chrono>
@@ -41,8 +42,9 @@ bool all_zero(const std::uint8_t *p, std::size_t n) {
 }
 
 // A fresh directory on the file system the data folder is on: the SD card on the Switch
-// (MapleThiefTests.nro sets TMPDIR to sdmc:/switch/maplethief-tests/tmp), the temporary
-// directory elsewhere.
+// (MapleThiefTests.nro sets TMPDIR to sdmc:/switch/maplethief-tests/tmp), the app's external
+// files folder on Android (MapleThiefTests.apk sets TMPDIR to <external files>/tmp, #357), the
+// temporary directory elsewhere.
 fs::path scratch(const char *what) {
     const fs::path p =
         fs::temp_directory_path() /
@@ -156,6 +158,8 @@ TEST_CASE("horizon: the runtime's default data folder") {
     }
 #if defined(__SWITCH__)
     CHECK(std::string(mt_stubs_data_dir()) == MT_STUBS_SWITCH_DATA_DIR);
+#elif defined(__ANDROID__)
+    CHECK(std::string(mt_stubs_data_dir()).empty()); // the frontend sets it (ADR 0251)
 #else
     CHECK(std::string(mt_stubs_data_dir()).find("hief") != std::string::npos);
 #endif
@@ -193,5 +197,24 @@ TEST_CASE("horizon: a thread made like a GCD worker has its 8 MiB stack") {
     pthread_attr_destroy(&attr);
     REQUIRE(pthread_join(t, nullptr) == 0);
     CHECK(result == 96u); // 96 frames of 64 KiB, each with frame[512] == 1
+}
+#endif
+
+#if defined(__ANDROID__)
+TEST_CASE("android: the scratch files are on the external files folder's file system") {
+    // The saves' cases above ran where a player's saves live (ADR 0251): TMPDIR is
+    // <external files>/tmp, which MapleThiefTests.apk sets.
+    const std::string tmp = fs::temp_directory_path().string();
+    INFO(tmp);
+    CHECK(tmp.find("/Android/data/io.github.armaatus.maplethief.tests/files/tmp") !=
+          std::string::npos);
+    const fs::path dir = scratch("rename");
+    const fs::path a = dir / "a", b = dir / "b";
+    std::ofstream(a, std::ios::binary) << "new";
+    std::ofstream(b, std::ios::binary) << "old";
+    fs::rename(a, b); // ADR 0074's one-step replacement: rename over an existing file
+    CHECK(read_file(b) == "new");
+    CHECK_FALSE(fs::exists(a));
+    fs::remove_all(dir);
 }
 #endif

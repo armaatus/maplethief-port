@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# Run the runtime's seam tests on Android (#357): MapleThiefTests.apk, installed with adb on the
+# arm64 emulator of this Mac (scripts/android-emulator boots it) or on any device adb sees, its
+# results.txt fetched and kept in a log. Never runs in CI: it needs the emulator or a device.
+#
+# Usage: scripts/android-test [--image 4k|16k | --serial SERIAL] [--preset P] [--build]
+#                             [--seconds S] [--keep] [-- DOCTEST_ARGS...]
+#
+#   --image 4k|16k  the emulator's system image (default 4k): 4 KiB or 16 KiB pages; install it
+#                   first with scripts/android-sdk install --image 4k|16k
+#   --serial S      a device adb already sees (a phone with USB debugging), instead of the
+#                   emulator
+#   --preset P      which build's APK: android-release (default) or android-debug
+#   --build         build it first (cmake --preset P, then cmake --build --preset P)
+#   --seconds S     how long the run may take (default 900)
+#   --keep          leave the emulator running (scripts/android-emulator stop 4k|16k)
+#   DOCTEST_ARGS    passed to doctest, e.g. -tc='horizon*'
+#
+# The APK (io.github.armaatus.maplethief.tests) prints the Android release, the page size and
+# its folders, then every test, to logcat (tag MapleThiefTests) and to results.txt in its
+# external files folder; the run passes when results.txt's last line is
+# "android: all tests passed (exit status 0)". Log: build/test-output/android/
+# MapleThiefTests-<image or serial>-<UTC time>.log (git-ignored).
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+SDK="${MAPLETHIEF_ANDROID_SDK:-$REPO/build/_android-sdk}"
+PACKAGE=io.github.armaatus.maplethief.tests
+ACTIVITY="$PACKAGE/.TestsActivity"
+PASS_LINE="android: all tests passed (exit status 0)"
+
+usage() {
+    sed -n '/^# Usage:/,/^# The APK/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//' >&2
+    exit "${1:-2}"
+}
+
+image=4k
+serial=""
+preset=android-release
+build=0
+seconds=900
+keep=0
+extra=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --image) [ "$#" -ge 2 ] || usage; image="$2"; shift 2 ;;
+        --serial) [ "$#" -ge 2 ] || usage; serial="$2"; shift 2 ;;
+        --preset) [ "$#" -ge 2 ] || usage; preset="$2"; shift 2 ;;
+        --build) build=1; shift ;;
+        --seconds) [ "$#" -ge 2 ] || usage; seconds="$2"; shift 2 ;;
+        --keep) keep=1; shift ;;
+        --) shift; extra=("$@"); break ;;
+        -h | --help) usage 0 ;;
+        *) echo "scripts/android-test: unknown argument: $1" >&2; usage ;;
+    esac
+done
+case "$preset" in
+    android-release | android-debug) ;;
+    *) echo "scripts/android-test: --preset must be android-release or android-debug" >&2; exit 2 ;;
+esac
+case "$image" in
+    4k | 16k) ;;
+    *) echo "scripts/android-test: --image is 4k or 16k" >&2; exit 2 ;;
+esac
+
+if [ "$build" = 1 ]; then
+    cmake --preset "$preset"
+    cmake --build --preset "$preset" --target MapleThiefTests_apk
+fi
+apk="build/$preset/MapleThiefTests.apk"
+if [ ! -f "$apk" ]; then
+    echo "scripts/android-test: no $apk: cmake --build --preset $preset builds it (or pass" \
+        "--build)" >&2
+    exit 2
+fi
+
+adb="$SDK/platform-tools/adb"
+[ -x "$adb" ] || { echo "scripts/android-test: no adb (scripts/android-sdk install)" >&2; exit 2; }
+out_dir="build/test-output/android"
+mkdir -p "$out_dir"
+if [ -z "$serial" ]; then
+    label="$image"
+    serial="$(scripts/android-emulator serial "$image")"
+    # shellcheck disable=SC2329 # run by the trap below
+    stop() {
+        [ "$keep" -eq 1 ] || scripts/android-emulator stop "$image"
+    }
+    trap stop EXIT
+    scripts/android-emulator start "$image" "$out_dir/emulator-$image.txt"
+else
+    label="$serial"
+fi
+log="$out_dir/MapleThiefTests-$label-$(date -u +%Y%m%dT%H%M%SZ).log"
+results="/sdcard/Android/data/$PACKAGE/files/results.txt"
+
+echo "== adb install $apk ($serial)"
+"$adb" -s "$serial" install -r "$apk" >/dev/null
+"$adb" -s "$serial" shell am force-stop "$PACKAGE"
+"$adb" -s "$serial" shell rm -f "$results"
+"$adb" -s "$serial" logcat -c
+# The doctest arguments as the string array extra "args" (commas would split an argument).
+start=(shell am start -W -n "$ACTIVITY")
+if [ "${#extra[@]}" -gt 0 ]; then
+    joined=""
+    for a in "${extra[@]}"; do
+        case "$a" in *,*) echo "scripts/android-test: no commas in DOCTEST_ARGS: $a" >&2; exit 2 ;; esac
+        # adb shell runs a shell on the device: quote each argument for it.
+        joined="${joined:+$joined,}${a//\'/\'\\\'\'}"
+    done
+    start+=(--esa args "'$joined'")
+fi
+"$adb" -s "$serial" "${start[@]}" >/dev/null
+
+done_line=""
+for _ in $(seq 1 "$seconds"); do
+    "$adb" -s "$serial" shell cat "$results" >"$log" 2>/dev/null || true
+    done_line="$(grep -E '^android: (all tests passed|tests failed)' "$log" | tail -n 1 || true)"
+    [ -z "$done_line" ] || break
+    if ! "$adb" -s "$serial" shell pidof "$PACKAGE" >/dev/null 2>&1; then
+        sleep 2 # the last writes of a process that just ended
+        "$adb" -s "$serial" shell cat "$results" >"$log" 2>/dev/null || true
+        done_line="$(grep -E '^android: (all tests passed|tests failed)' "$log" | tail -n 1 || true)"
+        break
+    fi
+    sleep 1
+done
+"$adb" -s "$serial" logcat -d >"$log.logcat"
+"$adb" -s "$serial" shell am force-stop "$PACKAGE"
+
+grep -E '^android: |^\[doctest\] (test cases|assertions|Status)' "$log" || true
+echo "== log: $log (logcat: $log.logcat)"
+if [ "$done_line" = "$PASS_LINE" ]; then
+    echo "== MapleThiefTests ($label): PASS"
+    exit 0
+fi
+if [ -z "$done_line" ]; then
+    echo "scripts/android-test: no last line in $results (the process died or the run took" \
+        "longer than ${seconds} s; see $log.logcat)" >&2
+fi
+echo "== MapleThiefTests ($label): FAIL" >&2
+exit 1

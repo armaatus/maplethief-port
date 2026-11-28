@@ -1,0 +1,92 @@
+// MapleThiefTests.apk (#357): the runtime's seam tests (libMapleThiefTests.so) and the crash
+// child (libcrash_child.so), run by TestsActivity. Run by tests/CMakeLists.txt with:
+//
+//   -Pmaplethief.buildDir    Gradle's own output (build/<preset>/tests/android/gradle)
+//   -Pmaplethief.jniLibs     the folder holding arm64-v8a/lib*.so
+//   -Pmaplethief.keystore    the build tree's debug key (platform/android/android.cmake's)
+//   -Pmaplethief.version     MAPLETHIEF_VERSION
+
+plugins {
+    id 'com.android.application'
+}
+
+def pins = gradle.ext.maplethiefPins
+def agp = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION
+if (agp != pins['ANDROID_AGP_VERSION']) {
+    throw new GradleException("settings.gradle applies AGP ${agp}, but pins.env pins ${pins['ANDROID_AGP_VERSION']}")
+}
+def prop = { String name ->
+    if (!project.hasProperty(name)) {
+        throw new GradleException("-P${name} is missing: build the APK through CMake (an android-* preset)")
+    }
+    return project.property(name)
+}
+
+layout.buildDirectory = file(prop('maplethief.buildDir'))
+
+android {
+    namespace 'io.github.armaatus.maplethief.tests'
+    compileSdk pins['ANDROID_COMPILE_API'] as int
+    buildToolsVersion pins['ANDROID_BUILD_TOOLS_VERSION']
+
+    defaultConfig {
+        applicationId 'io.github.armaatus.maplethief.tests'
+        minSdk pins['ANDROID_MIN_API'] as int
+        targetSdk pins['ANDROID_COMPILE_API'] as int
+        versionCode 1
+        versionName prop('maplethief.version')
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    signingConfigs {
+        buildTree {
+            storeFile file(prop('maplethief.keystore'))
+            storePassword 'android'
+            keyAlias 'maplethief-debug'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.buildTree
+        }
+        release {
+            signingConfig signingConfigs.buildTree
+            minifyEnabled false
+        }
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ['src']
+            res.srcDirs = []
+            jniLibs.srcDirs = [prop('maplethief.jniLibs')]
+            assets.srcDirs = []
+            resources.srcDirs = []
+            aidl.srcDirs = []
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Extracted at install: the diagnostics' tests start libcrash_child.so as a program,
+            // and only an extracted file in the native library folder may be executed.
+            useLegacyPackaging true
+            keepDebugSymbols += ['**/*.so']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}

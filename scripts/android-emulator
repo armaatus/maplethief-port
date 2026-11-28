@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# The arm64 Android emulator of this Mac (ADR 0150, ADR 0163; #356, #357), shared by
+# scripts/android-run and scripts/android-test: writes the AVD of a system image if needed,
+# boots it without a window and checks its page size, or stops it.
+#
+# Usage: scripts/android-emulator start 4k|16k [LOG]
+#        scripts/android-emulator stop 4k|16k
+#        scripts/android-emulator serial 4k|16k
+#
+#   start   boots maplethief-<image> on its own port (4k: emulator-5580, 16k: emulator-5582)
+#           unless it is running already, waits for sys.boot_completed (3 minutes at most) and
+#           fails unless the device reports the image's page size (4096 or 16384); the
+#           emulator's output goes to LOG (default /dev/null)
+#   stop    kills that emulator
+#   serial  prints its adb serial
+#
+# Install the image first: scripts/android-sdk install --image 4k|16k.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SDK="${MAPLETHIEF_ANDROID_SDK:-$REPO/build/_android-sdk}"
+PINS="$REPO/tools/containers/android/pins.env"
+
+usage() {
+    sed -n '/^# Usage:/,/^# Install/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//' >&2
+    exit 2
+}
+[ "$#" -ge 2 ] || usage
+cmd="$1"
+image="$2"
+log="${3:-/dev/null}"
+case "$image" in
+    4k) key=IMAGE; tag=google_apis; page=4096; port=5580 ;;
+    16k) key=IMAGE_PS16K; tag=google_apis_ps16k; page=16384; port=5582 ;;
+    *) echo "scripts/android-emulator: the image is 4k or 16k, not $image" >&2; exit 2 ;;
+esac
+serial="emulator-$port"
+name="maplethief-$image"
+export ANDROID_HOME="$SDK" ANDROID_SDK_ROOT="$SDK"
+export ANDROID_AVD_HOME="$SDK/avd" ANDROID_USER_HOME="$SDK/user-home"
+adb="$SDK/platform-tools/adb"
+
+case "$cmd" in
+    serial)
+        echo "$serial"
+        exit 0
+        ;;
+    stop)
+        "$adb" -s "$serial" emu kill >/dev/null 2>&1 || true
+        exit 0
+        ;;
+    start) ;;
+    *) usage ;;
+esac
+
+pin() { sed -n "s/^$1=//p" "$PINS"; }
+image_path="$(pin "ANDROID_${key}_PATH")"
+api="$(pin ANDROID_COMPILE_API)"
+for need in "$SDK/emulator/emulator" "$adb" "$SDK/$image_path/system.img"; do
+    if [ ! -e "$need" ]; then
+        echo "scripts/android-emulator: $need is missing (scripts/android-sdk install --image" \
+            "$image)" >&2
+        exit 2
+    fi
+done
+mkdir -p "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
+
+# The AVD, written directly (avdmanager needs the cmdline-tools, which the pins leave out).
+avd="$ANDROID_AVD_HOME/$name.avd"
+if [ ! -f "$avd/config.ini" ]; then
+    mkdir -p "$avd"
+    cat >"$avd/config.ini" <<AVD
+AvdId=$name
+avd.ini.displayname=MapleThief $image
+abi.type=arm64-v8a
+hw.cpu.arch=arm64
+hw.cpu.ncore=4
+hw.ramSize=3072
+hw.lcd.width=1080
+hw.lcd.height=2340
+hw.lcd.density=420
+hw.gpu.enabled=yes
+hw.gpu.mode=swiftshader_indirect
+hw.keyboard=yes
+disk.dataPartition.size=2G
+image.sysdir.1=$image_path/
+tag.id=$tag
+target=android-$api
+AVD
+    printf 'avd.ini.encoding=UTF-8\npath=%s\npath.rel=avd/%s.avd\ntarget=android-%s\n' \
+        "$avd" "$name" "$api" >"$ANDROID_AVD_HOME/$name.ini"
+fi
+
+booted() {
+    [ "$("$adb" -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]
+}
+if ! booted; then
+    echo "== Booting $name on port $port" >&2
+    "$SDK/emulator/emulator" -avd "$name" -port "$port" -no-window -no-audio -no-boot-anim \
+        -no-snapshot -gpu swiftshader_indirect >"$log" 2>&1 &
+    emulator_pid=$!
+    for _ in $(seq 1 180); do
+        booted && break
+        if ! kill -0 "$emulator_pid" 2>/dev/null; then
+            # It refused to start (a full disk, a missing image): its last lines say why.
+            echo "scripts/android-emulator: the emulator ended before $name booted:" >&2
+            tail -n 3 "$log" >&2 || true
+            exit 1
+        fi
+        sleep 1
+    done
+    booted || { echo "scripts/android-emulator: $name did not boot in 3 minutes" >&2; exit 1; }
+fi
+got_page="$("$adb" -s "$serial" shell getconf PAGESIZE | tr -d '\r')"
+release="$("$adb" -s "$serial" shell getprop ro.build.version.release | tr -d '\r')"
+echo "== Booted: $name, Android $release, page size $got_page" >&2
+if [ "$got_page" != "$page" ]; then
+    echo "scripts/android-emulator: page size $got_page, expected $page" >&2
+    exit 1
+fi

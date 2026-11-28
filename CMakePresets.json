@@ -416,8 +416,8 @@
     { "name": "switch-debug", "configurePreset": "switch-debug" },
     { "name": "switch-release", "configurePreset": "switch-release" },
     { "name": "switch-player", "configurePreset": "switch-player", "targets": ["MapleThief_nro"] },
-    { "name": "android-debug", "configurePreset": "android-debug", "targets": ["MapleThief_apk"] },
-    { "name": "android-release", "configurePreset": "android-release", "targets": ["MapleThief_apk"] }
+    { "name": "android-debug", "configurePreset": "android-debug", "targets": ["MapleThief_apk", "MapleThiefTests_apk"] },
+    { "name": "android-release", "configurePreset": "android-release", "targets": ["MapleThief_apk", "MapleThiefTests_apk"] }
   ],
   "testPresets": [
     {

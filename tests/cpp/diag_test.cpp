@@ -84,14 +84,27 @@ struct Guest {
     }
 };
 
+#if defined(MT_CRASH_CHILD) || defined(__ANDROID__)
+#define MT_HAVE_CRASH_CHILD 1
+// crash_child's path: built in, or on Android libcrash_child.so in the test APK's native library
+// folder, which android_test_host.cpp names in MT_CRASH_CHILD_PATH (#357).
+std::string crash_child() {
 #if defined(MT_CRASH_CHILD)
+    return MT_CRASH_CHILD;
+#else
+    const char *path = std::getenv("MT_CRASH_CHILD_PATH");
+    REQUIRE(path != nullptr);
+    return path;
+#endif
+}
+
 // Runs crash_child with `mode`; returns its stderr (and stdout).
 std::string run_child(const char *mode, int *status) {
 #if defined(_WIN32)
-    const std::string cmd = std::string("\"\"") + MT_CRASH_CHILD + "\" " + mode + " 2>&1\"";
+    const std::string cmd = std::string("\"\"") + crash_child() + "\" " + mode + " 2>&1\"";
     std::FILE *p = _popen(cmd.c_str(), "r");
 #else
-    const std::string cmd = std::string("'") + MT_CRASH_CHILD + "' " + mode + " 2>&1";
+    const std::string cmd = std::string("'") + crash_child() + "' " + mode + " 2>&1";
     std::FILE *p = popen(cmd.c_str(), "r");
 #endif
     REQUIRE(p != nullptr);
@@ -673,7 +686,7 @@ TEST_CASE("the crash file gets the same report as the log (the Switch's crash.tx
     fs::remove_all(dir);
 }
 
-#if defined(MT_CRASH_CHILD)
+#if defined(MT_HAVE_CRASH_CHILD)
 
 TEST_CASE("the unimplemented report is written at exit") {
     int status = 0;
