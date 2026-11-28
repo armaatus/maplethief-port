@@ -357,6 +357,12 @@ extern "C" int mt_mem_seal_image(mt_mem *mem) noexcept {
             pages[static_cast<std::uint32_t>(p)] |= s.initprot;
         }
     }
+    // Page zero reads as zeros and faults on a write on every host (ADR 0250). A 16 KiB host
+    // page already holds it together with __TEXT; a 4 KiB one has no segment in it.
+    if (pages.find(0u) == pages.end() && !commit_range(mem, 0u, mem->page)) {
+        return -1;
+    }
+    pages[0u] |= MT_PROT_READ;
     int rc = 0;
     auto it = pages.begin();
     while (it != pages.end()) {
