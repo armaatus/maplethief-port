@@ -9,5 +9,6 @@ Step-by-step guides for the changes most contributions are made of. Each was fol
 | [Adding a setting](setting.md) | A new `settings.ini` key, with its flag, presets, menu row and tests |
 | [Translating the port's menus](translation.md) | A text of the port's menus to fix in a shipped language, or a new language |
 | [Debugging a trap](trap.md) | A run stopped with exit code 5 and a crash report |
+| [Bumping a dependency](bump-a-dependency.md) | Dependabot's weekly pull request, or `scripts/deps check` says a pin has a newer version upstream |
 
 The design behind them: [ARCHITECTURE.md](../../ARCHITECTURE.md), [ADR 0019](../../adr/0019-import-thunks-and-hle-abi.md) (imports and the HLE registry), [ADR 0026](../../adr/0026-objective-c-strategy.md) (host classes), [ADR 0030](../../adr/0030-runtime-diagnostics.md) (diagnostics) and [ADR 0070](../../adr/0070-settings-registry-and-presets.md) (the settings registry).
