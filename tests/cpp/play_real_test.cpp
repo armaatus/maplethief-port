@@ -3060,6 +3060,208 @@ void chapter_1_l(Run &r, u64) {
 }
 void chapter_1_l_checks(Run &, u64) {}
 
+// A timed run from a new character (#442, epic #402's second exit criterion): the speedrun timer
+// as game.cpp runs it, on a fresh install with run_timer on. A game-event listener feeds it while
+// run_timer is on (run_timer_event), every turn reads the Assists (follow_run_timer's turn()), and
+// each finished or reset run is written to the data folder's runs/ with the timer's best
+// (write_run_records). Nothing calls start(): the new character's MT_GAME_EVENT_NEW_CHARACTER
+// starts the run. Two shipped categories are timed side by side from the same character:
+// chapter_1 whole, and Any% cut to its first split (Tutorial), a clean run that finishes there and
+// makes a personal best. After the split an Assist (turbo_attack) is turned on and off again:
+// chapter_1's run is assisted for good, and its log, reset as the game resets it on quit, names it.
+namespace speedrun_new {
+
+namespace fe = maplethief::frontend;
+
+fe::RunInstant now() {
+    return fe::RunInstant{static_cast<double>(SDL_GetTicksNS()) / 1e9, mt_input_get_stats().ticks};
+}
+fe::RunTimer g_chapter_1(fe::RunClock{now, [] { return std::string("2026-11-28 10:00:00"); }});
+fe::RunTimer g_any(fe::RunClock{now, [] { return std::string("2026-11-28 10:00:01"); }});
+std::vector<std::string> g_logs; // the run logs written, in order
+
+// run_timer_event's body for both timers.
+void hear(void *user, const mt_game_event *e) {
+    const Run &r = *static_cast<const Run *>(user);
+    if (r.settings.run_timer) {
+        g_chapter_1.on_event(*e);
+        g_any.on_event(*e);
+    }
+}
+
+// write_run_records's body: to <data dir>/runs/, a new best becoming the one compared with.
+void write_records(const Run &r, fe::RunTimer &t) {
+    for (fe::RunRecord &rec : t.take_records()) {
+        std::string path, why;
+        bool best = false;
+        const std::optional<fe::RunRecord> &old = t.best();
+        check(fe::write_run(r.data.string(), rec, old ? &*old : nullptr, &path, &best, &why),
+              "the " + rec.category + " run written: " + why);
+        std::printf(
+            "run: %s %s in %s (%llu ticks), %zu of %zu splits, %s%s: %s\n", rec.category.c_str(),
+            rec.finished ? "finished" : "reset", fe::format_run_time(rec.end.ms).c_str(),
+            static_cast<unsigned long long>(rec.end.ticks), rec.times.size(), rec.splits.size(),
+            rec.clean() ? "clean" : "assisted", best ? ", a new personal best" : "", path.c_str());
+        g_logs.push_back(path);
+        if (best) {
+            t.set_best(std::move(rec));
+        }
+    }
+}
+
+fe::RunCategory shipped(const std::string &id) {
+    std::vector<std::string> problems;
+    std::optional<fe::RunCategory> c;
+    for (const auto &[name, text] : fe::shipped_run_category_files()) {
+        if (name == id) {
+            c = fe::parse_run_category(name, text, &problems);
+        }
+    }
+    check(c.has_value() && problems.empty(), "the shipped " + id + " category parses");
+    return *c;
+}
+
+std::string lines_text(const std::vector<std::string> &lines) {
+    std::string s;
+    for (const std::string &l : lines) {
+        s += (s.empty() ? "" : " | ") + l;
+    }
+    return s;
+}
+
+// The overlay's lines (what game.cpp draws top right) hold each of `want`; printed.
+void overlay_has(const fe::RunTimer &t, const std::string &what,
+                 const std::vector<std::string> &want) {
+    const std::vector<std::string> lines = t.overlay_lines();
+    std::printf("overlay (%s): %s\n", what.c_str(), lines_text(lines).c_str());
+    for (const std::string &w : want) {
+        check(std::find(lines.begin(), lines.end(), w) != lines.end(),
+              "the overlay (" + what + ") shows '" + w + "': " + lines_text(lines));
+    }
+}
+
+std::string read_file(const fs::path &p) {
+    std::ifstream in(p, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+} // namespace speedrun_new
+
+void speedrun_new_character(Run &r, u64) {
+    namespace sn = speedrun_new;
+    namespace fe = maplethief::frontend;
+    r.settings.run_timer = true;
+    attach_pad(r);
+    mt_game_events_add_listener(sn::hear, &r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        for (fe::RunTimer *t : {&sn::g_chapter_1, &sn::g_any}) {
+            t->turn();
+            sn::write_records(r, *t);
+        }
+    };
+    then_do(r, "the speedrun timer waits for a new character", [&r](mt_cpu *) {
+        fe::RunCategory any = sn::shipped("any");
+        any.splits.resize(1);
+        for (fe::RunTimer *t : {&sn::g_chapter_1, &sn::g_any}) {
+            t->attach(&r.settings);
+        }
+        sn::g_chapter_1.set_category(sn::shipped("chapter_1"),
+                                     fe::load_run_best(r.data.string(), "chapter_1"));
+        sn::g_any.set_category(any, fe::load_run_best(r.data.string(), "any"));
+        check(sn::g_chapter_1.state() == fe::RunTimer::State::kWaiting &&
+                  sn::g_any.state() == fe::RunTimer::State::kWaiting && !sn::g_chapter_1.best() &&
+                  !sn::g_any.best(),
+              "both timers wait, no personal best on a fresh install");
+        sn::overlay_has(sn::g_chapter_1, "waiting",
+                        {"Chapter 1  0:00.0", "a new character starts the run"});
+    });
+    then_new_game(r);
+    then_wait_for(r, "the new character starts both runs", 60, [](mt_cpu *) {
+        return sn::g_chapter_1.state() == fe::RunTimer::State::kRunning &&
+               sn::g_any.state() == fe::RunTimer::State::kRunning;
+    });
+    then_wait(r, 2);
+    then_do(r, "the overlay: the real time running, the first split next, clean", [](mt_cpu *) {
+        check(sn::g_chapter_1.elapsed().ms > 0 && sn::g_chapter_1.times().empty(),
+              "chapter_1's real time runs, no split yet");
+        const std::string title = sn::g_chapter_1.overlay_lines().front();
+        check(title == "Chapter 1  " + fe::format_run_time(sn::g_chapter_1.elapsed().ms),
+              "the overlay's first line is the category and its real time: " + title);
+        sn::overlay_has(sn::g_chapter_1, "running",
+                        {"next: Tutorial (1/3)", "no personal best yet", "clean"});
+        sn::overlay_has(sn::g_any, "running", {"next: Tutorial (1/1)", "clean"});
+    });
+    then_tutorial(r);
+    then_do(r, "the Tutorial split: both runs reached it, Any%'s finished clean", [](mt_cpu *) {
+        const std::vector<fe::RunTime> &times = sn::g_chapter_1.times();
+        check(sn::g_chapter_1.state() == fe::RunTimer::State::kRunning && times.size() == 1 &&
+                  times[0].ms > 0 && times[0].ticks > 0,
+              "chapter_1 split at the tutorial's end, still running (" +
+                  std::to_string(times.size()) + " split(s))");
+        std::printf("Tutorial split: %s (%lld ms, %llu ticks)\n",
+                    fe::format_run_time(times[0].ms).c_str(), static_cast<long long>(times[0].ms),
+                    static_cast<unsigned long long>(times[0].ticks));
+        check(sn::g_chapter_1.elapsed().ms >= times[0].ms,
+              "the real time goes on past the split's");
+        sn::overlay_has(sn::g_chapter_1, "after the split",
+                        {"next: Chapter 1 boss (2/3)", "clean"});
+        check(sn::g_any.state() == fe::RunTimer::State::kFinished && sn::g_any.best() &&
+                  sn::g_any.best()->times.size() == 1,
+              "Any%'s run finished at the split and is its personal best");
+        sn::overlay_has(sn::g_any, "finished",
+                        {"Any%  " + fe::format_run_time(sn::g_any.elapsed().ms), "finished (1/1)",
+                         "Tutorial +0:00.0 to the best", "clean"});
+    });
+    then_do(r, "an Assist mid-run: turbo_attack on",
+            [&r](mt_cpu *) { r.settings.turbo_attack = true; });
+    then_wait(r, 2);
+    then_do(r, "an Assist mid-run: turbo_attack off again",
+            [&r](mt_cpu *) { r.settings.turbo_attack = false; });
+    then_wait(r, 2);
+    then_do(r, "the run is assisted for good; the finished one stays clean", [](mt_cpu *) {
+        check(sn::g_chapter_1.assists() == std::vector<std::string>{"turbo_attack"},
+              "chapter_1's run names turbo_attack (" +
+                  std::to_string(sn::g_chapter_1.assists().size()) + " Assists)");
+        sn::overlay_has(sn::g_chapter_1, "assisted", {"assisted: turbo_attack"});
+        sn::overlay_has(sn::g_any, "finished before the Assist", {"clean"});
+    });
+    // The game quitting resets a run in progress (game.cpp's quit); the reset run's log.
+    then_do(r, "the run reset as on quit; its log, Any%'s log and best in the data folder",
+            [&r](mt_cpu *) {
+                sn::g_chapter_1.reset();
+                sn::write_records(r, sn::g_chapter_1);
+                const fs::path runs = r.data / "runs";
+                check(sn::g_logs.size() == 2,
+                      "two run logs written (" + std::to_string(sn::g_logs.size()) + ")");
+                for (const std::string &path : sn::g_logs) {
+                    check(fs::path(path).parent_path() == runs,
+                          path + " is in the data folder's runs/");
+                }
+                std::vector<std::string> problems;
+                const std::optional<fe::RunRecord> any =
+                    fe::parse_run_log(sn::read_file(sn::g_logs[0]), &problems);
+                check(any && any->category == "any" && any->finished && any->clean() &&
+                          any->times.size() == 1 && any->times[0].ms > 0 && any->times[0].ticks > 0,
+                      "Any%'s log: finished, clean, the split's two times");
+                const std::optional<fe::RunRecord> best = fe::load_run_best(r.data.string(), "any");
+                check(fs::is_regular_file(runs / "any.best") && best && *best == *any,
+                      "runs/any.best holds Any%'s run");
+                const std::string text = sn::read_file(sn::g_logs[1]);
+                std::printf("run log %s:\n%s", sn::g_logs[1].c_str(), text.c_str());
+                const std::optional<fe::RunRecord> ch1 = fe::parse_run_log(text, &problems);
+                check(ch1 && ch1->category == "chapter_1" && !ch1->finished &&
+                          ch1->times.size() == 1 && ch1->times[0].ticks > 0 &&
+                          ch1->assists == std::vector<std::string>{"turbo_attack"} &&
+                          problems.empty(),
+                      "chapter_1's log: reset after the Tutorial split, assisted by turbo_attack");
+                check(!fs::exists(runs / "chapter_1.best"),
+                      "an assisted run makes no personal best (no runs/chapter_1.best)");
+            });
+    then_finish(r);
+}
+void speedrun_new_character_checks(Run &, u64) {}
+
 // The counts a Craft or a Trade changes: other items, equipment carried or worn, meso.
 struct Counts {
     std::map<i32, i32> items, equip;
@@ -16387,6 +16589,7 @@ constexpr Mode k_modes[] = {
     {"chapter_1_j", chapter_1_j, chapter_1_j_checks, 1},
     {"chapter_1_k", chapter_1_k, chapter_1_k_checks, 1},
     {"chapter_1_l", chapter_1_l, chapter_1_l_checks, 1},
+    {"speedrun_new_character", speedrun_new_character, speedrun_new_character_checks, 1},
     {"chapter_1_m", chapter_1_m, chapter_1_m_checks, 1},
     {"chapter_2_a", chapter_2_a, chapter_2_a_checks, 1},
     {"chapter_2_b", chapter_2_b, chapter_2_b_checks, 1},
