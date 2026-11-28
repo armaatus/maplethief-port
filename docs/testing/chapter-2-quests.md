@@ -169,7 +169,9 @@ Part F: Pirate_Orbis (4.1), list 2, with main 9 active, runs `clearAll` and the 
 chapter-end run event (`ok: run event chapter 2 ends`), the map change to 6.0, chapter 3 in the
 quest manager (`chapter 3 on 6.0 in guest memory`) and in the save (`chapter 3 on 6.0 in the
 save`: `quest0[0]` 3, `theif0` `0x41C`/`0x41D` 6, 0). The same check as chapter 1's trip compares the hero before and
-after it (`the trip kept the hero`, #307; not rerun on this branch).
+after it (`the trip kept the hero`, #307). The hero before the trip is taken at Pirate_Orbis,
+after the walk 9.0 → 4.1 (`go: Pirate_Orbis (4.1), before the trip`): the bot drinks potions on
+that walk, which the trip has nothing to do with (#436).
 
 ### Side quests beside the main line (#299)
 

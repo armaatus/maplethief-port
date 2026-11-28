@@ -3493,6 +3493,9 @@ void chapter_2_f(Run &r, u64) {
     then_talk_to(r, "Alchester: main 8 done, main 9 given", 9, 0, "Alchester", 5, main_quests(8, 9),
                  900);
     then_quests_are(r, "chapter 2 before the trip", {{0, 8, 2}, {0, 9, 1}});
+    // The hero before the trip is taken at Pirate_Orbis, after the walk from 9.0: on the way the
+    // bot drinks potions (#436), which the trip's clearAll has nothing to do with.
+    then_go(r, "Pirate_Orbis (4.1), before the trip", at_object(4, 1, "Pirate_Orbis", 6), 900);
     then_bag(r, "before the trip");
     const std::shared_ptr<std::string> kept = then_take_kept(r);
     then_talk_to(
