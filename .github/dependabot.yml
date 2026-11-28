@@ -1,0 +1,47 @@
+# Dependabot (#340, ADR 0003 addendum of 2026-11-28): looks for newer versions of what
+# Dependabot can bump on its own, once a week, and opens one grouped pull request into dev per
+# ecosystem.
+#
+#   github-actions  the actions in .github/workflows/, pinned by commit with the tag in a comment;
+#                   Dependabot moves both
+#   uv              pyproject.toml's [dependency-groups] pins and uv.lock (pytest, Capstone,
+#                   PyGhidra, Unicorn and what they pull in)
+#
+# The rest is pinned where Dependabot can't follow it: the C and C++ dependencies by SHA-256 in
+# cmake/Dependencies.cmake, the container images by digest in an ARG of
+# tools/containers/*/Dockerfile, the linters in scripts/lint, Ghidra in
+# tools/mtport/ghidra_setup.py. `scripts/deps check` lists those against upstream, by hand
+# (docs/build/how-to/bump-a-dependency.md). Dependabot reads this file from the default branch
+# only. scripts/lint checks it against SchemaStore's schema.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+    labels: ["area:infra"]
+
+  - package-ecosystem: uv
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      python:
+        patterns: ["*"]
+    # Capstone 6 changes the text the recompiler's decoder tests compare with (ADR 0003 addendum
+    # of 2026-11-28): its move is an issue of its own, which scripts/deps check flags.
+    ignore:
+      - dependency-name: capstone
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: deps
+    labels: ["area:infra"]
